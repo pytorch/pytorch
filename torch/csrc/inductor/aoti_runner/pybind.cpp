@@ -14,16 +14,47 @@
 
 #include <torch/csrc/utils/pybind.h>
 
+#include <memory>
+#include <utility>
+
 namespace torch::inductor {
+
+namespace {
+
+// Constructs a Runner with the GIL released. py::call_guard cannot do this for
+// py::init: class_::init_instance() would then register the new instance
+// without the GIL (https://github.com/pybind/pybind11/issues/5473). Releasing
+// inside the factory confines the release to the C++ constructor.
+template <typename Runner, typename... Args>
+auto init_releasing_gil() {
+  return py::init([](Args... args) {
+    py::gil_scoped_release no_gil;
+    return std::make_unique<Runner>(std::forward<Args>(args)...);
+  });
+}
+
+} // namespace
 
 void initAOTIRunnerBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");
 
-  py::class_<AOTIModelContainerRunnerCpu>(m, "AOTIModelContainerRunnerCpu")
-      .def(py::init<const std::string&, int>())
+  // Nothing in the runners needs the caller's GIL: they are the same C++ that
+  // runs without an interpreter. Construction, destruction and run() release
+  // it because they can block for long. swap_constant_buffer() has to as well:
+  // it waits for model_exec_mutex_, which run() holds while code under it may
+  // take the GIL (e.g. a Python kernel).
+  py::class_<AOTIModelContainerRunnerCpu>(
+      m,
+      "AOTIModelContainerRunnerCpu",
+      py::release_gil_before_calling_cpp_dtor())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerCpu,
+           const std::string&,
+           int>())
       .def(
-          py::init<
+          init_releasing_gil<
+              AOTIModelContainerRunnerCpu,
               const std::string&,
               size_t,
               std::unordered_map<std::string, at::Tensor>&>(),
@@ -34,7 +65,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           "run",
           &AOTIModelContainerRunnerCpu::run,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+          py::arg("stream_handle") = nullptr,
+          py::call_guard<py::gil_scoped_release>())
       .def("get_call_spec", &AOTIModelContainerRunnerCpu::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -56,7 +88,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("user_managed") = false)
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerCpu::swap_constant_buffer)
+          &AOTIModelContainerRunnerCpu::swap_constant_buffer,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer)
@@ -69,22 +102,35 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("weights_path"));
 
 #ifdef USE_CUDA
-  py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
-      .def(py::init<const std::string&, int>())
-      .def(py::init<const std::string&, int, const std::string&>())
-      .def(py::init<
+  py::class_<AOTIModelContainerRunnerCuda>(
+      m,
+      "AOTIModelContainerRunnerCuda",
+      py::release_gil_before_calling_cpp_dtor())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerCuda,
+           const std::string&,
+           int>())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerCuda,
+           const std::string&,
+           int,
+           const std::string&>())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerCuda,
            const std::string&,
            int,
            const std::string&,
            const std::string&>())
-      .def(py::init<
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerCuda,
            const std::string&,
            int,
            const std::string&,
            const std::string&,
            const bool>())
       .def(
-          py::init<
+          init_releasing_gil<
+              AOTIModelContainerRunnerCuda,
               const std::string&,
               size_t,
               const std::string&,
@@ -99,7 +145,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           "run",
           &AOTIModelContainerRunnerCuda::run,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+          py::arg("stream_handle") = nullptr,
+          py::call_guard<py::gil_scoped_release>())
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -129,7 +176,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"))
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerCuda::swap_constant_buffer)
+          &AOTIModelContainerRunnerCuda::swap_constant_buffer,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer)
@@ -142,16 +190,28 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("weights_path"));
 #endif
 #ifdef USE_XPU
-  py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
-      .def(py::init<const std::string&, int>())
-      .def(py::init<const std::string&, int, const std::string&>())
-      .def(py::init<
+  py::class_<AOTIModelContainerRunnerXpu>(
+      m,
+      "AOTIModelContainerRunnerXpu",
+      py::release_gil_before_calling_cpp_dtor())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerXpu,
+           const std::string&,
+           int>())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerXpu,
+           const std::string&,
+           int,
+           const std::string&>())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerXpu,
            const std::string&,
            int,
            const std::string&,
            const std::string&>())
       .def(
-          py::init<
+          init_releasing_gil<
+              AOTIModelContainerRunnerXpu,
               const std::string&,
               size_t,
               const std::string&,
@@ -166,7 +226,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           "run",
           &AOTIModelContainerRunnerXpu::run,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+          py::arg("stream_handle") = nullptr,
+          py::call_guard<py::gil_scoped_release>())
       .def("get_call_spec", &AOTIModelContainerRunnerXpu::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -196,7 +257,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"))
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerXpu::swap_constant_buffer)
+          &AOTIModelContainerRunnerXpu::swap_constant_buffer,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer)
@@ -210,13 +272,20 @@ void initAOTIRunnerBindings(PyObject* module) {
 #endif
 #if defined(USE_MPS) && defined(__APPLE__) && \
     !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
-  py::class_<AOTIModelContainerRunnerMps>(m, "AOTIModelContainerRunnerMps")
-      .def(py::init<const std::string&, int>())
+  py::class_<AOTIModelContainerRunnerMps>(
+      m,
+      "AOTIModelContainerRunnerMps",
+      py::release_gil_before_calling_cpp_dtor())
+      .def(init_releasing_gil<
+           AOTIModelContainerRunnerMps,
+           const std::string&,
+           int>())
       .def(
           "run",
           &AOTIModelContainerRunnerMps::run,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+          py::arg("stream_handle") = nullptr,
+          py::call_guard<py::gil_scoped_release>())
       .def("get_call_spec", &AOTIModelContainerRunnerMps::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -246,7 +315,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"))
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerMps::swap_constant_buffer)
+          &AOTIModelContainerRunnerMps::swap_constant_buffer,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerMps::free_inactive_constant_buffer)
