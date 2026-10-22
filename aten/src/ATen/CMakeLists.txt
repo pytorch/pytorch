@@ -280,9 +280,6 @@ if(USE_FLASH_ATTENTION)
     #  list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
     #endif()
 
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-early-inline-all=true)
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-function-calls=false)
-
     # Additional CK compiler flags
     set(CK_SDPA_EXTRA_HIPCC_OPTIONS
         CK_ENABLE_BF16
@@ -676,14 +673,15 @@ if(USE_ROCM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   else()
-    # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
-    # compile for that arch. Build CK GEMM as a separate library with gfx1250
-    # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
-    # CK GEMM. Remove this filtering once the CK submodule supports gfx1250.
+    # composable_kernel supports CK GEMM only on an allowlist of gfx archs
+    # (torch_filter_ck_gemm_arches in cmake/public/utils.cmake; mirrors the
+    # allowlist in at::Context::ckGemmSupported()). Build CK GEMM as a separate
+    # library restricted to that subset via HIP_ARCHITECTURES so every other
+    # requested arch still builds. Dependencies.cmake turns USE_ROCM_CK_GEMM off
+    # when the subset is empty, so this branch always has at least one arch.
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
-    set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
-    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    torch_filter_ck_gemm_arches(_ck_gemm_hip_arches)
     set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
     add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
     set_target_properties(ck_gemm PROPERTIES
@@ -828,6 +826,12 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(SLEEF_DISABLE_OPENMP ON CACHE BOOL "OpenMP only used by sleef DFT and tests, both disabled" FORCE)
     if(WIN32)
       set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
+      # Turn off SLEEF SVE on Windows:
+      # - MSVC 14.51 (VS 2026) ships arm_sve.h, so SLEEF's SVE check passes
+      # - SLEEF has no MSVC flag that defines __ARM_FEATURE_SVE, so its SVE files fail to build
+      # - MSVC 14.44 (VS 2022) had no arm_sve.h, so SVE was already off
+      # - ATen builds no SVE kernels with MSVC, so nothing uses SLEEF SVE here
+      set(SLEEF_DISABLE_SVE ON CACHE BOOL "Disable SLEEF SVE on Windows" FORCE)
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")

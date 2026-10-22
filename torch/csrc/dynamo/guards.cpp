@@ -1,10 +1,13 @@
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/functional.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #define PY_SSIZE_T_CLEAN
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/Synchronized.h>
@@ -177,17 +180,51 @@ static std::string format_tensor_type_mismatch(
   return fail_reason.str();
 }
 
+namespace {
+thread_local std::optional<c10::DeviceIndex>* current_device_index_cache =
+    nullptr;
+
+at::DeviceIndex current_device_index() {
+  if (current_device_index_cache == nullptr) {
+    return at::accelerator::getDeviceIndex();
+  }
+  if (!current_device_index_cache->has_value()) {
+    *current_device_index_cache = at::accelerator::getDeviceIndex();
+  }
+  return **current_device_index_cache;
+}
+
+class CurrentDeviceIndexCacheScope {
+ public:
+  CurrentDeviceIndexCacheScope() : previous_cache_(current_device_index_cache) {
+    current_device_index_cache = &cache_;
+  }
+
+  ~CurrentDeviceIndexCacheScope() {
+    current_device_index_cache = previous_cache_;
+  }
+
+ private:
+  std::optional<c10::DeviceIndex> cache_;
+  std::optional<c10::DeviceIndex>* previous_cache_;
+};
+} // namespace
+
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
     const at::Tensor& v,
     c10::DispatchKeySet dispatch_key_set,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    bool device_index_is_current)
     : pytype(pt),
-      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
+      dispatch_key_(state.apply_for_tensor(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
-      device_index_(v.device().index()),
+      device_index_(
+          device_index_is_current
+              ? std::nullopt
+              : std::optional<c10::DeviceIndex>(v.device().index())),
       requires_grad_(v.requires_grad()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
@@ -206,13 +243,27 @@ TensorCheck::TensorCheck(
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
     : pytype(pt),
-      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
+      dispatch_key_(state.apply_for_tensor(dispatch_key_set).raw_repr()),
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
+
+bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
+  // An unset index means the guard accepts the current accelerator rather than
+  // a recorded one -- still a real check, just not a rank-specific one. Neither
+  // form admits a tensor on some other device.
+  //
+  // Deliberately not value_or(current_device_index()): that evaluates its
+  // argument eagerly, querying the current device on every recorded-index check
+  // too. This runs per guarded tensor, so keep the common path call-free.
+  if (device_index_.has_value()) {
+    return *device_index_ == device.index();
+  }
+  return device.index() == current_device_index();
+}
 
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
@@ -244,8 +295,8 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
+  if (dispatch_key_ != state.apply_for_tensor(dispatch_key_set).raw_repr() ||
+      dtype_ != dtype || !deviceIndexMatches(device) ||
       requires_grad_ != requires_grad) {
     return false;
   }
@@ -280,12 +331,12 @@ std::string TensorCheck::check_verbose(
     const std::string& tensor_name) {
   std::stringstream fail_reason;
   fail_reason << "tensor '" << tensor_name << "' ";
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+  if (dispatch_key_ != state.apply_for_tensor(v.key_set()).raw_repr()) {
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
-    // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
+    // {}", dispatch_key_, state.apply_for_tensor(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
                 << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
-                << ", actual " << state.apply(v.key_set());
+                << ", actual " << state.apply_for_tensor(v.key_set());
     return std::move(fail_reason).str();
   } else if (dtype_ != v.dtype().toScalarType()) {
     // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
@@ -293,9 +344,15 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
     return std::move(fail_reason).str();
-  } else if (device_index_ != v.device().index()) {
-    fail_reason << "Tensor device index mismatch. Expected device index to be "
-                << device_index_ << ", actual " << v.device().index();
+  } else if (!deviceIndexMatches(v.device())) {
+    fail_reason << "Tensor device index mismatch. Expected device index to be ";
+    if (device_index_.has_value()) {
+      fail_reason << static_cast<int>(*device_index_);
+    } else {
+      fail_reason << "the current device ("
+                  << static_cast<int>(current_device_index()) << ")";
+    }
+    fail_reason << ", actual " << static_cast<int>(v.device().index());
     return std::move(fail_reason).str();
   } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
@@ -431,8 +488,8 @@ static int TensorGuards_init(
     return -1;
   }
 
-  // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
-  // an optimization to avoid invoking .size()/.stride() in python needlessly
+  // dynamic_dims_strides/sizes_py may be None - this is an optimization to
+  // avoid invoking .size()/.stride() in python needlessly
   std::vector<std::vector<std::optional<c10::SymInt>>>
       per_tensor_dynamic_dims_sizes = get_dynamic_dims(dynamic_dims_sizes_py);
   std::vector<std::vector<std::optional<c10::SymInt>>>
@@ -612,6 +669,9 @@ struct AutocastState {
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
+  // Excluded autocast dispatch keys, equivalent to `enabled` but checkable in
+  // one mask compare.
+  c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -619,22 +679,26 @@ struct AutocastState {
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
     cache_enabled = at::autocast::is_autocast_cache_enabled();
+    disabled_keys = c10::impl::tls_local_dispatch_key_set().excluded_ &
+        c10::autocast_dispatch_keyset;
   }
 
-  bool operator==(const AutocastState& o) const {
-    for (size_t i = 0; i < DEVICES.size(); i++) {
-      // If disabled audocast, autocast_dtype comparison not occur
-      if (enabled[i] == false && o.enabled[i] == false) {
-        continue;
-      }
-      if (enabled[i] != o.enabled[i] || dtype[i] != o.dtype[i]) {
+  // Compares all enabled flags at once via the TLS excluded set, and only
+  // fetches dtypes for enabled devices.
+  bool matches_current() const {
+    const auto& excluded{c10::impl::tls_local_dispatch_key_set().excluded_};
+    if ((excluded & c10::autocast_dispatch_keyset) != disabled_keys) {
+      return false;
+    }
+
+    for (size_t i{0}; i < DEVICES.size(); ++i) {
+      if (enabled[i] &&
+          dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
       }
     }
-    if (cache_enabled != o.cache_enabled) {
-      return false;
-    }
-    return true;
+
+    return cache_enabled == at::autocast::is_autocast_cache_enabled();
   }
 
   std::string reason(const AutocastState& o) const {
@@ -668,6 +732,16 @@ struct AutocastState {
     json_t.enabled = json_j.at("enabled");
     json_t.dtype = json_j.at("dtype");
     json_t.cache_enabled = json_j.at("cached_enabled");
+
+    // Rebuild disabled_keys from enabled
+    json_t.disabled_keys = c10::DispatchKeySet();
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (!json_t.enabled[i]) {
+        json_t.disabled_keys = json_t.disabled_keys.add(
+            at::autocast::get_autocast_dispatch_key_from_device_type(
+                DEVICES[i]));
+      }
+    }
   }
 };
 
@@ -711,7 +785,7 @@ struct GlobalStateGuard {
   bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
-            _autocast_state == AutocastState() &&
+            _autocast_state.matches_current() &&
             _torch_function == torch::torch_function_enabled() &&
             _torch_function_all_disabled ==
                 at::impl::torch_function_all_disabled() &&
@@ -730,9 +804,8 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    AutocastState current_autocast;
-    if (!(_autocast_state == current_autocast))
-      os << _autocast_state.reason(current_autocast);
+    if (!_autocast_state.matches_current())
+      os << _autocast_state.reason(AutocastState{});
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())
@@ -2644,6 +2717,54 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
   py::object forward_ad_module;
 };
 
+// Checks if the autograd saved tensor hooks have changed.
+class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
+ public:
+  AUTOGRAD_SAVED_TENSORS_HOOKS(
+      RootGuardManager* root_guard_manager,
+      py::object graph_module_type_obj,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard{root_guard_manager, std::move(verbose_code_parts), std::move(user_stack)},
+        graph_module_type{py::cast<py::type>(std::move(graph_module_type_obj))},
+        guard_hooks_ids{get_guard_hooks_ids()} {}
+
+  bool check_nopybind(PyObject* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return guard_hooks_ids == get_guard_hooks_ids();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return guard_hooks_ids == get_guard_hooks_ids();
+  }
+
+ private:
+  py::type graph_module_type;
+  std::array<PyObject*, 2> guard_hooks_ids;
+
+  std::array<PyObject*, 2> get_guard_hooks_ids() {
+    auto hooks{at::SavedTensorDefaultHooks::get_hooks(true)};
+    if (!hooks) {
+      return {};
+    }
+
+    auto is_graph_module{[&](PyObject* o) {
+      return PyType_IsSubtype(
+          Py_TYPE(o), reinterpret_cast<PyTypeObject*>(graph_module_type.ptr()));
+    }};
+    auto* pack{hooks->first.ptr(&hooks->first.pyinterpreter())};
+    auto* unpack{hooks->second.ptr(&hooks->second.pyinterpreter())};
+    if (!is_graph_module(pack) || !is_graph_module(unpack)) {
+      return {};
+    }
+
+    // This is safe since we're not accessing the contents of these pointers,
+    // only the contained address.
+    return std::array<PyObject*, 2>{pack, unpack};
+  }
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -3265,7 +3386,8 @@ inline std::vector<std::optional<c10::SymInt>> to_opt_symint(
 // dtype, device, requires_grad, sizes, strides) for the dict-tag fast path.
 inline TensorCheck make_tensor_check(
     const LocalState& state,
-    const at::Tensor& tensor) {
+    const at::Tensor& tensor,
+    bool device_index_is_current) {
   auto layout = tensor.layout();
   bool sparse = layout == c10::kSparseCsr || layout == c10::kSparseCsc ||
       layout == c10::kSparseBsc || layout == c10::kSparseBsr;
@@ -3280,7 +3402,24 @@ inline TensorCheck make_tensor_check(
       tensor,
       tensor.key_set(),
       to_opt_symint(tensor.sizes()),
-      std::move(strides));
+      std::move(strides),
+      device_index_is_current);
+}
+
+// Mirrors _guard_device_index_is_current in torch/_dynamo/guards.py: under
+// compile_on_one_rank an accelerator tensor's index is the compiling rank's and
+// carries no information, so the snapshot has to compare against the runtime
+// current device the way the TENSOR_MATCH leaf does. Pinning it here instead
+// would let the unchanged-dict-tag fast path accept a tensor left behind on
+// another device, which the leaf itself rejects.
+inline bool coor_device_index_is_current(
+    bool compile_on_one_rank,
+    const at::Tensor& tensor) {
+  if (!compile_on_one_rank) {
+    return false;
+  }
+  auto acc = at::accelerator::getAccelerator(false);
+  return acc.has_value() && tensor.device().type() == acc.value();
 }
 
 struct RecordedTensorMetadata {
@@ -4399,6 +4538,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
       _reset_relational_guard_state();
@@ -4409,13 +4549,18 @@ class RootGuardManager : public GuardManager {
     // Dynamo should only be adding guards on values without
     // torch function at this point, because if there
     // was a torch function, we should've traced through it
+    // Restored by scope exit so a C++ throw out of an accessor (a TORCH_CHECK
+    // in TENSOR_MATCH on a nested tensor, say) cannot leave the calling thread
+    // ALL_DISABLED.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -4423,13 +4568,11 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
 
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -4457,6 +4600,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     int num_guards_executed = 0;
 
@@ -4472,16 +4616,19 @@ class RootGuardManager : public GuardManager {
       return debug_info_leaf;
     }
 
+    // Same scope-exit restore as check_nopybind_template above.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
     const GuardDebugInfo& debug_info_accessors =
         GuardManager::check_accessors_verbose_nopybind(
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return debug_info_accessors;
     }
@@ -4492,7 +4639,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
@@ -4501,7 +4647,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
@@ -4530,6 +4675,7 @@ class RootGuardManager : public GuardManager {
         std::make_unique<RootGuardManager>();
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
+    cloned_root->_compile_on_one_rank = _compile_on_one_rank;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
@@ -4607,10 +4753,20 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
+    const at::Tensor& tensor = THPVariable_Unpack(tensor_pointer);
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
         py::reinterpret_borrow<py::object>(tensor_pointer),
-        make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
+        make_tensor_check(
+            _local_state,
+            tensor,
+            coor_device_index_is_current(_compile_on_one_rank, tensor)),
     });
+  }
+
+  // Whether this graph was traced with compile_on_one_rank. Set from Python
+  // alongside guard construction; see record_tensor_metadata.
+  void set_compile_on_one_rank(bool value) {
+    _compile_on_one_rank = value;
   }
 
  public:
@@ -4618,6 +4774,9 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
+  // See set_compile_on_one_rank.
+  bool _compile_on_one_rank = false;
+
   // All the relational guards under this guard manager. We only use these
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
@@ -5232,7 +5391,8 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts,
       py::object user_stack,
       py::object pytype,
-      py::object dispatch_keys)
+      py::object dispatch_keys,
+      bool device_index_is_current)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
@@ -5267,7 +5427,8 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        device_index_is_current);
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -7876,6 +8037,13 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DUAL_LEVEL_MATCH")
       .def(py::init<RootGuardManager*, int64_t, py::list, py::object>())
       .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<
+      AUTOGRAD_SAVED_TENSORS_HOOKS,
+      LeafGuard,
+      std::shared_ptr<AUTOGRAD_SAVED_TENSORS_HOOKS>>(
+      py_m, "AUTOGRAD_SAVED_TENSORS_HOOKS")
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
+      .def("__call__", &AUTOGRAD_SAVED_TENSORS_HOOKS::check);
   py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
       py_m, "FLOAT_IS_NAN")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -7918,7 +8086,8 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object,
            py::type,
-           py::object>())
+           py::object,
+           bool>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
@@ -8386,6 +8555,18 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(user_stack)));
           })
       .def(
+          "add_autograd_saved_tensors_hooks_guard",
+          [](GuardManager& self,
+             py::object graph_module_type,
+             py::object verbose_code_parts,
+             py::object user_stack) {
+            self.add_leaf_guard(std::make_shared<AUTOGRAD_SAVED_TENSORS_HOOKS>(
+                self.get_root(),
+                std::move(graph_module_type),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
           "add_float_is_nan_guard",
           [](GuardManager& self,
              py::object value,
@@ -8449,7 +8630,8 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack,
              py::object pytype,
-             py::object dispatch_keys) -> void {
+             py::object dispatch_keys,
+             bool device_index_is_current) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
@@ -8460,8 +8642,18 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts),
                 std::move(user_stack),
                 std::move(pytype),
-                std::move(dispatch_keys)));
-          })
+                std::move(dispatch_keys),
+                device_index_is_current));
+          },
+          py::arg("value"),
+          py::arg("sizes"),
+          py::arg("strides"),
+          py::arg("tensor_name"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("pytype"),
+          py::arg("dispatch_keys"),
+          py::arg("device_index_is_current") = false)
 
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -8855,6 +9047,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
       .def("get_local_state", &RootGuardManager::get_local_state)
       .def("set_local_state", &RootGuardManager::set_local_state)
+      .def(
+          "set_compile_on_one_rank", &RootGuardManager::set_compile_on_one_rank)
       .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards

@@ -19,9 +19,8 @@ import functools
 import logging
 import operator
 import textwrap
-import traceback
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
@@ -53,6 +52,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    format_user_stack,
     ObservedAttributeError,
     raise_observed_exception,
     raise_type_error,
@@ -78,6 +78,7 @@ from ..utils import (
     proxy_args_kwargs,
     set_example_value,
     tensortype_to_dtype,
+    unpack_iterable,
 )
 from .base import (
     _check_method_arity,
@@ -92,6 +93,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .object_protocol import python_constant_repr_impl
 from .script_object import CustomClassObjectVariable
 from .user_defined import UserDefinedClassVariable
 
@@ -105,7 +107,9 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.output_graph import OutputGraph
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._guards import Source
 
     from .functions import UserFunctionVariable
     from .torch_function import TensorWithTFOverrideVariable
@@ -169,6 +173,29 @@ _VIEW_ATTR_TO_ATEN_OP = {
 }
 
 
+def _contains_graph_intermediate(
+    value: Any, side_effects: "SideEffects | None" = None
+) -> bool:
+    """Return whether value contains a differentiable current-graph tensor."""
+    found = False
+
+    def visit(vt: VariableTracker) -> None:
+        nonlocal found
+        if (
+            isinstance(vt, TensorVariable)
+            # Sources can describe in-graph views (for example, x.real). A
+            # sourced placeholder is only an input boundary for this trace;
+            # relationships severed by an earlier graph break are already
+            # outside the scope of this check.
+            and (vt.source is None or vt.proxy.node.op != "placeholder")
+            and (vt.requires_grad or vt.has_grad_fn)
+        ):
+            found = True
+
+    VariableTracker.visit(visit, value, side_effects=side_effects)
+    return found
+
+
 def _is_sym_arith_operand(vt: VariableTracker) -> bool:
     """True if vt can be the other operand of a SymNode arithmetic op
     (add/sub). Accepts SymNode-like values plus float ConstantVariable —
@@ -219,6 +246,110 @@ class TensorSpecializedProps(TypedDict):
     _size: NotRequired[tuple[Any, ...]]
     stride: NotRequired[tuple[Any, ...]]
     is_contiguous: NotRequired[tuple[torch.memory_format, ...] | None]
+
+
+def _current_device_index_variable(
+    tx: "InstructionTranslatorBase",
+) -> VariableTracker:
+    """The current device index for this graph, observed once and reused.
+
+    Cached the way _current_device_edge caches the device itself: the value cannot
+    change within a graph, so a fresh node per read would allocate a fresh unbacked
+    symbol each time -- leaving two reads incomparable to each other, and costing a
+    fallback kernel and a cudagraph partition boundary apiece.
+
+    Cached on the tracer, not the graph. A higher-order op traces each subgraph with
+    its own tracer, and a proxy created under a sibling cannot be reused here.
+    """
+    from .builder import wrap_fx_proxy
+
+    tracer = tx.output.current_tracer
+    cached = tracer.coor_current_device_index_var
+    if cached is not None:
+        return cached
+    var = wrap_fx_proxy(
+        tx,
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.coor.current_device_index.default,
+            (),
+            {},
+        ),
+    )
+    tracer.coor_current_device_index_var = var
+    return var
+
+
+class CurrentDeviceVariable(VariableTracker):
+    """A CooR device with a static accelerator type and runtime-relative index."""
+
+    def __init__(self, value: torch.device, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self) -> torch.device:
+        return self.value
+
+    def python_type(self) -> type:
+        return torch.device
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch.fx.experimental.proxy_tensor", "_coor_current_device"
+            )
+        )
+        codegen.call_function(0, False)
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "torch.fx.experimental.proxy_tensor._coor_current_device()"
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # tp_richcompare_impl reports this device equal to an explicit cuda:N
+        # whenever N is the running rank's index, so a hash has to agree with every
+        # cuda:N. Under CooR ConstantVariable.hash_impl drops the index from device
+        # hashes too, so all devices of one type share a bucket and equality decides:
+        # two rank-relative devices are equal, and against an explicit cuda:N the
+        # comparison is on the runtime index rather than silently unequal.
+        return hash(self.value), False
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "type":
+            return ConstantVariable.create(self.value.type)
+        if name == "index":
+            return _current_device_index_variable(tx)
+        return super().tp_getattro_impl(tx, name)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        if isinstance(other, CurrentDeviceVariable):
+            equal = self.value.type == other.value.type
+            return ConstantVariable.create(equal if op == "__eq__" else not equal)
+        try:
+            other_device = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        if not isinstance(other_device, torch.device):
+            return ConstantVariable.create(NotImplemented)
+        if other_device.type != self.value.type or other_device.index is None:
+            return ConstantVariable.create(op == "__ne__")
+        compare = operator.eq if op == "__eq__" else operator.ne
+        return variables.BuiltinVariable(compare).call_function(
+            tx,
+            [
+                _current_device_index_variable(tx),
+                ConstantVariable.create(other_device.index),
+            ],
+            {},
+        )
 
 
 class TensorVariable(VariableTracker):
@@ -328,6 +459,21 @@ class TensorVariable(VariableTracker):
         """Get the current version of self's fake tensor, or None if unavailable."""
         self_fake = self.proxy.node.meta.get("example_value")
         return self_fake._version if self_fake is not None else None
+
+    def graph_input_source(self, tx: "InstructionTranslatorBase") -> "Source | None":
+        """Source of the graph input this tensor is (possibly a source-less alias like x.contiguous()), else None."""
+        if self.source is not None:
+            return self.source
+        self_fake = self.proxy.node.meta.get("example_value")
+        if self_fake is None:
+            return None
+        # Use the root tracer: inside a higher-order op, tx.output.graph is the subgraph,
+        # whose placeholders have no grapharg.
+        for node in tx.output.root_tracer.graph.find_nodes(op="placeholder"):
+            arg = node.meta.get("grapharg")
+            if arg is not None and arg.fake_tensor is self_fake:
+                return arg.source
+        return None
 
     def _sync_if_inplace_mutation(
         self,
@@ -593,9 +739,24 @@ class TensorVariable(VariableTracker):
     def method_attr_device(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
-        if self.device is not None:
-            return VariableTracker.build(tx, self.device)
-        return None
+        if self.device is None:
+            return None
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+        device = self.device
+        if _coor_device_index_is_current(device):
+            # compile-on-one-rank: hand back a bare "cuda" rather than "cuda:N".
+            # x.device is constant-folded here, so an indexed device gets frozen into
+            # the Dynamo graph and every rank produces different text -- and Dynamo
+            # runs before make_fx, which is where the current_device() substitution
+            # happens, so nothing downstream can undo it. An index-less accelerator
+            # device is the form make_fx already rewrites into that node.
+            #
+            # Keep the device type static so type predicates and device-consuming
+            # operations remain traceable, while index-dependent observations are
+            # represented by CurrentDeviceVariable at runtime.
+            return CurrentDeviceVariable(torch.device(device.type))
+        return VariableTracker.build(tx, device)
 
     def method_attr_layout(
         self, tx: "InstructionTranslatorBase"
@@ -790,16 +951,22 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if self.source is not None and hasattr(torch.ops.aten, name):
+        if name.endswith("_") and hasattr(torch.ops.aten, name):
             fn = getattr(torch.ops.aten, name)
             if (
                 hasattr(fn, "overloads")
                 and hasattr(fn, fn.overloads()[0])
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+                and self.graph_input_source(tx) is not None
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
+                # A source-less alias may share the input's fake tensor yet be another
+                # tensor in eager (e.g. after as_subclass): rebuild the call on it.
+                src = None if self.source is None else AttrSource(self.source, name)
+                method = variables.GetAttrVariable(self, name) if src is None else None
                 return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(self.source, name),
+                    source=src,
+                    callable_var=method,
                     msg="Getting an inplace view on a graph input is not supported",
                     hints=[
                         "Avoid mutating a graph input's tensor metadata with in-place view ops. "
@@ -1364,6 +1531,12 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
         if isinstance(self.device, torch.device):
+            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+            if _coor_device_index_is_current(self.device):
+                # An int has no index-less form meaning "this rank's device". Read
+                # the index at runtime, as x.device.index does under CooR.
+                return _current_device_index_variable(tx)
             index = self.device.index if self.device.type != "cpu" else -1
             return VariableTracker.build(tx, index)
         return None
@@ -1577,10 +1750,23 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
-            if isinstance(inputs, variables.BaseListVariable):
+            if isinstance(inputs, variables.MappingProxyVariable) and inputs.source:
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            if issubclass(inputs.python_type(), Mapping):
+                values = inputs.call_method(tx, "values", [], {})
+                iterator = VariableTracker.build(tx, iter).call_function(
+                    tx, [values], {}
+                )
+                provided_vars = unpack_iterable(tx, iterator)
+            elif isinstance(inputs, variables.BaseListVariable):
                 provided_vars = inputs.items
-            elif isinstance(inputs, variables.ConstDictVariable):
-                provided_vars = list(inputs.items.values())
             else:
                 provided_vars = [inputs]
             input_vars = self._collect_backward_inputs(
@@ -1890,7 +2076,7 @@ class TensorVariable(VariableTracker):
     @functools.cache
     def _warn_capture_scalar_outputs() -> None:
         user_stack = torch._guards.TracingContext.extract_stack()
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_formatted = format_user_stack(user_stack)
         log.warning(
             textwrap.dedent(
                 """\
@@ -3313,6 +3499,9 @@ class SymNodeVariable(VariableTracker):
         # Essentially convert the SymNode to a constant variable whenever its
         # searched for a dict key.
         return hash(self.evaluate_expr())
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class NumpyNdarrayVariable(TensorVariable):
