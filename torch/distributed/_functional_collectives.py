@@ -167,6 +167,70 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
+def reduce(
+    self: torch.Tensor,
+    dst: int,
+    reduceOp: str | dist.ReduceOp,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    """
+    Reduces the tensor data across all processes onto ``dst``.
+
+    Returns zeros on ranks other than ``dst``.
+
+    Backward is a collective: every rank must run backward through the output.
+
+    Args:
+        dst (int): Destination rank within the group
+        reduceOp (str or ReduceOp): The reduction operation
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    group = _resolve_group(group, tag)
+    reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
+    tensor = torch.ops._c10d_functional.reduce(
+        self, dst, reduce_op, _group_or_group_name(group)
+    )
+    return _maybe_wrap_tensor(tensor)
+
+
+def gather(self: torch.Tensor, dst: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Gathers tensors from all processes onto ``dst``, concatenated along dim 0.
+
+    Every rank returns a tensor of the gathered shape; it is zeros on ranks other than ``dst``.
+
+    Backward is a collective: every rank must run backward through the output.
+
+    Args:
+        dst (int): Destination rank within the group
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    group = _resolve_group(group, tag)
+    tensor = torch.ops._c10d_functional.gather(self, dst, _group_or_group_name(group))
+    return _maybe_wrap_tensor(tensor)
+
+
+def scatter(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Splits the tensor on ``src`` along dim 0 and sends one chunk to each process.
+
+    Every rank must pass a tensor of the same shape; its data is ignored on ranks other than ``src``.
+
+    Backward is a collective: every rank must run backward through the output.
+
+    Args:
+        src (int): Source rank within the group
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    group = _resolve_group(group, tag)
+    tensor = torch.ops._c10d_functional.scatter(self, src, _group_or_group_name(group))
+    return _maybe_wrap_tensor(tensor)
+
+
 def all_reduce(
     self: torch.Tensor,
     reduceOp: str | dist.ReduceOp,
@@ -218,9 +282,8 @@ def all_gather_single(
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
-    Note that it currently only supports gather_dim = 0.
-
     The input tensor is left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
@@ -267,8 +330,6 @@ def all_gather_single_autograd(
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
-    Note that it currently only supports gather_dim = 0.
-
     This function is the same as all_gather_single but will propagate the
     backwards gradient across workers.
 
@@ -293,12 +354,14 @@ def reduce_scatter_single(
 
 
     The input tensor is left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
         ProcessGroup: Will perform a collective using the ranks and tag of the PG.
         DeviceMesh: Do a SPMD collective over all ranks of the mesh
         (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
@@ -362,7 +425,7 @@ def all_gather_tensor(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_tensor` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -378,7 +441,7 @@ def all_gather_tensor_autograd(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_tensor_autograd` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single_autograd` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -397,7 +460,7 @@ def reduce_scatter_tensor(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -414,7 +477,7 @@ def reduce_scatter_tensor_autograd(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor_autograd` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_autograd` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -470,6 +533,7 @@ def all_gather_single_coalesced(
     Note that it currently only supports gather_dim = 0.
 
     The input tensor is left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
@@ -505,6 +569,7 @@ def reduce_scatter_single_coalesced(
     the final result, then scatter the results to corresponding ranks.
 
     The input tensors are left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
@@ -551,7 +616,7 @@ def all_gather_into_tensor_coalesced(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_into_tensor_coalesced` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single_coalesced` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single_coalesced` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -568,7 +633,7 @@ def reduce_scatter_tensor_coalesced(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor_coalesced` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_coalesced` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single_coalesced` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -988,6 +1053,87 @@ torch.library.register_autograd(
     setup_context=all_to_all_single_setup_context,
 )
 
+
+def broadcast_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.reduce(
+        grad_output.contiguous(), ctx.src, "sum", ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def broadcast_setup_context(ctx, inputs, output):
+    _, ctx.src, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::broadcast",
+    broadcast_backward,
+    setup_context=broadcast_setup_context,
+)
+
+
+def reduce_backward(ctx, grad_output: torch.Tensor):
+    reduce_op = _reduce_op_type(ctx.reduce_op)
+    if reduce_op not in ("sum", "avg", ReduceOp.SUM, ReduceOp.AVG):
+        raise RuntimeError(
+            f"reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
+        )
+    output = wait_tensor(
+        torch.ops._c10d_functional.broadcast(
+            grad_output.contiguous(), ctx.dst, ctx.group_name
+        )
+    )
+    if reduce_op in ("avg", ReduceOp.AVG):
+        output = output / c10d._get_group_size_by_name(ctx.group_name)
+    return output, None, None, None
+
+
+def reduce_setup_context(ctx, inputs, output):
+    _, ctx.dst, ctx.reduce_op, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::reduce",
+    reduce_backward,
+    setup_context=reduce_setup_context,
+)
+
+
+def gather_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.scatter(
+        grad_output.contiguous(), ctx.dst, ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def gather_setup_context(ctx, inputs, output):
+    _, ctx.dst, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::gather",
+    gather_backward,
+    setup_context=gather_setup_context,
+)
+
+
+def scatter_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.gather(
+        grad_output.contiguous(), ctx.src, ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def scatter_setup_context(ctx, inputs, output):
+    _, ctx.src, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::scatter",
+    scatter_backward,
+    setup_context=scatter_setup_context,
+)
+
 # Backward compatibility: register autograd for _c10d_functional_autograd ops
 # These ops redirect to _c10d_functional but need their own autograd registration
 torch.library.register_autograd(
@@ -1219,7 +1365,7 @@ def permute_tensor(
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
         ProcessGroup: Will perform a collective using the ranks and tag of the PG.
         DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
     """
     t, rankset, group_size = _expand_group(group, tag)
     local_pg = c10d._find_or_create_pg_by_ranks_and_tag(t, rankset, group_size)
@@ -1239,11 +1385,12 @@ class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
     prior to first use of the underlying tensor.
-    Use it inside functional collective pytorch wrappers like the following:
-    def functional_collective(self, group, tag):
-        tag, rankset, group_size = _expand_group(group, tag)
-        tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
-        return _maybe_wrap_tensor(tensor)
+    Use it inside functional collective pytorch wrappers like the following::
+
+        def functional_collective(self, group, tag):
+            group_name = _resolve_group(group, tag)
+            tensor = torch.ops._c10d_functional.{collective}(self, ..., group_name)
+            return _maybe_wrap_tensor(tensor)
     """
 
     elem: torch.Tensor
@@ -1271,6 +1418,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
+        """Wait on the collective and return the result as a list."""
         return self.trigger_wait().tolist()
 
     @staticmethod
@@ -1294,6 +1442,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
+        """Wait on the collective if not yet completed and return the result tensor."""
         if not self.completed:
             out = wait_tensor(self.elem)
             self.completed = True
@@ -1302,6 +1451,7 @@ class AsyncCollectiveTensor(torch.Tensor):
             return self.elem
 
     def wait(self) -> torch.Tensor:
+        """Wait on the collective and return the result tensor."""
         return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
@@ -1348,6 +1498,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return out
 
     def numpy(self):  # type: ignore[override]
+        """Wait on the collective and return the result as a NumPy array."""
         return self.wait().numpy()
 
 
@@ -1652,6 +1803,21 @@ def _broadcast_meta(self, *args):
     return torch.empty_like(self)
 
 
+def _gather_meta(self, dst, group_name):
+    return _make_all_gather_out_tensor(self, c10d._get_group_size_by_name(group_name))
+
+
+def _scatter_meta(self, src, group_name):
+    group_size = c10d._get_group_size_by_name(group_name)
+    torch._check(
+        self.dim() > 0 and self.size(0) % group_size == 0,
+        lambda: "scatter: the first dimension of the input must be divisible by the group size",
+    )
+    out_size = list(self.size())
+    out_size[0] //= group_size
+    return self.new_empty(out_size)
+
+
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
@@ -1811,6 +1977,9 @@ lib_impl.impl(
 lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+lib_impl.impl("reduce", _all_reduce_meta, "Meta")
+lib_impl.impl("gather", _gather_meta, "Meta")
+lib_impl.impl("scatter", _scatter_meta, "Meta")
 
 # Backward compatibility: register Meta impls for _c10d_functional_autograd ops
 # These ops redirect to _c10d_functional but need their own Meta registration so
@@ -1881,7 +2050,7 @@ _ASYNC_OP_REMAP_ERROR = (
     "Dynamo can only remap synchronous torch.distributed collectives "
     "(async_op=False) to functional collectives. If your program does not need "
     "the Work handle, set async_op=False. Otherwise, rewrite the collective "
-    "with torch.distributed._functional_collectives and synchronize the "
+    "with torch.distributed.functional_collectives and synchronize the "
     "returned tensor with wait_tensor or wait_tensors. Tracking issue: "
     "https://github.com/pytorch/pytorch/issues/119890"
 )
@@ -2309,3 +2478,8 @@ class _LegacyToFunctionalCollectiveMode(torch.overrides.TorchFunctionMode):
             mapped_func, mapped_args, mapped_kwargs = remapped
             return mapped_func(*mapped_args, **mapped_kwargs)
         return func(*args, **(kwargs or {}))
+
+
+# Ensure the public module, which sets ``__module__`` on the public API, is
+# loaded: FX codegen resolves functions in graphs by their ``__module__`` path.
+import torch.distributed.functional_collectives
