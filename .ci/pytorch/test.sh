@@ -1423,9 +1423,9 @@ test_dynamo_benchmark() {
   local shard_id="$1"
   shift
 
-  ### Perf benchmark 2.13.0, need to reinstall detectron2 to avoid crashing when importing it
+  ### Perf benchmark 2.14.1, need to reinstall detectron2 to avoid crashing when importing it
   pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu triton pytorch-triton detectron2
-  pip_install torch==2.13.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+  pip_install torch==2.14.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
   # Rebuild torchrec and fbgemm_gpu against the installed torch release
   if [[ "${TEST_CONFIG}" == *torchbench* ]] && [[ "${TEST_CONFIG}" != *cpu* ]]; then
     rm -rf dist/torchrec
