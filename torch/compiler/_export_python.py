@@ -330,6 +330,19 @@ def _tolerances_for(reference: torch.Tensor) -> tuple[float, float]:
     return rtol, atol
 
 
+def _copy_args(args: tuple[Any, ...]) -> tuple[Any, ...]:
+    """A deep copy of args that tolerates non-leaf tensors.
+
+    A non-leaf tensor refuses deepcopy, so copy its detached data (sharing the storage
+    memo, so aliasing survives) as a fresh leaf that requires grad.
+    """
+    memo: dict[int, Any] = {}
+    for t in pytree.tree_leaves(args):
+        if isinstance(t, torch.Tensor) and not t.is_leaf and id(t) not in memo:
+            memo[id(t)] = copy.deepcopy(t.detach(), memo).requires_grad_()
+    return copy.deepcopy(args, memo)
+
+
 def _eager_draws(
     fn: Callable[..., Any],
     args: tuple[Any, ...],
@@ -343,20 +356,27 @@ def _eager_draws(
     states -- running twice from the same state proves nothing, because eager is
     perfectly reproducible at a fixed seed. What makes the comparison meaningless is that
     inductor lowers random ops to its own philox and differs from eager at the same seed
-    by design.
+    by design. ``args`` is a pre-call copy that nothing else uses, so the second run
+    consumes it.
     """
     saved = _rng_state()
     try:
         _set_rng_state(rng)
-        first_args = copy.deepcopy(args)
+        first_args = _copy_args(args)
         first = _compared(fn(*first_args), first_args, path)
         seed = int(torch.random.initial_seed()) + 1
         torch.random.default_generator.manual_seed(seed)
         if torch.cuda.is_initialized():
             torch.cuda.manual_seed_all(seed)
-        second_args = copy.deepcopy(args)
-        second = _compared(fn(*second_args), second_args, path)
-    except Exception:
+        second = _compared(fn(*args), args, path)
+    except Exception as e:
+        log.warning(
+            "%s: could not tell whether %s draws from the generator (%s), so a "
+            "mismatch below is reported as is.",
+            _CHECK_ENV,
+            getattr(fn, "__name__", "fn"),
+            e,
+        )
         return set()
     finally:
         # This runs only to answer a question; the caller's streams must not move.
@@ -402,6 +422,7 @@ def _verify_against_eager(
     fn: Callable[..., Any],
     args: tuple[Any, ...],
     reference_args: tuple[Any, ...],
+    draw_args: tuple[Any, ...],
     produced: Any,
     path: str,
     rng: _RngState,
@@ -447,7 +468,7 @@ def _verify_against_eager(
         # Asked only once a check fails: a draw explains any of the three mismatches.
         nonlocal draws
         if draws is None:
-            draws = _eager_draws(fn, reference_args, rng, path)
+            draws = _eager_draws(fn, draw_args, rng, path)
             if draws:
                 skipped = "; ".join(compared[i][0] for i in sorted(draws))
                 warning_once(
@@ -557,6 +578,20 @@ def _byte_span(t: torch.Tensor) -> tuple[int, int]:
     return start, start + (extent + 1) * t.element_size()
 
 
+def _tensor_components(t: torch.Tensor) -> list[torch.Tensor] | None:
+    """The tensors __tensor_flatten__ names in wrapper subclass t, or None if t is not
+    one or cannot be flattened."""
+    if not is_traceable_wrapper_subclass(t):
+        return None
+    try:
+        attrs, _ = t.__tensor_flatten__()
+    except Exception:
+        return None
+    # Not every flattened attribute is a tensor -- DTensor's list includes its DeviceMesh.
+    components = (getattr(t, attr, None) for attr in attrs)
+    return [c for c in components if isinstance(c, torch.Tensor)]
+
+
 def _dense_leaves(t: torch.Tensor) -> list[torch.Tensor] | None:
     """The real-memory tensors inside t, or None if its bytes cannot be located.
 
@@ -565,19 +600,11 @@ def _dense_leaves(t: torch.Tensor) -> list[torch.Tensor] | None:
     tensor's would report every pair as disjoint. Decompose it instead.
     """
     if is_traceable_wrapper_subclass(t):
-        try:
-            attrs, _ = t.__tensor_flatten__()
-        except Exception:
+        components = _tensor_components(t)
+        if components is None:
             return None
         leaves: list[torch.Tensor] = []
-        saw_tensor = False
-        for attr in attrs:
-            # __tensor_flatten__ names the attributes that must be transformed, and
-            # not all of them are tensors -- DTensor's list includes its DeviceMesh.
-            component = getattr(t, attr, None)
-            if not isinstance(component, torch.Tensor):
-                continue
-            saw_tensor = True
+        for component in components:
             inner = _dense_leaves(component)
             if inner is None:
                 return None
@@ -586,7 +613,7 @@ def _dense_leaves(t: torch.Tensor) -> list[torch.Tensor] | None:
         # answer. Only a subclass we could not see INTO is unresolvable -- returning
         # `leaves` unconditionally would make such a wrapper disjoint from everything
         # and let a donor be written over a live input.
-        return leaves if saw_tensor else None
+        return leaves if components else None
     if t.numel() == 0 or t.is_meta:
         # Owns no bytes, unlike "bytes we cannot find" (both report data_ptr 0): one empty
         # component must not make its whole wrapper alias everything.
@@ -623,15 +650,8 @@ def _device_types(t: torch.Tensor, leaves: list[torch.Tensor] | None) -> set[str
     if leaves is not None:
         return {x.device.type for x in leaves}
     types = {t.device.type}
-    if is_traceable_wrapper_subclass(t):
-        try:
-            attrs, _ = t.__tensor_flatten__()
-        except Exception:
-            return types
-        for attr in attrs:
-            component = getattr(t, attr, None)
-            if isinstance(component, torch.Tensor):
-                types |= _device_types(component, None)
+    for component in _tensor_components(t) or ():
+        types |= _device_types(component, None)
     return types
 
 
@@ -959,9 +979,7 @@ class ExportedPythonArtifact:
         example_tensors = _input_tensors(example)
         example_overlaps = _input_overlaps(example, example_tensors)
         if self._example_inputs is None and example_overlaps != _input_overlaps(args):
-            from torch._precompile import PrecompileError
-
-            raise PrecompileError(
+            raise _precompile_error(
                 "torch.compiler.export_python: deep-copying the first-call "
                 "arguments did not preserve how their tensors share memory, so "
                 "capturing from the copy would bake in aliasing the real arguments "
@@ -1160,10 +1178,11 @@ class ExportedPythonArtifact:
         captured = self._read_stamp(code, _CPU_ISA_TAG)
         try:
             width, name = captured
-            features = set(name.split())
-        except (TypeError, ValueError, AttributeError):
-            # A recorded None (no C++ kernel) is a stamp; a dropped, unparsable or
-            # reshaped line is not.
+        except (TypeError, ValueError):
+            width = name = None
+        if type(width) is not int or not isinstance(name, str):
+            # A recorded None (no C++ kernel) is a stamp; a dropped, unparsable,
+            # reshaped or retyped line is not.
             if self._read_raw_stamp(code, _CPU_ISA_TAG) != "None":
                 log.warning(
                     "torch.compiler.export_python: the artifact at %s carries no "
@@ -1180,8 +1199,10 @@ class ExportedPythonArtifact:
         # Only the width is baked into loop strides, but a feature the live ISA lacks
         # may be an intrinsic the kernel emits (an AMX tile op compiles without
         # -mamx-tile and then faults). Extra live features at the same width are safe,
-        # and a scalar capture (width 0) emits no vector code to mismatch.
-        missing = features - set(str(live).split())
+        # and a scalar capture (width 0) emits no vector code to mismatch. Only the
+        # features str(isa) names are compared: the GEMM templates' amx_fp16 and
+        # avx512_bf16 choices are not in the stamp, so a change in those goes unchecked.
+        missing = set(name.split()) - set(str(live).split())
         if width and (live.bit_width() != width or missing):
             raise _precompile_error(
                 "torch.compiler.export_python: the artifact's C++ kernels were "
@@ -1460,11 +1481,12 @@ class ExportedPythonArtifact:
                     f"({where}); make_fx specializes the None branch without "
                     "a runtime guard. Split the function, or pass a tensor."
                 )
+            scalar = next(leaf for leaf in unsupported if leaf is not None)
             raise TypeError(
                 "torch.compiler.export_python supports only Tensor pytrees and "
                 "nn.Module positional arguments; Python scalar/config values are "
                 "specialized by make_fx without runtime guards. Close constants "
-                f"over in the function instead of passing {unsupported[0]!r} as "
+                f"over in the function instead of passing {scalar!r} as "
                 f"{where}."
             )
 
@@ -1480,15 +1502,10 @@ class ExportedPythonArtifact:
             return loaded(*args)
         # Copy BEFORE the call: the graph may mutate its inputs in place, and the eager
         # reference has to see what the artifact saw rather than what it left behind.
-        # The args are all of it: capture refuses any tensor fn closes over. A non-leaf
-        # tensor refuses deepcopy, so copy its detached data (sharing the storage memo, so
-        # aliasing survives) as a fresh leaf that requires grad.
-        memo: dict[int, Any] = {}
-        for t in pytree.tree_leaves(args):
-            if isinstance(t, torch.Tensor) and not t.is_leaf and id(t) not in memo:
-                memo[id(t)] = copy.deepcopy(t.detach(), memo).requires_grad_()
+        # The args are all of it: capture refuses any tensor fn closes over. The draw
+        # detector gets its own pre-call copy, since the reference run mutates its own.
         try:
-            reference = copy.deepcopy(args, memo)
+            reference, draw_args = _copy_args(args), _copy_args(args)
         except Exception:
             warning_once(
                 log,
@@ -1511,7 +1528,7 @@ class ExportedPythonArtifact:
         try:
             _set_rng_state(before)
             _verify_against_eager(
-                self._fn, args, reference, produced, self._path, before
+                self._fn, args, reference, draw_args, produced, self._path, before
             )
         finally:
             _set_rng_state(after)

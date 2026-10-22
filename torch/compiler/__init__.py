@@ -1121,17 +1121,19 @@ def export_python(
     results must match exactly. A tensor that depends on the generator is skipped with
     a warning, since inductor's philox differs from eager's by design. It is a debug
     mode, so leave it off in production: each checked call deep-copies every argument
-    (an ``nn.Module`` argument with all of its weights) and runs ``fn`` a second time,
-    so any side effect of ``fn`` -- writing a log, appending to a list, stepping a
-    counter -- happens twice, and a test that deliberately makes the artifact disagree
-    with ``fn`` fails under it. It catches an edit that changes the answer, but it
-    does not prove the edit computes the same function: an approximation whose error
-    is below the dtype's own noise passes by construction. It compares values only, so
-    it cannot see that the artifact's outputs carry no ``grad_fn``: a capture is
-    forward-only, and calling ``.backward()`` on an artifact's output fails where the
-    eager function would have worked. Only the CPU and CUDA generators are rewound for
-    the eager run and left where the artifact left them; on another accelerator a
-    checked call moves its generator.
+    (an ``nn.Module`` argument with all of its weights) twice and runs ``fn`` a second
+    time, and copies once more and runs ``fn`` twice more when a result mismatches to
+    tell whether it depends on the generator, so any side effect of ``fn`` -- writing a
+    log, appending to a list, stepping a counter -- happens up to three times, and a
+    test that deliberately makes the artifact disagree with ``fn`` fails under it. It
+    catches an edit that changes the answer, but it does not prove the edit computes
+    the same function: an approximation whose error is below the dtype's own noise
+    passes by construction. It compares values only, so it cannot see that the
+    artifact's outputs carry no ``grad_fn``: a capture is forward-only, and calling
+    ``.backward()`` on an artifact's output fails where the eager function would have
+    worked. Only the CPU and CUDA generators are rewound for the eager run and left
+    where the artifact left them; on another accelerator a checked call moves its
+    generator.
 
     .. warning::
         This API is experimental and subject to change.
@@ -1151,11 +1153,12 @@ def export_python(
         the ISA on one machine, so they count as part of the machine type, and an
         artifact containing a C++ kernel records the ISA it was generated against
         and refuses to load under a different vector width or an ISA lacking one of
-        its features. Running a CUDA artifact on a different architecture fails
-        with a kernel-image error. Commit an artifact only
-        alongside the machine type it captured on, and regenerate (delete ``path``)
-        when that changes; apart from the CPU ISA, nothing detects the change for
-        you.
+        the features its name lists (CPU features the C++ GEMM templates select on
+        separately, such as AMX-FP16 and AVX-512 BF16, are not in that name and are
+        not checked). Running a CUDA artifact on a different architecture fails with
+        a kernel-image error. Commit an artifact only alongside the machine type it
+        captured on, and regenerate (delete ``path``) when that changes; apart from
+        the CPU ISA, nothing detects the change for you.
 
     Keyword call arguments and positional defaults are normalized onto ``fn``'s full
     positional signature (so ``rope(q=..., k=...)`` works and omitted defaults do not
@@ -1169,7 +1172,7 @@ def export_python(
     rejected, since neither is expressible in the artifact's positional convention.
 
     Six things that ``make_fx`` or the code generator resolves without emitting a guard
-    are recorded as comment stamps and checked on every call: each ``nn.Module``
+    are recorded as comment stamps; the first five are checked on every call: each ``nn.Module``
     argument's per-submodule ``training`` state, which input tensors shared memory at
     capture (aliasing decides what an in-place mutation means), which input positions
     held the *same* tensor object (AOTAutograd folds those into a single graph slot,
