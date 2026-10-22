@@ -3593,7 +3593,7 @@ def _check_native_layer_norm_param_dtype(
         # Mirrors check_mixed_data_type (ATen/native/cpu/mixed_data_type.h): a
         # bf16/fp16 input may take fp32 params, even when there are no rows.
         torch._check(
-            all(p is None or p.dtype == torch.float32 for p in (weight, bias)),
+            builtins.all(p is None or p.dtype == torch.float32 for p in (weight, bias)),
             lambda: "mixed dtype (CPU): expect parameter to have scalar type of Float",
         )
         torch._check(
