@@ -151,6 +151,37 @@ def _pin_device_index(device: torch.device) -> torch.device:
     return torch.device(device.type, 0)
 
 
+def _is_target_device_available(device_type: str) -> bool:
+    if device_type in ("cpu", "meta"):
+        return True
+    try:
+        return torch.get_device_module(device_type).is_available()
+    except (RuntimeError, AttributeError):
+        return False
+
+
+def _targets_unavailable_device(
+    args: tuple[Any, ...], kwargs: Mapping[str, Any]
+) -> bool:
+    """True if the op targets a device that has no real backend in this build
+    (e.g. faking cuda/xpu on a privateuse1-only machine). Real execution would
+    then raise NotImplementedError. Covers both a positional device operand
+    and a ``device`` keyword argument, so ops synthesized inside fake
+    computation (e.g. empty_strided from prim meta impls) are caught too.
+    """
+    devices = [a for a in args if isinstance(a, torch.device)]
+    device = kwargs.get("device")
+    if device is not None:
+        if isinstance(device, str):
+            device = torch.device(device)
+        if isinstance(device, torch.device):
+            devices.append(device)
+    return any(
+        d.type not in ("cpu", "meta") and not _is_target_device_available(d.type)
+        for d in devices
+    )
+
+
 # Small helper that increments recursion count, and
 # resets it when the object goes out of scope.  Useful
 # if you don't want to increase indentation which is
@@ -3066,6 +3097,14 @@ class FakeTensorMode(TorchDispatchMode):
                 avoiding_device_init = True
             if func is torch.ops.prims.device_put.default:
                 avoiding_device_init = True
+        elif _targets_unavailable_device(args, kwargs):
+            # The destination device has no real backend in this build
+            # (e.g. faking cuda/xpu on a privateuse1-only machine).
+            # Const-prop and real-tensor propagation would run the real
+            # kernel and raise NotImplementedError; skip both and compute
+            # on meta instead. The positional device of prims.device_put
+            # is covered by the args scan in _targets_unavailable_device.
+            avoiding_device_init = True
 
         # skip const prop for aten._to_copy if
         # 1. input tensor is on "meta" device
@@ -3206,7 +3245,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         real = (
             run_real_op(self, func, args, kwargs)
-            if self.propagate_real_tensors
+            if self.propagate_real_tensors and not avoiding_device_init
             else None
         )
 
