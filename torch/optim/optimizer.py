@@ -922,8 +922,8 @@ class Optimizer:
             as calling it beforehand will overwrite the loaded learning rates.
 
         .. note::
-            State tensors keep their saved dtype and move to the parameter's device.
-            The ``step`` tensor keeps its saved dtype and device unless the parameter
+            Optimizer state tensors maintain their saved dtype but move to the parameter's
+            device. The ``step`` tensor keeps its saved dtype and device unless the parameter
             group is fused or capturable, which moves it to the parameter's device as
             ``torch.float32``. If parameter dtypes change, explicitly convert any state
             tensors that must match the parameter dtype for the optimizer.

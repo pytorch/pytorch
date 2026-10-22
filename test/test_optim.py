@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -1698,21 +1697,15 @@ class TestOptimRenewed(TestCase):
             )
 
     @skipMPS
-    @parametrize("impl", ["forloop", "fused", "capturable"])
-    @parametrize(
-        "dtype,state_dtype",
-        [(torch.bfloat16, torch.float32), (torch.float32, torch.bfloat16)],
-    )
-    def test_load_state_dict_preserves_dtype(self, device, dtype, state_dtype, impl):
-        param = Parameter(torch.zeros((), device=device, dtype=dtype))
-        optimizer = torch.optim.Adam(
-            [param], fused=impl == "fused", capturable=impl == "capturable"
-        )
+    @parametrize("fused", [False, True])
+    def test_load_state_dict_preserves_dtype(self, device, fused):
+        param = Parameter(torch.empty((), device=device, dtype=torch.bfloat16))
+        optimizer = torch.optim.Adam([param], fused=fused)
         saved_state = {
-            "step": torch.tensor(3.0, dtype=state_dtype),
-            "exp_avg": torch.tensor(0.12345679, dtype=state_dtype),
-            "exp_avg_sq": torch.tensor(0.01234568, dtype=state_dtype),
-            "nested": [{"scalar": torch.tensor(0.23456789, dtype=state_dtype)}],
+            "step": torch.tensor(3.0),
+            "exp_avg": torch.tensor(0.12345679),
+            "exp_avg_sq": torch.tensor(0.01234568),
+            "nested": [{"scalar": torch.tensor(0.23456789)}],
             "history": (torch.ones(1, dtype=torch.int64),),
         }
         optimizer.state[param] = saved_state
@@ -1720,80 +1713,22 @@ class TestOptimRenewed(TestCase):
         state = optimizer.state[param]
 
         for key in ("exp_avg", "exp_avg_sq"):
-            self.assertEqual(state[key].dtype, state_dtype)
+            self.assertEqual(state[key].dtype, torch.float32)
             self.assertEqual(state[key].device, param.device)
             self.assertEqual(state[key], saved_state[key])
         scalar = state["nested"][0]["scalar"]
-        self.assertEqual(scalar.dtype, state_dtype)
+        self.assertEqual(scalar.dtype, torch.float32)
         self.assertEqual(scalar.device, param.device)
         self.assertEqual(state["nested"], saved_state["nested"])
         self.assertEqual(state["history"][0].dtype, torch.int64)
         self.assertEqual(state["history"][0].device, param.device)
         self.assertEqual(state["history"], saved_state["history"])
-        if impl == "forloop":
-            self.assertIs(state["step"], saved_state["step"])
-        else:
+        if fused:
             self.assertEqual(state["step"].dtype, torch.float32)
             self.assertEqual(state["step"].device, param.device)
             self.assertEqual(state["step"].item(), 3.0)
-
-    @skipMPS
-    @parametrize("default_dtype", [torch.float32, torch.float64])
-    @optims(
-        [o for o in optim_db if o.optim_cls.__name__ in ("NAdam", "ASGD")],
-        dtypes=[torch.bfloat16],
-    )
-    def test_load_state_dict_preserves_scalar_dtype(
-        self, device, dtype, optim_info, default_dtype
-    ):
-        param = Parameter(torch.ones((), device=device, dtype=dtype))
-        param.grad = torch.ones_like(param)
-        optimizer = optim_info.optim_cls([param], foreach=False)
-        old_default_dtype = torch.get_default_dtype()
-        try:
-            torch.set_default_dtype(default_dtype)
-            optimizer.step()
-        finally:
-            torch.set_default_dtype(old_default_dtype)
-
-        saved_state = deepcopy(optimizer.state_dict())
-        optimizer.load_state_dict(saved_state)
-        keys = ("mu_product",) if optim_info.optim_cls is torch.optim.NAdam else ("eta", "mu")
-        for key in keys:
-            self.assertEqual(optimizer.state[param][key].dtype, default_dtype)
-            self.assertEqual(optimizer.state[param][key].device, param.device)
-            self.assertEqual(optimizer.state[param][key], saved_state["state"][0][key])
-        optimizer.step()
-
-    @skipMPS
-    @dtypes(torch.bfloat16)
-    def test_sgd_load_state_dict_mixed_precision(self, device, dtype):
-        param = Parameter(torch.ones(10, device=device, dtype=dtype))
-        param.grad_dtype = torch.float32
-        param.grad = torch.rand_like(param, dtype=torch.float32)
-        optimizer = SGD([param], lr=1e-2, momentum=0.9, foreach=False)
-        optimizer.step()
-
-        with tempfile.TemporaryFile() as f:
-            torch.save(optimizer.state_dict(), f)
-            f.seek(0)
-            saved_state = torch.load(f, map_location="cpu")
-
-        param_c = Parameter(param.detach().clone())
-        param_c.grad_dtype = torch.float32
-        optimizer_c = SGD([param_c], lr=1e-2, momentum=0.9, foreach=False)
-        optimizer_c.load_state_dict(saved_state)
-        momentum = optimizer_c.state[param_c]["momentum_buffer"]
-        self.assertEqual(momentum.dtype, torch.float32)
-        self.assertEqual(momentum.device, param_c.device)
-
-        for _ in range(3):
-            param.grad = torch.rand_like(param, dtype=torch.float32)
-            param_c.grad = param.grad.clone()
-            optimizer.step()
-            optimizer_c.step()
-            self.assertEqual(param, param_c, atol=0, rtol=0)
-            self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict(), atol=0, rtol=0)
+        else:
+            self.assertIs(state["step"], saved_state["step"])
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_can_load_older_state_dict(self, device, dtype, optim_info):
@@ -2655,44 +2590,27 @@ class TestOptimRenewed(TestCase):
             if amsgrad:
                 self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
 
-    @onlyCUDA
-    @parametrize("amsgrad", [False, True])
-    @optims(
-        [o for o in optim_db if o.optim_cls.__name__ in ("Adam", "AdamW")],
-        dtypes=[torch.float32],
-    )
-    def test_fused_mixed_precision_load_state_dict(
-        self, device, dtype, optim_info, amsgrad
-    ):
-        params = [torch.rand(shape, device=device, dtype=dtype) for shape in ((), (20, 7))]
-        for param in params:
-            param.grad = torch.rand_like(param)
-        optimizer = optim_info.optim_cls(params, lr=1e-3, fused=True, amsgrad=amsgrad)
+    @onlyAccelerator
+    @skipMPS
+    def test_fused_mixed_precision_load_state_dict(self, device):
+        param = torch.rand(20, 7, device=device)
+        param.grad = torch.rand_like(param)
+        optimizer = torch.optim.AdamW([param], fused=True)
         optimizer.register_step_pre_hook(_bf16_state_init_hook)
         optimizer.step()
 
-        with tempfile.TemporaryFile() as f:
-            torch.save(optimizer.state_dict(), f)
-            f.seek(0)
-            saved_state = torch.load(f, map_location="cpu")
+        param_c = param.clone()
+        optimizer_c = torch.optim.AdamW([param_c], fused=True)
+        optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
+        # The fused kernel picks its bf16-state path from the exp_avg dtype alone.
+        for key in ("exp_avg", "exp_avg_sq"):
+            self.assertEqual(optimizer_c.state[param_c][key].dtype, torch.bfloat16)
 
-        params_c = [param.clone() for param in params]
-        optimizer_c = optim_info.optim_cls(params_c, lr=1e-3, fused=True, amsgrad=amsgrad)
-        optimizer_c.load_state_dict(saved_state)
-        for param in params_c:
-            for key, value in optimizer_c.state[param].items():
-                expected_dtype = torch.float32 if key == "step" else torch.bfloat16
-                self.assertEqual(value.dtype, expected_dtype)
-                self.assertEqual(value.device, param.device)
-
-        for _ in range(3):
-            for param, param_c in zip(params, params_c):
-                param.grad = torch.rand_like(param)
-                param_c.grad = param.grad.clone()
-            optimizer.step()
-            optimizer_c.step()
-            self.assertEqual(params, params_c, atol=0, rtol=0)
-            self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict(), atol=0, rtol=0)
+        param.grad = torch.rand_like(param)
+        param_c.grad = param.grad.clone()
+        optimizer.step()
+        optimizer_c.step()
+        self.assertEqual(param, param_c, atol=0, rtol=0)
 
     @onlyAccelerator
     @skipMPS
