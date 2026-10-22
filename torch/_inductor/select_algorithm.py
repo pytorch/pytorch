@@ -3863,6 +3863,40 @@ class ExternKernelCaller(ChoiceCaller):
     def benchmark(self, *args, out):
         if self.bmreq is None:
             raise AssertionError("self.bmreq must not be None")
+
+        from . import tunableop
+
+        # is_enabled() reports only that the process has CUDA and a mode set;
+        # submit() pins the worker to the current CUDA device, so a CPU extern
+        # candidate must not be routed there.
+        if tunableop.is_enabled() and out.is_cuda:
+            # Extern kernels are otherwise benchmarked inline, assuming they do not
+            # crash (see benchmark_in_sub_process); hipBLASLt tuning can abort the
+            # process or hang, so run this candidate in the TunableOp worker. In
+            # reuse mode that is also where a borrow is validated and recorded, so
+            # the time returned already reflects whichever won.
+            outcome = tunableop.submit(
+                tunableop.BenchmarkJob(
+                    self.bmreq,
+                    tuning=tunableop.is_tune_mode(),
+                    nearest_match=tunableop.is_reuse_mode(),
+                    record_borrowed=tunableop.is_reuse_mode(),
+                    # The worker is a separate process, so the mask has to travel
+                    # with the job; the context manager below only covers the
+                    # inline fallback path.
+                    dyn_dims_mask=self.tunable_dyn_dims_mask,
+                )
+            )
+            if outcome.status == "ok":
+                return outcome.time
+            # Time the untuned kernel inline rather than dropping the candidate:
+            # TunableOp is not enabled in this process, so the fault cannot recur.
+            log.warning(
+                "TunableOp benchmark of %s hit %s; timing the default kernel instead.",
+                self.name,
+                outcome.status,
+            )
+
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         mask = self.tunable_dyn_dims_mask

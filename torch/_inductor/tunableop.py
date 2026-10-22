@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import math
 import threading
 from typing import Any, NamedTuple
 
@@ -45,12 +46,42 @@ class BenchmarkJob:
     process-global, which is why the worker must stay dedicated (see get_worker).
     """
 
-    def __init__(self, bmreq: Any, tuning: bool, nearest_match: bool = False) -> None:
+    def __init__(
+        self,
+        bmreq: Any,
+        tuning: bool,
+        nearest_match: bool = False,
+        record_borrowed: bool = False,
+        dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
+    ) -> None:
         self.bmreq = bmreq
         self.tuning = tuning
         self.nearest_match = nearest_match
+        self.record_borrowed = record_borrowed
+        self.dyn_dims_mask = dyn_dims_mask
         # Stamped by submit() with the submitting process's logical device.
         self.device = 0
+
+    def _warm_then_measure(self) -> float:
+        """Warm, then measure.
+
+        The first call is where TunableOp does its compile-time-only work, and
+        folding that into the average reports it as the kernel's cost: on a
+        3072x1894x242432 addmm it took aten from 3.5 ms to 7.45 ms and lost the
+        autotune race to a 4.71 ms triton kernel, while the solution just recorded
+        ran in 2.9 ms.
+        """
+        try:
+            self.bmreq.benchmark()
+        except Exception:  # noqa: BLE001 - a failed warm must still yield a timing
+            log.warning(
+                "TunableOp warm-up failed; measuring the untuned kernel instead",
+                exc_info=True,
+            )
+        # Nearest match is deliberately left on: if the warm call recorded nothing,
+        # turning it off would measure the default instead of the borrowed solution.
+        torch.cuda.tunable.tuning_enable(False)
+        return self.bmreq.benchmark()
 
     def __call__(self) -> float:
         tunable = torch.cuda.tunable
@@ -62,9 +93,24 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
+        # Without this a validated borrow is thrown away: the write path is gated
+        # on it, so reuse mode would decide the same thing on every later pass.
+        tunable._record_borrowed_enable(self.record_borrowed)
         # TunableOp cannot tune under graph capture.
         self.bmreq.benchmark_with_cudagraphs = False
-        return self.bmreq.benchmark()
+
+        # The mask lives on a thread-local stack in whichever process sets it, so
+        # the caller's context manager does not reach this worker. Re-enter it here
+        # or every GEMM benchmarked through the worker registers only its concrete
+        # signature, losing the wildcard entry that dynamic shapes match against at
+        # runtime -- silently, and precisely in tune mode, which exists to record it.
+        mask = self.dyn_dims_mask
+        if mask is not None and any(mask):
+            with tunable.dynamic_dims_mask(
+                M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+            ):
+                return self._warm_then_measure()
+        return self._warm_then_measure()
 
 
 class Outcome(NamedTuple):
@@ -159,7 +205,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         with _worker_lock:
             worker = get_worker((device, torch.cuda.tunable.get_filename()))
             worker.put(job)
-            return Outcome(worker.get(timeout=timeout), "ok")
+            value = worker.get(timeout=timeout)
     except TimeoutError:
         return Outcome(None, "timeout")
     except EOFError:
@@ -167,3 +213,9 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     except Exception as e:  # noqa: BLE001 - a failed benchmark must not fail the compile
         log.debug("TunableOp benchmark failed: %s", e)
         return Outcome(None, "error")
+    # inf is what a benchmark returns when it declines to run the op, and
+    # select_algorithm drops an inf candidate silently rather than reporting it.
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        log.warning("TunableOp benchmark returned %r; treating as a fault", value)
+        return Outcome(None, "error")
+    return Outcome(float(value), "ok")
