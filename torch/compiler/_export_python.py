@@ -427,7 +427,13 @@ def _verify_against_eager(
     path: str,
     rng: _RngState,
 ) -> None:
-    """Re-run fn eagerly on a pre-call copy of the inputs and compare the results.
+    """Re-run fn eagerly and compare its outputs and mutated inputs with the artifact's.
+
+    ``args`` are the caller's inputs after the artifact ran (and maybe mutated them),
+    ``produced`` is what it returned, and ``rng`` is the generator state it started
+    from. ``reference_args`` and ``draw_args`` are two separate pre-call copies,
+    consumed in place by the eager run and by ``_eager_draws``; ``draw_args`` must not
+    alias the caller's inputs, since the draw detector re-runs fn on it.
 
     The artifact is frozen at capture and stays frozen through every hand-edit -- that is
     the point of it -- so the way to know an edit is still correct is to ask the original
@@ -1072,11 +1078,13 @@ class ExportedPythonArtifact:
             return None
 
     def _check_capture_environment(self, args: tuple[Any, ...]) -> None:
-        # Two more things make_fx specialized with no runtime guard. Input ALIASING
-        # decides what an in-place mutation means, so an artifact captured with two
-        # arguments sharing memory computes the wrong thing (and mutates the wrong
-        # thing) when they are distinct at runtime -- torch.compile guards this and
-        # recompiles. Ambient AUTOCAST decides the dtypes the kernels were built for.
+        # Three things make_fx specialized with no runtime guard; torch.compile guards
+        # them and recompiles. Input ALIASING decides what an in-place mutation means,
+        # so an artifact captured with two arguments sharing memory computes (and
+        # mutates) the wrong thing when they are distinct at runtime. Input IDENTITY
+        # matters separately: AOTAutograd folds one object passed twice into a single
+        # graph slot, which byte overlap alone cannot tell apart from two views.
+        # Ambient AUTOCAST decides the dtypes the kernels were built for.
         tensors: list[torch.Tensor] | None = None
 
         def input_tensors() -> list[torch.Tensor]:
@@ -1202,7 +1210,10 @@ class ExportedPythonArtifact:
         # and a scalar capture (width 0) emits no vector code to mismatch. Only the
         # features str(isa) names are compared: the GEMM templates' amx_fp16 and
         # avx512_bf16 choices are not in the stamp, so a change in those goes unchecked.
-        missing = set(name.split()) - set(str(live).split())
+        # str(VecNEON/VecSVE) is "neon" in fbcode builds and "asimd" elsewhere.
+        spell = {"neon": "asimd"}
+        captured_words = {spell.get(f, f) for f in name.split()}
+        missing = captured_words - {spell.get(f, f) for f in str(live).split()}
         if width and (live.bit_width() != width or missing):
             raise _precompile_error(
                 "torch.compiler.export_python: the artifact's C++ kernels were "
