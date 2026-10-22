@@ -34,6 +34,24 @@ class _FrozenSetSubclass(frozenset):
     pass
 
 
+class _AsciiStrWithOverriddenStr(str):
+    __slots__ = ()
+
+    def __str__(self):
+        return "constant"
+
+
+class _AsciiObject:
+    def __init__(self, value, log=None):
+        self.value = value
+        self.log = log
+
+    def __repr__(self):
+        if self.log is not None:
+            self.log.append(self.value)
+        return self.value
+
+
 @instantiate_parametrized_tests
 class TpReprTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -85,6 +103,72 @@ class TpReprTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, obj), compiled(x, obj))
+
+    def test_ascii_escapes_user_defined_repr(self):
+        class MyObj:
+            def __repr__(self):
+                return "\u00e9\u2603\U0001f40d"
+
+        def fn(obj):
+            return ascii(obj)
+
+        obj = MyObj()
+        self.assertEqual(fn(obj), r"\xe9\u2603\U0001f40d")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), compiled(obj))
+
+    def test_ascii_preserves_ascii_str_subclass(self):
+        class MyStr(str):
+            __slots__ = ()
+
+        class MyObj:
+            def __repr__(self):
+                return MyStr("<abc>")
+
+        def fn(obj):
+            return ascii(obj)
+
+        obj = MyObj()
+        expected = fn(obj)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(obj)
+        self.assertEqual(result, expected)
+        self.assertIs(type(result), type(expected))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_ascii_str_subclass_overriding_str_graph_breaks(self):
+        def fn(obj):
+            return ascii(obj)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                _AsciiObject(_AsciiStrWithOverriddenStr("abc"))
+            )
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        objects = [
+            _AsciiObject(_AsciiStrWithOverriddenStr(value))
+            for value in ("abc", "\u00e9")
+        ]
+        expected = [fn(obj) for obj in objects]
+        for obj, eager in zip(objects, expected):
+            result = compiled(obj)
+            self.assertEqual(result, eager)
+            self.assertIs(type(result), type(eager))
+
+    def test_ascii_rejects_non_string_repr(self):
+        class MyObj:
+            def __repr__(self):
+                return 3
+
+        def fn(obj):
+            try:
+                return ascii(obj)
+            except TypeError as e:
+                return str(e)
+
+        obj = MyObj()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), compiled(obj))
 
     def test_user_defined_dunder_repr(self):
         class MyObj:
