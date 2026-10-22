@@ -14,7 +14,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor import ir
-from torch._inductor.choices import InductorChoices
+from torch._inductor.choices import GridPolicy, InductorChoices
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -41,6 +41,7 @@ from torch._inductor.codegen.wrapper import (
 )
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
+from torch._inductor.runtime import hints
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
@@ -50,13 +51,16 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
@@ -666,6 +670,381 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    def _capped_choices(self, policy, seen=None):
+        class CappedChoices(InductorChoices):
+            def triton_grid_policy(self, features):
+                if seen is not None:
+                    seen.append(features)
+                return policy
+
+            def uuid(self):
+                return f"capped {policy}"
+
+        return CappedChoices()
+
+    def _capped_kernel(self, policy, xnumel, rnumel=None, seen=None, **kwargs):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        numels = {"x": sympy.Integer(xnumel)}
+        if rnumel is not None:
+            numels["r0_"] = sympy.Integer(rnumel)
+            kwargs["override_persistent_reduction"] = False
+            kwargs["override_cooperative_reduction"] = False
+        features = SIMDKernelFeatures([], *numels.values())
+        with V.set_choices_handler(self._capped_choices(policy, seen)):
+            return TritonKernel(numels, features=features, **kwargs)
+
+    @parametrize(
+        "max_xblock,xnumel,dropped",
+        (
+            (65536, 1 << 24, True),
+            (65536, (1 << 24) + hints.TRITON_MAX_BLOCK["X"], False),
+            (None, (1 << 24) + hints.CAPPED_GRID_DEFAULT_MAX_XBLOCK, True),
+            # Coordinate descent can raise XBLOCK to the stock max block
+            (1024, 3 * 1024, False),
+            # With XBLOCK 1 the bound turns int64 once xnumel + 44 programs leave int32
+            (1, 2**31 - 1 - 44, False),
+            (1, 2**31 - 44, False),
+            (1, 2**31, True),
+        ),
+    )
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_loops_over_x_blocks(self, max_xblock, xnumel, dropped):
+        seen, scores, policy = [], {"x": sympy.Integer(2)}, GridPolicy(44, max_xblock)
+        kernel = self._capped_kernel(policy, xnumel, seen=seen, tiling_scores=scores)
+        self.assertEqual([f.tiling_scores for f in seen], [scores])
+        index = "tl.int32" if xnumel < 2**31 else "tl.int64"
+        self.assertEqual(kernel.index_dtype, index)
+        int64_bound = xnumel + 44 > 2**31 - 1
+        bound = "xnumel.to(tl.int64)" if int64_bound else "xnumel"
+        pid = f"x_block.to({index})" if int64_bound else "x_block"
+        self.assertIn(
+            f"for x_block in tl.range(tl.program_id(0), ({bound} - 1) // XBLOCK + 1, "
+            f"tl.num_programs(0)):\n    xoffset = {pid} * XBLOCK\n    xindex = ",
+            kernel.body.getvalue(),
+        )
+        # The mask drops at multiples of the larger of max_xblock and the stock block
+        mask = "tl.full([XBLOCK], True, tl.int1)" if dropped else "xindex < xnumel"
+        self.assertIn(f"\n    xmask = {mask}", kernel.body.getvalue())
+        limit = max_xblock or hints.CAPPED_GRID_DEFAULT_MAX_XBLOCK
+        self.assertEqual(kernel.max_block("x"), max(limit, hints.TRITON_MAX_BLOCK["X"]))
+        self.assertEqual(kernel._get_grid_type().__name__, "CappedGrid1D")
+        meta = kernel.inductor_meta_per_kernel()
+        self.assertEqual(meta["grid_cap"], 44)
+        self.assertEqual(meta.get("grid_max_xblock"), max_xblock)
+
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_looped_reduction_runs_inside_the_x_loop(self):
+        kernel = self._capped_kernel(GridPolicy(66), 4096, 65536)
+        self.assertEqual(kernel._get_grid_type().__name__, "CappedGrid1D")
+        # A looped reduction keeps the stock max block, so 4,096 rows drop the x mask
+        self.assertEqual(kernel.max_block("x"), hints.TRITON_MAX_BLOCK["X"])
+        self.assertIn("    xmask = tl.full([XBLOCK], True", kernel.body.getvalue())
+        # Two passes over the row, as when a second pass reads the first's statistics
+        with kernel:
+            kernel.compute.writeline("tmp0 = 1.0")
+            kernel.codegen_body()
+            kernel.compute.writeline("tmp1 = 2.0")
+            kernel.codegen_body()
+        lines = kernel.body.getvalue().splitlines()
+        header = [line.startswith("for x_block") for line in lines].index(True)
+        passes = [i for i, line in enumerate(lines) if "for r0_offset in" in line]
+        self.assertEqual(len(passes), 2)
+        for i in passes:
+            self.assertTrue(i > header and lines[i].startswith("    for r0_offset"))
+
+    @parametrize(
+        "case",
+        [
+            "persistent",
+            "mix_order",
+            "no_x_dim",
+            "cooperative",
+            "two_reduction_dims",
+            "two_dimensional",
+            "staged",
+            "native_matmul",
+            "combo",
+            "fixed_config",
+            "hint_override",
+            "one_x_element",
+            "subclass",
+            "grandchild",
+            "block_ptr",
+            "tensor_descriptor",
+            "multi_kernel",
+            "combo_autotune",
+            "rocm",
+            "xpu",
+            "cpu",
+            "no_device",
+            "pointwise",
+            "reduction",
+            "opted_in",
+        ],
+    )
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_asked_only_for_eligible_kernels(self, case):
+        # One excluding condition per case; the last three cases are asked
+        x, r, y = sympy.Integer(1024), sympy.Integer(512), sympy.Integer(64)
+        opted_in = type("OptedIn", (TritonKernel,), {"supports_grid_policy": True})
+
+        def pointwise(cls=TritonKernel, numel=x, schedule=None, **kwargs):
+            features = SIMDKernelFeatures([], numel, indexing_node_schedule=schedule)
+            return cls({"x": numel}, features=features, **kwargs)
+
+        def reduction(persistent, cooperative=False, rnumels=("r0_",), **kwargs):
+            # Without mask optimization a persistent reduction needs no GPU here
+            return TritonKernel(
+                {"x": x, **dict.fromkeys(rnumels, r)},
+                features=SIMDKernelFeatures([], x, r ** len(rnumels)),
+                optimize_mask=False,
+                override_persistent_reduction=persistent,
+                override_cooperative_reduction=cooperative,
+                **kwargs,
+            )
+
+        def native_matmul():
+            matmul = property(lambda self: True, lambda self, value: None)
+            with patch.object(opted_in, "is_native_matmul", matmul, create=True):
+                return pointwise(opted_in)
+
+        factories = {
+            "persistent": lambda: reduction(True),
+            "mix_order": lambda: reduction(True, mix_order_reduction=True),
+            # Dropping the x dimension needs a fixed config (XBLOCK 1), itself excluded
+            "no_x_dim": lambda: reduction(
+                True, fixed_config=FixedTritonConfig({"XBLOCK": 1, "R0_BLOCK": 512})
+            ),
+            "cooperative": lambda: reduction(False, cooperative=True),
+            "two_reduction_dims": lambda: reduction(False, rnumels=("r0_", "r1_")),
+            "two_dimensional": lambda: TritonKernel(
+                {"y": y, "x": x}, features=SIMDKernelFeatures([], x * y)
+            ),
+            "staged": lambda: pointwise(schedule=[]),
+            "native_matmul": native_matmul,
+            "combo": lambda: pointwise(is_combo_kernel=True),
+            "fixed_config": lambda: pointwise(
+                fixed_config=FixedTritonConfig({"XBLOCK": 128})
+            ),
+            "hint_override": lambda: pointwise(hint_override=1024),
+            "one_x_element": lambda: pointwise(numel=sympy.S.One),
+            "subclass": lambda: pointwise(type("Subclass", (TritonKernel,), {})),
+            "grandchild": lambda: pointwise(type("Grandchild", (opted_in,), {})),
+            "reduction": lambda: reduction(False),
+            "opted_in": lambda: pointwise(opted_in),
+        }
+        configs = {
+            "block_ptr": {"triton.use_block_ptr": True},
+            "tensor_descriptor": {"triton.use_tensor_descriptor": True},
+            "multi_kernel": {"triton.multi_kernel": 1},
+            "combo_autotune": {
+                "combo_kernels": True,
+                "combo_kernel_compile_time_autotune": True,
+            },
+        }
+        device = torch.device(case if case in ("xpu", "cpu") else "cuda")
+        seen = []
+        with (
+            patch.object(torch.version, "hip", "6.4" if case == "rocm" else None),
+            patch.object(
+                self._graph, "current_device", None if case == "no_device" else device
+            ),
+            inductor_config.patch(configs.get(case, {})),
+            V.set_choices_handler(self._capped_choices(GridPolicy(44), seen)),
+        ):
+            kernel = factories.get(case, pointwise)()
+        asked = case in ("pointwise", "reduction", "opted_in")
+        self.assertEqual(len(seen), int(asked))
+        self.assertEqual(kernel.grid_policy, GridPolicy(44) if asked else None)
+        self.assertEqual(bool(kernel.no_x_dim), case == "no_x_dim")
+
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_hook_must_return_a_policy_or_none(self):
+        with self.assertRaisesRegex(
+            TypeError, r"CappedChoices\.triton_grid_policy must return .+, got 44"
+        ):
+            self._capped_kernel(44, 1 << 24)
+
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_none_keeps_the_stock_grid_and_pdl(self):
+        stock = self._capped_kernel(None, 1 << 24)
+        self.assertIn("xoffset = tl.program_id(0) * XBLOCK", stock.body.getvalue())
+        self.assertEqual(stock._get_grid_type().__name__, "Grid1D")
+        capped = self._capped_kernel(GridPolicy(44, 65536), 1 << 24)
+        # With PDL on and compute capability 9, only the stock kernel uses PDL
+        with (
+            inductor_config.patch({"triton.enable_pdl": True}),
+            patch("torch.cuda.get_device_capability", return_value=(9, 0)),
+        ):
+            for kernel, pdl in ((stock, True), (capped, False)):
+                with kernel:
+                    self.assertEqual(bool(TritonKernel._enable_pdl_codegen()), pdl)
+                    launch_pdl = TritonKernel.triton_meta_common()["launch_pdl"]
+                    self.assertEqual(bool(launch_pdl), pdl)
+
+    def test_grid_policy_validates_its_fields(self):
+        for programs in (0, True, 44.0):
+            with self.assertRaisesRegex(ValueError, "an int of at least 1"):
+                GridPolicy(programs)
+        self.assertEqual(GridPolicy(1).programs, 1)
+        for max_xblock in (0, 3000, True, 4096.0):
+            with self.assertRaisesRegex(ValueError, "an int power of 2"):
+                GridPolicy(44, max_xblock)
+        self.assertIsNone(GridPolicy(44).max_xblock)
+
+    def _compile_capped(self, fn, *args, policy=None, **compile_kwargs):
+        # The FX graph caches do not key on a policy set only on this thread
+        handler = self._capped_choices(policy or GridPolicy(44, 65536))
+        with (
+            inductor_config.patch(fx_graph_cache=False, fx_graph_remote_cache=False),
+            V.set_choices_handler(handler),
+        ):
+            compiled = torch.compile(fn, **compile_kwargs)
+            result, code = run_and_get_code(compiled, *args)
+        return compiled, result, "\n".join(code)
+
+    @parametrize(
+        "xnumel,coordesc", ((1 << 24, False), (1 << 24, True), (2**31 - 10, False))
+    )
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    # Twice the buffer must be free, so the 2**24 case runs on busy GPUs too
+    @largeTensorTest(
+        lambda self, xnumel, **_: 2 * xnumel, device=GPU_TYPE, inductor=True
+    )
+    @inductor_config.patch({"triton.autotune_pointwise": False})
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_in_place_kernel_runs_each_block_once(self, xnumel, coordesc):
+        # One config doubles an int8 view in place: each element reads 2 (4 if its block
+        # ran twice) and the guard after it keeps -1. 2**24 drops the x mask, also
+        # with the XBLOCK that coordinate descent picks from the capped candidate
+        def double(x):
+            x.mul_(2)
+
+        buf = torch.ones(xnumel + (1 << 17), device=GPU_TYPE, dtype=torch.int8)
+        buf[xnumel:] = -1
+        x, guard = buf[:xnumel], buf[xnumel:]
+        with inductor_config.patch(coordinate_descent_tuning=coordesc):
+            _, _, code = self._compile_capped(double, x, dynamic=False)
+        dropped = xnumel == 1 << 24
+        mask = "tl.full([XBLOCK], True" if dropped else "xindex < xnumel"
+        pid = "x_block" if dropped else "x_block.to(tl.int32)"
+        self.assertIn(f"xmask = {mask}", code)
+        self.assertIn(f"xoffset = {pid} * XBLOCK", code)
+        self.assertEqual((x.min().item(), x.max().item()), (2, 2))
+        self.assertEqual((guard.min().item(), guard.max().item()), (-1, -1))
+
+    @parametrize("rows", (4096, 4096 + 5))
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @inductor_config.patch({"split_reductions": False})
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_in_place_reduction_runs_each_block_once(self, rows):
+        # One kernel adds each row's sum to the row in place in a second pass (a block
+        # run twice adds again). 4,096 rows, a multiple of the stock max block, drop the
+        # x mask, and 4,101 keep it for a masked last block; guard rows keep -1, and
+        # integer values keep fp32 sums exact.
+        def add_row_sums(x):
+            x.add_(x.sum(1, keepdim=True))
+
+        cols = 4096
+        buf = torch.randint(-8, 8, (rows + 64, cols), device=GPU_TYPE).float()
+        buf[rows:] = -1
+        x = buf[:rows]
+        expected = x + x.sum(1, keepdim=True)
+        _, _, code = self._compile_capped(add_row_sums, x, policy=GridPolicy(66))
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self.assertNotIn(f"empty_strided_cuda(({rows}, {cols})", code)
+        self.assertGreaterEqual(code.count("\n        for r0_offset in tl.range("), 2)
+        dropped = rows % hints.TRITON_MAX_BLOCK["X"] == 0
+        mask = "tl.full([XBLOCK], True" if dropped else "xindex < xnumel"
+        self.assertIn(f"xmask = {mask}", code)
+        self.assertEqual(x, expected, atol=0, rtol=0)
+        self.assertTrue((buf[rows:] == -1).all())
+
+    @parametrize("cpp_wrapper", (False, True))
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_dynamic_size_below_and_above_its_hint(self, cpp_wrapper):
+        x = torch.randn(1 << 22, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled, actual, code = self._compile_capped(lambda t: t * 2, x)
+        # The C++ wrapper computes the capped grid at each launch
+        self.assertEqual("std::min<int64_t>(" in code, cpp_wrapper)
+        # An int64 bound, an int32 index, and the runtime told the size hint may vary
+        self.assertIn("(xnumel.to(tl.int64) - 1) // XBLOCK + 1", code)
+        self.assertIn("    xoffset = x_block.to(tl.int32) * XBLOCK", code)
+        self.assertIn("'grid_dynamic_xnumel': True", code)
+        self.assertEqual(actual, x * 2, atol=0, rtol=0)
+        # The same kernel, without a recompile, below the cap, uneven and far above
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for numel in (5000, (1 << 20) + 3, (1 << 24) + 3):
+                y = torch.randn(numel, device=GPU_TYPE)
+                self.assertEqual(compiled(y), y * 2, atol=0, rtol=0)
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_from_a_registered_handler_keys_the_fx_graph_cache(self):
+        # Registering a policy misses the FX graph cache, then hits the capped kernel
+        from torch._dynamo.utils import counters
+        from torch._inductor import choices, virtualized
+
+        x = torch.randn(1 << 24, device=GPU_TYPE)
+        key = virtualized._choices._key
+        prior = virtualized.threadlocal.__dict__.get(key)
+
+        def compile_and_run():
+            torch._dynamo.reset()
+            actual, code = run_and_get_code(torch.compile(lambda t: t * 2), x)
+            self.assertEqual(actual, x * 2, atol=0, rtol=0)
+            return "\n".join(code)
+
+        with inductor_config.patch(fx_graph_cache=True, fx_graph_remote_cache=False):
+            self.assertNotIn("for x_block", compile_and_run())
+            policy = self._capped_choices(GridPolicy(44))
+            choices.register_inductor_choices("policy", lambda: policy)
+            try:
+                for _ in range(2):
+                    code = compile_and_run()
+                    self.assertIn("for x_block in tl.range(tl.program_id(0), ", code)
+            finally:
+                choices.unregister_inductor_choices("policy")
+                # Unregistering installs a newly built handler: restore the prior one
+                virtualized.threadlocal.__dict__.pop(key, None)
+                if prior is not None:
+                    setattr(virtualized.threadlocal, key, prior)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm(msg="TritonKernel asks for capped grids only on CUDA outside ROCm")
+    def test_grid_policy_fx_ir_wrapper_caps_a_symbolic_grid(self):
+        from torch._inductor.codegen import common
+        from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
+
+        gms = []
+
+        class RecordingFxCodegen(WrapperFxCodegen):
+            def compile_graph(self, gm):
+                gms.append(gm)
+                return super().compile_graph(gm)
+
+        backend = common.DeviceCodegen(TritonScheduling, RecordingFxCodegen, None)
+        x = torch.randn(1 << 22, device=GPU_TYPE)
+        with patch.dict(common.device_codegens, {GPU_TYPE: backend}):
+            _, actual, _ = self._compile_capped(lambda t: t * 2, x, dynamic=True)
+        self.assertEqual(actual, x * 2, atol=0, rtol=0)
+        (gm,) = gms
+        (node,) = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.higher_order.triton_kernel_wrapper_mutation,
+        )
+        grid = node.kwargs["grid"][0][0]
+        self.assertIs(grid.target, torch.sym_min)
+        # One program for one element; the cap for 2**22 elements, 64 or more blocks
+        expr = grid.meta["val"].node.expr
+        (size,) = expr.free_symbols
+        self.assertEqual([int(expr.subs(size, n)) for n in (1, 1 << 22)], [1, 44])
 
     @parametrize(
         "reduction_type,identity,reduction_fn",
