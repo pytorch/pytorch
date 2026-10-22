@@ -3,11 +3,18 @@ name: Build manywheel docker images for s390x
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/build-manywheel-images-s390x.yml
+      - .ci/docker/manywheel/Dockerfile_s390x
+      - .ci/docker/manywheel/s390_scripts/**
   push:
     tags:
       - ciflow/s390/*
     paths:
       - .github/workflows/build-manywheel-images-s390x.yml
+      - .ci/docker/manywheel/Dockerfile_s390x
+      - .ci/docker/manywheel/s390_scripts/**
 
 
 env:
@@ -20,7 +27,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   build-docker-cpu-s390x:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
     runs-on: linux.s390x

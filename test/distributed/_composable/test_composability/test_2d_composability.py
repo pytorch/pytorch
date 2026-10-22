@@ -125,7 +125,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
         )
 
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_train_parity_2d_mlp(self, device):
         device_type = torch.device(device).type
         global_mesh = self.init_global_mesh(device_type)
@@ -173,7 +173,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
     def test_train_parity_2d_transformer(self, device):
         self.run_subtests(
@@ -255,7 +255,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_tp_with_fsdp_offloading(self, device):
         device_type = torch.device(device).type
@@ -315,7 +315,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/125644"
     )
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
     @with_temp_dir
     def test_train_parity_2d_transformer_checkpoint_resume(self, device):

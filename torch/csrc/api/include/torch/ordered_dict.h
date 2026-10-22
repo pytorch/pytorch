@@ -237,8 +237,8 @@ class OrderedDict<Key, Value>::Item {
   }
 
  private:
-  /// This is stored as an std::pair because it will make Python binding a lot,
-  /// lot easier.
+  /// This is stored as an std::pair because it will make Python binding a lot
+  /// easier.
   ::std::pair<Key, Value> pair_;
 };
 

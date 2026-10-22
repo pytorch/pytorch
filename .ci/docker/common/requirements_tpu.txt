@@ -12,4 +12,4 @@ jaxlib==0.9.0
 jaxtyping==0.3.2
 libtpu==0.0.34
 tpu-info==0.7.1
-setuptools==80.10.2
+setuptools==83.0.0

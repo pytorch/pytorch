@@ -24,7 +24,7 @@ from optree import (
     structseq_fields,
 )
 
-import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401
+import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401  # load the C++ extension module
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
 
@@ -34,7 +34,7 @@ from ..decorators import substitute_in_graph
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable, Iterable, Mapping
-    from typing_extensions import Self, TypeIs
+    from typing_extensions import TypeIs
 
     from torch.utils._cxx_pytree import PyTree
 
@@ -163,21 +163,17 @@ def tree_leaves(
     )
 
 
-class _Asterisk(str):
+class _ReprNoQuotes(str):
     __slots__ = ()
 
-    def __new__(cls) -> Self:
-        return super().__new__(cls, "*")
-
     def __repr__(self) -> str:
-        return "*"  # no quotes
+        return str(self)  # no quotes inside containers
 
 
-_asterisk = _Asterisk()
-del _Asterisk
+_asterisk = _ReprNoQuotes("*")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, repr=False, eq=False, unsafe_hash=False, slots=True)
 class PyTreeSpec:
     """Analog for :class:`optree.PyTreeSpec` in Python."""
 
@@ -223,7 +219,7 @@ class PyTreeSpec:
         object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, /) -> str:
-        def helper(treespec: PyTreeSpec) -> str:
+        def helper(treespec: PyTreeSpec) -> _ReprNoQuotes:
             if treespec.is_leaf():
                 if treespec.type is not None:
                     raise AssertionError("Leaf treespec must have type None")
@@ -231,7 +227,8 @@ class PyTreeSpec:
 
             if treespec.type is None:
                 raise AssertionError("Non-leaf treespec must have a type")
-            if not callable(treespec._unflatten_func):
+            unflatten_func = treespec._unflatten_func
+            if not callable(unflatten_func):
                 raise AssertionError(
                     "Non-leaf treespec must have a callable unflatten_func"
                 )
@@ -244,17 +241,16 @@ class PyTreeSpec:
                 or optree.is_namedtuple_class(treespec.type)
                 or optree.is_structseq_class(treespec.type)
             ):
-                return treespec._unflatten_func(
-                    treespec._metadata,
-                    children_representations,
+                return _ReprNoQuotes(
+                    repr(unflatten_func(treespec._metadata, children_representations))
                 )
-            return (
+            return _ReprNoQuotes(
                 f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
                 f"[{', '.join(children_representations)}])"
             )
 
         inner = [
-            str(helper(self)),
+            helper(self),
             *(["NoneIsLeaf"] if self.none_is_leaf else []),
             f"namespace={self.namespace!r}",
         ]
@@ -262,6 +258,52 @@ class PyTreeSpec:
 
     def __len__(self, /) -> int:
         return self.num_leaves
+
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, PyTreeSpec):
+            return NotImplemented
+        if (
+            self.none_is_leaf != other.none_is_leaf
+            or self.num_nodes != other.num_nodes
+            or self.num_leaves != other.num_leaves
+            or self._type is not other._type
+            or self._metadata != other._metadata
+        ):
+            return False
+        # A namespace mismatch is ignored if either side has an empty namespace, mirroring optree's
+        # `PyTreeSpec::EqualTo` (src/treespec/richcomparison.cpp).
+        if self.namespace and other.namespace and self.namespace != other.namespace:
+            return False
+        return self._children == other._children
+
+    def __hash__(self, /) -> int:
+        node_type = self._type
+        if node_type in STANDARD_DICT_TYPES:
+            # Dict metadata is the (unhashable) list of keys; hash the keys instead.
+            node_data: Any = tuple(self._entries)
+        elif (
+            node_type is None
+            or node_type in BUILTIN_TYPES
+            or optree.is_namedtuple_class(node_type)
+            or optree.is_structseq_class(node_type)
+        ):
+            node_data = self._metadata
+        else:
+            # Custom node metadata may be unhashable; hash the node type only, mirroring optree's
+            # `PyTreeSpec::HashValueImpl` (src/treespec/hashing.cpp).
+            node_data = None
+        # `namespace` is intentionally excluded: `__eq__` treats an empty namespace as a wildcard,
+        # so specs that compare equal must hash the same.
+        return hash(
+            (
+                self.none_is_leaf,
+                node_type,
+                self.num_leaves,
+                self.num_nodes,
+                node_data,
+                self._children,
+            )
+        )
 
     @property
     def type(self, /) -> builtins.type | None:
@@ -447,7 +489,9 @@ class PyTreeSpec:
         return self._unflatten_func(self._metadata, subtrees)
 
 
-def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec | python_pytree.TreeSpec]:
+def _is_pytreespec_instance(
+    obj: object, /
+) -> TypeIs[PyTreeSpec | python_pytree.TreeSpec]:
     return isinstance(obj, (PyTreeSpec, python_pytree.TreeSpec))
 
 
@@ -591,7 +635,7 @@ def tree_flatten(
                 (),
                 None,
                 none_is_leaf=none_is_leaf,
-                namespace=namespace,
+                namespace="",
             )
 
         (

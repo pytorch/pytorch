@@ -34,7 +34,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     frequency distribution approximately follows the `Zipf's law`_.
 
     Adaptive softmax partitions the labels into several clusters, according to
-    their frequency. These clusters may contain different number of targets
+    their frequency. These clusters may contain a different number of targets
     each.
     Additionally, clusters containing less frequent labels assign lower
     dimensional embeddings to those labels, which speeds up the computation.

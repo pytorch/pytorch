@@ -294,7 +294,7 @@ def insert_subgm(
 
 @compatibility(is_backward_compatible=False)
 def erase_nodes(gm: GraphModule, nodes: NodeList) -> None:
-    # erase original nodes in inversed topological order
+    # erase original nodes in inverse topological order
     for node in reversed(nodes):
         gm.graph.erase_node(node)
 

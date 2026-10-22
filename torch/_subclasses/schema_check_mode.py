@@ -36,7 +36,7 @@ SchemaArgType = torch._C._SchemaArgType
 SchemaInfo = torch._C._SchemaInfo
 
 # This TorchDispatchMode Subclass is used to verify op schemas
-# This TorchDispatchMode Scubclass currently:
+# This TorchDispatchMode Subclass currently:
 #  - Records the called ops
 #  - Checks for mutations on all inputs
 #  - Checks for aliasing on all inputs
