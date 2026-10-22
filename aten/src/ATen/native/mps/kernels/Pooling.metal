@@ -107,7 +107,8 @@ void max_pool_3d_input_iter(
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2 += d2) {
         auto offset2 = input_strides[2] * i2;
         auto input_value = input[offset0 + offset1 + offset2];
-        bool is_greater = input_value > max_value;
+        // Matches CPU: NaN wins, (val != val) is false for integral types
+        bool is_greater = input_value > max_value || input_value != input_value;
 
         max_value = is_greater ? input_value : max_value;
 
@@ -402,6 +403,97 @@ kernel void max_pool2d_dense(
   output[out_offset] = max_value;
   if IF_CONSTEXPR (return_indices) {
     indices[out_offset] = max_index;
+  }
+}
+
+// Stride-1 2D max pooling of a dense NCHW tensor without dilation along W.
+// Each thread computes a tile of kCols x kRows outputs, so each input row is
+// loaded once per tile and reduced along W before being combined into all
+// output rows whose window covers it. Columns are clamped to the input, which
+// does not change the result, as without dilation along W the clamped column is
+// always within the window. KW is the window width if known at compile time
+// (which lets the row be kept in registers), or 0.
+template <typename T, int KW>
+kernel void max_pool2d_s1_nchw(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant PoolingParams<5>& p [[buffer(3)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr int kCols = max_pool2d_s1_tile_cols;
+  constexpr int kRows = max_pool2d_s1_tile_rows;
+  const int32_t IH = p.input_sizes[p.dims - 2], IW = p.input_sizes[p.dims - 1];
+  const int32_t OH = p.output_sizes[p.dims - 2],
+                OW = p.output_sizes[p.dims - 1];
+  const auto kh = p.kernel_size[0], kw = KW > 0 ? KW : p.kernel_size[1];
+  const auto dh = p.dilation[0];
+  const int32_t ow0 = pos.x * kCols;
+  const int32_t oh0 = pos.y * kRows;
+  const int32_t c0 = ow0 - p.padding[1];
+  input += pos.z * IH * IW;
+
+  T acc[kRows][kCols];
+  int32_t first_row[kRows];
+  for (int u = 0; u < kRows; ++u) {
+    for (int v = 0; v < kCols; ++v) {
+      acc[u][v] = T(0);
+    }
+    auto h = oh0 + u - p.padding[0];
+    if (h < 0) {
+      h += dh * ((dh - 1 - h) / dh);
+    }
+    first_row[u] = h;
+  }
+
+  const auto ih_begin = max(oh0 - p.padding[0], 0);
+  const auto ih_end = min(oh0 + kRows - p.padding[0] + (kh - 1) * dh, IH);
+  for (auto ih = ih_begin; ih < ih_end; ++ih) {
+    const auto row = input + ih * IW;
+    T row_max[kCols];
+    if IF_CONSTEXPR (KW > 0) {
+      T vals[kCols + KW - 1];
+      for (int i = 0; i < kCols + KW - 1; ++i) {
+        vals[i] = row[clamp(c0 + i, 0, IW - 1)];
+      }
+      for (int v = 0; v < kCols; ++v) {
+        row_max[v] = vals[v];
+        for (int j = 1; j < KW; ++j) {
+          // Matches CPU: NaN wins, (val != val) is false for integral types
+          const bool take =
+              vals[v + j] > row_max[v] || vals[v + j] != vals[v + j];
+          row_max[v] = take ? vals[v + j] : row_max[v];
+        }
+      }
+    } else {
+      for (int v = 0; v < kCols; ++v) {
+        row_max[v] = row[clamp(c0 + v, 0, IW - 1)];
+      }
+      for (int32_t j = 1; j < kw; ++j) {
+        for (int v = 0; v < kCols; ++v) {
+          const T val = row[clamp(c0 + v + j, 0, IW - 1)];
+          const bool take = val > row_max[v] || val != val;
+          row_max[v] = take ? val : row_max[v];
+        }
+      }
+    }
+    for (int u = 0; u < kRows; ++u) {
+      const auto rel = ih - (oh0 + u - p.padding[0]);
+      if (rel < 0 || rel > (kh - 1) * dh || (dh != 1 && rel % dh != 0)) {
+        continue;
+      }
+      const bool first = ih == first_row[u];
+      for (int v = 0; v < kCols; ++v) {
+        const bool take =
+            first || row_max[v] > acc[u][v] || row_max[v] != row_max[v];
+        acc[u][v] = take ? row_max[v] : acc[u][v];
+      }
+    }
+  }
+
+  const auto out_base = (pos.z * OH + oh0) * OW + ow0;
+  for (int u = 0; u < kRows && oh0 + u < OH; ++u) {
+    for (int v = 0; v < kCols && ow0 + v < OW; ++v) {
+      output[out_base + u * OW + v] = acc[u][v];
+    }
   }
 }
 
@@ -924,6 +1016,30 @@ REGISTER_MAX_POOL2D_DENSE_ALL(short);
 REGISTER_MAX_POOL2D_DENSE_ALL(char);
 REGISTER_MAX_POOL2D_DENSE_ALL(uchar);
 REGISTER_MAX_POOL2D_DENSE_ALL(bool);
+
+#define REGISTER_MAX_POOL2D_S1(DTYPE, KW)                       \
+  template [[host_name("max_pool2d_s1_nchw_k" #KW "_" #DTYPE)]] \
+  kernel void max_pool2d_s1_nchw<DTYPE, KW>(                    \
+      device const DTYPE* input [[buffer(0)]],                  \
+      device DTYPE* output [[buffer(1)]],                       \
+      constant PoolingParams<5>& p [[buffer(3)]],               \
+      uint3 pos [[thread_position_in_grid]]);
+
+#define REGISTER_MAX_POOL2D_S1_ALL(DTYPE) \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 0)        \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 2)        \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 3)        \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 5)
+
+REGISTER_MAX_POOL2D_S1_ALL(float);
+REGISTER_MAX_POOL2D_S1_ALL(half);
+REGISTER_MAX_POOL2D_S1_ALL(bfloat);
+REGISTER_MAX_POOL2D_S1_ALL(int);
+REGISTER_MAX_POOL2D_S1_ALL(long);
+REGISTER_MAX_POOL2D_S1_ALL(short);
+REGISTER_MAX_POOL2D_S1_ALL(char);
+REGISTER_MAX_POOL2D_S1_ALL(uchar);
+REGISTER_MAX_POOL2D_S1_ALL(bool);
 
 REGISTER_POOL_BACKWARD_OP(float);
 REGISTER_POOL_BACKWARD_OP(half);
