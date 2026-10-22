@@ -257,7 +257,7 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
   return weight_transposed;
 }
 
-// Computes a wInt4aInt8 quantized linear: dequantizes `mat_a` (per-token
+// Computes a wInt4aInt8 quantized linear: dequantizes `mat_a` (rowwise
 // quantized activation) and `mat_b` (per-block quantized int4 weight),
 // matmuls them, optionally adds `bias`, and returns the result in
 // `out_dtype`.
@@ -265,10 +265,10 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
 //   - `mat_a`: the quantized activation, 2D, dtype `torch.int8` or
 //     `torch.uint8`, shape [M, K]
 //   - `mat_b`: the int4 weight packed as int32, 2D, shape [N, K/8]
-//   - `mat_a_scale`: per-token float32 scale for `mat_a`, shape [M, 1]
+//   - `mat_a_scale`: rowwise float32 scale for `mat_a`, shape [M, 1]
 //   - `mat_b_scales`: per-block float32 scale for `mat_b`, shape
 //     [K/group_size, N]
-//   - `mat_a_zero_point`: per-token int32 zero-point for `mat_a`, shape
+//   - `mat_a_zero_point`: rowwise int32 zero-point for `mat_a`, shape
 //     [M, 1]
 //   - `mat_b_zero_points`: per-block int8 zero-point for `mat_b`, shape
 //     [K/group_size, N]
