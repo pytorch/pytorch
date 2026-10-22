@@ -451,9 +451,6 @@ endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
-cmake_dependent_option(
-  USE_LITE_AOTI "Include AOTI sources" OFF
-  "BUILD_LITE_INTERPRETER" OFF)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION
        "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
