@@ -6527,14 +6527,13 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
         yield SampleInput(mt((1, 9, 10)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_arg(10, low=.5, high=2.0)
+    make_window = partial(make_arg, low=.5, high=2.0)
     yield SampleInput(mt((10, 10, 6)), kwargs=dict(
-        n_fft=10, window=window, center=center, return_complex=dtype.is_complex))
+        n_fft=10, window=make_window(10), center=True, return_complex=dtype.is_complex))
     yield SampleInput(mt((10, 10, 10)), kwargs=dict(
-        n_fft=10, window=window[:8], win_length=8, center=center, return_complex=True))
-
-    real_window = window if not dtype.is_complex else window.real
-    yield SampleInput(mt((10, 5, 6)), kwargs=dict(n_fft=8, window=real_window[:8], center=center))
+        n_fft=10, window=make_window(8), win_length=8, center=True, return_complex=True))
+    yield SampleInput(mt((10, 5, 6)), kwargs=dict(
+        n_fft=8, window=make_window(8, dtype=dtype.to_real()), center=True))
 
 def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
     # create a helper function wrapping `make_tensor`
@@ -7561,15 +7560,15 @@ _lce_chunked_op_skips = (
                  "TestCompositeCompliance", "test_cow_input",
                  device_type="cuda",
                  active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_grad"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvmap"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapjvpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp_has_batch_rule"),
     DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
     DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
 )
@@ -14048,9 +14047,6 @@ op_db: list[OpInfo] = [
            ),
            skips=(
                skipCPUIfNoFFT,
-               # gradcheck fails on ROCm (gh-68429)
-               # grad is computed improperly (probably for weights tensor)
-               # Pre-existing condition (calls .item); needs to be fixed
             ),
            ),
     UnaryUfuncInfo('floor',
@@ -15402,7 +15398,7 @@ op_db: list[OpInfo] = [
             # Only on this variant: the scalar backward supports neither jvp
             # nor the normalize pass, while its no_reduction sibling and the
             # override variants differ in what else they cannot do.
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvp"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
                          "test_normalize_operator_exhaustive"),
         ),
@@ -15452,10 +15448,10 @@ op_db: list[OpInfo] = [
                          "TestConsistency", "test_output_grad_match",
                          dtypes=(torch.float16, torch.bfloat16, torch.float32),
                          device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvp"),
             # Only on this variant: the recompute backward breaks
             # vmap-over-grad, a batched cotangent into in-place buffers.
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmap_autograd_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmap_autograd_grad"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
                          "test_normalize_operator_exhaustive"),
         ),
@@ -16098,7 +16094,7 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjpvmap', device_type='cuda'
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type=('cuda', 'xpu')
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
@@ -16264,27 +16260,31 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjpvmap',
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_jvpvjp', device_type="cuda"
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type=('cpu', 'cuda')
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_jvpvjp', device_type="xpu"
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjp', device_type="cuda"
+                   'TestOperatorsDevice', 'test_jvpvjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
+                   'TestOperatorsDevice', 'test_jvpvjp', device_type="xpu"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestOperatorsDevice', 'test_vjp', device_type="cuda"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=4e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_vjp', device_type="xpu"
+                   'TestOperatorsDevice', 'test_vjp', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=3e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_grad', device_type="xpu"
+                   'TestOperatorsDevice', 'test_grad', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -16299,7 +16299,7 @@ op_db: list[OpInfo] = [
                # sigma; rtol=2e-5 covers small-|dW|.
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
-                   'TestOperators', 'test_grad', device_type="cuda",
+                   'TestOperatorsDevice', 'test_grad', device_type="cuda",
                    active_if=TEST_WITH_ROCM,
                ),
                DecorateInfo(
@@ -16583,8 +16583,8 @@ op_db: list[OpInfo] = [
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: aten::_upsample_nearest_exact*d hit the vmap fallback which is currently disabled
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorsDevice', 'test_vmapjvpall_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorsDevice', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoDevice', 'test_op_has_batch_rule'),
            ),
            supports_out=False),
@@ -17539,9 +17539,6 @@ op_db: list[OpInfo] = [
         aten_backward_name='silu_backward',
         ref=lambda x, inplace=False: x / (1 + np.exp(-x)),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfMPS=floating_types_and(
-            torch.bfloat16, torch.float16, torch.int16, torch.int32, torch.uint8, torch.bool, torch.int8
-        ),
         supports_forward_ad=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=True,
@@ -17731,7 +17728,6 @@ op_db: list[OpInfo] = [
         'nn.functional.threshold',
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.half, torch.bfloat16),
-        dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         inplace_variant=lambda x, threshold, value:
             torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
@@ -18997,7 +18993,7 @@ op_db: list[OpInfo] = [
                ),
                 DecorateInfo(
                     toleranceOverride({torch.float32: tol(atol=5e-5, rtol=3e-6)}),
-                    'TestOperators',
+                    'TestOperatorsDevice',
                     'test_jvp',
                     device_type='cpu',
                 ),
@@ -19168,7 +19164,7 @@ op_db: list[OpInfo] = [
     OpInfo('lerp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
-           dtypesIfMPS=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           dtypesIfMPS=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19347,7 +19343,7 @@ op_db: list[OpInfo] = [
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
-                                    'TestOperators', 'test_grad'),
+                                    'TestOperatorsDevice', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -20534,7 +20530,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestEagerFusionOpInfo'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOperators'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice'),
                # AssertionError
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
                # AssertionError
@@ -21458,6 +21454,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                    decorators=(precisionOverride({torch.float16: 7e-1}),
                                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=4e-6)}),
                                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                                            'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
                                ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -22580,7 +22578,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.uint8, torch.float16, torch.complex64]),
             # FIXME: ValueError: The data in MaskedTensor a and Tensor b do not match
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                          dtypes=[torch.float16]),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
@@ -22617,7 +22615,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                          dtypes=[torch.float32]),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
@@ -22784,9 +22782,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.huber_loss",
         aten_backward_name='huber_loss_backward',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.float16, torch.bfloat16, torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32
-        ),
         supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
@@ -23287,7 +23282,7 @@ if "cutedsl" in dsl_ops_by_dsl:
                     "TestDecomp", "test_comprehensive"),
                 # Recompute-in-backward is not vmap-over-grad compatible, as on
                 # the "chunked_none" variant.
-                DecorateInfo(unittest.expectedFailure, "TestOperators",
+                DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice",
                              "test_vmap_autograd_grad"),
             ),
             **_cutedsl_lce_kwargs,
@@ -24360,7 +24355,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
-        decorators=(precisionOverride({torch.float16: 7e-1}),),
+        decorators=(
+            precisionOverride({torch.float16: 7e-1}),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
+        ),
         skips=(
             # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -25095,24 +25094,6 @@ python_ref_db = [
         # The corresponding PyTorch op doesn't support out.  But the ref is
         # registered as a decomp and ATen has an out variant.
         supports_out=True,
-        skips=(
-            # torch.bool - Subtraction, the `-` operator, with two bool tensors is not supported.
-            # Use the `^` or `logical_xor()` operator instead.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # AssertionError: Tensor-likes are not equal!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool),
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
@@ -26508,7 +26489,7 @@ python_ref_db = [
                 'test_ref_duplicate_values',
                 dtypes=[torch.float16]),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+                unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                 dtypes=[torch.float32]),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(

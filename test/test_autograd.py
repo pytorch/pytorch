@@ -10421,6 +10421,7 @@ for shape in [(1,), ()]:
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
     )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_custom_function_saving_mutated_view_no_leak(self):
         class Test(torch.autograd.Function):
             @staticmethod
@@ -13448,7 +13449,7 @@ class TestAutogradDeviceType(TestCase):
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
                 )
@@ -13471,7 +13472,7 @@ class TestAutogradDeviceType(TestCase):
             return torch.aminmax(x)[1]
 
         for f in [torch.amin, torch.amax, amax2, amin2]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
                     device=device,

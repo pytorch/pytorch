@@ -6727,6 +6727,39 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors=fudge_factors
             )
 
+    @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
+    def test_mem_eff_backward_outside_capture_after_graph_replay(self, device):
+        # A forward captured in a CUDA graph returns its dropout seed/offset on
+        # device; running backward on them outside capture used to segfault.
+        q, k, v = (torch.randn(2, 4, 128, 64, device=device, dtype=torch.float16) for _ in range(3))
+        fwd = torch.ops.aten._scaled_dot_product_efficient_attention
+        bwd = torch.ops.aten._scaled_dot_product_efficient_attention_backward
+        dropout_p = 0.1
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            fwd(q, k, v, None, True, dropout_p, False)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out, lse, seed, offset = fwd(q, k, v, None, True, dropout_p, False)
+        g.replay()
+        self.assertTrue(seed.is_cuda and offset.is_cuda)
+
+        grad_out = torch.ones_like(out)
+        args = (grad_out, q, k, v, None, out, lse, seed, offset, dropout_p, [True, True, True, False], False)
+        grads = bwd(*args)
+        # Reference: the same backward captured and replayed, which has always
+        # consumed device seed/offset. ROCm backends need device seed/offset,
+        # so a CPU-copy reference is not portable.
+        g_bwd = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g_bwd):
+            grads_ref = bwd(*args)
+        g_bwd.replay()
+        self.assertEqual(grads[:3], grads_ref[:3])
+
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
