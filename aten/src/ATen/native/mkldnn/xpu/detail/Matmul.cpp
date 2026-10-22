@@ -235,7 +235,7 @@ sycl::event matmul(
   at::Tensor m1_, m2_, dst_;
 
   if (attr.with_binary())
-    attr.construct_post_binary(matmul_pd, args);
+    attr.construct_post_binary(args);
 
   size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(

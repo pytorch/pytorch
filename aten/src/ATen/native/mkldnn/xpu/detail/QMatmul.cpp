@@ -281,7 +281,7 @@ void quantized_matmul(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   if (attr.with_binary())
-    attr.construct_post_binary(matmul_pd, args);
+    attr.construct_post_binary(args);
 
   args.insert({DNNL_ARG_SRC, m1_m});
   args.insert({DNNL_ARG_WEIGHTS, m2_m});
