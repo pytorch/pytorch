@@ -9095,6 +9095,10 @@ class TritonScheduling(SIMDScheduling):
             src_code,
             current_device.type,
             metadata=metadata_comment,
+            # A template is built with its one config already.
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):
