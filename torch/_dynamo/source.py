@@ -37,6 +37,7 @@ from .bytecode_transformation import (
     create_binary_subscr,
     create_build_tuple,
     create_call_function,
+    create_call_method,
 )
 
 
@@ -369,8 +370,12 @@ class GenericAttrSource(ChainedSource):
             )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # A plain LOAD_ATTR would run the class's __getattribute__ override.
+        codegen.load_import_from("builtins", "object")
+        codegen.load_method("__getattribute__")
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs(self.member))
+        codegen.append_output(codegen.create_load_const(self.member))
+        codegen.extend_output(create_call_method(2))
 
     @functools.cached_property
     def _name_template(self) -> str:

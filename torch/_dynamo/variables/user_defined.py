@@ -67,6 +67,7 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    GenericAttrSource,
     GetItemSource,
     RandomValueSource,
     TypeMROSource,
@@ -3759,12 +3760,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         - tp_getattro_impl (for objects without a custom __getattribute__)
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
+        - BaseBuiltinVariable.call_method for object.__getattribute__(obj, name)
+        - call_base_method for a builtin base's __getattribute__
 
         The algorithm: MRO walk → data descriptor → instance __dict__ →
         non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        AttributeError. Like PyObject_GenericGetAttr it never calls
+        __getattr__; tp_getattro_impl does, as slot_tp_getattr_hook does.
+
+        On a class that overrides __getattribute__, guards read the attribute
+        through object.__getattribute__: a plain getattr would run the override
+        instead of the lookup traced here.
         """
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        if not isinstance(name, str):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"attribute name must be string, not '{type(name).__name__}'"],
+            )
+        source: Source | None = None
+        if self.source:
+            source_cls = (
+                GenericAttrSource if self._object_has_getattribute else AttrSource
+            )
+            source = source_cls(self.source, name)
 
         if name == "__dict__":
             if not hasattr(self.value, "__dict__"):
@@ -3786,8 +3805,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
         #   4. if type_attr is a non-data descriptor → invoke it
         #   5. if type_attr is a plain class variable → return it
-        #   6. __getattr__ fallback
-        #   7. raise AttributeError
+        #   6. raise AttributeError
         #
         # Between steps 5 and 6, we also handle objects with custom storage
         # that aren't visible via the MRO walk or instance __dict__ (step 5b).
@@ -3805,7 +3823,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.resolve_data_descriptor(tx, name, type_attr, source)
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        result = self.lookup_instance_dict(tx, name)
+        result = self.lookup_instance_dict(tx, name, source=source)
         if result is not None:
             return result
 
@@ -3843,22 +3861,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             except AttributeError:
                 pass
 
-        # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
-        if result is not None:
-            if (
-                self.source
-                and isinstance(self, variables.UnspecializedNNModuleVariable)
-                and hasattr(self.value, "__dict__")
-                and name not in self.value.__dict__
-            ):
-                # A pending deletion in the traced code can reach here with the
-                # name still in the live dict; guarding absence then would fail
-                # on the frame it was created.
-                install_not_in_instance_dict_guard(self.source, name)
-            return result
-
-        # Step 7: AttributeError.
+        # Step 6: AttributeError.
         raise_observed_exception(
             AttributeError,
             tx,
@@ -3869,35 +3872,52 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if self._object_has_getattribute:
+        # Mirrors slot_tp_getattr_hook: __getattribute__ (the user's override,
+        # or the generic lookup), then __getattr__ only if that raises
+        # AttributeError.
+        try:
+            if not self._object_has_getattribute:
+                return self.generic_getattr(tx, name)
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
             new_source: AttrSource | None = (
                 AttrSource(self.source, "__getattribute__") if self.source else None
             )
-
-            try:
-                return variables.UserMethodVariable(
-                    # Keep this off VariableTracker.build. The builder installs
-                    # a guard on the accessor eagerly; constructing directly
-                    # records the source and leaves the guard to whoever
-                    # consumes it. This path is generic, but an nn.Module
-                    # reaching it with an eager guard here made the guard
-                    # manager tag-unsafe (test/dynamo/test_guard_manager.py,
-                    # test_nn_module_tag_overridden_getattr_safe).
-                    variables.UserFunctionVariable(
-                        getattribute_fn,
-                        source=new_source and AttrSource(new_source, "__func__"),
-                    ),
-                    self,
-                    source=new_source,
-                ).call_function(tx, [VariableTracker.build(tx, name)], {})
-            except ObservedAttributeError:
-                # Pass through to __getattr__ if __getattribute__ fails
-                handle_observed_exception(tx)
-
-        return self.generic_getattr(tx, name)
+            return variables.UserMethodVariable(
+                # Keep this off VariableTracker.build. The builder installs
+                # a guard on the accessor eagerly; constructing directly
+                # records the source and leaves the guard to whoever
+                # consumes it. This path is generic, but an nn.Module
+                # reaching it with an eager guard here made the guard
+                # manager tag-unsafe (test/dynamo/test_guard_manager.py,
+                # test_nn_module_tag_overridden_getattr_safe).
+                variables.UserFunctionVariable(
+                    getattribute_fn,
+                    source=new_source and AttrSource(new_source, "__func__"),
+                ),
+                self,
+                source=new_source,
+            ).call_function(tx, [VariableTracker.build(tx, name)], {})
+        except ObservedAttributeError:
+            if self._check_for_getattr() is None:
+                raise
+            handle_observed_exception(tx)
+        result = self.call_getattr_fallback(tx, name)
+        if result is None:
+            raise AssertionError("expected a __getattr__ result")
+        if (
+            self.source
+            and not self._object_has_getattribute
+            and isinstance(self, variables.UnspecializedNNModuleVariable)
+            and hasattr(self.value, "__dict__")
+            and name not in self.value.__dict__
+        ):
+            # A pending deletion in the traced code can reach here with the
+            # name still in the live dict; guarding absence then would fail
+            # on the frame it was created.
+            install_not_in_instance_dict_guard(self.source, name)
+        return result
 
     def resolve_data_descriptor(
         self,
@@ -4142,9 +4162,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).call_function(tx, [self, owner_var], {})
 
     def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        source: Source | None = None,
     ) -> VariableTracker | None:
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        if source is None and self.source:
+            source = AttrSource(self.source, name)
 
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self,

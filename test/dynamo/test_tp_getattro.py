@@ -405,6 +405,316 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             torch.compile(fn, backend="eager")(MyObj())
 
+    # --- Explicit object.__getattribute__(obj, name) ---
+
+    def test_object_getattribute_resolves_like_attribute_access(self):
+        class MyObj:
+            def __init__(self):
+                self.scale = 3
+
+            @property
+            def offset(self):
+                return 2
+
+            def double(self, x):
+                return x * 2
+
+        obj = MyObj()
+
+        def fn(x):
+            double = object.__getattribute__(obj, "double")
+            scale = object.__getattribute__(obj, "scale")
+            return double(x) * scale + object.__getattribute__(obj, "offset")
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+
+    def test_object_getattribute_bypasses_getattribute_override(self):
+        class MyObj:
+            def __init__(self):
+                self.val = 1
+
+            def __getattribute__(self, name):
+                if name == "val":
+                    return 100
+                return object.__getattribute__(self, name)
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + object.__getattribute__(obj, "val")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), x + 1)
+        obj.val = 5
+        self.assertEqual(opt_fn(x), x + 5)
+
+    def test_object_getattribute_missing_skips_getattr(self):
+        class MyObj:
+            def __getattr__(self, name):
+                return 100
+
+        obj = MyObj()
+
+        def fn(x):
+            try:
+                return x + object.__getattribute__(obj, "missing")
+            except AttributeError:
+                return x - 1
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x - 1)
+
+    def test_super_getattribute_missing_skips_getattr(self):
+        class MyObj:
+            def __getattr__(self, name):
+                return 100
+
+            def probe(self):
+                try:
+                    return super().__getattribute__("missing")
+                except AttributeError:
+                    return -1
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + obj.probe()
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x - 1)
+
+    def test_object_getattribute_non_str_name_raises_type_error(self):
+        class MyObj:
+            def via_super(self):
+                return super().__getattribute__(1)
+
+        class MyDeque(collections.deque):
+            def via_super(self):
+                return super().__getattribute__(1)
+
+        obj = MyObj()
+        deq = MyDeque()
+        # Each call reaches __getattribute__ by a different route.
+        calls = (
+            lambda: object.__getattribute__(obj, 1),
+            obj.via_super,
+            deq.via_super,
+        )
+
+        def fn(x):
+            messages = []
+            for call in calls:
+                try:
+                    call()
+                except TypeError as e:
+                    messages.append(str(e))
+            return x + 1, messages
+
+        x = torch.randn(3)
+        _, messages = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        _, expected = fn(x)
+        self.assertEqual(len(expected), len(calls))
+        self.assertEqual(messages, expected)
+
+    def test_object_getattribute_returns_attribute_hidden_by_override(self):
+        class Inner:
+            pass
+
+        class MyObj:
+            def __init__(self):
+                self.inner = Inner()
+
+            def __getattribute__(self, name):
+                if name == "inner":
+                    return None
+                return object.__getattribute__(self, name)
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + 1, object.__getattribute__(obj, "inner")
+
+        x = torch.randn(3)
+        _, inner = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(inner, object.__getattribute__(obj, "inner"))
+
+    def test_super_getattribute_sees_update_hidden_by_override(self):
+        class MyObj:
+            def __init__(self):
+                self.val = 1
+
+            def __getattribute__(self, name):
+                if name == "val":
+                    return 100
+                if name == "doubled":
+                    return super().__getattribute__("val") * 2
+                return super().__getattribute__(name)
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + obj.doubled
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), x + 2)
+        obj.val = 5
+        self.assertEqual(opt_fn(x), x + 10)
+
+    def test_super_getattribute_missing_skips_getattr_builtin_base(self):
+        def make(base):
+            class MyContainer(base):
+                def __getattr__(self, name):
+                    return 100
+
+                def probe(self):
+                    try:
+                        return super().__getattribute__("missing")
+                    except AttributeError:
+                        return -1
+
+            return MyContainer()
+
+        # Which of these define their own __getattribute__ (and so reach it
+        # through the base-method path) varies across Python versions.
+        bases = (dict, list, set, collections.deque, collections.defaultdict)
+        objs = [make(base) for base in bases]
+
+        def fn(x):
+            return [x + obj.probe() for obj in objs]
+
+        x = torch.randn(3)
+        results = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(results, [x - 1] * len(objs))
+
+    def test_builtin_type_getattribute_missing_skips_getattr(self):
+        class MyDict(dict):
+            def __getattr__(self, name):
+                return 100
+
+        d = MyDict()
+
+        def fn(x):
+            try:
+                return x + dict.__getattribute__(d, "missing")
+            except AttributeError:
+                return x - 1
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x - 1)
+
+    def test_getattribute_override_miss_calls_getattr(self):
+        # After a __getattribute__ override raises AttributeError, CPython calls
+        # only __getattr__; it does not retry the generic lookup, which here
+        # would find the instance-dict entry the override hides.
+        def remap(self, name):
+            if name.startswith("__"):
+                return object.__getattribute__(self, name)
+            return object.__getattribute__(self, "_" + name)
+
+        class WithGetattr:
+            __getattribute__ = remap
+
+            def __init__(self):
+                self.val = 1
+
+            def __getattr__(self, name):
+                return 100
+
+        class WithoutGetattr:
+            __getattribute__ = remap
+
+            def __init__(self):
+                self.val = 1
+
+        with_getattr = WithGetattr()
+        without_getattr = WithoutGetattr()
+
+        def fn(x):
+            try:
+                without_getattr.val
+                missing = False
+            except AttributeError:
+                missing = True
+            return x + with_getattr.val, missing
+
+        x = torch.randn(3)
+        result, missing = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x + 100)
+        self.assertTrue(missing)
+
+    def test_object_getattribute_slot_sees_update_hidden_by_override(self):
+        class MyObj:
+            __slots__ = ("val",)
+
+            def __init__(self):
+                self.val = 1
+
+            def __getattribute__(self, name):
+                if name == "val":
+                    return 100
+                return object.__getattribute__(self, name)
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + object.__getattribute__(obj, "val")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), x + 1)
+        obj.val = 5
+        self.assertEqual(opt_fn(x), x + 5)
+
+    def test_object_getattribute_sees_updated_value(self):
+        class MyObj:
+            def __init__(self):
+                self.scale = 2
+
+        obj = MyObj()
+
+        def fn(x):
+            return x * object.__getattribute__(obj, "scale")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        self.assertEqual(opt_fn(x), x * 2)
+        obj.scale = 5
+        self.assertEqual(opt_fn(x), x * 5)
+
+    def test_object_getattribute_on_nn_module(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = 3
+                self.weight = torch.nn.Parameter(torch.ones(3))
+                self.register_buffer("buf", torch.ones(3))
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                # Parameters, buffers and submodules live outside __dict__ and
+                # are only found by nn.Module.__getattr__, which this skips.
+                hidden = 0
+                for name in ("weight", "buf", "linear"):
+                    try:
+                        object.__getattribute__(self, name)
+                    except AttributeError:
+                        hidden += 1
+                if object.__getattribute__(self, "training"):
+                    return x * object.__getattribute__(self, "scale") + hidden
+                return x
+
+        mod = MyModule()
+        x = torch.randn(3)
+        result = torch.compile(mod, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x * 3 + 3)
+
     # --- Sparse tensor blocking ---
 
     def test_sparse_tensor_attr_access_graph_breaks(self):

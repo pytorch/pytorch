@@ -557,6 +557,20 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            name == "__getattribute__"
+            and len(args) == 2
+            and not kwargs
+            and args[1].is_python_constant()
+        ):
+            fn = self.as_python_constant()
+            # object itself, or a builtin type that inherits its slot (e.g. dict
+            # on 3.14), so the call is object.__getattribute__(obj, name).
+            if isinstance(fn, type) and fn.__getattribute__ is object.__getattribute__:
+                attr_name = args[1].as_python_constant()
+                obj = args[0].realize()
+                if isinstance(obj, UserDefinedObjectVariable):
+                    return obj.generic_getattr(tx, attr_name)
         if name == "__str__" and len(args) == 1 and not kwargs:
             arg = args[0]
             if self.as_python_constant() is object:
