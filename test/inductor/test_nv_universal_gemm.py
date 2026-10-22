@@ -4587,7 +4587,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         (
             (0, 16, True),
             (0, 32, False),
-            (0, 64, True),
+            (0, 64, False),
             (1, 16, True),
             (1, 64, True),
         ),
