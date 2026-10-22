@@ -245,6 +245,10 @@ def register_binary_nonlinear(
     def impl(
         a: ComplexTensor, b: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
+        if isinstance(a, torch.Tensor):
+            a = torch.resolve_conj(torch.resolve_neg(a))  # type: ignore[bad-assignment]
+        if isinstance(b, torch.Tensor):
+            b = torch.resolve_conj(torch.resolve_neg(b))  # type: ignore[bad-assignment]
         out_dt, (a, b) = promote_tensors(a, b)
         a_r, a_i = split_complex_arg(a)
         b_r, b_i = split_complex_arg(b)
