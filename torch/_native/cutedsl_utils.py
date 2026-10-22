@@ -30,6 +30,7 @@ _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     Version("4.6.2"),
     Version("4.7.1"),
     Version("4.8.0"),
+    Version("4.8.1"),
 }
 
 
