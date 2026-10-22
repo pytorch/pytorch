@@ -127,23 +127,29 @@ static void sdpa_vector_mps(const Tensor& q,
 }
 
 // Prefill tiles (padded head dims); keep in sync with the instantiations in
-// PrefillAttention.h and MppAttention.h. Head dims above the widest simdgroup
-// tile run on kChunkTile: the QK dim in tile-wide chunks, V/O in tile-wide
-// column slabs, one launch per slab.
+// PrefillAttention.h and MppAttention.h. Head dims above the widest tile run
+// on kChunkTile: the QK dim in tile-wide chunks, V/O in tile-wide column slabs.
 static constexpr std::array<int64_t, 8> kPrefillTiles{32, 64, 72, 80, 96, 128, 160, 192};
-static constexpr std::array<int64_t, 4> kMppTiles{64, 96, 128, 256};
+static constexpr std::array<int64_t, 3> kMppTiles{64, 96, 128};
+// Before Apple10 only, for an exact head dim: on Apple10 the 256 tile is
+// register-bound and the chunked 128 tile runs 1.7x faster (M5 Pro).
+static constexpr int64_t kMppWideTile = 256;
 static constexpr int64_t kChunkTile = 128;
 // Split-K spreads the keys of a Q block over threadgroups until the grid
 // reaches kSplitTargetThreadgroups (fills an M5 Pro), keeping at least
 // kSplitMinKBlocks K blocks per split so the partial rows and merge pay off,
 // and at most kMaxSplits of them.
 static constexpr int64_t kSplitTargetThreadgroups = 128, kSplitMinKBlocks = 8, kMaxSplits = 32;
+// The full-width V/O slabs of the MPP kernel run in one launch while the grid
+// stays below kGridThreadgroupsPerCore per GPU core (an M5 Pro fills at 128);
+// past that, one launch per slab keeps the slab's V hot across the wave (M4,
+// M5 Pro).
+static constexpr int64_t kGridThreadgroupsPerCore = 8;
 
 // Prefill: flash attention on simdgroup matrices (PrefillAttention.h) or, on
-// macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h) for half and
-// bfloat on their exact tiles. One threadgroup per (Q block, head, batch),
-// with the keys split across threadgroups when that grid is too small to
-// fill the GPU.
+// macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h). One threadgroup
+// per (Q block, head, batch), with the keys split across threadgroups when that
+// grid is too small to fill the GPU.
 static void sdpa_prefill_mps(const Tensor& q,
                              const Tensor& k,
                              const Tensor& v,
@@ -155,14 +161,25 @@ static void sdpa_prefill_mps(const Tensor& q,
   // matmul2d cooperative_tensor's lane->element layout differs across Apple GPU
   // generations (see MppAttention.h).
   static const bool is_apple10_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
+  // MPP fp32 is only bfloat-accurate in relaxed precision, and strict precision
+  // (its own fragment layout) measured 1.3x the simdgroup kernel: not worth it.
+  // Before Apple10's matrix units, MPP only beats the simdgroup kernel on an
+  // unpadded, unchunked tile (M3 Ultra, M4).
   const int64_t d = q.size(3), dv = v.size(3);
-  const bool mpp_mask = !mask_ || mask_->scalar_type() == kBool || mask_->scalar_type() == q.scalar_type();
-  const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && d == dv && k.size(2) > 0 && mpp_mask &&
-      std::find(kMppTiles.begin(), kMppTiles.end(), d) != kMppTiles.end();
+  const bool exact_mpp_tile = d == dv &&
+      (std::find(kMppTiles.begin(), kMppTiles.end(), d) != kMppTiles.end() ||
+       (!is_apple10_or_newer && d == kMppWideTile));
   const int64_t widest = std::max(d, dv);
-  const int64_t bd = use_mpp          ? d
-      : widest > kPrefillTiles.back() ? kChunkTile
-                                      : *std::lower_bound(kPrefillTiles.begin(), kPrefillTiles.end(), widest);
+  // On Apple10 a padded QK dim up to 192 with a V/O dim past the 128 tile keeps
+  // its exact simdgroup tile: MPP would chunk QK and recompute the scores per
+  // V/O slab (M5 Pro: 0.66x), while above 192 both kernels chunk and MPP wins.
+  const bool two_slabs = widest > kMppTiles.back() && widest <= kPrefillTiles.back() && dv > kMppTiles.back();
+  const bool use_mpp =
+      at::mps::has_mpp() && q.scalar_type() != kFloat && (exact_mpp_tile || (is_apple10_or_newer && !two_slabs));
+  const c10::IntArrayRef tiles = use_mpp ? c10::IntArrayRef(kMppTiles) : c10::IntArrayRef(kPrefillTiles);
+  const int64_t bd = use_mpp && exact_mpp_tile ? d
+      : widest > tiles.back()                  ? kChunkTile
+                                               : *std::lower_bound(tiles.begin(), tiles.end(), widest);
   const int64_t bq = use_mpp ? kMppBQ : kPrefillBQ, bk = use_mpp ? kMppBK : prefill_bk(bd);
 
   std::optional<Tensor> mask = mask_;
@@ -177,8 +194,10 @@ static void sdpa_prefill_mps(const Tensor& q,
 
   const int64_t rows = q.size(0) * q.size(1) * q.size(2);
   const int64_t nq = c10::metal::ceil_div(q.size(2), bq), nk = c10::metal::ceil_div(k.size(2), bk);
+  static const int64_t core_grid = kGridThreadgroupsPerCore * std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  const int64_t grid_xy = nq * q.size(0) * q.size(1);
   const int64_t max_splits = std::clamp(nk / kSplitMinKBlocks, int64_t(1), kMaxSplits);
-  const int64_t n_splits = std::clamp(kSplitTargetThreadgroups / (nq * q.size(0) * q.size(1)), int64_t(1), max_splits);
+  const int64_t n_splits = std::clamp(kSplitTargetThreadgroups / grid_xy, int64_t(1), max_splits);
   const bool split = n_splits > 1;
   const auto float_opts = q.options().dtype(kFloat);
   Tensor sums, maxs;
@@ -187,42 +206,31 @@ static void sdpa_prefill_mps(const Tensor& q,
     maxs = at::empty_like(sums);
   }
   const auto dtype = scalarToMetalTypeString(q);
-  std::string kname;
-  if (use_mpp) {
-    const auto mpp_dtype = q.scalar_type() == kHalf ? "float16"sv : "bfloat16"sv;
-    const auto mpp_mask_dtype = mask && mask->scalar_type() == kBool ? "bool_"sv : mpp_dtype;
-    kname = fmt::format("prefill_attention_mpp_{}_{}_bq{}_bk{}_bd{}_wm{}_wn1_hm{:d}_dc{:d}_split{:d}_mask{}",
-                        is_apple10_or_newer ? "a10"sv : "a9"sv,
-                        mpp_dtype,
-                        kMppBQ,
-                        kMppBK,
-                        bd,
-                        kPrefillSimdgroups,
-                        mask.has_value(),
-                        is_causal,
-                        split,
-                        mpp_mask_dtype);
-  } else {
-    const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
-    kname = fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}",
-                        dtype,
-                        bd,
-                        mask.has_value(),
-                        is_causal,
-                        d > bd,
-                        split,
-                        mask_dtype);
-  }
+  const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
+  const auto family = use_mpp ? (is_apple10_or_newer ? "_mpp_a10"sv : "_mpp_a9"sv) : ""sv;
+  const auto kname = fmt::format("prefill_attention{}_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}",
+                                 family,
+                                 dtype,
+                                 bd,
+                                 mask.has_value(),
+                                 is_causal,
+                                 d > bd,
+                                 split,
+                                 mask_dtype);
   const auto pso = lib.getPipelineStateForFunc(kname);
-  const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * n_splits);
   const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, kPrefillSimdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
-  for (int64_t v0 = 0; v0 < dv; v0 += bd) {
-    const auto vs = v.narrow(3, v0, std::min(bd, dv - v0));
+  // Only the MPP kernel takes slabs in one launch.
+  const int64_t full = dv / bd * bd;
+  const int64_t step = use_mpp && grid_xy * n_splits < core_grid ? std::max(full, bd) : bd;
+  for (int64_t v0 = 0; v0 < dv; v0 += step) {
+    const auto vs = v.narrow(3, v0, std::min(step, dv - v0));
     const auto os = out.narrow(3, v0, vs.size(3));
+    const int64_t slabs = c10::metal::ceil_div(vs.size(3), bd);
+    const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * n_splits * slabs);
     Tensor partials;
     if (split) {
-      partials = at::empty({rows, n_splits, bd}, float_opts);
+      partials = at::empty({rows, n_splits, use_mpp ? vs.size(3) : bd}, float_opts);
     }
     const PrefillAttnParams params{
         .B = c10::safe_conv<int32_t>(q.size(0)),
@@ -232,8 +240,9 @@ static void sdpa_prefill_mps(const Tensor& q,
         .kL = c10::safe_conv<int32_t>(k.size(2)),
         .gqa_factor = c10::safe_conv<int32_t>(q.size(1) / k.size(1)),
         .scale = scale,
-        .Dv = c10::safe_conv<int32_t>(vs.size(3)),
+        .Dv = c10::safe_conv<int32_t>(vs.size(3) / slabs),
         .n_splits = c10::safe_conv<int32_t>(n_splits),
+        .n_slabs = c10::safe_conv<int32_t>(slabs),
         .Q_strides = {q.stride(0), q.stride(1), q.stride(2)},
         .K_strides = {k.stride(0), k.stride(1), k.stride(2)},
         .V_strides = {vs.stride(0), vs.stride(1), vs.stride(2)},
