@@ -1287,6 +1287,25 @@ torch.ones(10) * 2
 
         self.assertFalse(any(e.name == "aten::mul" for e in prof.events()))
 
+    def test_global_callback_session_closed_by_atexit(self):
+        script = """
+import atexit
+import torch
+from torch.profiler import profile, ProfilerActivity
+config = torch._C._profiler._ExperimentalConfig(profile_all_threads=True)
+with profile(activities=[ProfilerActivity.CPU], experimental_config=config) as prof:
+    torch.ones(10) + 1
+    atexit._run_exitfuncs()
+    torch.ones(10) * 2
+names = {e.name for e in prof.events()}
+print("aten::add" in names, "aten::mul" in names)
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip().splitlines()[-1], "True False")
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
