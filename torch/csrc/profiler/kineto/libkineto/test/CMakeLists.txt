@@ -18,7 +18,7 @@ if(KINETO_BACKEND STREQUAL "xpu" AND LINUX)
 endif()
 
 if(KINETO_BACKEND STREQUAL "xpu")
-    set(XPU_XPUPTI_LIBRARY ${PTI_LIBRARY} ${SYCL_LIBRARY})
+    set(XPU_XPUPTI_LIBRARY Pti::pti_view torch::sycl)
     add_subdirectory(xpupti)
 else()
     set(XPU_XPUPTI_LIBRARY "")
