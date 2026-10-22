@@ -111,6 +111,17 @@ class _ProfilerStats:
     function_events_build_tree_call_duration_us: int = 0
 
 
+# DeviceTypes representing host (CPU-side) memory and work, as opposed to
+# accelerator (device) memory and work. Used by _parse_kineto_results() below
+# to classify memory-usage and kernel events; kept at module scope so the
+# classification itself is unit-testable independent of a real profiling run.
+_HOST_DEVICE_TYPES = (DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP)
+
+
+def _is_host_device_type(device_type: DeviceType) -> bool:
+    return device_type in _HOST_DEVICE_TYPES
+
+
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
 
@@ -664,21 +675,14 @@ class profile:
         def _cpu_memory_usage(mem_record):
             return (
                 mem_record.nbytes()
-                if mem_record.device_type()
-                in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP]
+                if _is_host_device_type(mem_record.device_type())
                 else 0
             )
 
         def _device_memory_usage(mem_record):
             return (
                 mem_record.nbytes()
-                if mem_record.device_type()
-                in [
-                    DeviceType.CUDA,
-                    DeviceType.PrivateUse1,
-                    DeviceType.HIP,
-                    DeviceType.XPU,
-                ]
+                if not _is_host_device_type(mem_record.device_type())
                 else 0
             )
 
@@ -800,11 +804,7 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if f_evt.device_type in [
-                        DeviceType.CUDA,
-                        DeviceType.PrivateUse1,
-                        DeviceType.XPU,
-                    ]:
+                    if not _is_host_device_type(f_evt.device_type):
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
