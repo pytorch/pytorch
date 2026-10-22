@@ -1356,6 +1356,61 @@ static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+// Sets view replay and grad mode for AOTAutograd's runtime wrapper. Under a
+// TorchFunctionMode, changes go through the Python-level setters so the mode
+// can intercept them; if one raises, the other is still applied.
+static void aot_set_state(PyObject* module, bool view_replay, bool grad_mode) {
+  auto& state = c10::AutogradState::get_tls_state();
+  if (!at::impl::torch_function_mode_enabled()) {
+    state.set_view_replay_enabled(view_replay);
+    state.set_grad_mode(grad_mode);
+    return;
+  }
+  auto set = [&](const char* setter, bool current, bool value) {
+    if (current != value) {
+      py::handle(module).attr(setter)(value);
+    }
+  };
+  auto set_grad_mode = [&] {
+    set("_set_grad_enabled", state.get_grad_mode(), grad_mode);
+  };
+  try {
+    set("_set_view_replay_enabled",
+        state.get_view_replay_enabled(),
+        view_replay);
+  } catch (...) {
+    set_grad_mode();
+    throw;
+  }
+  set_grad_mode();
+}
+
+// Training enables view replay and grad mode; inference disables grad mode.
+// Returns the prior state for _aot_runtime_exit to restore.
+static PyObject* aot_runtime_enter(PyObject* self, PyObject* training) {
+  HANDLE_TH_ERRORS
+  auto train = py::handle(training).cast<bool>();
+  auto& state = c10::AutogradState::get_tls_state();
+  bool prior_view_replay = state.get_view_replay_enabled();
+  bool prior_grad_mode = state.get_grad_mode();
+  try {
+    aot_set_state(self, train || prior_view_replay, train);
+  } catch (...) {
+    aot_set_state(self, prior_view_replay, prior_grad_mode);
+    throw;
+  }
+  return THPUtils_packInt32(prior_view_replay | (prior_grad_mode << 1));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* aot_runtime_exit(PyObject* self, PyObject* prior) {
+  HANDLE_TH_ERRORS
+  auto bits = py::handle(prior).cast<int>();
+  aot_set_state(self, bits & 1, bits & 2);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_grad_layout_enforcement_enabled(
     PyObject* self,
     PyObject* args,
@@ -1805,6 +1860,8 @@ static PyMethodDef methods[] = {
      castPyCFunctionWithKeywords(set_view_replay_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
+    {"_aot_runtime_enter", aot_runtime_enter, METH_O, nullptr},
+    {"_aot_runtime_exit", aot_runtime_exit, METH_O, nullptr},
     {"_is_grad_layout_enforcement_enabled",
      is_grad_layout_enforcement_enabled,
      METH_NOARGS,
