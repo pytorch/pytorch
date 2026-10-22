@@ -221,14 +221,19 @@ std::string processName([[maybe_unused]] int32_t pid) {
   // NOLINTNEXTLINE(performance-avoid-endl)
   std::cerr << "Failed to read process name for pid " << pid << std::endl;
 #elif defined(_WIN32)
-  constexpr BOOL inherit_handle = FALSE; // FALSE means the handle cannot be inherited by child processes
+  constexpr BOOL inherit_handle =
+      FALSE; // FALSE means the handle cannot be inherited by child processes
   const HANDLE process = OpenProcess(
-      PROCESS_QUERY_LIMITED_INFORMATION, inherit_handle, static_cast<DWORD>(pid));
+      PROCESS_QUERY_LIMITED_INFORMATION,
+      inherit_handle,
+      static_cast<DWORD>(pid));
   if (process != nullptr) {
     char path[MAX_PATH];
     DWORD size = MAX_PATH;
-    constexpr DWORD use_win32_path_format = 0; // 0 means use the Win32 path format 1 means PROCESS_NAME_NATIVE
-    const BOOL ok = QueryFullProcessImageNameA(process, use_win32_path_format, path, &size);
+    constexpr DWORD use_win32_path_format =
+        0; // 0 means use the Win32 path format 1 means PROCESS_NAME_NATIVE
+    const BOOL ok =
+        QueryFullProcessImageNameA(process, use_win32_path_format, path, &size);
     CloseHandle(process);
     if (ok && size > 0) {
       const std::string ret(path, size);
@@ -253,13 +258,19 @@ static std::pair<int32_t, std::string> parentPidAndCommand(
   // "<pid> (<comm>) <state> <ppid> ..."; comm may itself contain parentheses.
   const auto start_bracket_pos = line.find('(');
   const auto end_bracket_pos = line.rfind(')');
-  const bool in_brackets = start_bracket_pos != std::string::npos && end_bracket_pos != std::string::npos && start_bracket_pos < end_bracket_pos;
+  const bool in_brackets = start_bracket_pos != std::string::npos &&
+      end_bracket_pos != std::string::npos &&
+      start_bracket_pos < end_bracket_pos;
   char state = 0;
   int32_t parent_pid = 0;
   const bool parent_pid_parsed = static_cast<bool>(
-      std::istringstream(line.substr(end_bracket_pos + 1)) >> state >> parent_pid);
+      std::istringstream(line.substr(end_bracket_pos + 1)) >> state >>
+      parent_pid);
   if (in_brackets && parent_pid_parsed) {
-    return std::make_pair(parent_pid, line.substr(start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
+    return std::make_pair(
+        parent_pid,
+        line.substr(
+            start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
   std::cerr << "Failed to parse /proc/" << pid << "/stat" << std::endl;
