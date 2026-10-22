@@ -24,6 +24,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param import (
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     AllGatherInput,
+    DefaultAllGatherLayout,
 )
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -661,9 +662,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
     def _set_native_all_gather(self, model: nn.Module) -> None:
-        # FSDPModule has no setter for the all-gather copy-out yet
-        group = fully_shard.state(model)._fsdp_param_group
-        group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+        native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        model.set_all_gather_layout(native)
 
     def _init_hsdp_mesh(self, shard_world_size: int) -> DeviceMesh:
         return init_device_mesh(
@@ -1120,6 +1120,12 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             self.assertEqual(model(inp), inp @ weight.T)
         fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
         self.assertEqual(fsdp_param.all_gather_output_layouts, ())
+        # More shard ranks have nothing to all-gather, which raises, not StopIteration
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (self.world_size,)))
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        with self.assertRaisesRegex(ValueError, "without any payloads"):
+            model(inp)
 
 
 class TestAllGatherInputValidation(TestCase):

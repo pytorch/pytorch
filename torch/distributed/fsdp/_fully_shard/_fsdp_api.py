@@ -158,6 +158,10 @@ class AllGather(Comm):
     Interface for all_gather comm primitive
     """
 
+    # A weak reference to the parameter group whose all-gather layout installed
+    # this comm, set by FSDP
+    _fsdp_param_group: Callable[[], object] | None = None
+
     @abstractmethod
     def __call__(
         self,
