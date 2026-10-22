@@ -3478,6 +3478,18 @@ class TestReductions(TestCase):
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
 
+    @dtypes(torch.float, torch.double)
+    @skipIfMPS
+    def test_histc_large_constant_input(self, device, dtype):
+        # float32 integer precision ends at 2**24, so the equal-bounds
+        # +/-1 range widening is a no-op at these magnitudes (see
+        # bins_edges_correction in Histogram.cpp for the CPU-side fix).
+        for value in (2.0**23, 2.0**24, 2.0**25, -(2.0**25)):
+            x = torch.full((5,), value, dtype=dtype, device=device)
+            expected = torch.histc(x.cpu(), bins=4, min=0, max=0)
+            actual = torch.histc(x, bins=4, min=0, max=0)
+            self.assertEqual(expected, actual)
+
     # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the tensors are empty) in the tensor. These tests specifically
     # cater to functions where specifying the `dim` parameter is necessary.
