@@ -1,11 +1,3 @@
-// SDPA decode kernel, one query row per (batch, head). sdpa_vector<.., BLOCKS
-// = 1> writes the normalized output in one pass; the kDecodeBlocks variant
-// splits the keys across kDecodeBlocks threadgroups, which write unnormalized
-// fp32 partial rows in place of the output for sdpa_merge_partials. Head dims
-// are padded to BD: a lane's window of BD / 32 columns is clamped inside the
-// real dims so its loads stay unconditional, and the columns a clamped window
-// shares with the previous lane are zeroed in q and skipped at the store.
-//
 // Adapted from MLX:
 //   https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/scaled_dot_product_attention.metal
 #pragma once
@@ -218,9 +210,9 @@ template <typename T>
     num += f * partials[b * width];
     den += f * sums[b];
   }
-  for (ushort k = 1; k < kMergeLanes; k <<= 1) {
-    num += simd_shuffle_xor(num, k);
-    den += simd_shuffle_xor(den, k);
+  for (int k = 1; k < kMergeLanes; k <<= 1) {
+    num += simd_shuffle_xor(num, ushort(k));
+    den += simd_shuffle_xor(den, ushort(k));
   }
   if (lane == 0) {
     out[row * long(dims.z) + col] =

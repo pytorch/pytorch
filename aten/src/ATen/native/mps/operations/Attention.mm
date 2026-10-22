@@ -31,14 +31,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 using namespace std::literals;
 
-static uint32_t u32(int64_t x) {
-  return c10::safe_conv<uint32_t>(x, "uint32_t");
-}
-
-static int32_t i32(int64_t x) {
-  return c10::safe_conv<int32_t>(x, "int32_t");
-}
-
 // out[rows, Dv] = merge of partials[rows, blocks, width] with their row max / sum.
 static void merge_partials(id<MTLComputeCommandEncoder> encoder,
                            const Tensor& partials,
@@ -49,7 +41,10 @@ static void merge_partials(id<MTLComputeCommandEncoder> encoder,
   const auto dv = out.size(-1);
   const auto pso = lib.getPipelineStateForFunc("sdpa_merge_partials_" + scalarToMetalTypeString(out));
   [encoder setComputePipelineState:pso];
-  const std::array<uint32_t, 4> dims{u32(dv), u32(partials.size(-2)), u32(out.stride(-2)), u32(partials.size(-1))};
+  const std::array<uint32_t, 4> dims{c10::safe_conv<uint32_t>(dv),
+                                     c10::safe_conv<uint32_t>(partials.size(-2)),
+                                     c10::safe_conv<uint32_t>(out.stride(-2)),
+                                     c10::safe_conv<uint32_t>(partials.size(-1))};
   mtl_setArgs(encoder, partials, sums, maxs, out, dims);
   // Threadgroups of kMergeLanes x columns: a decode merge has few rows and
   // should still spread across the GPU cores.
@@ -83,16 +78,16 @@ static void sdpa_vector_mps(const Tensor& q,
                             float scale,
                             int64_t bd) {
   using namespace mps;
-  const uint32_t rows = u32(q.size(0) * q.size(1)), n = u32(k.size(2));
+  const uint32_t rows = c10::safe_conv<uint32_t>(q.size(0) * q.size(1)), n = c10::safe_conv<uint32_t>(k.size(2));
   const bool two_pass = n >= kTwoPassMinKeys && rows < (n >= kTwoPassLongKeys ? kTwoPassLongMaxRows : kTwoPassMaxRows);
-  auto stride = [](const Tensor& t, int d) { return u32(t.stride(d)); };
+  auto stride = [](const Tensor& t, int d) { return c10::safe_conv<uint32_t>(t.stride(d)); };
   auto mask_stride = [&](int d) { return mask && mask->size(d) > 1 ? stride(*mask, d) : 0u; };
   const DecodeAttnParams params{
       .N = n,
-      .D = u32(q.size(3)),
-      .Dv = u32(v.size(3)),
-      .gqa_factor = u32(q.size(1) / k.size(1)),
-      .num_heads = u32(q.size(1)),
+      .D = c10::safe_conv<uint32_t>(q.size(3)),
+      .Dv = c10::safe_conv<uint32_t>(v.size(3)),
+      .gqa_factor = c10::safe_conv<uint32_t>(q.size(1) / k.size(1)),
+      .num_heads = c10::safe_conv<uint32_t>(q.size(1)),
       .scale = scale,
       .Q_strides = {stride(q, 0), stride(q, 1)},
       .K_strides = {stride(k, 0), stride(k, 1), stride(k, 2)},
@@ -244,17 +239,17 @@ static void sdpa_prefill_mps(const Tensor& q,
     kname += fmt::format("_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}", has_mask, is_causal, chunked, split, mask_dtype);
     const auto pso = lib.getPipelineStateForFunc(kname);
     const PrefillAttnParams params{
-        .B = i32(q.size(0)),
-        .H = i32(q.size(1)),
-        .D = i32(d),
-        .qL = i32(q.size(2)),
-        .kL = i32(k.size(2)),
-        .gqa_factor = i32(q.size(1) / k.size(1)),
+        .B = c10::safe_conv<int32_t>(q.size(0)),
+        .H = c10::safe_conv<int32_t>(q.size(1)),
+        .D = c10::safe_conv<int32_t>(d),
+        .qL = c10::safe_conv<int32_t>(q.size(2)),
+        .kL = c10::safe_conv<int32_t>(k.size(2)),
+        .gqa_factor = c10::safe_conv<int32_t>(q.size(1) / k.size(1)),
         .scale = scale,
-        .Dv = i32(vs.size(3) / slabs),
-        .n_splits = i32(splits),
-        .n_slabs = i32(slabs),
-        .n_score_splits = i32(n_score_splits),
+        .Dv = c10::safe_conv<int32_t>(vs.size(3) / slabs),
+        .n_splits = c10::safe_conv<int32_t>(splits),
+        .n_slabs = c10::safe_conv<int32_t>(slabs),
+        .n_score_splits = c10::safe_conv<int32_t>(n_score_splits),
         .Q_strides = {q.stride(0), q.stride(1), q.stride(2)},
         .K_strides = {k.stride(0), k.stride(1), k.stride(2)},
         .V_strides = {vs.stride(0), vs.stride(1), vs.stride(2)},

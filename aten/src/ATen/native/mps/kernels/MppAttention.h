@@ -59,7 +59,7 @@ struct BaseMPPFrag {
   }
 
   // Slot j -> col offset: contig {0,1,2,3} on A10, split-pair {0,1,8,9} on A8.
-  METAL_FUNC static constexpr short col_offset(short j) {
+  METAL_FUNC static constexpr int col_offset(int j) {
     if (IS_APPLE10) {
       return j;
     } else {
@@ -84,18 +84,18 @@ struct BaseMPPFrag {
     const short2 sc = get_coord();
     src += sc.y * str_x + sc.x * str_y;
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemRows; i++) {
+    for (int i = 0; i < kElemRows; i++) {
       const auto r = off_x + i * kElemRowsJump;
       const auto c = off_y;
       if constexpr (metal::is_same_v<StrY, Int<1>>) {
         MPP_PRAGMA_UNROLL
-        for (short j = 0; j < kElemCols; j++) {
+        for (int j = 0; j < kElemCols; j++) {
           dst[i * kElemCols + j] =
               static_cast<T>(src[r * str_x + c + col_offset(j)]);
         }
       } else {
         MPP_PRAGMA_UNROLL
-        for (short j = 0; j < kElemCols; j++) {
+        for (int j = 0; j < kElemCols; j++) {
           dst[i * kElemCols + j] =
               static_cast<T>(src[r * str_x + (c + col_offset(j)) * str_y]);
         }
@@ -126,11 +126,11 @@ struct BaseMPPFrag {
     auto lx = lim_x - sc.y;
     auto ly = lim_y - sc.x;
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemRows; i++) {
+    for (int i = 0; i < kElemRows; i++) {
       const auto r = off_x + i * kElemRowsJump;
       const auto c = off_y;
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kElemCols; j++) {
+      for (int j = 0; j < kElemCols; j++) {
         const auto coff = col_offset(j);
         if (r < lx && (c + coff) < ly) {
           dst[i * kElemCols + j] =
@@ -160,18 +160,18 @@ struct BaseMPPFrag {
     const short2 sc = get_coord();
     dst += sc.y * str_x + sc.x * str_y;
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemRows; i++) {
+    for (int i = 0; i < kElemRows; i++) {
       const auto r = off_x + i * kElemRowsJump;
       const auto c = off_y;
       if constexpr (metal::is_same_v<StrY, Int<1>>) {
         MPP_PRAGMA_UNROLL
-        for (short j = 0; j < kElemCols; j++) {
+        for (int j = 0; j < kElemCols; j++) {
           dst[r * str_x + c + col_offset(j)] =
               static_cast<U>(src[i * kElemCols + j]);
         }
       } else {
         MPP_PRAGMA_UNROLL
-        for (short j = 0; j < kElemCols; j++) {
+        for (int j = 0; j < kElemCols; j++) {
           dst[r * str_x + (c + col_offset(j)) * str_y] =
               static_cast<U>(src[i * kElemCols + j]);
         }
@@ -203,11 +203,11 @@ struct BaseMPPFrag {
     auto lx = lim_x - sc.y;
     auto ly = lim_y - sc.x;
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemRows; i++) {
+    for (int i = 0; i < kElemRows; i++) {
       const auto r = off_x + i * kElemRowsJump;
       const auto c = off_y;
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kElemCols; j++) {
+      for (int j = 0; j < kElemCols; j++) {
         const auto coff = col_offset(j);
         if (r < lx && (c + coff) < ly) {
           dst[r * str_x + (c + coff) * str_y] =
@@ -259,18 +259,18 @@ struct BaseMPPFrag {
         CType>();
 
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
+    for (int i = 0; i < kElemsPerFrag; i++) {
       ct_a[i] = A[i];
     }
 
     if (IS_APPLE10) {
       MPP_PRAGMA_UNROLL
-      for (short i = 0; i < kElemsPerFrag; i++) {
+      for (int i = 0; i < kElemsPerFrag; i++) {
         ct_b[i] = Bn0[i];
         ct_b[kElemsPerFrag + i] = Bn1[i];
       }
       MPP_PRAGMA_UNROLL
-      for (short i = 0; i < kElemsPerFrag; i++) {
+      for (int i = 0; i < kElemsPerFrag; i++) {
         ct_c[i] = Cn0[i];
         ct_c[kElemsPerFrag + i] = Cn1[i];
       }
@@ -278,20 +278,20 @@ struct BaseMPPFrag {
       gemm_op.run(ct_a, ct_b, ct_c);
 
       MPP_PRAGMA_UNROLL
-      for (short i = 0; i < kElemsPerFrag; i++) {
+      for (int i = 0; i < kElemsPerFrag; i++) {
         Cn0[i] = ct_c[i];
         Cn1[i] = ct_c[kElemsPerFrag + i];
       }
     } else {
       MPP_PRAGMA_UNROLL
-      for (short i = 0; i < 4; i++) {
+      for (int i = 0; i < 4; i++) {
         ct_b[i] = Bn0[i];
         ct_b[4 + i] = Bn1[i];
         ct_b[8 + i] = Bn0[4 + i];
         ct_b[12 + i] = Bn1[4 + i];
       }
       MPP_PRAGMA_UNROLL
-      for (short i = 0; i < 4; i++) {
+      for (int i = 0; i < 4; i++) {
         ct_c[i] = Cn0[i];
         ct_c[4 + i] = Cn1[i];
         ct_c[8 + i] = Cn0[4 + i];
@@ -301,7 +301,7 @@ struct BaseMPPFrag {
       gemm_op.run(ct_a, ct_b, ct_c);
 
       MPP_PRAGMA_UNROLL
-      for (short i = 0; i < 4; i++) {
+      for (int i = 0; i < 4; i++) {
         Cn0[i] = ct_c[i];
         Cn1[i] = ct_c[4 + i];
         Cn0[4 + i] = ct_c[8 + i];
@@ -315,7 +315,7 @@ struct BaseMPPFrag {
       thread const dtype_frag_t<T>& inp_vals,
       thread T* reduced_vals) {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemRows; i++) {
+    for (int i = 0; i < kElemRows; i++) {
       T thr_reduce = Op::apply(
           Op::apply(inp_vals[i * kElemCols + 0], inp_vals[i * kElemCols + 1]),
           Op::apply(inp_vals[i * kElemCols + 2], inp_vals[i * kElemCols + 3]));
@@ -332,9 +332,9 @@ struct BaseMPPFrag {
       thread dtype_frag_t<T>& inp_vals,
       thread T* row_vals) {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemRows; i++) {
+    for (int i = 0; i < kElemRows; i++) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kElemCols; j++) {
+      for (int j = 0; j < kElemCols; j++) {
         inp_vals[i * kElemCols + j] =
             Op::apply(inp_vals[i * kElemCols + j], row_vals[i]);
       }
@@ -383,10 +383,10 @@ struct BaseMPPFragK_Apple8 {
     const short2 sc = get_coord();
     src += sc.y * str_x + sc.x * str_y;
     MPP_PRAGMA_UNROLL
-    for (short s = 0; s < kElemsPerFrag; s++) {
-      const short s_local = s & 3;
-      const short r = off_x + (s_local & 1) + 8 * ((s_local >> 1) & 1);
-      const short c = off_y + 8 * (s >> 2);
+    for (int s = 0; s < kElemsPerFrag; s++) {
+      const int s_local = s & 3;
+      const int r = off_x + (s_local & 1) + 8 * ((s_local >> 1) & 1);
+      const int c = off_y + 8 * (s >> 2);
       if constexpr (metal::is_same_v<StrY, Int<1>>) {
         dst[s] = static_cast<T>(src[r * str_x + c]);
       } else {
@@ -418,10 +418,10 @@ struct BaseMPPFragK_Apple8 {
     auto lx = lim_x - sc.y;
     auto ly = lim_y - sc.x;
     MPP_PRAGMA_UNROLL
-    for (short s = 0; s < kElemsPerFrag; s++) {
-      const short s_local = s & 3;
-      const short r = off_x + (s_local & 1) + 8 * ((s_local >> 1) & 1);
-      const short c = off_y + 8 * (s >> 2);
+    for (int s = 0; s < kElemsPerFrag; s++) {
+      const int s_local = s & 3;
+      const int r = off_x + (s_local & 1) + 8 * ((s_local >> 1) & 1);
+      const int c = off_y + 8 * (s >> 2);
       if (r < lx && c < ly) {
         dst[s] = static_cast<T>(src[r * str_x + c * str_y]);
       } else {
@@ -468,17 +468,16 @@ struct MPPTile {
 
   METAL_FUNC constexpr void clear() {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kNumFrags; ++i) {
+    for (int i = 0; i < kNumFrags; ++i) {
       val_frags[i] = frag_type(0);
     }
   }
 
-  METAL_FUNC constexpr thread frag_type& frag_at(const short i, const short j) {
+  METAL_FUNC constexpr thread frag_type& frag_at(const int i, const int j) {
     return val_frags[i * kTileCols + j];
   }
-  METAL_FUNC constexpr const thread frag_type& frag_at(
-      const short i,
-      const short j) const {
+  METAL_FUNC constexpr const thread frag_type& frag_at(const int i, const int j)
+      const {
     return val_frags[i * kTileCols + j];
   }
 
@@ -493,9 +492,9 @@ struct MPPTile {
   METAL_FUNC void row_reduce(thread metal::vec<T, kRowsPerThread>& vals) const {
     auto vptr = (thread T*)(&vals);
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kTileRows; ++i) {
+    for (int i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kTileCols; ++j) {
+      for (int j = 0; j < kTileCols; ++j) {
         MPPFrag_t::template row_reduce<Op>(
             frag_at(i, j), &vptr[i * kFragThrRows]);
       }
@@ -506,9 +505,9 @@ struct MPPTile {
   METAL_FUNC void row_bin_op(thread metal::vec<T, kRowsPerThread>& vals) {
     auto vptr = (thread T*)(&vals);
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kTileRows; ++i) {
+    for (int i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kTileCols; ++j) {
+      for (int j = 0; j < kTileCols; ++j) {
         MPPFrag_t::template row_bin_op<Op>(
             frag_at(i, j), &vptr[i * kFragThrRows]);
       }
@@ -518,9 +517,9 @@ struct MPPTile {
   template <typename U>
   METAL_FUNC void load(const device U* src, const int ld) {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kTileRows; ++i) {
+    for (int i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kTileCols; ++j) {
+      for (int j = 0; j < kTileCols; ++j) {
         MPPFrag_t::load(
             frag_at(i, j), src, ld, Int<1>{}, i * kFragRows, j * kFragCols);
       }
@@ -534,9 +533,9 @@ struct MPPTile {
       const int n_rows,
       const int n_cols) {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kTileRows; ++i) {
+    for (int i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kTileCols; ++j) {
+      for (int j = 0; j < kTileCols; ++j) {
         MPPFrag_t::load_safe(
             frag_at(i, j),
             src,
@@ -553,9 +552,9 @@ struct MPPTile {
   template <typename U>
   METAL_FUNC void store(device U* dst, const int ld) const {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kTileRows; ++i) {
+    for (int i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kTileCols; ++j) {
+      for (int j = 0; j < kTileCols; ++j) {
         MPPFrag_t::store(
             frag_at(i, j), dst, ld, Int<1>{}, i * kFragRows, j * kFragCols);
       }
@@ -569,9 +568,9 @@ struct MPPTile {
       const int n_rows,
       const int n_cols) const {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kTileRows; ++i) {
+    for (int i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
-      for (short j = 0; j < kTileCols; ++j) {
+      for (int j = 0; j < kTileCols; ++j) {
         MPPFrag_t::store_safe(
             frag_at(i, j),
             dst,
@@ -666,7 +665,7 @@ prefill_attention_mpp(
   // Pre-multiply by log2(e) so we can use exp2 in the inner softmax.
   const AccumType scale2 = params->scale * M_LOG2E_F;
 
-  constexpr short kU = 16;
+  constexpr int kU = 16;
   constexpr int kNWarps = kPrefillSimdgroups;
   static_assert(
       BQ >= (kNWarps * kU) && BQ % (kNWarps * kU) == 0,
@@ -674,7 +673,7 @@ prefill_attention_mpp(
 
   constexpr int TQ = BQ / (kNWarps * kU);
   constexpr int TD = BD / kU;
-  constexpr short TK = BK / kU;
+  constexpr int TK = BK / kU;
   static_assert(TQ == 1, "Check TQ");
   static_assert(
       (TK & 1) == 0,
@@ -711,11 +710,11 @@ prefill_attention_mpp(
   const short sm = simd_coord.y;
   const short sn = simd_coord.x;
 
-  constexpr short kRowsPT = otile_t::kRowsPerThread;
+  constexpr int kRowsPT = otile_t::kRowsPerThread;
   metal::vec<AccumType, kRowsPT> max_score;
   metal::vec<AccumType, kRowsPT> sum_score{0};
   MPP_PRAGMA_UNROLL
-  for (short i = 0; i < kRowsPT; ++i) {
+  for (int i = 0; i < kRowsPT; ++i) {
     max_score[i] = -INFINITY;
   }
 
@@ -754,11 +753,11 @@ prefill_attention_mpp(
     auto qk_chunk = [&](int d0) __attribute__((always_inline)) {
       const bool d_full = d0 + BD <= D;
       MPP_PRAGMA_UNROLL
-      for (short iq = 0; iq < TQ; iq++) {
+      for (int iq = 0; iq < TQ; iq++) {
         MPP_PRAGMA_UNROLL
-        for (short ik = 0; ik < TK; ik += 2) {
+        for (int ik = 0; ik < TK; ik += 2) {
           MPP_PRAGMA_UNROLL
-          for (short id = 0; id < TD; id++) {
+          for (int id = 0; id < TD; id++) {
             MPPTile<T, 1, 1, QFrag_t> Qtile;
             MPPTile<T, 2, 1, KFrag_t> Ktile;
 
@@ -802,24 +801,24 @@ prefill_attention_mpp(
 
     // Scale (in log2 space).
     MPP_PRAGMA_UNROLL
-    for (short ii = 0; ii < stile_t::kElemsPerTile; ii++) {
+    for (int ii = 0; ii < stile_t::kElemsPerTile; ii++) {
       Stile.elems()[ii] *= scale2;
     }
 
     // Mask out the partial K column when kL is not BK-aligned.
     if (!align_K && is_last_k) {
       MPP_PRAGMA_UNROLL
-      for (short iq = 0; iq < TQ; iq++) {
+      for (int iq = 0; iq < TQ; iq++) {
         MPP_PRAGMA_UNROLL
-        for (short ik = 0; ik < TK; ik++) {
-          const short col_pos = ik * kU + sn;
+        for (int ik = 0; ik < TK; ik++) {
+          const int col_pos = ik * kU + sn;
           thread auto& fg = Stile.frag_at(iq, ik);
           MPP_PRAGMA_UNROLL
-          for (short ii = 0; ii < stile_t::kFragThrRows; ii++) {
+          for (int ii = 0; ii < stile_t::kFragThrRows; ii++) {
             MPP_PRAGMA_UNROLL
-            for (short jj = 0; jj < stile_t::kFragThrCols; jj++) {
+            for (int jj = 0; jj < stile_t::kFragThrCols; jj++) {
               const auto loc = ii * stile_t::kFragThrCols + jj;
-              const short c_off = QFrag_t::col_offset(jj);
+              const int c_off = QFrag_t::col_offset(jj);
               if ((col_pos + c_off) >= kL_rem) {
                 fg[loc] = -INFINITY;
               }
@@ -835,14 +834,14 @@ prefill_attention_mpp(
         const int base_row = block_idx * BQ + tm;
         const int base_col = kb * BK;
         MPP_PRAGMA_UNROLL
-        for (short iq = 0; iq < TQ; iq++) {
+        for (int iq = 0; iq < TQ; iq++) {
           MPP_PRAGMA_UNROLL
-          for (short ik = 0; ik < TK; ik++) {
+          for (int ik = 0; ik < TK; ik++) {
             thread auto& fg = Stile.frag_at(iq, ik);
             MPP_PRAGMA_UNROLL
-            for (short ii = 0; ii < stile_t::kFragThrRows; ii++) {
+            for (int ii = 0; ii < stile_t::kFragThrRows; ii++) {
               MPP_PRAGMA_UNROLL
-              for (short jj = 0; jj < stile_t::kFragThrCols; jj++) {
+              for (int jj = 0; jj < stile_t::kFragThrCols; jj++) {
                 const int r =
                     base_row + iq * kU + ii * stile_t::kFragRowsJump + sm;
                 const int c = base_col + ik * kU + QFrag_t::col_offset(jj) + sn;
@@ -869,9 +868,9 @@ prefill_attention_mpp(
       const bool inside = (base_row + BQ <= qL) && (base_col + BK <= kL);
 
       MPP_PRAGMA_UNROLL
-      for (short iq = 0; iq < TQ; iq++) {
+      for (int iq = 0; iq < TQ; iq++) {
         MPP_PRAGMA_UNROLL
-        for (short ik = 0; ik < TK; ik++) {
+        for (int ik = 0; ik < TK; ik++) {
           const int row_pos = base_row + iq * kU;
           const int col_pos = base_col + ik * kU;
           mfrag_t mfrag;
@@ -896,7 +895,7 @@ prefill_attention_mpp(
           }
           thread auto& fg = Stile.frag_at(iq, ik);
           MPP_PRAGMA_UNROLL
-          for (short jj = 0; jj < mtile_t::kElemsPerFrag; jj++) {
+          for (int jj = 0; jj < mtile_t::kElemsPerFrag; jj++) {
             if constexpr (is_bool) {
               fg[jj] = mfrag[jj] ? fg[jj] : (AccumType)-INFINITY;
             } else {
@@ -911,7 +910,7 @@ prefill_attention_mpp(
     metal::vec<AccumType, kRowsPT> new_max;
     metal::vec<AccumType, kRowsPT> factor;
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
+    for (int i = 0; i < kRowsPT; ++i) {
       new_max[i] = max_score[i];
     }
     Stile.template row_reduce<MaxOp>(new_max);
@@ -919,7 +918,7 @@ prefill_attention_mpp(
 
     // If new_max is -inf, the row is fully masked so far; keep state.
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
+    for (int i = 0; i < kRowsPT; ++i) {
       factor[i] = (new_max[i] == -INFINITY)
           ? (AccumType)1
           : fast::exp2(max_score[i] - new_max[i]);
@@ -927,7 +926,7 @@ prefill_attention_mpp(
     }
 
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
+    for (int i = 0; i < kRowsPT; ++i) {
       sum_score[i] = sum_score[i] * factor[i];
     }
     Stile.template row_reduce<SumOp>(sum_score);
@@ -939,16 +938,16 @@ prefill_attention_mpp(
     // O += P @ V.
     const bool v_full = k_rows == BK && Dv == BD;
     MPP_PRAGMA_UNROLL
-    for (short iq = 0; iq < TQ; iq++) {
+    for (int iq = 0; iq < TQ; iq++) {
       MPP_PRAGMA_UNROLL
-      for (short id = 0; id < TD; id += 2) {
+      for (int id = 0; id < TD; id += 2) {
         if constexpr (BD == 128) {
           if (id == 4) {
             threadgroup_barrier(mem_flags::mem_none);
           }
         }
         MPP_PRAGMA_UNROLL
-        for (short ik = 0; ik < TK; ik++) {
+        for (int ik = 0; ik < TK; ik++) {
           MPPTile<T, 1, 2, QFrag_t> Vtile;
           const int V_load_off = ik * kU * v_seq_stride + id * kU;
           if (v_full) {
@@ -981,7 +980,7 @@ prefill_attention_mpp(
   // Every slab computes the same row stats and writes the same values.
   if (n_splits > 1) {
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
+    for (int i = 0; i < kRowsPT; ++i) {
       const int row = sm + i * otile_t::kFragRowsJump;
       if (sn == 0 && row < o_rows) {
         sums[part0 + row * n_splits] = sum_score[i];
@@ -991,14 +990,14 @@ prefill_attention_mpp(
   } else {
     // Treat fully-masked rows as zero output.
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
+    for (int i = 0; i < kRowsPT; ++i) {
       if (max_score[i] == -INFINITY) {
         sum_score[i] = (AccumType)1;
       }
     }
     metal::vec<AccumType, kRowsPT> rcp;
     MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
+    for (int i = 0; i < kRowsPT; ++i) {
       rcp[i] = 1.0f / sum_score[i];
     }
     Otile.template row_bin_op<MulOp>(rcp);

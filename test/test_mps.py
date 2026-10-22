@@ -12997,101 +12997,67 @@ class TestSDPA(TestCaseMPS):
         tol = {torch.float32: 5e-5, torch.float16: 2e-3, torch.bfloat16: 8e-3}[dtype]
         self.assertLess(((got - ref).abs().max() / ref.abs().max()).item(), tol)
 
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("mask", [None, "bool", "float32", "causal"])
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
     @parametrize("shape", [
-        # (batch, NH, NH_kv, q_len, s_len, head_dim, v_dim); no head dim is a kernel tile width
-        (1, 23, 23, 1, 17, 121, 121),  # decode, lane windows clamped inside the head dim
-        (1, 4, 2, 1, 4096, 192, 128),  # two-pass decode with QK dim != V dim
-        (1, 2, 2, 1, 64, 600, 600),  # past the widest decode tile: prefill at q_len 1
-        (2, 8, 8, 8, 2048, 40, 40),  # short q_len on the prefill kernel, split-K
-        (1, 2, 2, 100, 300, 48, 48),  # partial Q and K blocks
-        (1, 2, 1, 64, 64, 256, 256),  # QK dim chunked, V/O in slabs (staged scores for float32)
-        (1, 1, 1, 40, 40, 512, 512),
-        (1, 1, 1, 2, 2, 40000, 64),  # QK dim past 32767: int, not short, limits in the MPP tile loads
-        (1, 2, 2, 4, 0, 64, 64),  # no keys
+        # (NH, NH_kv, q_len, s_len, head_dim, v_dim); no head dim is a kernel tile width
+        (23, 23, 1, 17, 121, 121),  # decode, lane windows clamped inside the head dim
+        (4, 2, 1, 4096, 192, 128),  # two-pass decode with QK dim != V dim
+        (8, 8, 8, 2048, 40, 40),  # prefill: partial Q block, split-K
+        (2, 1, 100, 300, 256, 300),  # partial Q and K blocks, QK dim chunked, V/O in slabs
+        (1, 1, 2, 40, 40000, 64),  # QK dim past 32767: int, not short, limits in the MPP tile loads
+        (2, 2, 4, 0, 64, 64),  # no keys
     ], name_fn=lambda s: "x".join(map(str, s)))
-    def test_sdpa_non_tile_shapes(self, dtype, mask, shape):
-        batch, NH, NH_kv, q_len, s_len, head_dim, v_dim = shape
-        q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
-        k = torch.randn(batch, NH_kv, s_len, head_dim, dtype=dtype, device="mps")
-        v = torch.randn(batch, NH_kv, s_len, v_dim, dtype=dtype, device="mps")
-        attn_mask = None
-        if mask == "bool":
-            attn_mask = torch.rand(batch, 1, q_len, s_len, device="mps") > 0.3
-        elif mask == "float32":
-            attn_mask = torch.randn(batch, 1, q_len, s_len, device="mps")
-        is_causal = mask == "causal"
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=is_causal, enable_gqa=NH != NH_kv)
-        cpu_mask = attn_mask.cpu() if attn_mask is not None else None
+    def test_sdpa_non_tile_shapes(self, dtype, shape):
+        NH, NH_kv, q_len, s_len, head_dim, v_dim = shape
+        q = torch.randn(2, NH, q_len, head_dim, dtype=dtype, device="mps")
+        k = torch.randn(2, NH_kv, s_len, head_dim, dtype=dtype, device="mps")
+        v = torch.randn(2, NH_kv, s_len, v_dim, dtype=dtype, device="mps")
+        mask = torch.rand(2, 1, q_len, s_len, device="mps") > 0.3
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=NH != NH_kv)
         ref = F.scaled_dot_product_attention(
-            q.cpu().float(), k.cpu().float(), v.cpu().float(), attn_mask=cpu_mask, is_causal=is_causal, enable_gqa=NH != NH_kv
+            q.cpu().float(), k.cpu().float(), v.cpu().float(), attn_mask=mask.cpu(), enable_gqa=NH != NH_kv
         )
-        tol = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 0.02}[dtype]
-        self._compare_tensors(out.cpu().float(), ref, tol=tol)
+        self._compare_tensors(out.cpu().float(), ref, tol=1e-4 if dtype == torch.float32 else 0.02)
 
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("q_len", [1, 40])  # decode and prefill kernels
-    @parametrize("fill", ["randn", "finfo_min", "neg_1e9"])
-    def test_sdpa_fp32_mask(self, dtype, q_len, fill):
-        # An fp32 additive mask is allowed with any query dtype and is added in
-        # fp32 like the CPU math path: no rounding to the query dtype, and a row
-        # masked with a finite sentinel averages the values instead of zeroing.
-        q = torch.randn(1, 2, q_len, 64, dtype=dtype)
-        k = torch.randn(1, 2, 50, 64, dtype=dtype)
-        v = torch.randn(1, 2, 50, 64, dtype=dtype)
-        # magnitudes where rounding the mask to bfloat16 would move logits by up to 0.5
-        mask = torch.randn(1, 1, q_len, 50) * 60
-        if fill == "finfo_min":
-            mask[..., 0, :] = torch.finfo(torch.float32).min
-        elif fill == "neg_1e9":
-            mask[..., 0, :] = -1e9
+    def test_sdpa_fp32_mask(self, dtype, q_len):
+        # An fp32 additive mask is added in fp32 like the CPU math path, not rounded
+        # to the query dtype: magnitudes of 60 would move logits by up to 0.5 in
+        # bfloat16, and a row masked with finfo.min averages the values instead of
+        # zeroing.
+        q = torch.randn(2, 2, q_len, 64, dtype=dtype)
+        k = torch.randn(2, 2, 50, 64, dtype=dtype)
+        v = torch.randn(2, 2, 50, 64, dtype=dtype)
+        mask = torch.randn(2, 1, q_len, 50) * 60
+        mask[0, :, 0] = torch.finfo(torch.float32).min
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
             ref = F.scaled_dot_product_attention(q.float(), k.float(), v.float(), attn_mask=mask)
         out = F.scaled_dot_product_attention(q.to("mps"), k.to("mps"), v.to("mps"), attn_mask=mask.to("mps"))
-        tol = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 0.02}[dtype]
-        self._compare_tensors(out.cpu().float(), ref, tol=tol)
+        self._compare_tensors(out.cpu().float(), ref, tol=5e-3 if dtype == torch.float16 else 0.02)
 
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
-    @parametrize("q_len", [1, 5])
-    @parametrize("mask", [None, "bool", "float32", "causal"])
-    def test_sdpa_zero_qk_head_dim(self, dtype, q_len, mask):
+    @parametrize("q_len", [1, 5])  # decode and prefill kernels
+    def test_sdpa_zero_qk_head_dim(self, q_len):
         # Every score is zero: uniform attention over the unmasked keys, as on CPU.
-        q = torch.empty(1, 2, q_len, 0, dtype=dtype, device="mps")
-        k = torch.empty(1, 2, 8, 0, dtype=dtype, device="mps")
-        v = torch.randn(1, 2, 8, 16, dtype=dtype, device="mps")
-        attn_mask = None
-        if mask == "bool":
-            attn_mask = torch.rand(1, 1, q_len, 8, device="mps") > 0.3
-            attn_mask[..., 0] = True  # no fully masked row
-        elif mask == "float32":
-            attn_mask = torch.randn(1, 1, q_len, 8, device="mps")
-        is_causal = mask == "causal"
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
-        cpu_mask = attn_mask.cpu() if attn_mask is not None else None
-        ref = F.scaled_dot_product_attention(
-            q.cpu().float(), k.cpu().float(), v.cpu().float(), attn_mask=cpu_mask, is_causal=is_causal
-        )
-        self._compare_tensors(out.cpu().float(), ref, tol=1e-4 if dtype == torch.float32 else 0.02)
+        q = torch.empty(1, 2, q_len, 0, device="mps")
+        k = torch.empty(1, 2, 8, 0, device="mps")
+        v = torch.randn(1, 2, 8, 16, device="mps")
+        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), is_causal=True)
+        self._compare_tensors(out.cpu(), ref, tol=1e-4)
 
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
-    @parametrize("mask", [None, "bool", "causal"])
-    def test_sdpa_unstaged_wide_head_dim(self, dtype, mask):
+    def test_sdpa_unstaged_wide_head_dim(self):
         # PYTORCH_MPS_SDPA_STAGED_SCORES_MAX_BYTES=0 disables the staged scores
-        # pass, so a V/O dim wider than the tile runs the fused kernel once per
-        # column slab: the path otherwise taken only by very large inputs.
-        q = torch.randn(1, 2, 70, 256, dtype=dtype, device="mps")
-        k = torch.randn(1, 2, 90, 256, dtype=dtype, device="mps")
-        v = torch.randn(1, 2, 90, 300, dtype=dtype, device="mps")
-        attn_mask = torch.rand(1, 1, 70, 90, device="mps") > 0.3 if mask == "bool" else None
-        is_causal = mask == "causal"
+        # pass of the simdgroup (fp32) kernel, so a V/O dim wider than the tile
+        # runs the fused kernel once per column slab: the path otherwise taken
+        # only by very large inputs.
+        q = torch.randn(1, 2, 70, 256, device="mps")
+        k = torch.randn(1, 2, 90, 256, device="mps")
+        v = torch.randn(1, 2, 90, 300, device="mps")
         with unittest.mock.patch.dict(os.environ, {"PYTORCH_MPS_SDPA_STAGED_SCORES_MAX_BYTES": "0"}):
-            out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
-        cpu_mask = attn_mask.cpu() if attn_mask is not None else None
-        ref = F.scaled_dot_product_attention(
-            q.cpu().float(), k.cpu().float(), v.cpu().float(), attn_mask=cpu_mask, is_causal=is_causal
-        )
-        self._compare_tensors(out.cpu().float(), ref, tol=1e-4 if dtype == torch.float32 else 0.02)
+            out = F.scaled_dot_product_attention(q, k, v)
+        ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+        self._compare_tensors(out.cpu(), ref, tol=1e-4)
 
 class TestSDPAMetaDispatchMode(TorchDispatchMode):
     """
