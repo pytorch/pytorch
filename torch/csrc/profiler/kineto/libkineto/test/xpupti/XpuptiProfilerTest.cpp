@@ -236,6 +236,11 @@ TEST(XpuptiProfilerTest, OverheadActivity) {
         << "metadata = " << metadata;
     EXPECT_NE(metadata.find("overhead occupancy"), std::string::npos)
         << "metadata = " << metadata;
+    EXPECT_TRUE(
+        pActivity
+            ->getMetadataValue(libkineto::XpuMetadataFields::kOverheadApiId)
+            .has_value())
+        << "metadata = " << metadata;
   }
 }
 
