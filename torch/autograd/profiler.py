@@ -46,9 +46,6 @@ from torch.autograd.profiler_util import (
 from torch.futures import Future
 
 
-# Close the global callback session on interpreter exit. If disableProfiler is never
-# called (e.g. an exception between prof.start() and prof.stop()), this is needed to
-# block threads from accessing profiler resources after they have been torn down.
 atexit.register(_close_global_callback_session)
 
 __all__ = [

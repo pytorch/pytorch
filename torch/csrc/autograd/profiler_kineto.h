@@ -202,6 +202,10 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+// Closes the global callback session at interpreter exit. If disableProfiler()
+// is never called (e.g. an exception between prof.start() and prof.stop()),
+// this is needed to block threads from accessing profiler resources after they
+// have been torn down.
 TORCH_API void closeGlobalCallbackSession();
 
 using ActivityFilter = std::unordered_map<
