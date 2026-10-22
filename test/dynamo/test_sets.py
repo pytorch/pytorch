@@ -72,6 +72,64 @@ class CustomSetTests(_BaseSetTests):
         self.assertTrue(s.contains(3))
 
 
+class CustomNewSetTests(_BaseSetTests):
+    # No class between the leaf and set/frozenset overrides __new__ at all
+    # -- tp_new must resolve the owner by walking the MRO, not by checking
+    # self.value.__new__ identity for a fixed list of known base types.
+    class PlainSet(set):
+        pass
+
+    class GrandchildPlainSet(PlainSet):
+        pass
+
+    class PlainFrozenset(frozenset):
+        pass
+
+    class GrandchildPlainFrozenset(PlainFrozenset):
+        pass
+
+    @make_dynamo_test
+    def test_set_new_exact_type(self):
+        s = set.__new__(set)
+        s.add(1)
+        self.assertTrue(s == {1})
+
+    @make_dynamo_test
+    def test_frozenset_new_exact_type(self):
+        s = frozenset.__new__(frozenset)
+        self.assertTrue(s == frozenset())
+
+    @make_dynamo_test
+    def test_set_new_ignores_kwargs(self):
+        # set.__new__ (tp_new) silently ignores extra args/kwargs -- only
+        # set.__init__ (called separately) actually populates the set.
+        s = set.__new__(set, [1, 2], extra="ignored")
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError, lambda: frozenset.__new__(frozenset, [1, 2], extra=1)
+        )
+
+    @make_dynamo_test
+    def test_set_new_multilevel_no_override_ignores_extra_args(self):
+        s = self.GrandchildPlainSet.__new__(
+            self.GrandchildPlainSet, [1, 2], extra="ignored"
+        )
+        self.assertTrue(type(s) is self.GrandchildPlainSet)
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_multilevel_no_override_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError,
+            lambda: self.GrandchildPlainFrozenset.__new__(
+                self.GrandchildPlainFrozenset, [1, 2], extra=1
+            ),
+        )
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_isdisjoint_with_generator(self):
         n = 0
