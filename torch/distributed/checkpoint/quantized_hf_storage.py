@@ -10,6 +10,7 @@ import torch
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
+    MetadataIndex,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadPlanner, ReadItem
@@ -88,7 +89,25 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                     # Update the metadata with the size after dequantization.
                     # Metadata used by planner to slice state dict.
                     tensor_metadata.size = dequantized_size
+                    tensor_metadata.properties.dtype = self.target_dtype
                     self._tensor_full_shapes[fqn] = dequantized_size
+
+                    # The planner sizes reads from chunks, and read_data looks
+                    # each read up by its chunk offset, so move both from
+                    # [..., G, B] to the dequantized [..., G*B*2].
+                    dequantized_chunks = []
+                    for chunk in tensor_metadata.chunks:
+                        *offset_prefix, group_offset, _ = chunk.offsets
+                        *size_prefix, num_groups, _ = chunk.sizes
+                        new_chunk = ChunkStorageMetadata(
+                            offsets=torch.Size([*offset_prefix, group_offset * B * 2]),
+                            sizes=torch.Size([*size_prefix, num_groups * B * 2]),
+                        )
+                        metadata.storage_data[MetadataIndex(fqn, new_chunk.offsets)] = (
+                            metadata.storage_data.pop(MetadataIndex(fqn, chunk.offsets))
+                        )
+                        dequantized_chunks.append(new_chunk)
+                    tensor_metadata.chunks = dequantized_chunks
                 elif fqn in self._weight_scale_mapping and fqn.endswith(
                     ".weight_packed"
                 ):
