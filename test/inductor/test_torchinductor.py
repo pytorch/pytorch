@@ -9496,6 +9496,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
+    @parametrize("start, is_noop", [(-4, True), (-5, True), (-3, False)])
+    def test_remove_noop_slice_negative_start(self, start, is_noop):
+        def f(x):
+            return torch.ops.aten.slice.Tensor(x, 0, start, 4) + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        post_grad_graph = get_post_grad_graph(torch.compile(f), (x,))
+        self.assertEqual("= torch.ops.aten.slice" not in post_grad_graph, is_noop)
+        self.assertEqual(torch.compile(f)(x), f(x))
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151378",

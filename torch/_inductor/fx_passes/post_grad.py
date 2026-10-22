@@ -1354,7 +1354,11 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
 
     slice_dim_size = self.shape[dim]
     if (
-        statically_known_true(sym_eq(start, 0))
+        (
+            statically_known_true(sym_eq(start, 0))
+            # negative starts at or below -slice_dim_size normalize to 0
+            or statically_known_true(start <= -slice_dim_size)
+        )
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_dim_size)
