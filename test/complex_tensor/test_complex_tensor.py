@@ -97,18 +97,27 @@ SKIPS = {
     Descriptor(op=aten.isfinite, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.transpose, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.view_as_real, variant=Variant.Distributed): "No scalar support",
+    Descriptor(op=aten.mm, variant=Variant.OpInterleaved): "Conjugated inputs",
+    Descriptor(op=aten.dot, variant=Variant.OpInterleaved): "Conjugated inputs",
+    Descriptor(op=aten.addmm, variant=Variant.OpInterleaved): "Conjugated inputs",
 }
 
 EXTRA_KWARGS = {
-    Descriptor(op=aten.asinh, dtype=torch.complex64, variant=Variant.Op): {
+    Descriptor(
+        op=aten.asinh, dtype=torch.complex64, variant=Variant.Op | Variant.OpInterleaved
+    ): {
         "rtol": 2e-5,
         "atol": 5e-5,
     },
-    Descriptor(op=aten.tanh, dtype=torch.complex64, variant=Variant.Op): {
+    Descriptor(
+        op=aten.tanh, dtype=torch.complex64, variant=Variant.Op | Variant.OpInterleaved
+    ): {
         "rtol": 1e-4,
         "atol": 1e-5,
     },
-    Descriptor(op=aten.pow, dtype=torch.complex64, variant=Variant.Op): {
+    Descriptor(
+        op=aten.pow, dtype=torch.complex64, variant=Variant.Op | Variant.OpInterleaved
+    ): {
         "rtol": 2e-2,
         "atol": 2e-6,
     },
@@ -146,6 +155,18 @@ class TestComplexTensor(TestCase):
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
+
+    @ops(
+        implemented_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_consistency_interleaved(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.OpInterleaved)
+
+    @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
+    def test_maybe_error_interleaved(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.OpInterleaved)
 
 
 class TestComplexTensorGeneric(TestCase):
@@ -188,6 +209,48 @@ class TestComplexTensorGeneric(TestCase):
         xc = ComplexTensor.from_interleaved(c)
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
+
+    def test_interleaved_views_input(self):
+        from torch._subclasses.complex_tensor import (
+            ComplexTensor,
+            InterleavedComplexTensor,
+        )
+
+        t = torch.randn(4, 6, dtype=torch.complex128)[:, ::2]
+        x = InterleavedComplexTensor(t)
+
+        self.assertEqual(x.stride(), t.stride())
+        self.assertEqual(x.re.data_ptr(), t.data_ptr())
+        self.assertEqual(x.as_interleaved(), t)
+
+        y = x * x
+        self.assertIsInstance(y, ComplexTensor)
+        self.assertEqual(y.as_interleaved(), t * t)
+
+        x.real = torch.zeros(4, 3)
+        self.assertEqual(t.real, torch.zeros(4, 3, dtype=torch.float64))
+
+    def test_interleaved_inplace_writes_through(self):
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
+
+        a = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+        b = torch.tensor([7 - 8j, -9 + 1j], dtype=torch.complex64)
+        expected = a * b
+
+        xa = InterleavedComplexTensor(a)
+        result = xa.mul_(b)
+
+        self.assertIs(result, xa)
+        self.assertEqual(a, expected)
+
+        xa.copy_(b)
+        self.assertEqual(a, b)
+
+    def test_interleaved_rejects_invalid_input(self):
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
+
+        with self.assertRaises(TypeError):
+            InterleavedComplexTensor(torch.randn(3))
 
 
 @unMarkDynamoStrictTest

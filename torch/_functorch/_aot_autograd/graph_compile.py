@@ -2892,7 +2892,9 @@ def _aot_stage2b_compile_forward_or_inference(
                 maybe_subclass_meta, fw_metadata
             )
 
-        if config.enable_complex_wrapper:
+        # The pass relies on functionalization: unfunctionalized in-place ops would mutate
+        # ComplexTensor copies instead of the real tensors.
+        if config.enable_complex_wrapper and not aot_config.disable_functionalization:
             from .complex_decomposition import decompose_complex_in_graph
 
             fw_module = decompose_complex_in_graph(

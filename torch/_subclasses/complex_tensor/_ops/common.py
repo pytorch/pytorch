@@ -11,7 +11,7 @@ from torch.types import Number
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 
 
 _P = ParamSpec("_P")
@@ -60,7 +60,7 @@ def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
         >>> is_complex_tensor(ct)
         True
     """
-    return isinstance(obj, ComplexTensor)
+    return isinstance(obj, ComplexTensor | InterleavedComplexTensor)
 
 
 @overload
@@ -316,20 +316,24 @@ def register_inductor(
     return register_complex(op, impl)
 
 
-def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
+def _as_complex_tensor(
+    arg: Tensor | Any, interleaved: bool = False
+) -> Tensor | ComplexTensor | InterleavedComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
-        not isinstance(arg, ComplexTensor)
+        not isinstance(arg, ComplexTensor | InterleavedComplexTensor)
         and isinstance(arg, Tensor)
         and arg.dtype in COMPLEX_TO_REAL
     ):
+        if interleaved:
+            return InterleavedComplexTensor(arg)
         return ComplexTensor.from_interleaved(arg)
     return arg
 
 
 def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     """Convert a ComplexTensor to a Tensor with a complex dtype. Pass other arguments as-is."""
-    if isinstance(arg, ComplexTensor):
+    if isinstance(arg, ComplexTensor | InterleavedComplexTensor):
         return arg.as_interleaved()
     return arg
 
