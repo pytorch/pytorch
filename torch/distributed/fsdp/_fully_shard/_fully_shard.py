@@ -26,7 +26,12 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import _default_reduce_scatter_input_fn, DefaultAllGather
+from ._fsdp_collectives import (
+    _default_reduce_scatter_input_fn,
+    DefaultAllGather,
+    ProcessGroupAllocAllGather,
+    SymmMemAllGather,
+)
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -315,6 +320,15 @@ def fully_shard(
         modules, cls_to_fsdp_cls, FSDPModule, "FSDP", _unimplemented_deepcopy
     )
     return arg_module
+
+
+def _layout_comm_owner(comm: AllGather) -> FSDPParamGroup | None:
+    # The group that a layout bound to this comm is still installed on
+    owner_ref = getattr(comm, "_fsdp_param_group", None)
+    owner = owner_ref() if owner_ref is not None else None
+    if owner is not None and owner._all_gather_layout.comm is comm:
+        return owner
+    return None
 
 
 def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
@@ -796,6 +810,11 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            if _layout_comm_owner(comm) not in (None, fsdp_param_group):
+                raise ValueError(
+                    "this all-gather comm is bound to a layout installed on another "
+                    "parameter group"
+                )
             layout = fsdp_param_group._all_gather_layout
             if layout.comm is not None and comm is not layout.comm:
                 raise RuntimeError(
@@ -941,9 +960,10 @@ class FSDPModule:
         that setter, :meth:`set_symm_mem_for_comm` or
         :meth:`set_allocate_memory_from_process_group_for_comm` afterwards. Such
         a layout serves one parameter group; install a separate instance on each
-        module with ``recurse=False``. Set layouts and those comms before the
-        first unshard: once parameters adopt outputs from a custom layout, neither
-        can be replaced. FSDP checks every group before changing any.
+        module with ``recurse=False``. Set custom layouts and those comms before
+        the first unshard: neither can be replaced while an all-gather is pending,
+        while parameters are unsharded, or after they adopt outputs from a custom
+        layout. FSDP checks every group before changing any.
 
         Args:
             layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
@@ -964,28 +984,37 @@ class FSDPModule:
         for module in modules:
             if not isinstance(module, FSDPModule):
                 continue
-            for fsdp_param_group in module._get_fsdp_state()._fsdp_param_groups:
+            fsdp_param_groups = module._get_fsdp_state()._fsdp_param_groups
+            if layout.comm is not None and len(fsdp_param_groups) > 1:
+                raise ValueError(
+                    "A layout bound to its comm is not supported with multiple param "
+                    "groups (from per-param mesh via shard_placement_fn)"
+                )
+            for fsdp_param_group in fsdp_param_groups:
+                old_layout = fsdp_param_group._all_gather_layout
                 comm = layout.comm or fsdp_param_group._all_gather_comm
-                if layout.comm is None and fsdp_param_group._all_gather_layout.comm:
+                if layout.comm is None and old_layout.comm:
                     comm = DefaultAllGather()  # the replaced layout installed its comm
-                if layout is not fsdp_param_group._all_gather_layout:
+                # Default layouts' outputs depend on neither the copy-out nor the comm
+                default_swap = all(
+                    isinstance(d, DefaultAllGatherLayout) for d in (old_layout, layout)
+                )
+                if layout is not old_layout and not default_swap:
                     fsdp_param_group._check_all_gather_replaceable()
                 updates.append((fsdp_param_group, comm))
         if layout.comm is not None:
             # Its comm may read per-call state that the layout keeps for one group
-            groups: set[FSDPParamGroup | None] = {group for group, _ in updates}
-            if layout._fsdp_param_group is not None:
-                groups.add(layout._fsdp_param_group())
-            if len(groups - {None}) > 1:
+            groups = {group for group, _ in updates}
+            if (owner := _layout_comm_owner(layout.comm)) is not None:
+                groups.add(owner)
+            if len(groups) > 1:
                 raise ValueError(
                     "A layout bound to its comm serves one parameter group; install "
                     "a separate instance on each module with recurse=False"
                 )
         for fsdp_param_group, comm in updates:
-            if (old_layout := fsdp_param_group._all_gather_layout).comm is not None:
-                old_layout._fsdp_param_group = None
             if layout.comm is not None:
-                layout._fsdp_param_group = weakref.ref(fsdp_param_group)
+                layout.comm._fsdp_param_group = weakref.ref(fsdp_param_group)
             fsdp_param_group._all_gather_layout = layout
             fsdp_param_group._all_gather_comm = comm
 
@@ -1168,13 +1197,19 @@ class FSDPModule:
         This cannot be used together with :meth:`set_custom_all_gather` or
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
-        determine their staging buffer allocation strategy. It is also rejected
-        while an all-gather layout bound to its comm is installed.
+        determine their staging buffer allocation strategy. It is rejected while a
+        layout bound to its comm is installed and, under any other custom layout,
+        when it changes the setting while an all-gather is pending, while
+        parameters are unsharded, or after they adopt outputs from the layout.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
         state = self._get_fsdp_state()
+        comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
+        setter = "set_allocate_memory_from_process_group_for_comm()"
+        for fsdp_param_group in state._fsdp_param_groups:  # check all first
+            fsdp_param_group._check_comm_swap(setter, comm_type)
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_allocate_memory_from_process_group(enable)
 
@@ -1202,14 +1237,17 @@ class FSDPModule:
         Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
 
         This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`, and is rejected while an all-gather
-        layout bound to its comm is installed.
+        :meth:`set_custom_reduce_scatter`, and is rejected like
+        :meth:`set_allocate_memory_from_process_group_for_comm` under a layout.
 
         Args:
             backend (str): The symmetric memory backend to use. Defaults to
                 ``"NCCL"``. Currently, only ``"NCCL"`` is supported.
         """
         state = self._get_fsdp_state()
+        setter = "set_symm_mem_for_comm()"
+        for fsdp_param_group in state._fsdp_param_groups:  # check all first
+            fsdp_param_group._check_comm_swap(setter, SymmMemAllGather)
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_symm_mem(backend)
 

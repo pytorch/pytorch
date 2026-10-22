@@ -401,16 +401,20 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
-        copy_in, call_layout, output_metadata = layout.prepare(
-            AllGatherInputMetadata(
-                input_split_sizes=inp_split_sizes,
-                input_outer_sizes=outer_sizes,
-                input_numel=all_gather_input_numel,
-                world_size=world_size,
-                dtype=dtype,
-                device=device,
+        if isinstance(layout, DefaultAllGatherLayout):
+            # It always packs with its copy_in into rank-major output
+            copy_in, call_layout, output_metadata = layout.copy_in, layout, None
+        else:  # copies, since copy_in and the default copy-out read these lists
+            copy_in, call_layout, output_metadata = layout.prepare(
+                AllGatherInputMetadata(
+                    input_split_sizes=list(inp_split_sizes),
+                    input_outer_sizes=list(outer_sizes),
+                    input_numel=all_gather_input_numel,
+                    world_size=world_size,
+                    dtype=dtype,
+                    device=device,
+                )
             )
-        )
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
@@ -610,8 +614,8 @@ def foreach_all_gather_copy_out(
     # Copies, so that a layout cannot change FSDP's lists behind the checks below
     param_metadata = [
         AllGatherParamMetadata(
-            input_numels=numels,
-            input_dtypes=dtypes,
+            input_numels=list(numels),
+            input_dtypes=list(dtypes),
             outer_sizes=[next(outer_sizes) for _ in numels],
             outputs=list(fsdp_param.all_gather_outputs),
         )
@@ -640,7 +644,7 @@ def foreach_all_gather_copy_out(
         )
     if first_unshard:
         return _adopt_layout_outputs(
-            fsdp_params, param_metadata, outputs, all_gather_result, world_size
+            fsdp_params, outputs, all_gather_result, world_size
         )
     _check_layout_refill(fsdp_params, outputs)
     return persistent_buffers

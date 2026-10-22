@@ -37,13 +37,11 @@ import torch
 
 
 if TYPE_CHECKING:
-    import weakref
     from collections.abc import Callable
 
     from ._fsdp_api import AllGather
     from ._fsdp_collectives import AllGatherResult
     from ._fsdp_param import FSDPParam
-    from ._fsdp_param_group import FSDPParamGroup
 
 
 @dataclass(kw_only=True)
@@ -91,13 +89,14 @@ class AllGatherOutputs:
     dim 1, since FSDP views the unsharded parameter from it. On the group's
     first unshard FSDP checks those sizes and dtypes and adopts ``tensors`` as
     the parameters' outputs and ``buffers`` as the FSDP-owned buffers behind
-    them; every nonempty output must view one of the buffers and should have its
-    own version counter, e.g. a ``.data`` view, like a separately allocated
-    output. FSDP frees and re-allocates each buffer's whole storage on the
-    current stream, so finalize allocates each buffer with resizable storage of
-    its own on the collective's device, not the collective's input or output
-    and not shared with another parameter group. Later finalizes return the
-    outputs they refilled, the first unshard's: an output may be larger than
+    them; every nonempty output must view one of the buffers, without overlapping
+    another output, and should have its own version counter, e.g. a ``.data``
+    view, like a separately allocated output. FSDP frees and re-allocates each
+    buffer's whole storage on the current stream, outside any memory pool, so
+    finalize allocates each buffer with resizable storage of its own on the
+    collective's device, not the collective's input or output and not shared
+    with another parameter group. Later finalizes return the outputs they
+    refilled, the first unshard's: an output of outer size 1 may be larger than
     its payload, which then fills a prefix, and keeps its dtype for uint8 bytes.
     """
 
@@ -158,12 +157,12 @@ class AllGatherLayout(ABC):
     Parameter groups' all-gathers can overlap, so a layout that keeps per-call
     state, e.g. for its comm, must not be shared across groups.
     ``DefaultAllGatherLayout`` is stateless and may be shared. ``comm`` is the
-    collective this layout requires, if any, which FSDP installs with it.
+    collective this layout requires, if any, which FSDP installs with it. FSDP
+    calls ``prepare`` and ``copy_in`` on its all-gather copy-in stream and
+    ``finalize_outputs`` on the current stream, which allocates the buffers.
     """
 
     comm: AllGather | None = None
-    # The parameter group that a layout with a comm is installed on, set by FSDP
-    _fsdp_param_group: weakref.ref[FSDPParamGroup] | None = None
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
@@ -347,7 +346,6 @@ def _plan_rank_major_outputs(
 
 def _adopt_layout_outputs(
     fsdp_params: list[FSDPParam],
-    param_metadata: list[AllGatherParamMetadata],
     result: AllGatherOutputs,
     all_gather_result: AllGatherResult,
     world_size: int,
@@ -373,14 +371,19 @@ def _adopt_layout_outputs(
                 "collective's input or output"
             )
     buffer_storages = {buffer.untyped_storage().data_ptr() for buffer in result.buffers}
-    for fsdp_param, param, outputs in zip(fsdp_params, param_metadata, result.tensors):
+    for fsdp_param, numels, dtypes, outputs in zip(
+        fsdp_params,
+        all_gather_result.param_all_gather_input_numels,
+        all_gather_result.param_all_gather_input_dtypes,
+        result.tensors,
+    ):
         name = fsdp_param._display_name
-        if len(outputs) != len(param.input_numels):
+        if len(outputs) != len(numels):
             raise ValueError(
                 f"all-gather layout returned {len(outputs)} outputs for the "
-                f"{len(param.input_numels)} payloads of {name}"
+                f"{len(numels)} payloads of {name}"
             )
-        for t, numel, dtype in zip(outputs, param.input_numels, param.input_dtypes):
+        for t, numel, dtype in zip(outputs, numels, dtypes):
             if t.dim() != 1 or not t.is_contiguous() or t.numel() != numel * world_size:
                 raise ValueError(
                     f"all-gather output of {name} must be a contiguous 1-D tensor of "
@@ -399,9 +402,15 @@ def _adopt_layout_outputs(
                     "buffers its layout returned, so refills would not reach it"
                 )
     for fsdp_param, outputs in zip(fsdp_params, result.tensors):
-        fsdp_param.all_gather_outputs = outputs
+        fsdp_param.all_gather_outputs = list(outputs)  # the layout may keep its list
         # The group allocates and frees the buffers the outputs view
         fsdp_param._keep_all_gather_output_storage = True
+    if output.device.type in ("cuda", "xpu"):
+        # Reshard frees the buffers on the current stream, so one allocated on
+        # another stream waits for its work; a no-op for buffers from finalize
+        stream = torch.get_device_module(output.device).current_stream()
+        for buffer in result.buffers:
+            buffer.record_stream(stream)
     return _PersistentBuffers(
         list(result.buffers),
         [buffer.untyped_storage().size() for buffer in result.buffers],

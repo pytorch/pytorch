@@ -5,7 +5,7 @@ import contextlib
 import functools
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 import torch
@@ -404,23 +404,35 @@ class FSDPParamGroup:
         # outputs, and outputs that view a custom layout's buffers keep their owner
         if self._all_gather_result is not None or self.is_unsharded:
             raise RuntimeError(
-                "cannot replace the all-gather comm or layout while an all-gather "
-                "is pending or parameters are unsharded"
+                self._with_fqn(
+                    "cannot replace the all-gather comm or layout while an "
+                    "all-gather is pending or parameters are unsharded; reshard, "
+                    "or call reset_iter_state() after a failed unshard"
+                )
             )
         if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
             raise RuntimeError(
-                "cannot replace the all-gather comm or layout after parameters "
-                "adopted outputs from the installed layout"
+                self._with_fqn(
+                    "cannot replace the all-gather comm or layout after parameters "
+                    "adopted outputs from the installed custom layout"
+                )
             )
 
-    def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
+    def _check_comm_swap(self, setter: str, comm_type: type) -> None:
         if self._all_gather_layout.comm is not None:
             raise RuntimeError(
-                "cannot call set_symm_mem() while the all-gather layout is bound "
-                "to its comm"
+                self._with_fqn(
+                    f"cannot call {setter} while the all-gather layout is bound to "
+                    "its comm; install another layout first"
+                )
             )
+        if type(self._all_gather_comm) is comm_type:
+            return  # FSDP's comms of one type produce the same outputs
         if not isinstance(self._all_gather_layout, DefaultAllGatherLayout):
             self._check_all_gather_replaceable()
+
+    def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
+        self._check_comm_swap("set_symm_mem_for_comm()", SymmMemAllGather)
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -447,13 +459,9 @@ class FSDPParamGroup:
         Whether to (try to) use the ProcessGroup's allocate_tensor method for
         the staging buffers for collective comms.
         """
-        if self._all_gather_layout.comm is not None:
-            raise RuntimeError(
-                "cannot call set_allocate_memory_from_process_group() while the "
-                "all-gather layout is bound to its comm"
-            )
-        if not isinstance(self._all_gather_layout, DefaultAllGatherLayout):
-            self._check_all_gather_replaceable()
+        comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
+        setter = "set_allocate_memory_from_process_group_for_comm()"
+        self._check_comm_swap(setter, comm_type)
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):
@@ -593,11 +601,17 @@ class FSDPParamGroup:
                         self._all_gather_buffers,
                     )
                 except ValueError:
-                    # Drop the completed all-gather, so that a layout whose first
-                    # unshard was rejected can be replaced, and free the buffers
-                    # that a rejected refill re-allocated
+                    # Drop the completed all-gather once its streams wait for the
+                    # rejected copy-out, so that a layout whose first unshard was
+                    # rejected can be replaced, and free what a refill re-allocated
+                    event = self.device_handle.Event()
+                    event.record()
+                    self.comm_ctx.wait_all_gather_streams_on_event(event)
                     self._all_gather_result = None
                     self._free_all_gather_buffers()
+                    for fsdp_param in self.fsdp_params:
+                        if not fsdp_param.keep_unsharded_storage:
+                            fsdp_param.free_all_gather_outputs()
                     raise
 
         for fsdp_param in self.fsdp_params:
@@ -1208,14 +1222,17 @@ class FSDPParamGroup:
     def is_unsharded(self) -> bool:
         return self._sharded_state == ShardedState.UNSHARDED
 
-    def _set_all_gather_output_fn(self, fn: Callable) -> None:
+    def _removed_all_gather_output_fn(self, *args: Any) -> NoReturn:
         raise AttributeError(
             "FSDPParamGroup._all_gather_output_fn was removed; install the copy-out "
-            "function with set_all_gather_layout(DefaultAllGatherLayout(fn))"
+            "function with set_all_gather_layout(DefaultAllGatherLayout(fn)), which "
+            "calls fn(output, outputs, *, split_sizes, outer_sizes, world_size)"
         )
 
-    # 2.15's private hook, so that assigning it fails instead of being ignored
-    _all_gather_output_fn = property(fset=_set_all_gather_output_fn)
+    # 2.15's private hook, so that using it fails instead of being ignored
+    _all_gather_output_fn = property(
+        _removed_all_gather_output_fn, _removed_all_gather_output_fn
+    )
 
     @contextlib.contextmanager
     def use_training_state(self, training_state: TrainingState):
