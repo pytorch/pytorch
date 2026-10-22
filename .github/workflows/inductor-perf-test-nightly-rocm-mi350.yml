@@ -62,7 +62,8 @@ on:
         default: inductor_huggingface_perf_rocm_mi350,inductor_timm_perf_rocm_mi350,inductor_torchbench_perf_rocm_mi350
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  # DO NOT MERGE: include run_id so repeated workflow_dispatch runs can overlap for load tests.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 permissions:
