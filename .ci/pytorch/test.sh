@@ -599,7 +599,7 @@ test_python_smoke_b200() {
   # CuTeDSL runtime does, so they are collected nowhere else.
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # The variants' expectations live outside test_ops too: two xfails in
-  # test_ops_gradients.py and nine TestOperators entries in the shared skip
+  # test_ops_gradients.py and nine TestOperatorsDevice entries in the shared skip
   # tuple. An expectation that never runs rots into an unexpected success
   # without anyone noticing, so collect those suites here as well -- a handful
   # of tests each once restricted to this op.
@@ -2503,7 +2503,7 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e .
+  pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)

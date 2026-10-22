@@ -2121,11 +2121,15 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
+        # Containers dispatch (see _call_unbound_method below) instead of
+        # folding: their comparison runs the elements' own __eq__, which must be
+        # traced rather than evaluated at compile time.
         if (
-            name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+            name in _RICHCOMPARE_OPS
             and len(args) == 2
             and not kwargs
             and isinstance(self.fn, type)
+            and self.fn not in (set, frozenset, list, tuple)
             and args[0].is_python_constant()
             and args[1].is_python_constant()
         ):

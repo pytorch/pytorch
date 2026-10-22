@@ -3,6 +3,7 @@ import contextlib
 import copy
 import errno
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -10,6 +11,8 @@ import json
 import os
 import pathlib
 import pickle
+import runpy
+import shutil
 import stat
 import struct
 import subprocess
@@ -28,6 +31,7 @@ from unittest import mock
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
+from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -192,6 +196,7 @@ class TestPrecompile(TestCase):
             bypassed=("gen",),
             truncated=("loop (m.py:12)",),
             uncovered_frames=("helper",),
+            eager_fallbacks=("dispatch (m.py:30)",),
             wont_generalize=("n",),
             dropped_guards=(("HASATTR", "m"),) + risky,
             kept_guards=(("EQUALS_MATCH", "n"), ("TENSOR_MATCH", "x")),
@@ -207,7 +212,7 @@ class TestPrecompile(TestCase):
         # failures last, so a failure never sits between two notes.
         self.assertExpectedInline(
             str(summary),
-            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 eager fallback: ['dispatch (m.py:30)'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
         )
         # Keyword-only: four leading ints would otherwise transpose silently.
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
@@ -258,6 +263,7 @@ class TestPrecompile(TestCase):
         self.assertFalse(summary(bypassed=("f",)).complete)
         self.assertFalse(summary(truncated=("f",)).complete)
         self.assertFalse(summary(uncovered_frames=("f",)).complete)
+        self.assertTrue(summary(eager_fallbacks=("f (m.py:1)",)).complete)
         # Coverage only: the guard fields never make a capture incomplete.
         risky = (("ID_MATCH", "self.act"),)
         flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
@@ -518,7 +524,7 @@ class TestPrecompile(TestCase):
         def helper(x):
             return x
 
-        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False, **kw):
             return _DynamoCodeCacheEntry(
                 python_code=SerializedCode.from_code_object(fn.__code__),
                 python_module=__name__,
@@ -529,18 +535,20 @@ class TestPrecompile(TestCase):
                 code_source=None,
                 install_to_global=resume_name is not None,
                 bypassed=bypassed,
+                **kw,
             )
 
         variant = _GuardedCodeCacheEntry(
             guards_state=b"",
             dynamo_code=SerializedCode.from_code_object(helper.__code__),
         )
+        fallback = {"variants": [variant], "eager_fallback": True}
         entry = _DynamoCacheEntry(
             codes=[
                 code_entry(forward, variants=[variant], bypassed=True),
                 code_entry(forward),  # a submodule's forward: same co_name
-                code_entry(helper, "__resume_at_12_3", [variant]),
-                code_entry(helper, "__resume_at_40_7", [variant], bypassed=True),
+                code_entry(helper, "__resume_at_12_3", **fallback),
+                code_entry(helper, "__resume_at_40_7", bypassed=True, **fallback),
             ],
             source_info=SourceInfo(inlined_sources=set()),
             device_type="cpu",
@@ -549,6 +557,10 @@ class TestPrecompile(TestCase):
         frames = _multigraph_frames(entry)
         self.assertEqual([f["is_entry"] for f in frames], [True, False, False, False])
         self.assertEqual([f["bypassed"] for f in frames], [True, False, False, True])
+        # A bypassed code serves nothing, so it is never an eager fallback.
+        self.assertEqual(
+            [f["eager_fallback"] for f in frames], [False, False, True, False]
+        )
         self.assertEqual(
             [f["resume_names"] for f in frames],
             [[], [], ["__resume_at_12_3"], ["__resume_at_40_7"]],
@@ -630,7 +642,7 @@ class TestPrecompile(TestCase):
         def step(x):
             return x * scale
 
-        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False, **kw):
             return _DynamoCodeCacheEntry(
                 python_code=SerializedCode.from_code_object(fn.__code__),
                 python_module=__name__,
@@ -641,6 +653,7 @@ class TestPrecompile(TestCase):
                 code_source=None,
                 install_to_global=resume_name is not None,
                 bypassed=bypassed,
+                **kw,
             )
 
         def reject(fn_name, codes):
@@ -667,6 +680,10 @@ class TestPrecompile(TestCase):
         # A bypassed HELPER beside a variant-less entry is the thin-wrapper case.
         with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
             reject("fwd_loss_bwd", [thin, dead_helper])
+        # An entry Dynamo gave up on at its first call is not a thin wrapper.
+        fallback = code_entry(fwd_loss_bwd, eager_fallback=True)
+        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+            reject("fwd_loss_bwd", [fallback])
         # A healthy entry beside a bypassed continuation has nothing to refuse,
         # and neither has an empty capture.
         reject("fwd_loss_bwd", [healthy, dead_cont])
@@ -714,6 +731,41 @@ class TestPrecompile(TestCase):
         }
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         return ns["_build_multigraph_forward"]
+
+    def test_multigraph_driver_runs_an_eager_fallback_miss_eagerly(self):
+        # A frame the capture flagged eager_fallback: a miss of its variant runs
+        # it as plain Python and warns once for the frame, not once per miss.
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _multigraph_frames
+
+        def step(x, scale=2.0):
+            return x.sin() * scale + int(torch.compiler.is_compiling())
+
+        x = torch.randn(3)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        expected = compiled(x)
+        frames = _multigraph_frames(package.cache_entry())
+        frames[0]["eager_fallback"] = True
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        self._scrub_minted(step.__globals__)
+        binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+        forward = self._multigraph_driver(frames, backends, binding)()
+        torch._logging._internal.warning_once.cache_clear()
+        with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+            self.assertEqual(forward(x, 3.0), x.sin() * 3.0)
+            self.assertEqual(forward(x, 4.0), x.sin() * 4.0)
+        self.assertEqual(len(logs.output), 1, logs.output)
+        self.assertIn("no captured variant of step", logs.output[0])
+        self.assertEqual(forward(x), expected)
 
     def test_multigraph_driver_dispatches_entry_frame(self):
         # The driver rebuilds the entry frame's f_locals (a keyword-only default
@@ -1058,6 +1110,25 @@ class TestPrecompile(TestCase):
         ns = {"__name__": "_artifact"}
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
+    def test_artifact_with_module_level_kernels_runs_from_its_file(self):
+        # A module-level Triton kernel reads its source back from the module's file,
+        # which both the header's runpy.run_path recipe and the inlined load provide.
+        m = torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU()).eval().cuda()
+        x = torch.randn(3, 8, device="cuda")
+        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
+        self.assertRegex(code, r"(?m)^def triton_\w+\(")
+        self.assertIn(
+            '#     import runpy\n#     ns = runpy.run_path("this_file.py")', code
+        )
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            self.assertEqual(runpy.run_path(path)["forward"](m, x), m(x))
+        for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+            self.assertEqual(f_c(m, x), m(x))
 
     @unittest.skipUnless(
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
@@ -3068,6 +3139,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "entry frame was BYPASSED"):
             _build_multigraph_artifact(entry, backends, summary, "eager", step)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_multigraph_artifact_installs_a_frame_the_entry_cannot_reach(self):
         # A graph break inside a child module's forward compiles that forward as
         # its own frame, entered by an ordinary call the standalone dispatcher
@@ -4593,6 +4665,7 @@ class TestPrecompileCapture(TestCase):
 
 
 _GOLDEN_MODULE = """
+import collections
 import types
 
 import torch
@@ -4642,6 +4715,20 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+Record = collections.namedtuple("Record", ("value", "weight"))
+
+
+def record_helper(y):
+    record = Record(y.sin(), 2)
+    z = record.value * record.weight
+    torch._dynamo.graph_break()
+    return z.cos()
+
+
+def calls_record_helper(model, x):
+    return record_helper(model(x)) + 1
+
+
 RAISE = []
 
 
@@ -4676,6 +4763,68 @@ def records_stance(model, x):
 def tags_compiled(model, x):
     # Adds 1 only in a compiled frame, so a result shows how the call was served.
     return breaking_helper(model(x)) + int(torch.compiler.is_compiling())
+
+
+@torch._dynamo.disable
+def opaque(y):
+    return y + 0
+
+
+def dispatch(y, opaque_layers):
+    # Traces whole for opaque_layers=0. For more, the graph break inside the loop
+    # is one Dynamo cannot resume from, so it runs every later call of this code
+    # object eagerly. Adds 1 only when compiled, like tags_compiled.
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return y.sin() + int(torch.compiler.is_compiling())
+
+
+@torch._dynamo.disable(recursive=False)
+def call_dispatch(y, opaque_layers):
+    # An eager caller, so dispatch is always a frame of its own.
+    return dispatch(y, opaque_layers)
+
+
+def falls_back_on_a_branch(model, x, opaque_layers=0):
+    return call_dispatch(model(x), opaque_layers) + 1
+
+
+def falls_back_after_a_break(model, x, opaque_layers=0):
+    # The continuation is reachable from the entry, so the artifact stays
+    # standalone, and its recompile for opaque_layers=1 falls back like dispatch.
+    y = model(x)
+    torch._dynamo.graph_break()
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return y.sin() + int(torch.compiler.is_compiling())
+
+
+def falls_back_in_the_entry(model, x, opaque_layers=0, scale=1):
+    # The graph break gives the entry a continuation, so the artifact is
+    # standalone; the entry's recompile for opaque_layers=1 falls back before
+    # reaching it. model is unused: its forward would be a frame of its own
+    # once the entry runs eagerly. scale is a default only the eager run reads.
+    y = x * 2
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    torch._dynamo.graph_break()
+    return y.sin() * scale + int(torch.compiler.is_compiling())
+
+
+def tagged_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos() + int(torch.compiler.is_compiling())
+
+
+def falls_back_around_a_helper(model, x, opaque_layers=0):
+    # Under nested_graph_breaks=False, tagged_helper is a frame the entry cannot
+    # reach, so the artifact is installed. The entry's recompile for
+    # opaque_layers=1 falls back; its eager run still calls tagged_helper.
+    y = x * 2
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return tagged_helper(y) + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -4694,12 +4843,18 @@ for args, kwargs, expected in saved["calls"]:
     torch.testing.assert_close(f(model, *args, **kwargs), expected)
 for name, grad in saved["grads"].items():
     torch.testing.assert_close(model.get_parameter(name).grad, grad)
-try:
-    f(model, saved["calls"][0][0][0].double())
-except torch.compiler.PrecompileError as e:
-    assert "no captured variant" in str(e), e
+miss = saved["calls"][0][0][0].double()
+if saved["eager_miss"] is not None:
+    torch.testing.assert_close(f(model, miss), saved["eager_miss"])
 else:
-    raise AssertionError("an uncovered call was served")
+    try:
+        f(model, miss)
+    except torch.compiler.PrecompileError as e:
+        assert "no captured variant" in str(e), e
+        refused = saved.get("refused_frame")
+        assert refused is None or repr(refused) in str(e), e
+    else:
+        raise AssertionError("an uncovered call was served")
 print("served", mod.STANCES)
 """
 
@@ -4732,12 +4887,19 @@ class TestPrecompileDynamoCapture(TestCase):
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
-    def _serve_in_fresh_process(self, calls, grads=None, mode="standalone"):
+    def _serve_in_fresh_process(
+        self, calls, grads=None, mode="standalone", eager_miss=None, refused_frame=None
+    ):
+        # eager_miss: the result of an uncovered call that the entry runs
+        # eagerly; by default the loader expects that call refused, by
+        # refused_frame if given.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "state_dict": self.model.state_dict(),
             "calls": calls,
             "grads": grads or {},
+            "eager_miss": eager_miss,
+            "refused_frame": refused_frame,
         }
         torch.save(saved, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state, mode]
@@ -4801,6 +4963,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_frame_the_entry_cannot_reach_is_served_installed(self, backend):
         # The graph break inside breaking_helper compiles it as a frame of its
         # own, entered by an ordinary call rather than by a continuation name.
@@ -4826,7 +4989,28 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(calls, mode="installed")
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_artifact_seeds_unnamed_scope_globals(self):
+        # Inlining namedtuple's exec-generated __new__ roots record_helper's
+        # guards at the ___unnamed_scope_<id>_c<n> key Dynamo mints for globals
+        # no module owns. The key embeds an id() from the capturing process, so
+        # nothing binds it in the serving process unless the install does.
+        fn = self.mod.calls_record_helper
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        with self._capture(fn, backend="eager", tracer=tracer) as cap:
+            y = cap(self.model, self.x2)
+            # The capture's compile guarded through a minted key, or there is
+            # nothing for the install to seed.
+            self.assertTrue(
+                any(name.startswith(UNNAMED_SCOPE_PREFIX) for name in vars(self.mod))
+            )
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "installed"', f.read())
+        self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
+
+    @skipIfCrossRef
     @parametrize("compiled", ["calls_breaking_helper", "breaking_helper"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_frames_compiled_before_load(self, compiled):
         # A fresh process that torch.compile'd the entry, or only a frame the
         # entry calls, holds live entries that would serve uncovered calls.
@@ -4857,6 +5041,200 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertRegex(out.stdout, rf"onto \([^)]*\b{compiled}\b")
 
     @skipIfCrossRef
+    def test_an_installed_artifact_runs_a_frames_eager_fallback_eagerly(self):
+        # dispatch compiles for opaque_layers=0. Its recompile for 1 graph-breaks
+        # inside a loop, so the capturing process runs every later call of it
+        # eagerly. A load serves the compiled variant and runs the call it
+        # misses eagerly too, rather than refusing it.
+        fn = self.mod.falls_back_on_a_branch
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = torch.relu(self.model.lin(self.x2)).sin().detach()
+        self.assertEqual(compiled, base + 2)
+        self.assertEqual(eager, base + 1)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(summary.eager_fallbacks[0].startswith("dispatch ("), summary)
+        self.assertIn("1 eager fallback: ", str(summary))
+        self.assertTrue(summary.complete, summary)
+        with open(self.artifact) as f:
+            self.assertIn("('dispatch', 1),  # eager fallback", f.read())
+        # The capture skipped every call after the fallback; a load still serves
+        # the variant after the miss.
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1], mode="installed")
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_artifact_runs_an_entrys_eager_fallback_eagerly(self):
+        # The entry compiles for opaque_layers=0 and falls back for 1. A load
+        # serves its variant, runs its miss eagerly, and the eager run's callee
+        # still dispatches to its own variant and refuses a miss of its own (the
+        # loader's dtype miss reaches tagged_helper with a float64 input).
+        fn = self.mod.falls_back_around_a_helper
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = (self.x2 * 2).sin().cos()
+        self.assertEqual(compiled, base + 2)
+        # The entry ran eagerly; only tagged_helper's served variant adds 1.
+        self.assertEqual(eager, base + 1)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(
+            summary.eager_fallbacks[0].startswith("falls_back_around_a_helper ("),
+            summary,
+        )
+        self.assertTrue(summary.complete, summary)
+        with open(self.artifact) as f:
+            code = f.read()
+        self.assertIn('SERVING_MODE = "installed"', code)
+        self.assertIn("('falls_back_around_a_helper', 1),  # eager fallback", code)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(
+            calls + calls[:1], mode="installed", refused_frame="tagged_helper"
+        )
+
+    @skipIfCrossRef
+    def test_a_standalone_artifact_runs_a_continuations_eager_fallback_eagerly(self):
+        fn = self.mod.falls_back_after_a_break
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = torch.relu(self.model.lin(self.x2)).sin().detach()
+        self.assertEqual(compiled, base + 1)
+        self.assertEqual(eager, base)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(summary.complete, summary)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1])
+
+    @skipIfCrossRef
+    def test_a_standalone_artifact_runs_an_entrys_eager_fallback_eagerly(self):
+        # The driver rebuilds the entry with its recorded defaults to run a miss
+        # eagerly, so the missed call that leaves scale to its default works.
+        fn = self.mod.falls_back_in_the_entry
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = (self.x2 * 2).sin()
+        self.assertEqual(compiled, base + 1)
+        self.assertEqual(eager, base)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(
+            summary.eager_fallbacks[0].startswith("falls_back_in_the_entry ("), summary
+        )
+        self.assertTrue(summary.complete, summary)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        # A dtype miss of the entry runs eagerly too, with both defaults.
+        miss = (self.x2.double() * 2).sin()
+        self._serve_in_fresh_process(calls + calls[:1], eager_miss=miss)
+
+    @skipIfCrossRef
+    def test_an_entry_dynamo_gave_up_on_at_its_first_call_is_uncovered(self):
+        # Unlike a callee, it has no variant to dispatch to, so it is a coverage
+        # gap: the capture is not complete. Its callee, model.forward, compiles.
+        opaque = torch._dynamo.disable(lambda y: y + 0)
+
+        def entry(model, x):
+            for _ in range(1):
+                x = opaque(x)
+            return model(x)
+
+        # The capture refuses it, naming the cause, before the build would.
+        with self.assertRaisesRegex(
+            PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(entry, backend="eager") as cap:
+                cap(self.model, self.x2)
+                summary = cap.summary()
+        self.assertEqual(summary.uncovered_frames, ("entry",), summary)
+        self.assertEqual(summary.eager_fallbacks, (), summary)
+        self.assertFalse(summary.complete, summary)
+        # require_complete=False does not get past it.
+        tracer = DynamoTracer(require_complete=False)
+        with self.assertRaisesRegex(
+            PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(entry, tracer=tracer, backend="eager") as cap:
+                cap(self.model, self.x2)
+
+    def test_a_lone_entry_dynamo_gave_up_on_names_the_cause(self):
+        # Nothing compiles, but the entry did run: the refusal says why rather
+        # than "the callable must actually be run".
+        opaque = torch._dynamo.disable(lambda y: y + 0)
+
+        def lone(x, fail=False):
+            for _ in range(1):
+                x = opaque(x)
+            if fail:
+                raise ValueError("boom")
+            return x.sin()
+
+        with self.assertRaisesRegex(
+            PrecompileError, r"'lone': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(lone, backend="eager") as cap:
+                cap(self.x2)
+        # Ahead of a raised call too, whose message suggests require_complete=False.
+        with self.assertRaisesRegex(
+            PrecompileError, r"'lone': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(lone, backend="eager") as cap:
+                cap(self.x2)
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    cap(self.x2, fail=True)
+                self.assertTrue(cap.summary().capture_errors)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "a 3.10 generator frame first runs at next(), outside the capture",
+    )
+    def test_a_generator_entry_is_refused_naming_the_cause(self):
+        # Dynamo refuses to trace a generator frame and suppresses that, so the
+        # entry is flagged rather than left a plain uncovered frame.
+        def gen(model, x):
+            yield model(x)
+
+        with self.assertRaisesRegex(
+            PrecompileError, r"'gen': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(gen, backend="eager") as cap:
+                next(cap(self.model, self.x2))
+                summary = cap.summary()
+        # Flagged before _compile, it still counts as a gap.
+        self.assertEqual(summary.uncovered_frames, ("gen",), summary)
+        self.assertFalse(summary.complete, summary)
+        tracer = DynamoTracer(require_complete=False)
+        with self.assertRaisesRegex(
+            PrecompileError, r"'gen': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(gen, tracer=tracer, backend="eager") as cap:
+                next(cap(self.model, self.x2))
+
+    @skipIfCrossRef
+    def test_a_frame_dynamo_gave_up_on_is_not_a_coverage_gap(self):
+        # dispatch falls back to eager on its first call and never compiles, so
+        # it holds no variant. It ran eager during capture and a load runs it
+        # eager too, so it is an eager fallback rather than an uncovered frame.
+        fn = self.mod.falls_back_on_a_branch
+        with self._capture(fn, backend="eager") as cap:
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        self.assertEqual(eager, torch.relu(self.model.lin(self.x2)).sin() + 1)
+        self.assertTrue(summary.complete, summary)
+        self.assertNotIn("dispatch", summary.uncovered_frames)
+        self.assertTrue(
+            any(f.startswith("dispatch (") for f in summary.eager_fallbacks), summary
+        )
+        # Nothing of dispatch needs installing: it runs as plain Python.
+        self._serve_in_fresh_process([((self.x2, 1), {}, eager)])
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_leaves_the_global_stance_alone(self):
         # Another thread's torch.compile reads the process-global stance, so a
         # served call must refuse recompiles without setting it.
@@ -4867,6 +5245,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served ['default']", stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_under_a_process_wide_stance(self):
         # Captured on x2 only; x3 is uncovered. A served call adds 1.
         fn = self.mod.tags_compiled
@@ -4919,6 +5298,406 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("stances ok", out.stdout)
 
     @skipIfCrossRef
+    @parametrize("installed", [False, True])
+    def test_graphless_frames_that_lose_guards_are_served_eagerly(self, installed):
+        # The disabled scale() leaves its callees compiled, so the registry
+        # lookup compiles WeakKeyDictionary.__contains__ and __getitem__ as
+        # frames of their own. They hold no graph, and their guards on the
+        # registry's weakrefs cannot be serialized.
+        registry = f"{self.module_name}_registry"
+        callee = "CHILD" if installed else f"{registry}.scale"
+        entry = f"{self.module_name}_entry"
+        sources = {
+            registry: (
+                "import weakref\n"
+                "import torch\n\n"
+                "REGISTRY = weakref.WeakKeyDictionary()\n\n"
+                "class Key(torch.nn.Module):\n"
+                "    pass\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(key, x):\n"
+                "    if key in REGISTRY:\n"
+                "        return x * REGISTRY[key]\n"
+                "    return x\n"
+            ),
+            entry: (
+                f"import torch, {registry}\n\n"
+                "class Child(torch.nn.Module):\n"
+                "    def forward(self, key, x):\n"
+                f"        return {registry}.scale(key, x + 0)\n\n"
+                "CHILD = Child()\n\n"
+                "def step(key, x):\n"
+                f"    return {callee}(key, x.sin()).cos()\n"
+            ),
+        }
+        for name, source in sources.items():
+            with open(os.path.join(self.dir, name + ".py"), "w") as f:
+                f.write(source)
+            self.addCleanup(sys.modules.pop, name, None)
+        # The directory's mtime may not move between setUp's import and these
+        # writes, which would leave the import system's listing of it stale.
+        importlib.invalidate_caches()
+        reg = importlib.import_module(registry)
+        step = importlib.import_module(entry).step
+        key = reg.Key()
+        reg.REGISTRY[key] = 3.0
+        x = torch.randn(4)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        with build as built, self._capture(step, backend="eager") as cap:
+            self.assertEqual(cap(key, x), x.sin().mul(3.0).cos())
+            summary = cap.summary()
+        self.assertTrue(summary.complete, str(summary))
+        self.assertEqual(summary.bypassed, ())
+        self.assertEqual(summary.risky_dropped_guards, ())
+        self.assertNotIn("G['ref']", [name for _, name in summary.dropped_guards])
+        # Rendered with no variants and not bypassed, so they run as plain Python.
+        lookups = [
+            code
+            for code in built.call_args.args[0].codes
+            if code.python_code.co_name in ("__contains__", "__getitem__")
+        ]
+        self.assertEqual(len(lookups), 2)
+        for code in lookups:
+            self.assertEqual((code.guarded_codes, code.bypassed), ([], False))
+        with open(self.artifact) as f:
+            mode = "installed" if installed else "standalone"
+            self.assertIn(f'SERVING_MODE = "{mode}"', f.read())
+        script = (
+            "import importlib, sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "reg = importlib.import_module(sys.argv[4])\n"
+            "importlib.import_module(sys.argv[5])\n"
+            "x = torch.load(sys.argv[6])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "key = reg.Key()\n"
+            "for scale in (3.0, 5.0, None):\n"
+            "    if scale is None:\n"
+            "        del reg.REGISTRY[key]\n"
+            "        expected = x.sin().cos()\n"
+            "    else:\n"
+            "        reg.REGISTRY[key] = scale\n"
+            "        expected = x.sin().mul(scale).cos()\n"
+            "    torch.testing.assert_close(f(key, x), expected)\n"
+            "print('served')\n"
+        )
+        x_path = os.path.join(self.dir, "x.pt")
+        torch.save(x, x_path)
+        argv = [self.dir, self.artifact, self.cache, registry, entry, x_path]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
+
+    @skipIfCrossRef
+    def test_only_graphless_callees_that_lose_a_guard_are_served_eagerly(self):
+        # The filter drops every guard on FACTOR. factor() traces no ops and
+        # is not bypassed, so the drop alone empties it; mul() traces an op and
+        # the entry is what the artifact serves, so both keep their variants.
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        def drop_factor(entries):
+            keep = default_guard_filter_fn(entries)
+            return [k and "FACTOR" not in e.name for k, e in zip(keep, entries)]
+
+        name = f"{self.module_name}_factor"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\nFACTOR = 2\n\n"
+                "def factor(module, n):\n    return FACTOR * n\n\n"
+                "def mul(x):\n    return x * FACTOR\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x):\n    return mul(x) * factor(torch.nn.Module(), 3)\n\n"
+                "def step(x):\n    return scale(x.sin())\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(
+            guard_filter_fn=drop_factor,
+            require_complete=False,
+            require_no_risky_drops=False,
+        )
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        rendered = {}
+        for fn, args in (
+            (mod.step, (torch.randn(4),)),
+            (mod.factor, (torch.nn.Module(), 3)),
+        ):
+            self.artifact = os.path.join(self.dir, f"{fn.__name__}.py")
+            with build as built:
+                with self._capture(fn, tracer=tracer, backend="eager") as cap:
+                    cap(*args)
+                    summary = cap.summary()
+            codes = built.call_args.args[0].codes
+            rendered[fn.__name__] = {c.python_code.co_name: c for c in codes}
+            self.assertIn(
+                ("CONSTANT_MATCH", "G['FACTOR']"), summary.risky_dropped_guards
+            )
+            kept_n = ("CONSTANT_MATCH", "n") in summary.kept_guards
+            self.assertEqual(kept_n, fn is mod.factor)
+        factor, mul = rendered["step"]["factor"], rendered["step"]["mul"]
+        self.assertEqual((factor.guarded_codes, factor.bypassed), ([], False))
+        self.assertTrue(mul.guarded_codes)
+        self.assertTrue(rendered["factor"]["factor"].guarded_codes)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_a_callee_whose_graph_holds_parameters_stays_bypassed(self):
+        # install_free_tensors makes apply()'s graph hold LIN's parameter as an
+        # attribute, so output_graph bypasses it before it registers a backend
+        # graph. It traced ops, so it must stay bypassed, not run eagerly.
+        name = f"{self.module_name}_params"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\n"
+                "class Scale(torch.nn.Module):\n"
+                "    def __init__(self):\n"
+                "        super().__init__()\n"
+                "        self.w = torch.nn.Parameter(torch.ones(4))\n\n"
+                "    def forward(self, x):\n        return x * self.w\n\n"
+                "LIN = Scale()\n\n"
+                "def apply(x):\n    return LIN(x)\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x):\n    return apply(x)\n\n"
+                "def step(x):\n    return scale(x.sin())\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(require_complete=False)
+        with self._capture(mod.step, tracer=tracer, backend="eager") as cap:
+            cap(torch.randn(4))
+            summary = cap.summary()
+        self.assertEqual(summary.bypassed, ("apply",))
+        self.assertFalse(summary.complete)
+
+    @skipIfCrossRef
+    def test_a_risky_drop_only_in_an_eager_frame_is_not_reported(self):
+        # Both frames drop G['op'], a function whose globals no importable
+        # module owns, so its CLOSURE_MATCH cannot be saved. The graphless
+        # lookup() reads an aliased op, a risky drop, but is served eagerly;
+        # step() reads a def of that name from its own file, a harmless drop.
+        from torch._dynamo.eval_frame import _RefuseRecompileCallback
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.utils import counters
+
+        names = [f"{self.module_name}_{n}" for n in ("lookup", "step")]
+        sources = (
+            "import torch\n\n"
+            "def _double(module, n):\n    return 2 * n\n\n"
+            "op = type(_double)(_double.__code__, {'__builtins__': __builtins__})\n\n"
+            "def lookup(module, n):\n    return op(module, n)\n\n"
+            "@torch._dynamo.disable(recursive=False)\n"
+            "def scale(x):\n    return x * lookup(torch.nn.Module(), 3)\n",
+            f"import {names[0]}\n\n"
+            "def op(x):\n    return x + 1\n\n"
+            "op = type(op)(op.__code__, {'__builtins__': __builtins__})\n\n"
+            f"def step(x):\n    return {names[0]}.scale(op(x.sin()))\n",
+        )
+        for name, source in zip(names, sources):
+            with open(os.path.join(self.dir, name + ".py"), "w") as f:
+                f.write(source)
+            self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        step = importlib.import_module(names[1]).step
+        tracer = DynamoTracer(require_no_risky_drops=True)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        with build as built, self._capture(step, tracer=tracer, backend="eager") as cap:
+            cap(torch.randn(4))
+            summary = cap.summary()
+        codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
+        lookup = codes["lookup"]
+        self.assertEqual((lookup.guarded_codes, lookup.bypassed), ([], False))
+        self.assertIn(("CLOSURE_MATCH", "G['op']"), summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        # Installed with a refusing callback, as an installed artifact is,
+        # lookup() runs its inlined callee _double() as plain Python too: that
+        # frame takes a module and has no entry, so the callback would refuse it.
+        torch._dynamo.reset()
+        package = CompilePackage(step, built.call_args.args[0])
+        package.install(built.call_args.args[1])
+        self.addCleanup(package.uninstall)
+        context = torch._dynamo.optimize("eager")
+        context.callback = _RefuseRecompileCallback(context.callback)
+        served = context(sys.modules[names[0]].lookup)
+        self.assertEqual(served(torch.nn.Module(), 3), 6)
+        # The skip is process-global and shared: while either of two packages
+        # that skip lookup() is installed, an unrelated compile reaching it as
+        # a frame never enters Dynamo, and after both uninstall it does.
+        other = CompilePackage(step, built.call_args.args[0])
+        other.install(built.call_args.args[1])
+        self.addCleanup(other.uninstall)
+        lookup_fn = torch.compile(sys.modules[names[0]].lookup, backend="eager")
+        for uninstall, compiles in ((None, False), (package, False), (other, True)):
+            if uninstall is not None:
+                uninstall.uninstall()
+            counters.clear()
+            self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
+            self.assertEqual(counters["frames"]["total"] > 0, compiles)
+
+    @skipIfCrossRef
+    def test_a_lossy_graphless_frame_that_falls_back_is_not_an_eager_fallback(self):
+        # lookup() holds no graph and drops G['op'], so the capture serves it as
+        # plain Python. Its recompile for k=1 then graph-breaks in a loop, which
+        # flags it, but a frame served as plain Python has no variant to miss.
+        name = f"{self.module_name}_lossy_fallback"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\n"
+                "def _double(module, n):\n    return 2 * n\n\n"
+                "op = type(_double)(_double.__code__, {'__builtins__': __builtins__})\n\n"
+                "@torch._dynamo.disable\n"
+                "def opaque():\n    pass\n\n"
+                "def lookup(module, n, k):\n"
+                "    for _ in range(k):\n        opaque()\n"
+                "    return op(module, n)\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x, k):\n    return x * lookup(torch.nn.Module(), 3, k)\n\n"
+                "def step(x, k=0):\n    return scale(x.sin(), k)\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        x = torch.randn(4)
+        capturing = self._capture(mod.step, tracer=tracer, backend="eager")
+        with build as built, capturing as cap:
+            self.assertEqual(cap(x, 0), x.sin() * 6)
+            self.assertEqual(cap(x, 1), x.sin() * 6)
+            summary = cap.summary()
+        self.assertEqual(summary.eager_fallbacks, (), summary)
+        self.assertNotIn("lookup", summary.uncovered_frames, summary)
+        codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
+        lookup = codes["lookup"]
+        self.assertEqual((lookup.guarded_codes, lookup.skip_recursive), ([], True))
+        self.assertFalse(lookup.eager_fallback)
+
+    @skipIfCrossRef
+    @parametrize("caching_precompile", [False, True])
+    def test_an_installed_artifact_can_opt_into_serve_time_compiles(
+        self, caching_precompile
+    ):
+        # Captured on x2 only; x3 is uncovered. A compiled call adds 1.
+        fn = self.mod.tags_compiled
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        state = os.path.join(self.dir, "state.pt")
+        saved = {
+            "state_dict": self.model.state_dict(),
+            "x2": self.x2,
+            "x3": self.x3,
+            "y2": fn(self.model, self.x2),
+            "y3": fn(self.model, self.x3),
+        }
+        torch.save(saved, state)
+        script = (
+            "import sys, torch\n"
+            "from torch._dynamo.utils import _compilation_metrics as metrics\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "saved = torch.load(sys.argv[5])\n"
+            "model = mod.Model()\n"
+            "model.load_state_dict(saved['state_dict'])\n"
+            "from torch._dynamo.package import DynamoCache\n"
+            "touched = []\n"
+            "DynamoCache.load = DynamoCache.record_package = touched.append\n"
+            "f = torch.compiler.precompile.load(\n"
+            "    sys.argv[2], sys.argv[3], allow_serve_time_compiles=True\n"
+            ")\n"
+            "assert f.installed\n"
+            "x2, x3, y2, y3 = saved['x2'], saved['x3'], saved['y2'], saved['y3']\n"
+            "torch.testing.assert_close(f(model, x2), y2 + 1)\n"
+            "assert not metrics, 'a covered call compiled'\n"
+            "torch.testing.assert_close(f(model, x3), y3 + 1)\n"
+            "compiled = {m.co_name for m in metrics}\n"
+            "# The graph-break child frame missed its captured variant too.\n"
+            "assert {'tags_compiled', 'breaking_helper'} <= compiled, compiled\n"
+            "compiles = len(metrics)\n"
+            "torch.testing.assert_close(f(model, x3), y3 + 1)\n"
+            "assert len(metrics) == compiles, 'the serve-time compile was not reused'\n"
+            "assert not touched, f'the Dynamo cache was used: {touched}'\n"
+            "with torch.compiler.set_stance('force_eager'):\n"
+            "    x4 = torch.randn(4, 4)\n"
+            "    torch.testing.assert_close(f(model, x4), mod.tags_compiled(model, x4))\n"
+            "assert len(metrics) == compiles, 'compiled under force_eager'\n"
+            "with torch.compiler.set_stance('fail_on_recompile'):\n"
+            "    try:\n"
+            "        f(model, torch.randn(5, 4))\n"
+            "    except RuntimeError as e:\n"
+            "        assert 'Failed on the following precompiled guards' in str(e), e\n"
+            "    else:\n"
+            "        raise AssertionError('compiled under fail_on_recompile')\n"
+            "print('compiled at serve time')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name, state]
+        cmd = [sys.executable, "-c", script, *argv]
+        env = {**os.environ, "TORCH_CACHING_PRECOMPILE": str(int(caching_precompile))}
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("compiled at serve time", out.stdout)
+
+    def test_a_standalone_artifact_refuses_serve_time_compiles(self):
+        with self._capture(self.mod.single, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with self.assertRaisesRegex(PrecompileError, "only to an installed artifact"):
+            load(self.artifact, self.cache, allow_serve_time_compiles=True)
+
+    def test_an_installed_artifact_without_the_flag_default_refuses_it(self):
+        with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact, newline="") as f:
+            python_code = f.read()
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        self.assertIn(default, python_code)
+        python_code = python_code.replace(default, "\n")
+        with open(self.artifact, "w", newline="") as f:
+            f.write(python_code)
+        cache = torch.load(self.cache, weights_only=True)
+        cache["code_hash"] = hashlib.sha256(python_code.encode()).hexdigest()
+        torch.save(cache, self.cache)
+        with self.assertRaisesRegex(PrecompileError, "predates the flag"):
+            load(self.artifact, self.cache, allow_serve_time_compiles=True)
+
+    @parametrize(
+        "line,allow,msg",
+        [
+            ("_ALLOW_SERVE_TIME_COMPILES = True", False, "something other than False"),
+            ("_ALLOW_SERVE_TIME_COMPILES = False  # edited", True, "not in the form"),
+        ],
+    )
+    def test_an_installed_artifact_with_an_edited_flag_line_refuses_to_load(
+        self, line, allow, msg
+    ):
+        with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact, newline="") as f:
+            python_code = f.read()
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        self.assertIn(default, python_code)
+        python_code = python_code.replace(default, f"\n{line}\n")
+        with open(self.artifact, "w", newline="") as f:
+            f.write(python_code)
+        cache = torch.load(self.cache, weights_only=True)
+        cache["code_hash"] = hashlib.sha256(python_code.encode()).hexdigest()
+        torch.save(cache, self.cache)
+        with self.assertRaisesRegex(PrecompileError, msg):
+            load(self.artifact, self.cache, allow_serve_time_compiles=allow)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4941,6 +5720,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_to_load_with_compiled_autograd(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4961,6 +5741,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_changed_source_at_load(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4988,6 +5769,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_passes_the_models_own_errors_through(self):
         # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
         # RuntimeError the served model raises on a covered call is its own.
@@ -5051,6 +5833,112 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(self.model.lin.weight.grad, grads["lin.weight"])
         self.model.load_state_dict(state)
         self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
+
+    @contextlib.contextmanager
+    def _cold_bundled_autotune_cache(self):
+        from torch._inductor.runtime.autotune_cache import (
+            _AutotuneCacheBundlerImpl as Bundler,
+        )
+        from torch._inductor.utils import fresh_cache
+
+        cold = mock.Mock()
+        cold.get.return_value = None
+        # Without Triton the bundler has no backend hash and fails before it
+        # reaches the one-bundle check.
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+            mock.patch(
+                "torch._inductor.runtime.autotune_cache.create_cache",
+                return_value=cold,
+            ),
+            mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
+        ):
+            yield
+
+    def test_a_cold_bundled_autotune_cache_does_not_break_a_training_capture(self):
+        # The bundled autotune remote cache opens one bundle per compile context
+        # and closes it on the first compiled call; the capture lowers the
+        # backward with the forward, before either runs.
+        single = self.mod.single
+        reference = copy.deepcopy(self.model)
+        expected = single(reference, self.x2)
+        expected.sum().backward()
+        with self._cold_bundled_autotune_cache():
+            with self._capture(single, backend="inductor") as cap:
+                y = cap(self.model, self.x2)
+                y.sum().backward()
+                self.assertTrue(cap.summary().complete)
+            self.assertEqual(y, expected)
+            for p, ref in zip(self.model.parameters(), reference.parameters()):
+                self.assertEqual(p.grad, ref.grad)
+            self.model.zero_grad()
+            served = load(self.artifact, self.cache)(self.model, self.x2)
+            served.sum().backward()
+        self.assertEqual(served, expected)
+        for p, ref in zip(self.model.parameters(), reference.parameters()):
+            self.assertEqual(p.grad, ref.grad)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_cold_bundled_autotune_cache_does_not_break_an_installed_load(self):
+        # An installed artifact's load post-compiles the forward and the
+        # backward in install()'s one compile context, the one-bundle limit
+        # the capture hits; CompilePackage.install() turns the flag off.
+        fn = self.mod.calls_breaking_helper
+        reference = copy.deepcopy(self.model)
+        fn(reference, self.x2).sum().backward()
+        grads = {n: p.grad for n, p in reference.named_parameters()}
+        with self._cold_bundled_autotune_cache():
+            with self._capture(fn, backend="inductor") as cap:
+                y = cap(self.model, self.x2)
+                y.sum().backward()
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "installed"', f.read())
+        self.model.zero_grad()
+        state = os.path.join(self.dir, "state.pt")
+        torch.save({"state_dict": self.model.state_dict(), "x": self.x2}, state)
+        loader = textwrap.dedent(
+            """
+            import sys
+            from unittest import mock
+            import torch
+            from torch._inductor.runtime.autotune_cache import (
+                _AutotuneCacheBundlerImpl as Bundler,
+            )
+            from torch._inductor.utils import fresh_cache
+
+            tmp, module, artifact, cache, state = sys.argv[1:6]
+            sys.path.insert(0, tmp)
+            saved = torch.load(state)
+            model = __import__(module).Model()
+            model.load_state_dict(saved["state_dict"])
+            cold = mock.Mock()
+            cold.get.return_value = None
+            with (
+                fresh_cache(),
+                torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+                mock.patch(
+                    "torch._inductor.runtime.autotune_cache.create_cache",
+                    return_value=cold,
+                ),
+                mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
+            ):
+                f = torch.compiler.precompile.load(artifact, cache)
+                assert f.installed
+                f(model, saved["x"]).sum().backward()
+            torch.save({n: p.grad for n, p in model.named_parameters()}, state)
+            """
+        )
+        argv = [self.dir, self.module_name, self.artifact, self.cache, state]
+        out = subprocess.run(
+            [sys.executable, "-c", loader, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(torch.load(state), grads)
 
     def test_save_checkpoints_mid_block(self):
         single = self.mod.single
@@ -5280,6 +6168,14 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
+def _exception_chain(exc: BaseException | None) -> str:
+    parts = []
+    while exc is not None:
+        parts.append(str(exc))
+        exc = exc.__cause__ or exc.__context__
+    return "\n".join(parts)
+
+
 def _capture_files(
     test, fn, example_inputs, backend, dynamic=None, tracer=None, paths=None, then=None
 ):
@@ -5378,11 +6274,134 @@ def _bundle_header(bundle):
     return json.loads(bundle[start : start + size]), bundle[start + size :]
 
 
+def _replace_bundle_header(bundle, edit):
+    from torch.compiler._triton_runtime_cache import _MAGIC
+
+    header, payload = _bundle_header(bundle)
+    edit(header)
+    encoded = json.dumps(header).encode()
+    return _MAGIC + struct.pack("!Q", len(encoded)) + encoded + payload
+
+
+_TRITON_TRANSPORT_KERNEL = """
+import triton
+import triton.language as tl
+
+
+@triton.autotune(
+    configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+    key=["n"],
+)
+@triton.jit
+def scale(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    tl.store(out_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) * 3, mask=mask)
+"""
+
+
+_TRITON_TRANSPORT_DRIVER = """
+import os
+import pathlib
+import sys
+
+phase, directory, module = sys.argv[1:4]
+cache = pathlib.Path(directory, phase)
+bundle = pathlib.Path(directory, "bundle")
+os.environ["TRITON_CACHE_DIR"] = str(cache)
+os.environ["TRITON_CACHE_AUTOTUNING"] = "1"
+
+import torch
+from torch.compiler._triton_runtime_cache import (
+    export_runtime_cache,
+    import_runtime_cache,
+)
+
+
+def snapshot():
+    # Triton commits with os.replace, so a rewrite changes the inode.
+    return {
+        path: (path.stat().st_ino, path.stat().st_mtime_ns)
+        for path in cache.rglob("*")
+    }
+
+
+if phase == "consume":
+    import_runtime_cache(bundle.read_bytes())
+    before = snapshot()
+
+import triton
+
+sys.path.insert(0, directory)
+scale = __import__(module).scale
+x = torch.arange(1000, device="cuda", dtype=torch.float32)
+out = torch.empty_like(x)
+scale[lambda meta: (triton.cdiv(x.numel(), meta["BLOCK"]),)](x, out, x.numel())
+torch.testing.assert_close(out, x * 3)
+if phase == "produce":
+    bundle.write_bytes(export_runtime_cache())
+else:
+    # A compile or an autotuning benchmark would have written to the cache.
+    after = snapshot()
+    assert after == before, sorted(p for p in after if after[p] != before.get(p))
+print("transport phase ok:", phase)
+"""
+
+
 @skipIfTorchDynamo("exports a Triton cache directory, not a traced program")
 @unittest.skipUnless(has_triton_package(), "requires Triton")
 @instantiate_parametrized_tests
 class TestTritonRuntimeCacheTransport(TestCase):
     CONTEXT = {"build": "test"}
+
+    def _bundle(self, directory, **kwargs):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with _triton_cache_namespace(directory):
+            key, native = _write_triton_runtime_entries()
+            return export_runtime_cache(context=self.CONTEXT, **kwargs), key, native
+
+    @parametrize("consumer_exists", (False, True))
+    def test_roundtrip_hydrates_a_fresh_cache(self, consumer_exists):
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            producer = pathlib.Path(tmp, "producer")
+            consumer = pathlib.Path(tmp, "consumer")
+            if consumer_exists:
+                consumer.mkdir()
+                consumer.chmod(0o750)
+                mode = 0o750
+            else:
+                probe = pathlib.Path(tmp, "probe")
+                probe.mkdir()
+                mode = stat.S_IMODE(probe.stat().st_mode)
+            # Triton writes group paths with the directory as spelled.
+            spelled = f"{tmp}//producer"
+            bundle, key, native = self._bundle(spelled)
+            with _triton_cache_namespace(spelled):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+            inode = consumer.stat().st_ino if consumer_exists else None
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                self.assertEqual(stat.S_IMODE(consumer.stat().st_mode), mode)
+                if consumer_exists:
+                    self.assertEqual(consumer.stat().st_ino, inode)
+                for name in (native, "kernel.cubin", "kernel.autotune.json"):
+                    self.assertEqual(
+                        (consumer / key / name).read_bytes(),
+                        (producer / key / name).read_bytes(),
+                    )
+                self.assertEqual(
+                    get_cache_manager("ab" * 32).get_group("kernel.json"),
+                    {
+                        name: str(consumer / key / name)
+                        for name in ("kernel.json", "kernel.cubin")
+                    },
+                )
 
     def test_export_leaves_out_excluded_keys(self):
         from triton.runtime.cache import get_cache_manager
@@ -5415,6 +6434,283 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     payload[file["offset"] : file["offset"] + file["size"]],
                     pathlib.Path(tmp, file["key"], file["name"]).read_bytes(),
                 )
+
+    @parametrize(
+        "damage",
+        (
+            "checksum",
+            "truncated",
+            "trailing",
+            "malformed",
+            "context",
+            "occupied",
+            "extent",
+            "duplicate_file",
+            "duplicate_record",
+            "member_path",
+            "group_member",
+            "native_suffix",
+            "no_binary",
+            "incomplete_group",
+        ),
+    )
+    def test_import_rejects_a_damaged_bundle_without_writing(self, damage):
+        error = {
+            "checksum": "Corrupt Triton runtime-cache member",
+            "truncated": "Truncated Triton runtime-cache bundle",
+            "trailing": "Unexpected trailing",
+            "malformed": "Malformed Triton runtime-cache bundle",
+            "context": "Incompatible Triton runtime-cache ABI",
+            "occupied": "does not hold this runtime cache",
+            "extent": "Invalid Triton runtime-cache payload extent",
+            "duplicate_file": "Duplicate Triton runtime-cache member",
+            "duplicate_record": "Duplicate Triton runtime-cache record",
+            "member_path": "Invalid Triton runtime-cache member name",
+            "group_member": "Invalid Triton runtime-cache member name",
+            "native_suffix": "Invalid Triton runtime-cache native member",
+            "no_binary": "has no binary",
+            "incomplete_group": "Incomplete or unreferenced",
+        }[damage]
+        from torch.compiler._triton_runtime_cache import _MAGIC, import_runtime_cache
+
+        def kernel(header):
+            return next(r for r in header["records"] if r["kind"] == "kernel")
+
+        def rename(header, old, new):
+            for entry in header["records"] + header["files"]:
+                if entry.get("name") == old:
+                    entry["name"] = new
+
+        def shift(header):
+            header["files"][1]["offset"] += 1
+
+        def duplicate_file(header):
+            last = header["files"][-1]
+            header["files"].append(dict(last, offset=last["offset"] + last["size"]))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, native = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            consumer.mkdir()
+            context = self.CONTEXT
+            edits = {
+                "extent": shift,
+                "duplicate_file": duplicate_file,
+                "duplicate_record": lambda h: h["records"].append(h["records"][-1]),
+                "member_path": lambda h: h["files"][0].update(name="../escape"),
+                "group_member": lambda h: rename(
+                    h, "kernel.autotune.json", "__grp__kernel.autotune.json"
+                ),
+                "native_suffix": lambda h: rename(h, native, "launcher.txt"),
+                "no_binary": lambda h: kernel(h)["members"].remove("kernel.cubin"),
+                "incomplete_group": lambda h: kernel(h)["members"].append("kernel.ptx"),
+            }
+            if damage in edits:
+                header, payload = _bundle_header(bundle)
+                last = header["files"][-1]["offset"]
+                bundle = _replace_bundle_header(bundle, edits[damage])
+                if damage == "duplicate_file":
+                    bundle += payload[last:]
+            elif damage == "checksum":
+                bundle = bundle[:-1] + bytes([bundle[-1] ^ 1])
+            elif damage == "truncated":
+                bundle = bundle[: len(_MAGIC) + 8 + 10]
+            elif damage == "trailing":
+                bundle += b"\0"
+            elif damage == "malformed":
+                bundle = _MAGIC + struct.pack("!Q", 2) + b"[]"
+            elif damage == "context":
+                context = {"build": "other"}
+            else:
+                (consumer / "partial").write_bytes(b"partial")
+            before = sorted(os.listdir(tmp)), sorted(consumer.iterdir())
+            with (
+                _triton_cache_namespace(consumer),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                import_runtime_cache(bundle, context=context)
+            self.assertEqual(
+                (sorted(os.listdir(tmp)), sorted(consumer.iterdir())), before
+            )
+
+    @parametrize("kind", ("native", "kernel", "group", "autotune"))
+    @parametrize("damage", ("missing", "corrupt"))
+    def test_import_verifies_an_already_hydrated_cache(self, kind, damage):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, key, native = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                name = {
+                    "native": native,
+                    "kernel": "kernel.cubin",
+                    "group": "__grp__kernel.json",
+                    "autotune": "kernel.autotune.json",
+                }[kind]
+                member = consumer / key / name
+                if damage == "missing":
+                    member.unlink()
+                else:
+                    member.write_bytes(b"corrupt")
+                with self.assertRaisesRegex(
+                    RuntimeError, "Incomplete or incompatible|Unreadable"
+                ):
+                    import_runtime_cache(bundle, context=self.CONTEXT)
+
+    @parametrize("winner", ("same", "different", "subset"))
+    def test_import_that_loses_the_rename_checks_the_winner(self, winner):
+        import hashlib
+
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import (
+            export_runtime_cache,
+            import_runtime_cache,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            other = bundle
+            if winner != "same":
+                with _triton_cache_namespace(pathlib.Path(tmp, "other")):
+                    _write_triton_runtime_entries()
+                    get_cache_manager("cd" * 32).put(
+                        b"other native",
+                        "other" + sysconfig.get_config_var("EXT_SUFFIX"),
+                    )
+                    other = export_runtime_cache(context=self.CONTEXT)
+            if winner == "subset":
+                # This import places the extra entry and finds the winner's marker.
+                bundle, other = other, bundle
+            consumer = pathlib.Path(tmp, "consumer")
+            rename = os.rename
+
+            def race(source, destination):
+                patched.side_effect = rename
+                import_runtime_cache(other, context=self.CONTEXT)
+                return rename(source, destination)
+
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch("os.rename", side_effect=race) as patched,
+            ):
+                if winner == "same":
+                    import_runtime_cache(bundle, context=self.CONTEXT)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                        import_runtime_cache(bundle, context=self.CONTEXT)
+            # One rename per key, ours and the winner's.
+            self.assertEqual(patched.call_count, 2 if winner == "same" else 3)
+            self.assertEqual(
+                (consumer / ".runtime_cache_bundle").read_text(),
+                hashlib.sha256(other).hexdigest(),
+            )
+            self.assertEqual([p for p in os.listdir(consumer) if ".hydrate-" in p], [])
+
+    @parametrize("consumer_exists", (False, True))
+    def test_import_reports_a_failed_rename(self, consumer_exists):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            if consumer_exists:
+                consumer.mkdir()
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch("os.rename", side_effect=PermissionError("read-only")),
+                self.assertRaisesRegex(PermissionError, "read-only"),
+            ):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+            self.assertEqual(list(consumer.iterdir()), [])
+
+    @parametrize("code", ("EPERM", "EIO"))
+    def test_import_without_hard_links(self, code):
+        import hashlib
+
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            marker = consumer / ".runtime_cache_bundle"
+            error = OSError(getattr(errno, code), "no link")
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch("os.link", side_effect=error),
+            ):
+                if code == "EPERM":
+                    import_runtime_cache(bundle, context=self.CONTEXT)
+                    digest = hashlib.sha256(bundle).hexdigest()
+                    self.assertEqual(marker.read_text(), digest)
+                else:
+                    with self.assertRaisesRegex(OSError, "no link"):
+                        import_runtime_cache(bundle, context=self.CONTEXT)
+                    self.assertFalse(marker.exists())
+            self.assertFalse(any(".hydrate-" in p.name for p in consumer.iterdir()))
+
+    @parametrize("leftover", ("none", "foreign"))
+    def test_import_completes_an_interrupted_import(self, leftover):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, key, native = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                # An import killed after its first rename, before the marker.
+                marker = consumer / ".runtime_cache_bundle"
+                marker.unlink()
+                shutil.rmtree(consumer / key)
+                pathlib.Path(consumer, ".runtime_cache_bundle.hydrate-1-0").mkdir()
+                if leftover == "foreign":
+                    pathlib.Path(consumer, "cd" * 32).mkdir()
+                    with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                        import_runtime_cache(bundle, context=self.CONTEXT)
+                    return
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                self.assertTrue(marker.is_file())
+                self.assertTrue((consumer / key / native).is_file())
+                # A hydrated cache still imports after Triton adds entries to it.
+                pathlib.Path(consumer, "cd" * 32).mkdir()
+                import_runtime_cache(bundle, context=self.CONTEXT)
+
+    def test_import_into_a_file(self):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            consumer.write_text("not a directory")
+            with (
+                _triton_cache_namespace(consumer),
+                self.assertRaisesRegex(RuntimeError, "not a directory"),
+            ):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    def test_imported_cache_launches_without_compiling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"triton_transport_{uuid.uuid4().hex}"
+            pathlib.Path(directory, module + ".py").write_text(_TRITON_TRANSPORT_KERNEL)
+            for phase in ("produce", "consume"):
+                out = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        _TRITON_TRANSPORT_DRIVER,
+                        phase,
+                        directory,
+                        module,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"transport phase ok: {phase}", out.stdout)
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
     def test_export_holds_every_entry_triton_commits(self):
@@ -6008,6 +7304,9 @@ def _static_runtime_kernel(block):
 
 @contextlib.contextmanager
 def _producer_triton_cache(directory):
+    if not HAS_TRITON:
+        yield
+        return
     import triton
 
     with (
@@ -6018,15 +7317,197 @@ def _producer_triton_cache(directory):
             {"TRITON_CACHE_AUTOTUNING": "1", "TRITON_CACHE_DIR": str(directory)},
         ),
     ):
-        triton.knobs.cache.dir = str(directory)
+        # knobs.cache.dir reads TRITON_CACHE_DIR unless assigned, so later env
+        # patches (fresh_cache, a test's own directory) still take effect.
         triton.knobs.cache.manager_class = None
         triton.knobs.autotuning.cache = True
         yield
 
 
+@contextlib.contextmanager
+def _triton_settings_unchanged(test):
+    # A warm TRITON_CACHE_DIR no import could use, so repointing it is visible.
+    import triton
+
+    knobs = triton.knobs
+    with (
+        tempfile.TemporaryDirectory() as warm,
+        mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": warm}),
+        knobs.cache.scope(),
+        knobs.autotuning.scope(),
+    ):
+        pathlib.Path(warm, "kernel").mkdir()
+        knobs.autotuning.cache = False
+        yield
+        test.assertEqual(os.environ.get("TRITON_CACHE_DIR"), warm)
+        test.assertEqual(knobs.cache.dir, warm)
+        test.assertFalse(knobs.autotuning.cache)
+
+
+class _FakeTritonRuntimeCache:
+    """Stands in for a triton.runtime.cache that can export its runtime cache."""
+
+    def __init__(self, root):
+        self.root = root
+        self.imports = []
+
+    def runtime_cache_root(self):
+        return self.root
+
+    def export_runtime_cache(self, *, context):
+        return f"runtime cache from {self.root}".encode()
+
+    def _decode(self, bundle, context):
+        return [], {}
+
+    def import_runtime_cache(self, payload, *, context):
+        self.imports.append((payload, self.root))
+
+
+@contextlib.contextmanager
+def _replace_module(name, module):
+    # mock.patch.dict(sys.modules) restores the whole dict on exit, dropping modules
+    # first imported inside it; re-importing those can re-run registrations.
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        yield
+    finally:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+
+
+@contextlib.contextmanager
+def _fake_triton_runtime_cache(root):
+    import triton
+
+    from torch.compiler import _runtime_cache
+
+    fake = _FakeTritonRuntimeCache(root)
+    with (
+        triton.knobs.autotuning.scope(),
+        mock.patch.object(_runtime_cache, "_triton_runtime_cache", return_value=fake),
+        # A capture ships whatever root the fake has when it starts.
+        mock.patch.object(
+            _runtime_cache, "_own_triton_cache", lambda settings: str(fake.root)
+        ),
+        mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+    ):
+        triton.knobs.autotuning.cache = True
+        yield fake
+
+
+_RUNTIME_CACHE_MODULE = """
+import torch
+import triton
+import triton.language as tl
+
+
+@triton.autotune(
+    configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+    key=["n"],
+)
+@triton.jit
+def _scale_kernel(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    tl.store(out_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) * 3, mask=mask)
+
+
+@torch.library.custom_op("precompile_runtime_test::scale", mutates_args=())
+def scale(x: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(x)
+    n = x.numel()
+    _scale_kernel[lambda meta: (triton.cdiv(n, meta["BLOCK"]),)](x, out, n)
+    return out
+
+
+@scale.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+def fn(x, w):
+    y = (x.sin() * 2 + x.cos()).relu()
+    return torch.ops.precompile_runtime_test.scale.default((y @ w).softmax(-1))
+"""
+
+
+_RUNTIME_CACHE_DRIVER = """
+import os
+import sys
+
+phase, directory, module = sys.argv[1:4]
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
+# Neither phase sets TRITON_CACHE_DIR or TRITON_CACHE_AUTOTUNING: capture and
+# load pick Triton's cache directory and autotuning cache themselves.
+os.environ.pop("TRITON_CACHE_DIR", None)
+os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
+if phase == "replay":
+    os.environ["TORCH_PRECOMPILE_NO_COMPILATION"] = "1"
+
+import torch
+
+sys.path.insert(0, directory)
+fn = __import__(module).fn
+pc = torch.compiler.precompile
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
+expected_path = os.path.join(directory, "expected.pt")
+torch._inductor.config.use_static_cuda_launcher = True
+
+
+def inputs(seed):
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    x = torch.randn(64, 128, device="cuda", generator=g)
+    return x, torch.randn(128, 32, device="cuda", generator=g)
+
+
+if phase == "capture":
+    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    # Tunes _scale_kernel before the capture: the capture tunes it again.
+    torch.save([fn(*inputs(seed)) for seed in range(2, 4)], expected_path)
+    with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
+        for seed in range(2):
+            cap(*inputs(seed))
+else:
+    from triton.runtime.cache import FileCacheManager
+
+    # A Triton JIT compile or autotuning benchmark writes through the cache
+    # manager; replaying from the imported runtime cache writes nothing. The
+    # runtime-cache transport refuses a custom manager_class, so record in place.
+    writes = []
+    put = FileCacheManager.put
+
+    def recording_put(self, data, filename, binary=True):
+        writes.append(filename)
+        return put(self, data, filename, binary=binary)
+
+    expected = torch.load(expected_path)
+    FileCacheManager.put = recording_put
+    with pc.no_compilation():
+        loaded = pc.load(artifact, cache)
+        for seed, reference in zip(range(2, 4), expected):
+            torch.testing.assert_close(loaded(*inputs(seed)), reference)
+    assert not writes, writes
+print("runtime cache phase ok:", phase)
+"""
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Restores the Triton settings a serving-side import turns on for the
+        # process, and gives it a cache directory to import into.
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        directory = stack.enter_context(tempfile.TemporaryDirectory())
+        stack.enter_context(_producer_triton_cache(pathlib.Path(directory, "triton")))
+
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("tuning", ("rblock", "coordesc", "combo"))
     def test_static_export_preserves_late_winner(self, tuning):
@@ -6429,6 +7910,42 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(owner.triton_kernels, {})
         self.assertIsNone(reference())
 
+    def test_capture_ships_late_native_dependency(self):
+        from pathlib import Path
+
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        triton_cache = _runtime_cache._triton_runtime_cache()
+        late = {}
+
+        def write_late_native_dependency():
+            if triton_cache is not None:
+                from triton.runtime.cache import get_cache_manager
+
+                native = "late_helper" + sysconfig.get_config_var("EXT_SUFFIX")
+                writer = get_cache_manager("bc" * 32)
+                writer.put(b"late native dependency", native)
+                late["path"] = Path(writer.key) / native
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, cache = _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+                then=write_late_native_dependency,
+            )
+            with _producer_triton_cache(root / "consumer"):
+                pc.load(source, cache)
+                pc.load(source, cache)
+            if triton_cache is not None:
+                self.assertEqual(
+                    (root / "consumer" / late["path"]).read_bytes(),
+                    b"late native dependency",
+                )
+
     def test_misused_overlapping_captures_keep_one_scope(self):
         # Overlapping captures are unsupported (their cache halves mix); the
         # scope only must not close under the outer capture.
@@ -6470,6 +7987,24 @@ class TestPrecompileRuntimeCache(TestCase):
                 with _runtime_cache.capture_scope():
                     self.assertIsNot(_runtime_cache._capture, parent)
                 self.assertEqual(parent.captures, 1)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_skips_deleted_driver_module(self):
+        from triton.runtime import driver
+
+        from torch.compiler import _runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            module = pathlib.Path(directory, "utils_key", "cuda_utils.so")
+            module.parent.mkdir()
+            module.write_bytes(b"driver utils")
+            loaded = types.SimpleNamespace(__file__=str(module))
+            utils = types.SimpleNamespace(load_binary=types.MethodType(len, loaded))
+        active = types.SimpleNamespace(utils=utils)
+        with mock.patch.object(driver, "_active", active):
+            with _runtime_cache.capture_scope():
+                root = pathlib.Path(_runtime_cache._capture.cache_root)
+                self.assertFalse((root / "utils_key").exists())
 
     def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -6878,6 +8413,9 @@ class TestPrecompileRuntimeCache(TestCase):
     @parametrize("coordesc", (False, True))
     def test_frozen_gpu_kernel_serves_strict_load_from_empty_caches(self, coordesc):
         import gc
+        from pathlib import Path
+
+        import triton
 
         from torch._inductor import config as inductor_config
         from torch._inductor.async_compile import CompiledTritonKernels
@@ -6890,14 +8428,8 @@ class TestPrecompileRuntimeCache(TestCase):
         pc = torch.compiler.precompile
         x = torch.randn(64, 1024, device="cuda")
         with tempfile.TemporaryDirectory() as directory:
-            producer = {
-                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "producer"),
-                "TRITON_CACHE_DIR": os.path.join(directory, "producer_triton"),
-            }
-            consumer = {
-                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "consumer"),
-                "TRITON_CACHE_DIR": os.path.join(directory, "consumer_triton"),
-            }
+            producer = {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "producer")}
+            consumer = {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "consumer")}
             clear_caches()
             with (
                 mock.patch.dict(os.environ, producer),
@@ -6916,8 +8448,20 @@ class TestPrecompileRuntimeCache(TestCase):
             winner = recorded[0].launchers[0].config
             clear_caches()
             try:
-                with mock.patch.dict(os.environ, consumer), pc.no_compilation():
+                with (
+                    triton.knobs.cache.scope(),
+                    triton.knobs.autotuning.scope(),
+                    mock.patch.dict(os.environ, consumer),
+                    pc.no_compilation(),
+                ):
+                    # TRITON_CACHE_DIR holds other kernels, as Inductor's shared
+                    # cache does once it compiles, so the import gets its own.
+                    shared = Path(directory, "shared_triton")
+                    (shared / "unrelated").mkdir(parents=True)
+                    triton.knobs.cache.dir = str(shared)
                     runnable = pc.load(source, cache)
+                    self.assertNotEqual(triton.knobs.cache.dir, str(shared))
+                    self.assertEqual(os.listdir(shared), ["unrelated"])
                     with torch.no_grad():
                         self.assertEqual(runnable(x), expected)
                     [served] = _runtime_cache._loaded_triton_kernels.values()
@@ -6925,10 +8469,32 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertEqual(served.launchers[0].config.kwargs, winner.kwargs)
                     if coordesc:
                         self.assertTrue(served.launchers[0].config.found_by_coordesc)
-                    self.assertTrue(os.listdir(consumer["TRITON_CACHE_DIR"]))
+                    self.assertTrue(os.listdir(triton.knobs.cache.dir))
             finally:
                 CompiledTritonKernels.cache_clear()
                 clear_caches()
+
+    def test_triton_root_is_importable_under_the_import_rule(self):
+        from torch.compiler._runtime_cache import _importable
+        from torch.compiler._triton_runtime_cache import _READY
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory, "triton")
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            root.mkdir()
+            # What a running or killed import leaves: its staging directory and
+            # an entry it renamed into place.
+            (root / f"{_READY}.hydrate-1-ab").mkdir()
+            (root / "key").mkdir()
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / _READY).write_text("other")
+            self.assertFalse(_importable(root, "digest", {"key"}))
+            (root / _READY).write_text("digest")
+            # Kernels compiled into an imported directory since do not matter.
+            (root / "unrelated").mkdir()
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / _READY).unlink()
+            self.assertFalse(_importable(root, "digest", {"key"}))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_rejects_an_unresolved_triton_source(self):
@@ -6964,6 +8530,494 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertIn("inside the capture block", cause)
             self.assertFalse(os.path.exists(cache))
         self.assertIsNone(_runtime_cache._capture)
+
+    def test_triton_runtime_cache_hydrates_before_graph_artifacts(self):
+        from torch._inductor.codecache import InductorCacheArtifact
+        from torch.compiler._cache import CacheArtifactManager
+        from torch.compiler._runtime_cache import TritonRuntimeCacheArtifact
+
+        writes = []
+        graph = InductorCacheArtifact("graph", b"compiled graph")
+        runtime = TritonRuntimeCacheArtifact("runtime", b"runtime dependencies")
+        with (
+            mock.patch.object(
+                InductorCacheArtifact,
+                "populate_cache",
+                side_effect=lambda: writes.append("graph"),
+            ),
+            mock.patch.object(
+                TritonRuntimeCacheArtifact,
+                "populate_cache",
+                side_effect=lambda: writes.append("runtime"),
+            ),
+        ):
+            CacheArtifactManager.populate_caches(
+                {"inductor": [graph], "triton_runtime": [runtime]}
+            )
+        self.assertEqual(writes, ["runtime", "graph"])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_cache_round_trips_once_per_consumer(self):
+        from pathlib import Path
+
+        import triton
+
+        pc = torch.compiler.precompile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _fake_triton_runtime_cache(root / "producer") as fake:
+                source, cache = _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                )
+                fake.root = root / "consumer"
+                triton.knobs.autotuning.cache = False
+                pc.load(source, cache)
+                self.assertTrue(triton.knobs.autotuning.cache)
+                with pc.no_compilation():
+                    pc.load(artifact_path=source, cache_path=cache)
+                payload = f"runtime cache from {root / 'producer'}".encode()
+                self.assertEqual(fake.imports, [(payload, root / "consumer")])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_one_triton_runtime_cache_per_directory(self):
+        import hashlib
+
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import (
+            _READY,
+            export_runtime_cache,
+            import_runtime_cache,
+        )
+
+        artifacts = []
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("first", "second"):
+                with _triton_cache_namespace(pathlib.Path(directory, name)):
+                    _write_triton_runtime_entries()
+                    if name == "second":
+                        native = "extra" + sysconfig.get_config_var("EXT_SUFFIX")
+                        get_cache_manager("cd" * 32).put(b"second", native)
+                    payload = export_runtime_cache(
+                        context=_runtime_cache._runtime_context()
+                    )
+                artifacts.append(
+                    _runtime_cache.TritonRuntimeCacheArtifact(
+                        hashlib.sha256(payload).hexdigest(), payload
+                    )
+                )
+            consumer = pathlib.Path(directory, "consumer")
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+            ):
+                artifacts[0].import_into_triton()
+                hydrated = sorted(consumer.rglob("*"))
+                # The second cache gets a directory of its own.
+                artifacts[1].import_into_triton()
+                self.assertEqual(sorted(consumer.rglob("*")), hydrated)
+                second = pathlib.Path(os.environ["TRITON_CACHE_DIR"])
+                self.assertNotEqual(second, consumer)
+                self.assertEqual((second / _READY).read_text(), artifacts[1].key)
+                with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                    import_runtime_cache(
+                        artifacts[0].content, context=_runtime_cache._runtime_context()
+                    )
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_repeat_triton_runtime_import_skips_directory_setup(self):
+        import hashlib
+
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        payload = b"runtime cache"
+        runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            triton.knobs.cache.scope(),
+            mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": directory}),
+            _fake_triton_runtime_cache(pathlib.Path(directory)) as fake,
+            mock.patch.object(
+                _runtime_cache,
+                "_serving_triton_root",
+                wraps=_runtime_cache._serving_triton_root,
+            ) as serving,
+        ):
+            runtime.populate_cache()
+            runtime.populate_cache()
+            self.assertEqual(serving.call_count, 1)
+            self.assertEqual(len(fake.imports), 1)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_import_refused_inside_capture(self):
+        import hashlib
+
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        payload = b"runtime cache"
+        runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            triton.knobs.cache.scope(),
+            _fake_triton_runtime_cache(pathlib.Path(directory)) as fake,
+        ):
+            triton.knobs.cache.dir = directory
+            with (
+                _runtime_cache.capture_scope(),
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "inside a precompile.capture"),
+            ):
+                runtime.populate_cache()
+            self.assertEqual(triton.knobs.cache.dir, directory)
+            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_restores_triton_cache_settings(self):
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
+            triton.knobs.autotuning.cache = False
+            before = triton.knobs.cache.dir
+            for raises in (False, True):
+                with contextlib.suppress(ValueError):
+                    with _runtime_cache.capture_scope():
+                        root = _runtime_cache._capture.cache_root
+                        self.assertEqual(triton.knobs.cache.dir, root)
+                        self.assertNotEqual(root, before)
+                        self.assertTrue(triton.knobs.autotuning.cache)
+                        if raises:
+                            raise ValueError
+                self.assertIsNone(_runtime_cache._capture)
+                self.assertEqual(triton.knobs.cache.dir, before)
+                self.assertFalse(triton.knobs.autotuning.cache)
+
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    def test_capture_retunes_into_its_own_triton_cache(self):
+        from pathlib import Path
+
+        import triton
+        import triton.language as tl
+
+        from torch.compiler import _runtime_cache
+
+        knobs = triton.knobs
+        # Decorated with Triton's autotuning cache off, as by default.
+        knobs.autotuning.cache = False
+
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+            key=["n"],
+            restore_value=["x_ptr"],
+        )
+        @triton.jit
+        def tuned_add_one(x_ptr, n, BLOCK: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offsets < n
+            tl.store(
+                x_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) + 1, mask=mask
+            )
+
+        # Triton never caches the decision of a tuner with pre_hook configs.
+        hooked_add_one = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK": 64}, pre_hook=lambda nargs: None),
+                triton.Config({"BLOCK": 128}),
+            ],
+            key=["n"],
+            restore_value=["x_ptr"],
+        )(tuned_add_one.fn)
+        # ...unless it prunes its configs, so this one is dropped and tuned again.
+        keep_all = {"early_config_prune": lambda configs, nargs, **kw: configs}
+        pruned_add_one = triton.autotune(
+            configs=hooked_add_one.configs,
+            key=["n"],
+            restore_value=["x_ptr"],
+            prune_configs_by=keep_all,
+        )(tuned_add_one.fn)
+        # Tuned before the capture and not launched in it.
+        untouched_add_one = triton.autotune(
+            configs=tuned_add_one.configs, key=["n"], restore_value=["x_ptr"]
+        )(tuned_add_one.fn)
+
+        @triton.jit
+        def untouched_jit(x_ptr, n, BLOCK: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offsets < n
+            tl.store(
+                x_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) + 1, mask=mask
+            )
+
+        # Compiled for two block sizes before the capture, launched for one in it.
+        two_block_jit = triton.jit(untouched_jit.fn)
+
+        hits = []
+        compiled = []
+
+        def launch(kernel=tuned_add_one):
+            x = torch.zeros(1000, device="cuda")
+            kernel[lambda meta: (triton.cdiv(1000, meta["BLOCK"]),)](x, 1000)
+            self.assertEqual(x, torch.ones_like(x))
+
+        def launch_jit(kernel=untouched_jit, block=128):
+            x = torch.zeros(1000, device="cuda")
+            kernel[(triton.cdiv(1000, block),)](x, 1000, BLOCK=block)
+            self.assertEqual(x, torch.ones_like(x))
+
+        roots = []
+
+        def in_block():
+            roots.append(Path(_runtime_cache._capture.cache_root))
+            self.assertEqual(os.environ["TRITON_CACHE_DIR"], str(roots[0]))
+            self.assertTrue(knobs.autotuning.cache)
+            launch()
+            launch(hooked_add_one)
+            launch(pruned_add_one)
+            launch_jit(two_block_jit, 128)
+
+        with (
+            mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+            knobs.autotuning.scope(),
+            knobs.runtime.scope(),
+            tempfile.TemporaryDirectory() as elsewhere,
+        ):
+            knobs.autotuning.listener = lambda **kw: hits.append(kw["cache_hit"])
+            knobs.runtime.jit_post_compile_hook = lambda fn, **kw: compiled.append(
+                fn.jit_function
+            )
+            # Tuned and kept in memory before the capture.
+            for kernel in (tuned_add_one, hooked_add_one, pruned_add_one):
+                launch(kernel)
+            launch(untouched_add_one)
+            launch_jit()
+            launch_jit(two_block_jit, 64)
+            launch_jit(two_block_jit, 128)
+            self.assertEqual(hits, [False] * 4)
+            self.assertIn(untouched_jit, compiled)
+            self.assertEqual(compiled.count(two_block_jit), 2)
+            hooked = dict(hooked_add_one.cache)
+            untouched = dict(untouched_add_one.cache)
+            hooked_add_one.configs_timings = pruned_add_one.configs_timings = None
+            # The capture starts from a directory the loaded driver module is not in.
+            knobs.cache.dir = elsewhere
+            previous = (knobs.cache.dir, os.environ["TRITON_CACHE_DIR"])
+            source, cache = _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+                then=in_block,
+            )
+            # Tuned again in the block, so the decision is in the capture's cache;
+            # the non-pruning pre_hook tuner kept its decision rather than
+            # benchmark again, and the pruning one tuned again.
+            self.assertEqual(hits, [False] * 6)
+            self.assertEqual(hooked_add_one.cache, hooked)
+            self.assertIsNone(hooked_add_one.configs_timings)
+            self.assertIsNotNone(pruned_add_one.configs_timings)
+            self.assertIn(two_block_jit, compiled)
+            # What the block did not launch kept its decision and kernels.
+            compiled.clear()
+            launch(untouched_add_one)
+            launch_jit()
+            launch_jit(two_block_jit, 64)
+            launch_jit(two_block_jit, 128)
+            self.assertEqual(hits, [False] * 6)
+            self.assertEqual(untouched_add_one.cache, untouched)
+            self.assertEqual(compiled, [])
+            [root] = roots
+            self.assertTrue(list(root.glob("*/*.autotune.json")))
+            # The driver utility module this process loaded before the capture.
+            suffix = sysconfig.get_config_var("EXT_SUFFIX")
+            self.assertTrue(list(root.glob(f"*/*_utils{suffix}")))
+            self.assertEqual(
+                (knobs.cache.dir, os.environ["TRITON_CACHE_DIR"]), previous
+            )
+            self.assertFalse(knobs.autotuning.cache)
+            self.assertFalse(tuned_add_one.cache_results)
+
+            # A serving process without TRITON_CACHE_DIR reads the decision.
+            tuned_add_one.cache.clear()
+            with mock.patch.dict(os.environ), knobs.cache.scope():
+                del os.environ["TRITON_CACHE_DIR"]
+                torch.compiler.precompile.load(source, cache)
+                self.assertNotIn(knobs.cache.dir, previous)
+                self.assertTrue(tuned_add_one.cache_results)
+                launch()
+            self.assertEqual(hits, [False] * 6 + [True])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_restores_triton_cache_settings_when_opening_fails(self):
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
+            triton.knobs.autotuning.cache = False
+            before = triton.knobs.cache.dir
+            # The live-autotuner walk runs after the knobs are overridden.
+            boom = RuntimeError("boom")
+            with mock.patch.object(_runtime_cache.gc, "get_objects", side_effect=boom):
+                # Not assertRaises, which clears the traceback's frames: that
+                # would finalize a leaked knobs scope and restore it anyway.
+                caught = None
+                try:
+                    with _runtime_cache.capture_scope():
+                        pass
+                except RuntimeError as e:
+                    caught = e
+            self.assertIs(caught, boom)
+            self.assertIsNone(_runtime_cache._capture)
+            self.assertEqual(triton.knobs.cache.dir, before)
+            self.assertFalse(triton.knobs.autotuning.cache)
+            del caught
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_refuses_changed_triton_cache_dir(self):
+        import triton
+
+        with tempfile.TemporaryDirectory() as directory:
+
+            def move_root():
+                triton.knobs.cache.dir = directory
+
+            with self.assertRaisesRegex(PrecompileError, "could not freeze") as failure:
+                _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                    then=move_root,
+                )
+            self.assertIn("directory changed", str(failure.exception.__cause__))
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_strict_import_rejects_corrupt_triton_runtime_cache(self):
+        import hashlib
+        from pathlib import Path
+
+        from torch.compiler._runtime_cache import TritonRuntimeCacheArtifact
+
+        runtime = TritonRuntimeCacheArtifact(
+            hashlib.sha256(b"other").hexdigest(), b"runtime cache"
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _fake_triton_runtime_cache(Path(directory)) as fake,
+        ):
+            with _triton_settings_unchanged(self):
+                with (
+                    torch.compiler.precompile.no_compilation(),
+                    self.assertRaisesRegex(RuntimeError, "Corrupt"),
+                ):
+                    runtime.populate_cache()
+            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_strict_import_rejects_incompatible_triton_runtime_cache(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            with _triton_cache_namespace(directory):
+                _write_triton_runtime_entries()
+                bundle = export_runtime_cache(context={"torch_key": "other"})
+            runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+                hashlib.sha256(bundle).hexdigest(), bundle
+            )
+            with (
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+                _triton_settings_unchanged(self),
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "Incompatible"),
+            ):
+                runtime.populate_cache()
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_leaves_triton_alone_without_active_backend(self):
+        from triton.backends import backends
+
+        from torch.compiler import _runtime_cache
+
+        with contextlib.ExitStack() as stack:
+            for backend in backends.values():
+                stack.enter_context(
+                    mock.patch.object(backend.driver, "is_active", return_value=False)
+                )
+            stack.enter_context(_triton_settings_unchanged(self))
+            with _runtime_cache.capture_scope():
+                self.assertIsNone(_runtime_cache._capture.cache_root)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("missing", ("import", "cache_dir"))
+    def test_unimportable_triton_runtime_cache(self, missing):
+        from pathlib import Path
+
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        x = torch.ones(4)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _fake_triton_runtime_cache(root / "producer") as fake:
+                source, cache = _capture_files(
+                    self, _no_compilation_single_graph, [(x,)], backend="eager"
+                )
+                fake.root = root / "consumer"
+                with contextlib.ExitStack() as stack:
+                    if missing == "import":
+                        stack.enter_context(
+                            mock.patch.object(
+                                _runtime_cache,
+                                "_triton_runtime_cache",
+                                return_value=None,
+                            )
+                        )
+                        reason = "too old to import"
+                    else:
+                        stack.enter_context(
+                            mock.patch.object(
+                                fake,
+                                "runtime_cache_root",
+                                side_effect=RuntimeError("TRITON_CACHE_DIR is not set"),
+                            )
+                        )
+                        reason = "no cache directory"
+                    with (
+                        pc.no_compilation(),
+                        self.assertRaisesRegex(PrecompileError, "hydrate") as failure,
+                    ):
+                        pc.load(source, cache)
+                    self.assertIn(reason, _exception_chain(failure.exception))
+                self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_cache_needs_triton_cache_knobs(self):
+        import triton
+
+        from torch.compiler import _runtime_cache, _triton_runtime_cache
+
+        self.assertIs(_runtime_cache._triton_runtime_cache(), _triton_runtime_cache)
+        knobs = types.SimpleNamespace(cache=types.SimpleNamespace(dir="/tmp"))
+        with mock.patch.object(triton, "knobs", knobs):
+            self.assertIsNone(_runtime_cache._triton_runtime_cache())
+        with _replace_module("triton", None):
+            self.assertIsNone(_runtime_cache._triton_runtime_cache())
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
@@ -7035,6 +9089,34 @@ class TestPrecompileRuntimeCache(TestCase):
                 RuntimeError, "incomplete or incompatible Triton kernel file"
             ):
                 TritonBundler.read_and_emit(bundle)
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_strict_replay_in_fresh_process(self):
+        from torch.compiler._runtime_cache import _triton_runtime_cache
+
+        if _triton_runtime_cache() is None:
+            self.skipTest("requires a Triton with cache and autotuning knobs")
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"precompile_runtime_{uuid.uuid4().hex}"
+            with open(os.path.join(directory, module + ".py"), "w") as f:
+                f.write(_RUNTIME_CACHE_MODULE)
+            for phase in ("capture", "replay"):
+                out = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        _RUNTIME_CACHE_DRIVER,
+                        phase,
+                        directory,
+                        module,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"runtime cache phase ok: {phase}", out.stdout)
 
 
 if __name__ == "__main__":

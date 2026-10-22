@@ -20,6 +20,7 @@ from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
     disable_gc,
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -77,6 +78,8 @@ def comparable(value):
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_exception(self):
         def fn(x):
             x = torch.cos(x)
