@@ -811,7 +811,6 @@ class TestPoolingNNDevice(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
-    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
@@ -2332,7 +2331,6 @@ torch.{device_type}.synchronize()
                         fn(x, 6, stride=2, padding=0)
 
     @onlyAccelerator
-    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(
             self,

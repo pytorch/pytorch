@@ -8097,13 +8097,17 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 2, 3, 3), (7, 7), False)
 
-    @parametrize("pool", [F.adaptive_avg_pool2d, F.adaptive_max_pool2d], name_fn=lambda f: f.__name__)
-    def test_adaptive_pool2d_large_sizes(self, pool):
+    @parametrize("pool,output_size", [
+        (F.adaptive_avg_pool2d, (2, 49999)),
+        (F.adaptive_max_pool2d, (2, 49999)),
+        (F.adaptive_avg_pool3d, (1, 2, 49999)),
+    ], name_fn=lambda pool, output_size: pool.__name__)
+    def test_adaptive_pool_large_sizes(self, pool, output_size):
         # (in + 1) * (out + 1) overflows int32, which selects the 64-bit index kernels
         cpu_x = torch.randn(1, 2, 3, 50000, requires_grad=True)
         x = cpu_x.detach().to('mps').requires_grad_()
-        out = pool(x, (2, 49999))
-        out_cpu = pool(cpu_x, (2, 49999))
+        out = pool(x, output_size)
+        out_cpu = pool(cpu_x, output_size)
         self.assertEqual(out, out_cpu)
 
         cpu_grad = torch.randn(out_cpu.shape)
@@ -15502,6 +15506,8 @@ class TestConsistency(TestCaseMPS):
         'acosh', 'asinh', 'asin',
         'masked.std',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
+        # CPU accumulates in half precision, so MPS is closer to the float32 result
+        'nn.functional.adaptive_avg_pool3d',
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
