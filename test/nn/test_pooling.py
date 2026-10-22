@@ -29,7 +29,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
-    skipMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
