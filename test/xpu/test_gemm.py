@@ -1466,8 +1466,8 @@ class TestBasicGEMM(TestCase):
         scale = (max_val_pos - min_val_neg).clamp(min=eps) / (qmax - qmin)
         zero_point = (qmin - min_val_neg.div(scale).round()).clamp(qmin, qmax)
         qa = a.div(scale).add(zero_point).round().clamp_(qmin, qmax).to(dtype)
-        scale = scale.squeeze(-1).to(torch.float32).contiguous()
-        zero_point = zero_point.squeeze(-1).to(torch.int32).contiguous()
+        scale = scale.to(torch.float32).contiguous()
+        zero_point = zero_point.to(torch.int32).contiguous()
         return qa, scale, zero_point
 
     @parametrize("m", [128])
@@ -1509,8 +1509,8 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(out.shape, (m, n))
 
         a_dequant = (
-            mat_a.to(torch.float32) - mat_a_zero_point.unsqueeze(-1).to(torch.float32)
-        ) * mat_a_scale.unsqueeze(-1)
+            mat_a.to(torch.float32) - mat_a_zero_point.to(torch.float32)
+        ) * mat_a_scale
         ref = torch.mm(a_dequant, b_fp32).to(out_dtype)
         if use_bias:
             ref = ref + bias

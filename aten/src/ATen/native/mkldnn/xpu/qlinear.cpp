@@ -265,10 +265,11 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
 //   - `mat_a`: the quantized activation, 2D, dtype `torch.int8` or
 //     `torch.uint8`, shape [M, K]
 //   - `mat_b`: the int4 weight packed as int32, 2D, shape [N, K/8]
-//   - `mat_a_scale`: per-token float32 scale for `mat_a`, shape [M]
+//   - `mat_a_scale`: per-token float32 scale for `mat_a`, shape [M, 1]
 //   - `mat_b_scales`: per-block float32 scale for `mat_b`, shape
 //     [K/group_size, N]
-//   - `mat_a_zero_point`: per-token int32 zero-point for `mat_a`, shape [M]
+//   - `mat_a_zero_point`: per-token int32 zero-point for `mat_a`, shape
+//     [M, 1]
 //   - `mat_b_zero_points`: per-block int8 zero-point for `mat_b`, shape
 //     [K/group_size, N]
 //   - `group_size`: the quantization block size along K for `mat_b`; must
@@ -342,15 +343,21 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       " : expect mat_a_zero_point to be int32 tensor, but got ",
       mat_a_zero_point.dtype());
   TORCH_CHECK(
-      mat_a_scale.numel() == M && mat_a_zero_point.numel() == M,
+      mat_a_scale.dim() == 2 && mat_a_scale.size(0) == M &&
+          mat_a_scale.size(1) == 1,
       __func__,
-      " : expect mat_a_scale and mat_a_zero_point to carry one value per "
-      "activation row (per-token), expected ",
+      " : expect mat_a_scale to have shape [",
       M,
-      " but got ",
-      mat_a_scale.numel(),
-      " and ",
-      mat_a_zero_point.numel());
+      ", 1], but got ",
+      mat_a_scale.sizes());
+  TORCH_CHECK(
+      mat_a_zero_point.dim() == 2 && mat_a_zero_point.size(0) == M &&
+          mat_a_zero_point.size(1) == 1,
+      __func__,
+      " : expect mat_a_zero_point to have shape [",
+      M,
+      ", 1], but got ",
+      mat_a_zero_point.sizes());
 
   TORCH_CHECK(
       mat_b_scales.dtype() == c10::kFloat,
