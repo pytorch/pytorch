@@ -309,7 +309,6 @@ class GlobalCallbackSession {
   void activate(bool new_session) {
     if (new_session) {
       generation_.fetch_add(1);
-      closed_at_exit_.store(false);
     }
     active_.store(true);
   }
@@ -488,10 +487,6 @@ void onFunctionExitImpl(
 void maybePopCorrelationId(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
-  // Kineto may already be destroyed once the session is closed at exit.
-  if (globalCallbackSession().closedAtExit()) {
-    return;
-  }
   auto* kineto_ctx =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   if (kineto_ctx == nullptr || !kineto_ctx->pushed_correlation_id_) {
@@ -516,8 +511,12 @@ void onFunctionExitGlobal(
   // Balance the correlation id pushed at begin_op on every path below,
   // including the teardown and stale-session early exits that skip event
   // finalization.
-  auto correlation_guard =
-      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
+  auto correlation_guard = c10::make_scope_exit([&] {
+    // Kineto may already be destroyed once the session is closed at exit.
+    if (!globalCallbackSession().closedAtExit()) {
+      maybePopCorrelationId(fn, ctx_ptr);
+    }
+  });
 
   // Take this exit's own in-flight ref, paired here because
   // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
