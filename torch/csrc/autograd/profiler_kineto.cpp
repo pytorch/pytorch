@@ -309,8 +309,17 @@ class GlobalCallbackSession {
   void activate(bool new_session) {
     if (new_session) {
       generation_.fetch_add(1);
+      closed_at_exit_.store(false);
     }
     active_.store(true);
+  }
+
+  void markClosedAtExit() {
+    closed_at_exit_.store(true);
+  }
+
+  bool closedAtExit() const {
+    return closed_at_exit_.load();
   }
 
   // Session generation, stamped into each callback's ObserverContext at enter
@@ -371,6 +380,7 @@ class GlobalCallbackSession {
   std::atomic<bool> active_{false};
   std::atomic<int64_t> in_flight_{0};
   std::atomic<uint64_t> generation_{0};
+  std::atomic<bool> closed_at_exit_{false};
   std::mutex mutex_;
   std::condition_variable cv_; // guarded by mutex_
 };
@@ -478,6 +488,10 @@ void onFunctionExitImpl(
 void maybePopCorrelationId(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
+  // Kineto may already be destroyed once the session is closed at exit.
+  if (globalCallbackSession().closedAtExit()) {
+    return;
+  }
   auto* kineto_ctx =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   if (kineto_ctx == nullptr || !kineto_ctx->pushed_correlation_id_) {
@@ -871,7 +885,9 @@ void enableProfiler(
 }
 
 void closeGlobalCallbackSession() {
-  if (!globalCallbackSession().drain()) {
+  auto& session = globalCallbackSession();
+  session.markClosedAtExit();
+  if (!session.drain()) {
     // A global callback is wedged. Pop the global state so a later
     // disableProfiler() doesn't finalize the trace while that callback is
     // still writing to it.
