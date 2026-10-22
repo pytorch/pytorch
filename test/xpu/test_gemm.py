@@ -1789,7 +1789,7 @@ def forward(self, x_1, w_1):
             scale_recipe = ScalingType.TensorWise
         elif recipe == "rowwise":
             mat_b, scale_b, weight_dq = self._fp8_block_quantize(weight_nk, 1, K)
-            scale_b = scale_b.reshape(N)
+            scale_b = scale_b.reshape(1, N)
             scale_recipe = ScalingType.RowWise
         elif recipe == "block128x128":
             mat_b, scale_b, weight_dq = self._fp8_block_quantize(weight_nk, 128, 128)

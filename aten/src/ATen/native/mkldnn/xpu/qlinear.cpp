@@ -76,13 +76,23 @@ Tensor& _woq_scaled_rowwise(
       "(Float8_e4m3fn or Float8_e5m2), got ",
       mat_b.scalar_type());
   TORCH_CHECK_VALUE(
+      scale_b.dim() == 2 && scale_b.size(0) == 1 && scale_b.size(1) == N,
+      "woq_scaled_mm: RowWise scale_b should be (1, ",
+      N,
+      "), got ",
+      scale_b.sizes());
+  TORCH_CHECK_VALUE(
       scale_b.numel() == N && scale_b.scalar_type() == kFloat,
       "woq_scaled_mm: RowWise scale_b must have ",
       N,
-      " float32, got ",
+      " Float elements, got ",
       scale_b.numel(),
       " of dtype ",
       scale_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_b.stride(1) == 1,
+      "woq_scaled_mm: expected scale_b.stride(1) to be 1, but got ",
+      scale_b.stride(1));
 
   return _woq_scaled_gemm(
       mat_a, mat_b, scale_b, ScalingType::RowWise, bias, out);
