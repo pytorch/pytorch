@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
-import sys
 import unittest
 
 import torch
@@ -13,15 +12,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-
-
-_MIXIN_ENUM_CASES = [
-    ((enum.IntEnum,), int, (0, 1)),
-    ((enum.IntFlag,), int, (1, 2)),
-    ((float, enum.Enum), float, (0.5, 1.5)),
-]
-if sys.version_info >= (3, 11):
-    _MIXIN_ENUM_CASES.append(((enum.StrEnum,), str, ("a", "b")))
 
 
 class EnumTests(torch._dynamo.test_case.TestCase):
@@ -488,7 +478,12 @@ class EnumTests(torch._dynamo.test_case.TestCase):
 
     @parametrize(
         "bases,mixin,values",
-        _MIXIN_ENUM_CASES,
+        [
+            ((enum.IntEnum,), int, (0, 1)),
+            ((enum.IntFlag,), int, (1, 2)),
+            ((enum.StrEnum,), str, ("a", "b")),
+            ((float, enum.Enum), float, (0.5, 1.5)),
+        ],
         name_fn=lambda bases, mixin, values: "_".join(b.__name__ for b in bases),
     )
     def test_enum_explicit_mixin_dunder_comparison(self, bases, mixin, values):
