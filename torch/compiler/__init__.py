@@ -1140,13 +1140,16 @@ def export_python(
     or a call that passes extra keyword arguments to ``fn``'s ``**kwargs``, is
     rejected, since neither is expressible in the artifact's positional convention.
 
-    Three things that ``make_fx`` or the code generator resolves without emitting a
-    guard are recorded as comment stamps and checked on every call: each ``nn.Module``
+    Four things that ``make_fx`` or the code generator resolves without emitting a guard
+    are recorded as comment stamps and checked on every call: each ``nn.Module``
     argument's per-submodule ``training`` state, which input tensors shared memory at
-    capture (aliasing decides what an in-place mutation means), and which input
-    positions held the *same* tensor object (AOTAutograd folds those into a single graph
-    slot, which byte overlap alone cannot distinguish from two views that merely
-    intersect). What is *not* guarded is a change in *how* two aliased inputs overlap:
+    capture (aliasing decides what an in-place mutation means), which input positions
+    held the *same* tensor object (AOTAutograd folds those into a single graph slot,
+    which byte overlap alone cannot distinguish from two views that merely intersect),
+    and the ambient ``torch.autocast`` state (which picks the dtypes the kernels were
+    built for, for every device type the artifact's own source names, not only the ones
+    its inputs live on; any difference raises, even for a graph with no op autocast
+    would cast). What is *not* guarded is a change in *how* two aliased inputs overlap:
     when capture and the call both pass intersecting views, the artifact runs with
     capture's relative offsets baked in and may compute the wrong thing.
     ``torch.compile`` has the same hole *there*, but this list is not a complete account
