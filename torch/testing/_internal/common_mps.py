@@ -27,8 +27,6 @@ if torch.backends.mps.is_available():
             "cholesky_inverse",
             "float_power",
             "geqrf",
-            "linalg.eig",
-            "linalg.eigvals",
             "linalg.inv",
             "linalg.inv_ex",
             "linalg.ldl_factor",
@@ -51,8 +49,6 @@ if torch.backends.mps.is_available():
             # No 5-D bicubic sampler on MPS. float32 only: f16/bf16 are skipped below.
             # TODO: drop this when MPS has 5-D bicubic.
             "nn.functional.grid_sample": [torch.float32],
-            "linalg.eig": None,
-            "linalg.eigvals": None,
             "hash_tensor": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
