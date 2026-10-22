@@ -815,10 +815,8 @@ class Optimizer:
         param_groups: list[dict[str, Any]],
         key: str | None = None,
     ) -> torch.Tensor:
-        # Floating-point types are a bit special here. They are the only ones
-        # that are assumed to always match the type of params.
-        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-        # UNLESS fused or capturable, see note [special device hosting for step]
+        # Keep CPU step tensors to avoid synchronization in unfused, noncapturable optimizers.
+        # See note [special device hosting for step].
         fused = False
         capturable = False
         if param_groups is None:
@@ -834,10 +832,7 @@ class Optimizer:
             else:
                 return value
         else:
-            if param.is_floating_point():
-                return value.to(dtype=param.dtype, device=param.device)
-            else:
-                return value.to(device=param.device)
+            return value.to(device=param.device)
 
     def register_load_state_dict_pre_hook(
         self,
@@ -925,6 +920,13 @@ class Optimizer:
         .. warning::
             Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
             as calling it beforehand will overwrite the loaded learning rates.
+
+        .. note::
+            State tensors keep their saved dtype and move to the parameter's device.
+            The ``step`` tensor keeps its saved dtype and device unless the parameter
+            group is fused or capturable, which moves it to the parameter's device as
+            ``torch.float32``. If parameter dtypes change, explicitly convert any state
+            tensors that must match the parameter dtype for the optimizer.
 
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group
@@ -1032,7 +1034,7 @@ class Optimizer:
             else:
                 return value
 
-        # Copy state assigned to params (and cast tensors to appropriate types).
+        # Copy state assigned to params and move tensors to the appropriate devices.
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
         state: defaultdict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
