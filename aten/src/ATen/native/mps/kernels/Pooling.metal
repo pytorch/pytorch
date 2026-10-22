@@ -830,9 +830,52 @@ kernel void avg_pool_backward(
       params.divisor_override);
 }
 
-// Computes one element of grad_input per thread by gathering from all the
-// grad_output elements whose adaptive pooling window contains it.
-// Supports 2 pooling dims only.
+// Sums the gradients of all grad_output elements whose adaptive pooling window
+// contains the grad_input element at pooling_dim_indices. Output windows
+// covering an input index follow the same formula as input windows of an output
+// index, with input and output sizes swapped.
+template <int32_t pooling_dims, typename T, typename idx_t>
+opmath_t<T> adaptive_avg_pool_backward_gather(
+    device const T* grad_output,
+    constant int32_t* grad_input_sizes,
+    constant int32_t* grad_output_sizes,
+    constant int32_t* grad_output_strides,
+    thread int32_t (&pooling_dim_indices)[3]) {
+  auto bounds0 = get_adaptive_input_iter_bounds<0, idx_t>(
+      grad_output_sizes, grad_input_sizes, pooling_dim_indices);
+  auto bounds1 = get_adaptive_input_iter_bounds<1, idx_t>(
+      grad_output_sizes, grad_input_sizes, pooling_dim_indices);
+  auto bounds2 = pooling_dims == 3
+      ? get_adaptive_input_iter_bounds<2, idx_t>(
+            grad_output_sizes, grad_input_sizes, pooling_dim_indices)
+      : IterBounds<int32_t>{0, 1};
+
+  opmath_t<T> grad_sum = 0;
+  for (auto o0 = bounds0.start; o0 < bounds0.end; o0++) {
+    auto w0 = get_adaptive_bounds<idx_t>(
+        o0, grad_input_sizes[0], grad_output_sizes[0]);
+    auto offset0 = grad_output_strides[0] * o0;
+    for (auto o1 = bounds1.start; o1 < bounds1.end; o1++) {
+      auto w1 = get_adaptive_bounds<idx_t>(
+          o1, grad_input_sizes[1], grad_output_sizes[1]);
+      auto count01 = (w0.end - w0.start) * (w1.end - w1.start);
+      auto offset1 = offset0 + grad_output_strides[1] * o1;
+      for (auto o2 = bounds2.start; o2 < bounds2.end; o2++) {
+        auto w2 = pooling_dims == 3
+            ? get_adaptive_bounds<idx_t>(
+                  o2, grad_input_sizes[2], grad_output_sizes[2])
+            : IterBounds<int32_t>{0, 1};
+        auto offset2 = pooling_dims == 3 ? grad_output_strides[2] * o2 : 0;
+        auto count = count01 * (w2.end - w2.start);
+        grad_sum +=
+            static_cast<opmath_t<T>>(grad_output[offset1 + offset2]) / count;
+      }
+    }
+  }
+  return grad_sum;
+}
+
+// Computes one element of grad_input per thread, supports 2 or 3 pooling dims.
 template <typename T, typename idx_t>
 kernel void adaptive_avg_pool_backward(
     device T* grad_input [[buffer(0)]],
@@ -861,26 +904,19 @@ kernel void adaptive_avg_pool_backward(
   grad_output += offsets.input_leading;
   grad_output_strides += leading_dims;
 
-  // Output windows covering an input index follow the same formula as input
-  // windows of an output index, with input and output sizes swapped.
-  auto bounds0 = get_adaptive_input_iter_bounds<0, idx_t>(
-      grad_output_sizes, grad_input_sizes, pooling_dim_indices);
-  auto bounds1 = get_adaptive_input_iter_bounds<1, idx_t>(
-      grad_output_sizes, grad_input_sizes, pooling_dim_indices);
-
-  opmath_t<T> grad_sum = 0;
-  for (auto o0 = bounds0.start; o0 < bounds0.end; o0++) {
-    auto w0 = get_adaptive_bounds<idx_t>(
-        o0, grad_input_sizes[0], grad_output_sizes[0]);
-    auto offset0 = grad_output_strides[0] * o0;
-    for (auto o1 = bounds1.start; o1 < bounds1.end; o1++) {
-      auto w1 = get_adaptive_bounds<idx_t>(
-          o1, grad_input_sizes[1], grad_output_sizes[1]);
-      auto count = (w0.end - w0.start) * (w1.end - w1.start);
-      auto grad_val = grad_output[offset0 + grad_output_strides[1] * o1];
-      grad_sum += static_cast<opmath_t<T>>(grad_val) / count;
-    }
-  }
+  auto grad_sum = params.pooling_dims == 3
+      ? adaptive_avg_pool_backward_gather<3, T, idx_t>(
+            grad_output,
+            grad_input_sizes,
+            grad_output_sizes,
+            grad_output_strides,
+            pooling_dim_indices)
+      : adaptive_avg_pool_backward_gather<2, T, idx_t>(
+            grad_output,
+            grad_input_sizes,
+            grad_output_sizes,
+            grad_output_strides,
+            pooling_dim_indices);
   grad_input[offsets.output] = static_cast<T>(grad_sum);
 }
 
