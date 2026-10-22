@@ -163,7 +163,10 @@ class TestHub(TestCase):
     def test_load_state_dict_from_url_check_hash_prefix(self):
         # filenames without a >= 8 hex digit prefix must not slip past check_hash
         for filename in ("weights.pth", "weights-.pth", "weights-0123456.pth"):
-            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                self.subTest(filename=filename),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
                 with self.assertRaisesRegex(RuntimeError, "check_hash"):
                     hub.load_state_dict_from_url(
                         f"https://example.com/{filename}",
