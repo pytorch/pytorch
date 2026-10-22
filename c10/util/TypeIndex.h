@@ -8,11 +8,6 @@
 #include <string>
 #include <type_traits>
 
-#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
 namespace c10::util {
 
 struct type_index final : IdWrapper<type_index, uint64_t> {
@@ -57,12 +52,8 @@ inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
       "; c10::c10_string_view = c10::basic_string_view<char>]";
 #endif
 #if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
-  static_assert(c10::starts_with(
-      static_cast<std::string_view>(fun_sig),
-      static_cast<std::string_view>(prefix)));
-  static_assert(c10::ends_with(
-      static_cast<std::string_view>(fun_sig),
-      static_cast<std::string_view>(suffix)));
+  static_assert(fun_sig.starts_with(prefix));
+  static_assert(fun_sig.ends_with(suffix));
 #endif
   return fun_sig.substr(
       prefix.size(), fun_sig.size() - prefix.size() - suffix.size());

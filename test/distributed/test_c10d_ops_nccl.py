@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_ROCM,
 )
 
 
@@ -197,7 +196,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # Premul Sum
         if torch.cuda.nccl.version() >= (2, 11, 1):
-            for dtype in torch.half, torch.float, torch.double:
+            for dtype in torch.half, torch.float, torch.double, torch.bfloat16:
                 for factor in (
                     3.0,
                     torch.tensor([5.0], device=local_device_id, dtype=dtype),
@@ -320,7 +319,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected_val *= self.world_size
             self.assertEqual(xs.item(), expected_val)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/157896")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_nccl_watchdog_cudagraph(self):

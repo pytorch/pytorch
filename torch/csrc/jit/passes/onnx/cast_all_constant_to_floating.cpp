@@ -47,7 +47,7 @@ static void CastAllConstantToFloating(Block* block) {
             break;
 
           default:
-            throw std::runtime_error("Unsupported types: complex, string");
+            TORCH_CHECK(false, "Unsupported types: complex, string");
         }
         // create a cast node
         node->removeAttribute(attr::value);

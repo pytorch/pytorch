@@ -2,6 +2,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/util/Exception.h>
@@ -13,6 +14,7 @@
 #endif
 
 #include <optional>
+#include <utility>
 
 void inline sgd_math(
   float* param_ptr,
@@ -392,9 +394,7 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CPU, m) {
 int64_t test_device_guard(int64_t device_index) {
   using torch::stable::accelerator::DeviceGuard;
 
-  STD_TORCH_CHECK(
-      device_index >= std::numeric_limits<int32_t>::min() &&
-          device_index <= std::numeric_limits<int32_t>::max(),
+  STD_TORCH_CHECK(std::in_range<int32_t>(device_index),
       "Device index is out of range of DeviceIndex (int32_t).");
 
   DeviceGuard guard(device_index);
@@ -416,9 +416,7 @@ int64_t test_device_guard_set_index() {
 }
 
 int64_t test_stream(int32_t device_index) {
-  STD_TORCH_CHECK(
-      device_index >= std::numeric_limits<int32_t>::min() &&
-          device_index <= std::numeric_limits<int32_t>::max(),
+  STD_TORCH_CHECK(std::in_range<int32_t>(device_index),
       "Device index is out of range of DeviceIndex (int32_t).");
 
   return torch::stable::accelerator::getCurrentStream(device_index).id();
@@ -530,12 +528,20 @@ bool my_layout(const Tensor& t, Layout layout) {
   return t.layout() == layout;
 }
 
+// test_stable_torch_warn is in libtorch_agn_2_9 because it can target 2.9 at
+// runtime, but it only compiles against 2.16 because of STABLE_TORCH_WARN.
+void test_stable_torch_warn(int64_t value) {
+  STABLE_TORCH_WARN(
+      "test_stable_torch_warn value=", value, " scale=", 0.5, ' ', true);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_unsqueeze(Tensor t, int dim) -> Tensor");
   m.def("my_squeeze(Tensor t, int dim) -> Tensor");
   m.def("my_select(Tensor t, int dim, int index) -> Tensor");
   m.def("my_matmul(Tensor self, Tensor other) -> Tensor");
   m.def("my_layout(Tensor t, Layout layout) -> bool");
+  m.def("test_stable_torch_warn(int value) -> ()");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
@@ -544,4 +550,5 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_select", TORCH_BOX(&my_select));
   m.impl("my_matmul", TORCH_BOX(&my_matmul));
   m.impl("my_layout", TORCH_BOX(&my_layout));
+  m.impl("test_stable_torch_warn", TORCH_BOX(&test_stable_torch_warn));
 }

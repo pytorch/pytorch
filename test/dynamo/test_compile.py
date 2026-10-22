@@ -32,6 +32,18 @@ class InPlaceCompilationTests(TestCase):
         model(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_compilation_builtin_leaf_module(self):
+        torch._dynamo.reset()
+        model = torch.nn.Conv2d(3, 3, 3)
+        cnt = CompileCounter()
+        x = torch.randn(2, 3, 8, 8)
+        ref = model(x)
+
+        model.compile(backend=cnt)
+        self.assertEqual(model(x), ref)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     def test_overwrite_call_impl(self):
         torch._dynamo.reset()
         model = ToyModel()
@@ -211,7 +223,7 @@ class InPlaceCompilationTests(TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit.script(model)
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             frozen = torch.jit.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
@@ -222,7 +234,7 @@ class InPlaceCompilationTests(TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit.script(model)
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             frozen = torch.jit.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"

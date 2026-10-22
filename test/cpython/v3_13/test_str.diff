@@ -1,0 +1,101 @@
+diff --git a/test/cpython/v3_13/test_str.py b/test/cpython/v3_13/test_str.py
+index 46673cc56adb3561c98bf4b49ffd758265d3e88c..2ebb2ce5524965afa7c742b269a00ebedaa063f3 100644
+--- a/test/cpython/v3_13/test_str.py
++++ b/test/cpython/v3_13/test_str.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_str.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """ Test script for the Unicode implementation.
+ 
+ Written by Marc-Andre Lemburg (mal@lemburg.com).
+@@ -18,7 +72,8 @@ import unicodedata
+ import unittest
+ import warnings
+ from test.support import warnings_helper
+-from test import support, string_tests
++from test import support
++import string_tests
+ from test.support.script_helper import assert_python_failure
+ 
+ try:
+@@ -73,11 +128,12 @@ class WithRepr:
+ 
+ class StrTest(string_tests.StringLikeTest,
+         string_tests.MixinStrUnicodeTest,
+-        unittest.TestCase):
++        __TestCase):
+ 
+     type2test = str
+ 
+     def setUp(self):
++        super().setUp()
+         codecs.register(search_function)
+         self.addCleanup(codecs.unregister, search_function)
+ 
+@@ -2707,7 +2763,7 @@ class StrTest(string_tests.StringLikeTest,
+             str(b"x", "utf-8", "strict", errors="ignore")
+ 
+ 
+-class StringModuleTest(unittest.TestCase):
++class StringModuleTest(__TestCase):
+     def test_formatter_parser(self):
+         def parse(format):
+             return list(_string.formatter_parser(format))
+@@ -2783,4 +2839,4 @@ class StringModuleTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

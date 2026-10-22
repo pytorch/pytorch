@@ -19,7 +19,8 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     map_local_tensor_for_rank,
     with_comms,
 )
@@ -43,12 +44,9 @@ class MyModel(nn.Module):
 c10d_ops = torch.ops.c10d
 
 
-class DTensorAPITest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 4 as we need to test
-        # at least with 2d mesh
-        return 4
+class DTensorAPITest(DTensorContinuousTestBase):
+    # Four ranks are required for the 2D mesh cases.
+    world_size = 4
 
     @with_comms
     def test_distribute_tensor_rank(self):
@@ -443,7 +441,9 @@ class DTensorAPITest(DTensorTestBase):
 
 
 DTensorAPITestWithLocalTensor = create_local_tensor_test_class(
-    DTensorAPITest, skipped_tests=["test_checkpoint_apis_check_partial_placement"]
+    DTensorAPITest,
+    skipped_tests=["test_checkpoint_apis_check_partial_placement"],
+    base_class=LocalDTensorContinuousTestBase,
 )
 
 if __name__ == "__main__":

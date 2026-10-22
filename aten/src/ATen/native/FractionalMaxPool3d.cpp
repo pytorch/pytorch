@@ -37,6 +37,10 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
   int64_t poolSizeH = pool_size[1];
   int64_t poolSizeW = pool_size[2];
 
+  TORCH_CHECK(poolSizeT > 0 && poolSizeH > 0 && poolSizeW > 0,
+    "fractional_max_pool3d(): kernel size should be greater than zero, but got ",
+    poolSizeT, "x", poolSizeH, "x", poolSizeW);
+
   int64_t numBatch = 1;
   int64_t planeDim = 0;
   int64_t timeDim = 1;
@@ -242,8 +246,8 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
         input.const_data_ptr<scalar_t>(),
-        output.data_ptr<scalar_t>(),
-        indices.data_ptr<int64_t>(),
+        output.mutable_data_ptr<scalar_t>(),
+        indices.mutable_data_ptr<int64_t>(),
         randomSamples.const_data_ptr<scalar_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
@@ -375,7 +379,7 @@ void fractional_max_pool3d_backward_out_cpu_template(
     "fractional_max_pool3d_backward_out_frame",
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(
-        gradInput.data_ptr<scalar_t>(),
+        gradInput.mutable_data_ptr<scalar_t>(),
         gradOutput.const_data_ptr<scalar_t>(),
         indices.const_data_ptr<int64_t>(),
         numBatch, numPlanes,

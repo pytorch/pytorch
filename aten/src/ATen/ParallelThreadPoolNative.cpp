@@ -9,8 +9,8 @@
 namespace at {
 
 namespace {
-const int NOT_SET = -1;
-const int CONSUMED = -2;
+constexpr int NOT_SET = -1;
+constexpr int CONSUMED = -2;
 
 // Number of inter-op threads set by the user;
 // NOT_SET -> positive value -> CONSUMED

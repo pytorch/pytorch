@@ -437,6 +437,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: no graph break
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_hash_equals(row)
 
@@ -522,6 +523,23 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         p = Point(1, 2)
         self._assert_hash_equals(p)
+
+    def test_hash_frozen_dataclass_custom_hash(self):
+        """A frozen dataclass with a custom __hash__ is traced, not replaced by
+        the generated field-tuple hash. The unhashable ``payload`` field would
+        make the field hash raise, so this also covers specs (e.g. the cxx
+        pytree TreeSpec) that hold unhashable metadata."""
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True, eq=False)
+        class Custom:
+            key: int
+            payload: list  # unhashable; excluded by __hash__
+
+            def __hash__(self):
+                return hash(self.key)
+
+        self._assert_hash_equals(Custom(7, [1, 2, 3]))
 
     # --- Weakref ---
 
