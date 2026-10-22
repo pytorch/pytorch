@@ -67,7 +67,7 @@ TORCH_API void register_backend() {
                 ->rnn
 */
 
-Float32Backend str2backend(const std::string& name) {
+Float32Backend str2backend(std::string_view name) {
   if (name == "generic")
     return Float32Backend::GENERIC;
   else if (name == "cuda")
@@ -77,7 +77,7 @@ Float32Backend str2backend(const std::string& name) {
   TORCH_CHECK(false, "Unknown backend: ", name);
 }
 
-Float32Op str2op(const std::string& name) {
+Float32Op str2op(std::string_view name) {
   if (name == "all")
     return Float32Op::ALL;
   else if (name == "conv")
@@ -89,7 +89,7 @@ Float32Op str2op(const std::string& name) {
   TORCH_CHECK(false, "Unknown op: ", name);
 }
 
-Float32Precision str2precision(const std::string& name) {
+Float32Precision str2precision(std::string_view name) {
   if (name == "none")
     return Float32Precision::NONE;
   else if (name == "ieee")
@@ -100,6 +100,8 @@ Float32Precision str2precision(const std::string& name) {
     return Float32Precision::BF16;
   else if (name == "bfx9")
     return Float32Precision::BF16X9;
+  else if (name == "default")
+    return Float32Precision::DEFAULT;
   TORCH_CHECK(false, "Unknown precision: ", name);
 }
 
@@ -538,8 +540,10 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
         "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
   }
   TORCH_CHECK(
-      p != Float32Precision::DEFAULT,
-      "DEFAULT precision is internal and cannot be set explicitly");
+      p != Float32Precision::DEFAULT ||
+          (backend == Float32Backend::CUDA &&
+           (op == Float32Op::CONV || op == Float32Op::RNN)),
+      "precision 'default' is only supported for backend 'cuda' and ops 'conv' and 'rnn'");
 
   it->second = p;
 }
