@@ -7,16 +7,17 @@ kernel void pixel_shuffle(
     device T* output [[buffer(1)]],
     constant long* in_strides [[buffer(2)]],
     constant long* out_strides [[buffer(3)]],
-    constant uint2& factor_wd [[buffer(4)]],
+    constant uint2& factor_zdim [[buffer(4)]],
     constant bool& channel_major [[buffer(5)]],
     uint3 pos [[thread_position_in_grid]]) {
-  const uint factor = factor_wd.x, depth_width = factor_wd.y;
-  const uint plane_idx = channel_major ? pos.y : pos.x,
-             channel = channel_major ? pos.x : pos.y;
-  const uint hd = plane_idx / depth_width, wd = plane_idx - hd * depth_width;
-  const long in_base = pos.z * in_strides[0] + channel * in_strides[1] +
+  const uint factor = factor_zdim.x, z_dim = factor_zdim.y;
+  // grid is (wd, hd, n * C + c), or (c, wd, n * Hd + hd) when channel_major
+  const uint n = pos.z / z_dim, z = pos.z - n * z_dim;
+  const uint channel = channel_major ? pos.x : z,
+             hd = channel_major ? z : pos.y, wd = channel_major ? pos.y : pos.x;
+  const long in_base = n * in_strides[0] + channel * in_strides[1] +
       hd * in_strides[2] + wd * in_strides[3];
-  const long out_base = pos.z * out_strides[0] + channel * out_strides[1] +
+  const long out_base = n * out_strides[0] + channel * out_strides[1] +
       hd * out_strides[2] + wd * out_strides[3];
   for (uint i = 0; i < factor; ++i) {
     long in = in_base + i * in_strides[4], out = out_base + i * out_strides[4];
@@ -34,7 +35,7 @@ kernel void pixel_shuffle(
       device DTYPE* output,                                   \
       constant long* in_strides,                              \
       constant long* out_strides,                             \
-      constant uint2& factor_wd,                              \
+      constant uint2& factor_zdim,                            \
       constant bool& channel_major,                           \
       uint3 pos);
 

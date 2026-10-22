@@ -58,11 +58,14 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
   const auto in_strides = fold_strides(input, upscale);
   const auto out_strides = fold_strides(output.view({-1, oc, oh, ow}), !upscale);
   const Tensor& depth = upscale ? input : output;
-  const int64_t plane = depth.size(-2) * depth.size(-1), channels = upscale ? oc : c;
+  const int64_t hd = depth.size(-2), wd = depth.size(-1), channels = upscale ? oc : c;
   // channels_last input: walk c along the fastest thread axis so the reads coalesce.
   const bool channel_major = input.stride(1) < input.stride(3);
-  const std::array<uint32_t, 2> factor_wd = {c10::safe_conv<uint32_t>(factor, "factor"),
-                                             c10::safe_conv<uint32_t>(depth.size(-1), "width")};
+  // Grid (wd, hd, n * C + c), or (c, wd, n * Hd + hd) when channel_major. Keeping hd and wd on separate axes lets a
+  // depth plane with 2^32 or more pixels fit the 32-bit per-axis thread ids.
+  const int64_t z_dim = channel_major ? hd : channels;
+  const std::array<uint32_t, 2> factor_zdim = {c10::safe_conv<uint32_t>(factor, "factor"),
+                                               c10::safe_conv<uint32_t>(z_dim, "z_dim")};
   const std::string kernel = "pixel_shuffle_" + std::to_string(input.element_size());
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -70,9 +73,9 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
       auto pso = lib.getPipelineStateForFunc(kernel);
       getMPSProfiler().beginProfileKernel(pso, upscale ? "pixel_shuffle" : "pixel_unshuffle", {input}, stream);
       [computeEncoder setComputePipelineState:pso];
-      mtl_setArgs(computeEncoder, input, output, in_strides, out_strides, factor_wd, channel_major);
+      mtl_setArgs(computeEncoder, input, output, in_strides, out_strides, factor_zdim, channel_major);
       mtl_dispatch3DJob(
-          computeEncoder, pso, channel_major ? channels : plane, channel_major ? plane : channels, input.size(0));
+          computeEncoder, pso, channel_major ? channels : wd, channel_major ? wd : hd, input.size(0) * z_dim);
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
