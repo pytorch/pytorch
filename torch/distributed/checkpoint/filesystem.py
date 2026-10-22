@@ -851,6 +851,8 @@ class FileSystemReader(StorageReader):
         self,
         path: str | os.PathLike,
         _extension_registry: ExtensionRegistry | None = None,  # EXPERIMENTAL
+        *,
+        mmap: bool = False,
     ) -> None:
         super().__init__()
         self.fs = FileSystem()
@@ -860,6 +862,7 @@ class FileSystemReader(StorageReader):
         self.transforms = _StorageReaderTransforms(_extension_registry)
         self.rank = None
         self.use_collectives = True
+        self.mmap = mmap
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
@@ -882,6 +885,8 @@ class FileSystemReader(StorageReader):
             new_path = self.fs.concat_path(self.path, relative_path)
             with self.fs.create_stream(new_path, "rb") as stream:
                 # TODO sort by offset and cache the reading
+                mapped_storage: torch.UntypedStorage | None = None
+                file_size: int | None = None
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(stream, item_md)
@@ -898,22 +903,38 @@ class FileSystemReader(StorageReader):
                         read_bytes.seek(0)
                         planner.load_bytes(req, read_bytes)
                     else:
-                        if transform_from.seekable():
-                            seekable = transform_from
-                        else:
-                            # torch.load requires a seekable input, so read the transform
-                            # stream now and store the output if needed
-                            seekable = io.BytesIO(transform_from.read(-1))
-                            seekable.seek(0)
-
-                        tensor = cast(
-                            Tensor,
-                            torch.load(
-                                seekable,
-                                map_location="cpu",
-                                weights_only=True,
-                            ),
-                        )
+                        tensor: Tensor | None = None
+                        if self.mmap and type(self.fs) is FileSystem and not (
+                            item_md.transform_descriptors or ()
+                        ):
+                            if file_size is None:
+                                file_size = os.fstat(stream.fileno()).st_size
+                            end = item_md.offset + item_md.length
+                            if not 0 <= item_md.offset < end <= file_size:
+                                raise RuntimeError(
+                                    "DCP storage range is outside the backing file"
+                                )
+                            if mapped_storage is None:
+                                mapped_storage = torch.UntypedStorage.from_file(
+                                    os.fspath(new_path), shared=False, nbytes=file_size
+                                )
+                            try:
+                                tensor = torch.serialization._load_zip_region(
+                                    file_slice,
+                                    overall_storage=mapped_storage,
+                                    storage_base_offset=item_md.offset,
+                                )
+                            except torch.serialization._UnsupportedZipRegion:
+                                pass
+                        if tensor is None:
+                            if transform_from.seekable():
+                                seekable = transform_from
+                            else:
+                                seekable = io.BytesIO(transform_from.read(-1))
+                                seekable.seek(0)
+                            tensor = torch.load(
+                                seekable, map_location="cpu", weights_only=True
+                            )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths
                         )
