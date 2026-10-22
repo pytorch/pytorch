@@ -11036,6 +11036,13 @@ class TestExportPython(TestCase):
         with self.assertRaisesRegex(TypeError, "does not support None arguments"):
             optional(x)
 
+        @torch.compiler.export_python(path=self._tmp_path("mixed.py"), backend="eager")
+        def mixed(inp, opts):
+            return inp + 1
+
+        with self.assertRaisesRegex(TypeError, "instead of passing 3 as"):
+            mixed(x, (x, None, 3))
+
         @torch.compiler.export_python(
             path=self._tmp_path("nestmod.py"), backend="eager"
         )
@@ -11515,8 +11522,6 @@ class TestExportPython(TestCase):
 
         # A wrapper subclass reports data_ptr() == 0 with a real device, so comparing
         # its span directly would call every pair disjoint.
-        from torch.testing._internal.two_tensor import TwoTensor
-
         payload = torch.from_numpy(np.zeros(8, dtype=np.float32))
         self.assertTrue(
             _shares_memory(
