@@ -67,6 +67,22 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
+  # Flash Attention runtime (aotriton_v2.dll + its liblzma.dll dependency).
+  # aotriton's ExternalProject generates these in torch/lib/ during the build,
+  # after configure, so OPTIONAL defers the existence check to install time;
+  # a configure-time EXISTS guard misses them (WinError 126 loading torch_hip).
+  foreach(_fa_dll aotriton_v2.dll liblzma.dll)
+    install(FILES "${TORCH_SRC_DIR}/lib/${_fa_dll}"
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+  endforeach()
+
+  # MSVC OpenMP (libomp140) - TheRock copies this into torch/lib/ before the
+  # wheel build when using MSVC OpenMP instead of MKL libiomp.
+  set(_libomp140 "${TORCH_SRC_DIR}/lib/libomp140.x86_64.dll")
+  if(EXISTS "${_libomp140}")
+    install(FILES "${_libomp140}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+
   # libuv (uv.dll) - required by torch distributed (gloo transport).
   # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
   # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
@@ -82,7 +98,7 @@ if(WIN32 AND BUILD_PYTHON)
   endif()
 
   # CUDA runtime DLLs - only for CUDA builds.
-  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
+  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR AND NOT "$ENV{PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" MATCHES "cuda-toolkit")
     # CUDA 13+ moves DLLs to bin/x64.
     if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
@@ -111,17 +127,18 @@ if(WIN32 AND BUILD_PYTHON)
       endif()
     endforeach()
 
-    # NvToolsExt (legacy, may not exist on all systems).
-    set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
-    if(EXISTS "${_nvtoolsext}")
-      install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
-
     # zlibwapi (needed by some CUDA libraries).
     if(EXISTS "C:/Windows/System32/zlibwapi.dll")
       install(FILES "C:/Windows/System32/zlibwapi.dll"
               DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     endif()
+  endif()
+
+  # Retain the legacy NvToolsExt DLL for existing Windows binaries until its
+  # separate deprecation; cuda-toolkit no longer provides it.
+  set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
+  if(USE_CUDA AND EXISTS "${_nvtoolsext}")
+    install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 endif()
 
