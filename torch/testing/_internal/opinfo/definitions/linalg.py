@@ -931,6 +931,46 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
         sample.output_process_fn_grad = out_fn
         yield sample
 
+    if torch.device(device).type == "mps":
+        make_fn = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(
+            make_fn, dtype=dtype, device=device, requires_grad=requires_grad
+        )
+
+        batches = [(), (3,)]
+        # With 32 KB of threadgroup memory, eig_qr_iterate keeps H in
+        # threadgroup memory up to n = 62 and in device memory above that,
+        # so test a few sizes above and below the cutoff
+        ns = [32, 62, 63, 150]
+
+        for batch, n in product(batches, ns):
+            sample = SampleInput(make_arg(*batch, n, n))
+            sample.output_process_fn_grad = out_fn
+            yield sample
+
+        # The backward for most of these special matrices is ill-defined
+        if not requires_grad:
+            n = 8
+            scale = 2.0 ** torch.arange(0, 4 * n, 4)
+
+            special_matrices = [
+                torch.zeros(n, n, dtype=dtype),
+                torch.eye(n, dtype=dtype),
+                # Repeated eigenvalues
+                torch.tensor([2, 2, 2, -1, -1, 3, 3, 3], dtype=dtype).diag(),
+                torch.triu(torch.randn(n, n, dtype=dtype)),
+                # A cyclic permutation, on which Wilkinson shifts make no progress
+                torch.roll(torch.eye(n, dtype=dtype), 1, 0),
+                # A Jordan block, which is defective: all eigenvectors are parallel
+                2 * torch.eye(n, dtype=dtype)
+                + torch.diag(torch.ones(n - 1, dtype=dtype), 1),
+                # A badly scaled matrix
+                torch.randn(n, n, dtype=dtype) * scale.unsqueeze(-1) / scale,
+            ]
+
+            for m in special_matrices:
+                yield SampleInput(m.to(device))
+
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -1441,8 +1481,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),
@@ -1467,29 +1505,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCPUIfNoLapack],
         skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),
