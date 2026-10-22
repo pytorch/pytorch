@@ -505,11 +505,12 @@ class ExportedPythonArtifact:
                     f"({where}); make_fx specializes the None branch without "
                     "a runtime guard. Split the function, or pass a tensor."
                 )
+            scalar = next(leaf for leaf in unsupported if leaf is not None)
             raise TypeError(
                 "torch.compiler.export_python supports only Tensor pytrees and "
                 "nn.Module positional arguments; Python scalar/config values are "
                 "specialized by make_fx without runtime guards. Close constants "
-                f"over in the function instead of passing {unsupported[0]!r} as "
+                f"over in the function instead of passing {scalar!r} as "
                 f"{where}."
             )
 
