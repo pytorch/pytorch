@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
