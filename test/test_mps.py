@@ -1838,6 +1838,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res2, res2_cpu)
         [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
 
+    def test_linalg_cross_mixed_dtypes_raise(self):
+        # Regression: MPS used to accept mixed floating dtypes and read the
+        # second operand as the first's dtype, returning wrong values (#201629).
+        a = torch.randn(4, 3, device="mps")
+        b = torch.randn(4, 3, device="mps", dtype=torch.float16)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, b)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(b, a)
+        out = torch.empty(4, 3, device="mps")
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, b, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, a, out=out.half())
+
     def test_bmm_conj(self):
         # bmm must respect the conjugate bit on input tensors.
         # See https://github.com/pytorch/pytorch/issues/177474
@@ -15936,27 +15951,18 @@ class TestConsistency(TestCaseMPS):
                     g if i == 1 else torch.zeros_like(g)
                     for i, g in enumerate(cpu_grad_outputs))
 
-            if op.name in ("linalg.eigh",):
+            if op.name in ("linalg.eigh", "linalg.eig"):
                 # Only the eigenvalue gradient is gauge-invariant, so seed only it
                 # (output order is eigenvalues, eigenvectors).
                 cpu_grad_outputs = tuple(
                     g if i == 0 else torch.zeros_like(g)
                     for i, g in enumerate(cpu_grad_outputs))
 
-            if op.name == "linalg.eig":
-                # As for eigh, seed only the eigenvalue gradient, which is
-                # gauge-invariant. MPS orders the eigenvalues differently, so
-                # move each seed to the matching MPS eigenvalue.
-                g_values, g_vectors = cpu_grad_outputs
-                cpu_grad_outputs = (g_values, torch.zeros_like(g_vectors))
-                mps_grad_outputs = (
-                    torch.zeros_like(g_values).scatter(-1, eig_perm, g_values).to("mps"),
-                    torch.zeros_like(g_vectors).to("mps"))
-            elif op.name == "linalg.eigvals":
-                (g_values,) = cpu_grad_outputs
-                mps_grad_outputs = (torch.zeros_like(g_values).scatter(-1, eig_perm, g_values).to("mps"),)
-            else:
-                mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
+            mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
+            if op.name in ("linalg.eig", "linalg.eigvals"):
+                # MPS orders the eigenvalues differently, so move each seed to the matching MPS eigenvalue
+                g = cpu_grad_outputs[0]
+                mps_grad_outputs = (torch.zeros_like(g).scatter(-1, eig_perm, g).to("mps"),) + mps_grad_outputs[1:]
 
             # Compare computed gradients with cpu given random grad_output vector
             # Sometimes when the derivative is 0, we just don't bother creating the graph

@@ -2492,7 +2492,8 @@ static void encode_eig_kernel(MPSStream* stream,
                               int64_t threadgroup_memory,
                               const Args&... args) {
   auto encoder = stream->commandEncoder();
-  auto pso = lib.getPipelineStateForFunc(name);
+  const bool use_32bit_index = n * n <= std::numeric_limits<int32_t>::max();
+  auto pso = lib.getPipelineStateForFunc(fmt::format("{}_{}", name, use_32bit_index ? "int" : "long"));
   getMPSProfiler().beginProfileKernel(pso, name, {profiled}, stream);
   [encoder setComputePipelineState:pso];
   mtl_setArgs(encoder, args...);
@@ -2632,8 +2633,22 @@ static void encode_eig_kernel(MPSStream* stream,
 //   3. The columns of U are now the Schur vectors of B. In order to find the
 //      eigenvectors of B, we first find the eigenvectors of T (the upper
 //      triangular matrix output of QR iteration) and put them into the columns
-//      of a matrix X. Calculating the eigenvectors of a triangular matrix is a special
-//      case that is simpler than that of the original dense matrix A.
+//      of a matrix X. Calculating the eigenvectors of a triangular matrix is a
+//      special case that is much simpler than that of the original dense matrix
+//      A. Algorithm 1 in [Adlerborn et al.] describes how to find a single
+//      eigenvector of T. It simplifies down to the following:
+//
+//      An eigenvector `x` for the eigenvalue `T[s, s]` can be constructed one
+//      at a time by:
+//        x[s+1:] = 0
+//        x[s] = any nonzero value
+//        for i in [s-1, s-2, ..., 0]:
+//            x[i] = T[i, i+1:s+1].dot(x[i+1:s+1]) / (T[s, s] - T[i, i])
+//
+//      Our implementation is based on Algorithm 10 from [Adlerborn et al.],
+//      which is mathematically equivalent to the above, but it computes all the
+//      eigenvectors simultaneously and handles repeated eigenvalues (cases
+//      where T[s, s] == T[i, i]).
 //
 //   4. Calculate the eigenvectors of B and undo the initial balancing:
 //
@@ -2695,10 +2710,8 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
 
   Tensor U;
   if (compute_eigenvectors) {
-    // Begin forming the Schur vectors U by setting it to P, the product of the
-    // Householder reflectors. Calculate the product from tau (`tau_k`) and the
-    // values below the first subdiagonal of H (`v_k`), both of which were
-    // calculated in eig_hessenberg.
+    // U starts as P. Dropping the first row of H puts each implied v_k[0] = 1
+    // on the diagonal, where linalg_householder_product expects it.
     U = at::zeros({batch, n, n}, options).mT();
     U.select(-1, 0).select(-1, 0).fill_(1);
     if (n > 1) {
@@ -2706,11 +2719,10 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
       U.narrow(-2, 1, n - 1).narrow(-1, 1, n - 1).copy_(at::linalg_householder_product(reflectors, tau));
     }
   }
-  // Zero out the elements below the first subdiagonal of H, since we no longer
-  // need the `v_k` vectors that were stored there.
+  // Remove the v_k stored below the subdiagonal
   H.triu_(-1);
 
-  Tensor rotations = at::empty({batch, n, 4}, options.dtype(kFloat));
+  Tensor rotations = at::empty({batch, n, 3}, options.dtype(kFloat));
   Tensor U_arg = compute_eigenvectors ? U : at::empty({1}, options);
   const int64_t threadgroup_memory = stage_h ? ceil_div<int64_t>(h_bytes, 16) * 16 : 16;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2731,9 +2743,7 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
     }
   });
 
-  // Like LAPACK's xGEEV, normalize the eigenvectors to unit norm with their
-  // largest component real. Dividing by the largest component first, as
-  // conj(largest) / |largest|^2 without squaring |largest|, keeps the norm
+  // Multiplying by m^* / |m| / |m| instead of just m^* keeps the norm
   // computation from overflowing however D scales the columns.
   Tensor V = at::matmul(U, X).mul_(D.unsqueeze(-1));
   Tensor largest = V.gather(-2, V.abs().argmax(-2, /*keepdim=*/true));

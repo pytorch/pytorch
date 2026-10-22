@@ -957,12 +957,7 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
                 torch.zeros(n, n, dtype=dtype),
                 torch.eye(n, dtype=dtype),
                 # Repeated eigenvalues
-                torch.diag(
-                    torch.tensor(
-                        [2, 2, 2, -1, -1, 3, 3, 3],
-                        dtype=dtype,
-                    )
-                ),
+                torch.tensor([2, 2, 2, -1, -1, 3, 3, 3], dtype=dtype).diag(),
                 torch.triu(torch.randn(n, n, dtype=dtype)),
                 # A cyclic permutation, on which Wilkinson shifts make no progress
                 torch.roll(torch.eye(n, dtype=dtype), 1, 0),
