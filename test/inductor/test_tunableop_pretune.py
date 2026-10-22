@@ -22,7 +22,11 @@ from torch._inductor import config, ir
 from torch._inductor import select_algorithm as sa
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    run_tests,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -78,7 +82,7 @@ class _FakeWinner(sa.ExternKernelCaller):
     the base __init__ is deliberately not called.
     """
 
-    def __init__(self, name, input_nodes, out_sizes):  # noqa: B027
+    def __init__(self, name, input_nodes, out_sizes):
         self.name = name
         self.input_nodes = input_nodes
         self.layout = ir.FixedLayout(
@@ -128,6 +132,8 @@ def _run(winner, **kwargs):
 
 
 class TestTunableOpPretune(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _mm_winner(self, name, s):
         """A GEMM whose M is the dynamic dim. Bias-first ops get a third operand."""
         m, k, n = s, 256, 512

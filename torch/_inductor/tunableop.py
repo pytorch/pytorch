@@ -164,6 +164,6 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "timeout")
     except EOFError:
         return Outcome(None, "crash")
-    except Exception as e:  # noqa: BLE001 - a failed benchmark must not fail the compile
+    except Exception as e:  # a failed benchmark must not fail the compile
         log.debug("TunableOp benchmark failed: %s", e)
         return Outcome(None, "error")
