@@ -32,6 +32,7 @@ import io
 import itertools
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import traceback
@@ -112,6 +113,7 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
+from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
@@ -2986,12 +2988,8 @@ class GuardBuilder(GuardBuilderBase):
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
         ]
         self._set_guard_export_info(guard, code)
-
-        def fn(x: object) -> bool:
-            return guard_hooks_ids == hooks_ids_fn(get_hooks())
-
-        self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        self.guard_manager.root.add_autograd_saved_tensors_hooks_guard(
+            torch.fx.GraphModule, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def _portable_saved_tensors_hooks_guard(
@@ -3699,6 +3697,37 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_mapping_keys_guard(
             value, code, guard.user_stack
         )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ],
+        eval_fn=lambda value, metadata: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ]
+        == metadata,
+    )
+    def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
+        key_ids = [
+            self.id_ref(key, guard.name)
+            for key in collections.OrderedDict.keys(self.get(guard))
+        ]
+
+        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
+            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
+                id(current) == expected
+                for current, expected in zip(
+                    collections.OrderedDict.keys(value), key_ids
+                )
+            )
+
+        code = [f"___check_order({self.arg_ref(guard)})"]
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars() | {"___check_order": guard_fn},
+        )
+        self._set_guard_export_info(guard, code)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
@@ -4863,6 +4892,16 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
         return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
 
+    @classmethod
+    def _unpickle_custom_op_def(cls, qualname: str) -> Any:
+        try:
+            return OPDEFS[qualname]
+        except KeyError:
+            raise RuntimeError(
+                f"Custom op {qualname} is not registered; import the module that "
+                "defines it before loading"
+            ) from None
+
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
@@ -5229,7 +5268,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
             if is_ddp:
-                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
+                # Not DDP.__getstate__: its default-process-group check only
+                # protects DDP.__setstate__, which _unpickle_ddp_module never
+                # calls. A guard on a dropped attribute could not be rebuilt
+                # at load, so refuse here, a bypass, rather than save it.
+                for name in obj._unpicklable_attrs:
+                    attr = obj.__dict__.get(name)
+                    if attr is not None and id(attr) in self.guard_tree_values:
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads DistributedDataParallel.{name}, which does not pickle"
+                        )
+                return type(self)._unpickle_ddp_module, (obj._picklable_state(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
@@ -5312,6 +5361,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 obj._opname,
                 obj._overloadname,
             )
+
+        elif _is_registered_custom_op_def(obj):
+            # Its Library holds a _DispatchModule, which cannot be pickled.
+            return type(self)._unpickle_custom_op_def, (obj._qualname,)
 
         elif (
             obj.__class__.__module__ == "builtins"
@@ -5535,6 +5588,10 @@ def _is_nested_named_tuple_type(obj: object) -> bool:
     )
 
 
+def _is_registered_custom_op_def(value: object) -> bool:
+    return isinstance(value, CustomOpDef) and OPDEFS.get(value._qualname) is value
+
+
 def _resolves_by_reference(value: object) -> bool:
     """Whether unpickling ``value`` in another process yields that process's
     canonical object, so an identity guard rebuilt at load checks the right id.
@@ -5559,7 +5616,46 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return False
+    return _is_registered_custom_op_def(value) or _pickles_as_its_own_global(value)
+
+
+def _pickles_as_its_own_global(value: object) -> bool:
+    """Whether ``value``, one of its ``__module__``'s globals, is saved by
+    pickle's default lookup (``copyreg.dispatch_table``, then ``__reduce_ex__``)
+    as a reference to the module global that is ``value`` itself, as for
+    ``typing.List``, which reduces to ``"List"``. Any other value is refused
+    without running its reduction. User objects can raise anywhere in here,
+    which just means no."""
+    if isinstance(value, (torch.Tensor, torch.nn.Module)):
+        return False
+    try:
+        cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class unless it is a
+            # tuple; this refuses those tuples too, which only drops a guard.
+            return False
+        reduce = copyreg.dispatch_table.get(cls)
+        if (
+            reduce is None
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+        ):
+            return False
+        module_name = getattr(value, "__module__", None)
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
+        # The reduction is user code, possibly O(size), and this runs per guard:
+        # only reduce a value that is one of its module's own globals. list()
+        # snapshots the dict, which another thread may grow mid-scan.
+        if module is None or not any(v is value for v in list(vars(module).values())):
+            return False
+        name = reduce(value) if reduce else value.__reduce_ex__(_GUARDS_PROTOCOL)
+        return (
+            isinstance(name, str)
+            and FunctionPicklerBase._lookup(module_name, name) is value
+        )
+    except Exception:
+        return False
 
 
 def is_portable_identity_guard(
@@ -5583,7 +5679,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
     try:
         return builder.get(guard)
     except Exception:
-        # Not a module, enum member, class or function: never portable.
+        # A value the guard cannot read is never portable.
         return None
 
 
@@ -5658,6 +5754,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+# _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
+# protocol and the global copyreg.dispatch_table (the pickler sets none).
+_GUARDS_PROTOCOL = pickle.DEFAULT_PROTOCOL
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5694,6 +5795,7 @@ def pickle_guards_state(
             missing_values,
             builder.value_guarded_containers,
             buf,
+            protocol=_GUARDS_PROTOCOL,
         )
 
         if all(

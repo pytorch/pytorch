@@ -5,6 +5,7 @@ import contextlib
 import ctypes
 import functools
 import gc
+import importlib.util
 import json
 import os
 import pickle
@@ -310,7 +311,12 @@ class TestAmdSmiImport(TestCase):
                 )
                 env_updates["ROCM_HOME"] = ""
                 env_updates["ROCM_PATH"] = ""
-            if provide_sdk_library:
+            # A real _rocm_sdk_core (TheRock wheels) already provides the SDK
+            # fallback, and a stub would shadow it during torch's SDK preload.
+            if (
+                provide_sdk_library
+                and importlib.util.find_spec("_rocm_sdk_core") is None
+            ):
                 sdk_lib_dir = os.path.join(tmpdir, "_rocm_sdk_core", "lib")
                 os.makedirs(sdk_lib_dir)
                 with open(
