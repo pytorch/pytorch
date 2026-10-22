@@ -3580,15 +3580,6 @@ def _check_native_layer_norm_param_dtype(
     weight: Tensor | None,
     bias: Tensor | None,
 ) -> None:
-    # Every backend measured rejects a weight or bias whose dtype differs from the
-    # input: CUDA (which is why this check exists, #185693), CPU with "mixed dtype
-    # (CPU): expect parameter to have scalar type of Float", and Ascend NPU from
-    # aclnnLayerNorm. The restriction is not CUDA's, so gating the check on the
-    # device made the ref accept, on every other backend, a call eager refuses.
-    #
-    # The num_rows carve-out below is left as it was, i.e. still only right for
-    # CUDA: CUDA accepts the mismatch when no rows are processed, CPU rejects it
-    # even then. Narrowing that needs the empty case measured on MPS, XPU and NPU.
     mismatched_dtype = None
     if weight is not None and weight.dtype != input.dtype:
         mismatched_dtype = weight.dtype
@@ -3596,6 +3587,25 @@ def _check_native_layer_norm_param_dtype(
         mismatched_dtype = bias.dtype
 
     if mismatched_dtype is None:
+        return
+
+    if input.device.type == "cpu":
+        # Mirrors check_mixed_data_type (ATen/native/cpu/mixed_data_type.h): a
+        # bf16/fp16 input may take fp32 params, even when there are no rows.
+        torch._check(
+            all(p is None or p.dtype == torch.float32 for p in (weight, bias)),
+            lambda: "mixed dtype (CPU): expect parameter to have scalar type of Float",
+        )
+        torch._check(
+            input.dtype in (torch.bfloat16, torch.float16),
+            lambda: "mixed dtype (CPU): all inputs must share same datatype.",
+        )
+        return
+
+    # CUDA and XPU kernels read the params at the input dtype once there is at
+    # least one row. MPS casts the params to the input dtype, and meta has no
+    # kernel to model, so both accept any mismatch.
+    if input.device.type not in ("cuda", "xpu"):
         return
 
     axis = input.ndim - normalized_ndim

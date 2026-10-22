@@ -34,6 +34,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1179,40 +1180,40 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 class DecompOneOffTests(TestCase):
     @onlyNativeDeviceTypes
-    def test_layer_norm_param_dtype_matches_eager(self, device):
-        # native_layer_norm's ref checks that weight/bias share the input's dtype,
-        # but the check used to fire only for CUDA, so on every other backend the
-        # ref accepted a call eager refuses. Assert agreement rather than a fixed
-        # outcome: if some backend does accept the mismatch, this reports that the
-        # ref needs a carve-out instead of silently passing.
-        input = torch.randn(4, 8, device=device)
-        weight = torch.randn(8, dtype=torch.float16, device=device)
+    @parametrize(
+        "input_dtype,param_dtype",
+        [
+            (torch.float32, torch.float32),
+            (torch.float32, torch.float16),
+            (torch.bfloat16, torch.float32),
+            (torch.float16, torch.float32),
+        ],
+    )
+    def test_layer_norm_param_dtype_matches_eager(
+        self, device, input_dtype, param_dtype
+    ):
+        # Which weight/bias dtypes eager accepts differs by backend (CPU takes a
+        # bf16/fp16 input with fp32 params, CUDA does not), so assert that the ref
+        # agrees with eager rather than a fixed outcome.
+        input = torch.randn(4, 8, dtype=input_dtype, device=device)
+        weight = torch.randn(8, dtype=param_dtype, device=device)
+        bias = torch.randn(8, dtype=param_dtype, device=device)
 
-        def rejects(fn):
+        def run(fn):
             try:
-                fn()
+                return fn(input, (8,), weight, bias, 1e-5)
             except RuntimeError:
-                return True
-            return False
+                return None
 
-        eager = rejects(
-            lambda: torch.native_layer_norm(input, (8,), weight, None, 1e-5)
-        )
-        ref = rejects(
-            lambda: torch._refs.native_layer_norm(input, (8,), weight, None, 1e-5)
-        )
+        eager = run(torch.native_layer_norm)
+        ref = run(torch._refs.native_layer_norm)
         self.assertEqual(
-            ref,
-            eager,
-            msg=f"ref and eager disagree on a mismatched param dtype on {device}",
+            ref is None,
+            eager is None,
+            msg=f"ref and eager disagree on {input_dtype} input, {param_dtype} params",
         )
-
-        # The matched-dtype path must be untouched.
-        matched = torch.randn(8, device=device)
-        self.assertEqual(
-            torch._refs.native_layer_norm(input, (8,), matched, None, 1e-5)[0],
-            torch.native_layer_norm(input, (8,), matched, None, 1e-5)[0],
-        )
+        if input_dtype == param_dtype:
+            self.assertEqual(ref[0], eager[0])
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
