@@ -1,7 +1,7 @@
 ARG CUDA_VERSION=12.6
 ARG BASE_TARGET=cuda${CUDA_VERSION}
-ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
-FROM amd64/almalinux:8.10-20250519 as base
+ARG BASE_IMAGE=amd64/almalinux:8.10-20250519
+FROM ${BASE_IMAGE} as base
 
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -20,9 +20,12 @@ ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 
 # cmake-3.18.4 from pip
 # NS: Apr 1 2026 3.18.4 is gone, reported here https://github.com/scikit-build/cmake-python-distributions/issues/693
+# pip 9 mishandles truthy PIP_NO_CACHE_DIR values; fixed in pip 19:
+# https://github.com/pypa/pip/pull/5884
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4.post1 && \
+    python3 -mpip install --no-cache-dir cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
+ENV PIP_NO_CACHE_DIR=1
 RUN rm -rf /usr/local/cuda-*
 
 FROM base as patchelf
@@ -70,28 +73,28 @@ FROM cuda as cuda13.2
 RUN bash ./install_cuda.sh 13.2
 ENV DESIRED_CUDA=13.2
 
-FROM ${ROCM_IMAGE} as rocm_base
-ARG DEVTOOLSET_VERSION=13
-ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US.UTF-8
-# Install devtoolset on ROCm base image
-RUN yum -y update && \
-    yum -y install epel-release && \
-    yum -y install glibc-langpack-en && \
-    yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
-RUN git config --global --add safe.directory '*'
-# All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
-RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
-ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+FROM cuda as cuda13.4
+RUN bash ./install_cuda.sh 13.4
+ENV DESIRED_CUDA=13.4
 
-FROM rocm_base as rocm
+FROM base as rocm
 ARG PYTORCH_ROCM_ARCH
-ARG DEVTOOLSET_VERSION=13
+ARG ROCM_VERSION
+ARG THEROCK_INDEX_URL
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
+# TheRock wheels require Python 3.10+; AlmaLinux 8's system Python is too old.
+COPY --from=conda /opt/conda /opt/conda
+ENV PATH=/opt/conda/bin:$PATH
 ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 ENV MKLROOT /opt/intel
+# torch extensions link libatomic.so.1, which the plain AlmaLinux base lacks.
+RUN yum install -y libatomic
+ADD ./common/install_rocm.sh install_rocm.sh
+RUN bash ./install_rocm.sh && rm install_rocm.sh
+# Unlike manywheel, this image has no build_env_setup.py to read /etc/rocm_env.sh,
+# and install_rocm.sh only hooks /etc/bashrc, which non-interactive bash skips.
+ENV BASH_ENV=/etc/rocm_env.sh
 
 # Install MNIST test data
 FROM base as mnist
@@ -104,6 +107,7 @@ COPY --from=cuda12.8  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 COPY --from=cuda12.9  /usr/local/cuda-12.9 /usr/local/cuda-12.9
 COPY --from=cuda13.0  /usr/local/cuda-13.0 /usr/local/cuda-13.0
 COPY --from=cuda13.2  /usr/local/cuda-13.2 /usr/local/cuda-13.2
+COPY --from=cuda13.4  /usr/local/cuda-13.4 /usr/local/cuda-13.4
 
 # Final step
 FROM ${BASE_TARGET} as final

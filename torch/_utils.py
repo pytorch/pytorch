@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import _compat_pickle
 import copyreg
 import functools
 import importlib
@@ -217,6 +216,18 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def copy_backend_meta(src, dst, for_fake=False):
+    # Copy the backend-specific metadata (``c10::BackendMeta``) from ``src`` to
+    # ``dst``. When ``for_fake`` is set (copying onto a FakeTensor) the backend
+    # may drop or strip data that is not valid on a fake. See
+    # `get_tensor_metadata` / `set_tensor_metadata` above.
+    if not isinstance(src, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(src).__name__}")
+    if not isinstance(dst, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(dst).__name__}")
+    torch._C._copy_backend_meta(src, dst, for_fake)  # type: ignore[attr-defined]
+
+
 def _restore_device_fake_mode(tensor):
     if torch._guards.detect_fake_mode(None) is not None:
         if tensor.untyped_storage()._fake_device is not None:
@@ -274,7 +285,8 @@ def _rebuild_tensor_v3(
     return t
 
 
-_sparse_tensors_to_validate: list["torch.Tensor"] = []
+def _get_sparse_tensors_to_validate() -> list["torch.Tensor"]:
+    return torch.serialization._serialization_tls.sparse_tensors_to_validate
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -292,8 +304,9 @@ def _validate_loaded_sparse_tensors(weights_only=False):
     # cause out-of-bounds reads later (e.g. in to_dense()), and an untrusted
     # checkpoint must not be able to slip those through. Otherwise we fall back
     # to the global check_sparse_tensor_invariants setting.
+    sparse_tensors_to_validate = _get_sparse_tensors_to_validate()
     try:
-        if not _sparse_tensors_to_validate:
+        if not sparse_tensors_to_validate:
             return
         if weights_only:
             warnings.warn(
@@ -307,7 +320,7 @@ def _validate_loaded_sparse_tensors(weights_only=False):
         # We disable pinning check (see check_pinning=False below) to
         # avoid gh-153143. In fact, pinning check is unnecessary
         # anyway when loading sparse data from external sources.
-        for t in _sparse_tensors_to_validate:
+        for t in sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(),
@@ -348,7 +361,7 @@ def _validate_loaded_sparse_tensors(weights_only=False):
                 )
 
     finally:
-        _sparse_tensors_to_validate.clear()
+        sparse_tensors_to_validate.clear()
 
 
 def _rebuild_sparse_tensor(layout, data):
@@ -369,7 +382,7 @@ def _rebuild_sparse_tensor(layout, data):
         result = torch.sparse_coo_tensor(
             indices, values, size, check_invariants=False, is_coalesced=is_coalesced
         )
-        _sparse_tensors_to_validate.append(result)
+        _get_sparse_tensors_to_validate().append(result)
         return result
 
     elif layout in {
@@ -387,7 +400,7 @@ def _rebuild_sparse_tensor(layout, data):
             layout=layout,
             check_invariants=False,
         )
-        _sparse_tensors_to_validate.append(result)
+        _get_sparse_tensors_to_validate().append(result)
         return result
 
     raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
@@ -1158,16 +1171,6 @@ NAME_MAPPING = {
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
 
-# Protocol 2 pickle (torch.save's default) maps builtin exceptions to the
-# Python 2 "exceptions" module via REVERSE_NAME_MAPPING; map them back so
-# allowlisted exception types resolve under their builtins.* names.
-NAME_MAPPING.update(
-    {
-        ("exceptions", name): ("builtins", name)
-        for name in _compat_pickle.PYTHON2_EXCEPTIONS
-    }
-)
-
 
 def _chunk_or_narrow_cat(
     tensor: "torch.Tensor",
@@ -1233,6 +1236,10 @@ def _maybe_view_chunk_cat(
     Returns:
         Tensor with data rearranged to gather along gather_dim
     """
+
+    # The shape slicing below assumes a non-negative gather_dim.
+    if gather_dim < 0:
+        gather_dim += res.dim()
 
     if gather_dim == 0:
         # When gather_dim is 0, chunk+cat is a no-op
@@ -1434,3 +1441,94 @@ def _is_privateuse1_backend_available():
     return (
         is_available := getattr(privateuse1_backend_module, "is_available", None)
     ) and is_available()
+
+
+def getenv(name: str) -> "str | None":
+    """Read an environment variable through torch's serialized env access.
+
+    Prefer this over :func:`os.getenv` when torch is loaded: it shares c10's
+    environment mutex, so the read is consistent with concurrent C++ code and
+    other :func:`torch._utils.setenv` calls that also go through c10.
+
+    Args:
+        name: Name of the environment variable.
+
+    Returns:
+        The variable's value, or ``None`` if it is not set.
+    """
+    return torch._C._getenv(name)
+
+
+def setenv(name: str, value: str, overwrite: bool = True) -> None:
+    """Set an environment variable through torch's serialized env access.
+
+    Prefer this over assigning to :data:`os.environ` when torch is loaded: it
+    shares c10's environment mutex, so the write is consistent with concurrent
+    C++ code and other :func:`torch._utils.getenv` calls that also go through
+    c10.
+
+    Args:
+        name: Name of the environment variable.
+        value: Value to set.
+        overwrite: If ``False`` and the variable is already set, leave it
+            unchanged. Defaults to ``True``.
+    """
+    torch._C._setenv(name, value, overwrite)
+
+
+def unsetenv(name: str) -> None:
+    """Remove an environment variable through torch's serialized env access.
+
+    The counterpart to :func:`setenv`; shares c10's environment mutex.
+
+    Args:
+        name: Name of the environment variable to remove.
+    """
+    torch._C._unsetenv(name)
+
+
+# Saved originals so os.environ interception can be reverted; ``None`` means the
+# hook is not currently installed.
+_original_os_putenv: "Callable[..., None] | None" = None
+_original_os_unsetenv: "Callable[..., None] | None" = None
+
+
+def _torch_putenv(key: "str | bytes", value: "str | bytes") -> None:
+    setenv(os.fsdecode(key), os.fsdecode(value))
+
+
+def _torch_unsetenv(key: "str | bytes") -> None:
+    unsetenv(os.fsdecode(key))
+
+
+def install_os_environ_hook() -> None:
+    """Route ``os.environ`` mutations through torch's serialized env access.
+
+    CPython's ``os.environ.__setitem__`` / ``__delitem__`` call the module-level
+    ``os.putenv`` / ``os.unsetenv`` and then update ``os.environ``'s cached dict.
+    This replaces those two functions so that mutating ``os.environ`` (and any
+    direct ``os.putenv`` / ``os.unsetenv`` call) goes through c10's environment
+    mutex, keeping Python and C++ env access consistent. The cached dict is still
+    updated by CPython afterwards, so ``os.environ`` reads stay correct.
+
+    Idempotent: calling it again while installed is a no-op. Use
+    :func:`remove_os_environ_hook` to revert.
+    """
+    global _original_os_putenv, _original_os_unsetenv
+    if _original_os_putenv is not None:
+        return
+    _original_os_putenv = os.putenv
+    _original_os_unsetenv = os.unsetenv
+    os.putenv = _torch_putenv  # type: ignore[assignment]
+    os.unsetenv = _torch_unsetenv  # type: ignore[assignment]
+
+
+def remove_os_environ_hook() -> None:
+    """Undo :func:`install_os_environ_hook`; a no-op if it was not installed."""
+    global _original_os_putenv, _original_os_unsetenv
+    if _original_os_putenv is None or _original_os_unsetenv is None:
+        return
+    os.putenv = _original_os_putenv
+    os.unsetenv = _original_os_unsetenv
+    _original_os_putenv = None
+    _original_os_unsetenv = None

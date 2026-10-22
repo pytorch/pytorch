@@ -69,7 +69,8 @@ class _SameShapeFloatLossBase(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         spec = TensorSpec(
             size=output_spec.size,
             stride=output_spec.stride,
@@ -286,7 +287,8 @@ class NllLossOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         n = output_spec.size[0]
         self._num_classes = random.randint(2, 10)
         c = self._num_classes
@@ -345,7 +347,8 @@ class CrossEntropyOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         n = output_spec.size[0]
         self._num_classes = random.randint(2, 10)
         c = self._num_classes

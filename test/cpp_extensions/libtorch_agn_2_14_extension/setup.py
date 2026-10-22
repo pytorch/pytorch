@@ -46,43 +46,66 @@ class clean(distutils.command.clean.clean):
 
 
 def get_extension():
-    extra_compile_args = {
-        "cxx": [
-            "-DTORCH_TARGET_VERSION=0x020e000000000000",
-            "-DSTABLE_LIB_NAME=libtorch_agn_2_14",
-        ],
-    }
+    common_cxx = ["-DTORCH_TARGET_VERSION=0x020e000000000000"]
     if not IS_WINDOWS:
-        extra_compile_args["cxx"].append("-fdiagnostics-color=always")
+        common_cxx.append("-fdiagnostics-color=always")
 
-    # Collect sources from this version and all previous versions
-    sources = list(CSRC_DIR.glob("**/*.cpp"))
-    for prev_dir in PREV_CSRC_DIRS:
-        sources.extend(prev_dir.glob("**/*.cpp"))
+    all_csrc_dirs = [CSRC_DIR, *PREV_CSRC_DIRS]
+    mps_available = torch.backends.mps.is_available()
 
-    extension = CppExtension
+    # Op extension (_C): this version's ops + inherited 2.9-2.13 csrc, minus the
+    # interop module. The op extension is loaded via torch.ops.load_library like
+    # the other libtorch_agn extensions; the interop module must instead be an
+    # importable Python module (its PyMethodDef helpers hold the GIL), so it is
+    # built as a separate extension below.
+    op_sources = [
+        s
+        for d in all_csrc_dirs
+        for s in d.glob("**/*.cpp")
+        if s.name != "pyobject_interop_module.cpp"
+        and (s.parent.name != "mps" or mps_available)
+    ]
+
+    op_cxx = common_cxx + ["-DSTABLE_LIB_NAME=libtorch_agn_2_14"]
+    op_extra = {"cxx": op_cxx}
+    op_extension = CppExtension
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
-        extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
-        extra_compile_args["nvcc"] = [
+        op_cxx.append("-DLAE_USE_CUDA")
+        op_extra["nvcc"] = [
             "-O2",
             "-DUSE_CUDA",
             "-DTORCH_TARGET_VERSION=0x020e000000000000",
             "-DSTABLE_LIB_NAME=libtorch_agn_2_14",
         ]
-        extension = CUDAExtension
-        sources.extend(CSRC_DIR.glob("**/*.cu"))
+        op_extension = CUDAExtension
+        op_sources.extend(CSRC_DIR.glob("**/*.cu"))
         for prev_dir in PREV_CSRC_DIRS:
-            sources.extend(prev_dir.glob("**/*.cu"))
+            op_sources.extend(prev_dir.glob("**/*.cu"))
+
+    if mps_available:
+        op_cxx.append("-DUSE_MPS")
 
     return [
-        extension(
+        op_extension(
             "libtorch_agn_2_14._C",
-            sources=sorted(str(s) for s in sources),
+            sources=sorted(str(s) for s in op_sources),
             py_limited_api=True,
-            extra_compile_args=extra_compile_args,
+            extra_compile_args=op_extra,
             extra_link_args=[],
-        )
+        ),
+        # Interop extension (_interop): an importable abi3 module. Its
+        # PyObject<->Tensor helpers are plain module functions, so it is imported
+        # (which runs PyInit and exposes them) rather than loaded via
+        # torch.ops.load_library like the op extension.
+        CppExtension(
+            "libtorch_agn_2_14._interop",
+            sources=[str(CSRC_DIR / "pyobject_interop_module.cpp")],
+            py_limited_api=True,
+            extra_compile_args={
+                "cxx": common_cxx + ["-DSTABLE_LIB_NAME=libtorch_agn_2_14_interop"]
+            },
+        ),
     ]
 
 

@@ -1,10 +1,10 @@
 # Owner(s): ["module: functorch"]
 
-import logging
 import unittest
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+
+from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
@@ -12,11 +12,12 @@ from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._functorch._aot_autograd.subclass_codegen import (
     _codegen_subclass_wrapper_source,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.two_tensor import TwoTensor
-
-
-trace_log = logging.getLogger("torch.__trace")
 
 
 @dataclass
@@ -35,6 +36,8 @@ class _TestSubclassMeta:
 
 
 class TestSubclassCodegen(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _two_tensor_meta(self) -> _TestSubclassMeta:
         return _TestSubclassMeta(
             flat_tensor_start_idx=0,
@@ -51,32 +54,8 @@ class TestSubclassCodegen(TestCase):
             original_subclass_type=TwoTensor,
         )
 
-    @contextmanager
     def _capture_wrapper_source(self):
-        """Capture subclass_wrapper artifacts from the structured trace log."""
-        captured: list[str] = []
-
-        class _ArtifactHandler(logging.Handler):
-            def emit(self, record):
-                metadata = getattr(record, "metadata", {})
-                if (
-                    "artifact" in metadata
-                    and metadata["artifact"].get("name") == "subclass_wrapper"
-                ):
-                    payload = getattr(record, "payload", None)
-                    if payload is not None:
-                        captured.append(payload)
-
-        handler = _ArtifactHandler()
-        handler.setLevel(logging.DEBUG)
-        old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
-        trace_log.addHandler(handler)
-        try:
-            yield captured
-        finally:
-            trace_log.removeHandler(handler)
-            trace_log.setLevel(old_level)
+        return capture_codegen_source("subclass_wrapper")
 
     def test_compile_simple(self):
         """torch.compile with TwoTensor produces correct wrapper and output."""

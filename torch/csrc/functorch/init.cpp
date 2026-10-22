@@ -18,7 +18,6 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
-#include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
 #include <c10/core/InferenceMode.h>
@@ -407,7 +406,7 @@ static int64_t maybe_get_level(const Tensor& tensor) {
 static void maybe_unsafe_set_level(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
-    return batched->_unsafe_set_level(level);
+    batched->_unsafe_set_level(level);
   }
 }
 
@@ -441,7 +440,7 @@ static void tls_set_vmap_excluded(bool excluded) {
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
-  return setDynamicLayerFrontBackKeysIncluded(value);
+  setDynamicLayerFrontBackKeysIncluded(value);
 }
 
 static void dump_dls() {
@@ -501,7 +500,7 @@ static std::tuple<Tensor, std::optional<int64_t>> unwrapBatched(
   return std::make_tuple(tensor, std::nullopt);
 }
 
-static PyObject* unwrapDeadWrappers(PyObject* _unused, PyObject* args) {
+PyObject* unwrap_dead_wrappers(PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_Check(args), "expected a tuple of arguments");
   const auto num_args = PyTuple_GET_SIZE(args);
@@ -549,6 +548,10 @@ static PyObject* unwrapDeadWrappers(PyObject* _unused, PyObject* args) {
   }
   return result.release();
   END_HANDLE_TH_ERRORS
+}
+
+static PyObject* unwrapDeadWrappers(PyObject* _unused, PyObject* args) {
+  return unwrap_dead_wrappers(args);
 }
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

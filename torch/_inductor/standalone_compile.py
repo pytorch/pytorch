@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import itertools
 import logging
 import os
 import pickle
@@ -30,6 +31,7 @@ from ._functionalize_collectives import (
     _functionalize_inplace_collectives,
     _unbox_process_group_torchbinds,
 )
+from .codegen.common import patch_compile_options
 
 
 if TYPE_CHECKING:
@@ -494,10 +496,20 @@ def _resolve_fake_mode(
             if isinstance(last_node.args[0], torch.fx.Node)
             else last_node.args[0]
         )
-        for node in nodes:
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
-                maybe_fake_mode = maybe_get_fake_mode(maybe_tensor)
+        # Find a FakeTensor to recover its FakeTensorMode. This resolver was written when
+        # standalone_compile was only ever fed Dynamo/AOT graphs, which return a flat list
+        # of real Tensor outputs and stash the fake under "example_value". precompile now
+        # feeds make_fx graphs too, and those break both assumptions: make_fx stashes the
+        # fake under "val" (not "example_value"), and the traced fn's own return value is
+        # kept as an output leaf -- so when fn calls .backward() (which returns None) that
+        # None sits in the output list as a plain non-Node entry. So skip non-Node output
+        # entries (the old code called .meta on the None and crashed), check both metadata
+        # keys, and fall back to scanning every node since a make_fx fake may live only on
+        # an interior node. maybe_get_fake_mode also unwraps a traceable wrapper subclass.
+        output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
+        for node in itertools.chain(output_nodes, gm.graph.nodes):
+            for key in ("example_value", "val"):
+                maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:
                     return maybe_fake_mode
 
@@ -646,7 +658,7 @@ def _acceleration_cache_bytes(
 
     This is a PURE ACCELERATOR, not a serialized callable. It is the raw
     ``save_cache_artifacts()`` bundle (FxGraph entry + any triton/autotune cache);
-    ``load_from_python`` feeds it to ``load_cache_artifacts`` so that exec'ing the emitted
+    ``load_from_python`` feeds it to ``load_cache_artifacts`` so that running the emitted
     ``python_code`` loads the precompiled kernels instead of JIT-compiling them. The
     ``python_code`` runs correctly without it, so it carries no key/header framing -- it is
     handed straight back to ``load_cache_artifacts``.
@@ -663,8 +675,12 @@ def load_from_python(
 ) -> Callable[..., Any]:
     """Load the module emitted by ``compile_to_python`` into a runnable ``call``.
 
-    ``python_code`` is self-contained: exec'ing it defines ``call`` and JIT-compiles the
-    inlined kernels on first use, so it runs with ``cache=None``. When ``cache`` (the
+    ``python_code`` is self-contained: running it defines ``call`` and JIT-compiles the
+    inlined kernels on first use, so it runs with ``cache=None``. It runs from a file
+    written into the inductor cache dir (``codecache.exec_from_cache_file``), because a
+    module-level Triton kernel reads its source back through its module's file; so the
+    cache dir must be writable, and each distinct ``python_code`` leaves one file there,
+    keyed on its text. When ``cache`` (the
     accelerator bundle from ``compile_to_python``) is provided, it is loaded FIRST so the
     kernels load their precompiled binaries instead of recompiling -- a pure speedup, never
     a correctness requirement. Mirrors ``compile_to_python``: (python_code, cache) in,
@@ -672,9 +688,9 @@ def load_from_python(
     """
     if cache is not None:
         torch.compiler.load_cache_artifacts(cache)
-    namespace: dict[str, Any] = {"__name__": "__compile_to_python__"}
-    exec(compile(python_code, "<compile_to_python>", "exec"), namespace)
-    call = namespace.get("call")
+    from torch._inductor.codecache import exec_from_cache_file
+
+    call = exec_from_cache_file(python_code, "__compile_to_python__").get("call")
     if not callable(call):
         raise RuntimeError(
             "compile_to_python module did not define a callable ``call``."
@@ -732,12 +748,13 @@ def compile_to_python(
     over a conflicting user option, since the source-capture contract depends on
     them and a caller cannot be allowed to break the emitted module.
 
-    ``inner_python`` is self-contained: exec'ing it JIT-compiles the inlined kernels on
-    first use, so it runs with no cache. ``cache`` is a PURE ACCELERATOR -- the opaque
-    ``save_cache_artifacts()`` bundle; passing it to ``load_from_python`` warms the kernel
-    caches so exec loads the precompiled binaries instead of recompiling. It is ``None``
-    when the graph produced no cacheable module (no compute) or caches are disabled
-    (``force_disable_caches`` or ``fx_graph_cache=False``); ``inner_python`` still runs.
+    ``inner_python`` is self-contained: loading it (``load_from_python``, or importing it
+    from a file) JIT-compiles the inlined kernels on first use, so it runs with no cache.
+    ``cache`` is a PURE ACCELERATOR -- the opaque ``save_cache_artifacts()`` bundle;
+    passing it to ``load_from_python`` warms the kernel caches so the load uses the
+    precompiled binaries instead of recompiling. It is ``None`` when the graph produced
+    no cacheable module (no compute) or caches are disabled (``force_disable_caches`` or
+    ``fx_graph_cache=False``); ``inner_python`` still runs.
 
     ``inner_python`` is read off the ``CompiledFxGraph`` that ``compile_fx_inner``
     returns -- Inductor stashes the wrapper-module source on it as ``source_code`` -- so
@@ -831,7 +848,7 @@ def compile_to_python(
     # CacheArtifactManager isolates the cache bundle ``_acceleration_cache_bytes`` returns.
     with (
         torch.no_grad(),
-        config.patch(config_patches),
+        patch_compile_options(config_patches),
         config.patch("triton.autotune_at_compile_time", True),
         tracing(TracingContext(fake_mode)),
         V.set_fake_mode(fake_mode),

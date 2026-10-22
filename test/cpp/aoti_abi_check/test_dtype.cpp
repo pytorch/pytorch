@@ -136,6 +136,39 @@ TEST(TestDtype, TestComplexFloat) {
   EXPECT_EQ(a / b, div);
 }
 
+TEST(TestDtype, TestIsComplex) {
+  using torch::headeronly::is_complex;
+  static_assert(is_complex<torch::headeronly::complex<float>>::value);
+  static_assert(is_complex<torch::headeronly::complex<double>>::value);
+  static_assert(is_complex<std::complex<float>>::value);
+  static_assert(is_complex<std::complex<double>>::value);
+  static_assert(!is_complex<float>::value);
+  static_assert(!is_complex<torch::headeronly::Half>::value);
+  static_assert(!is_complex<torch::headeronly::BFloat16>::value);
+}
+
+TEST(TestDtype, TestScalarValueType) {
+  using torch::headeronly::scalar_value_type;
+  using cf = torch::headeronly::complex<float>;
+  static_assert(std::is_same_v<scalar_value_type<cf>::type, float>);
+  static_assert(
+      std::is_same_v<scalar_value_type<std::complex<double>>::type, double>);
+  // identity for non-complex types
+  static_assert(std::is_same_v<scalar_value_type<float>::type, float>);
+  using h = torch::headeronly::Half;
+  static_assert(std::is_same_v<scalar_value_type<h>::type, h>);
+}
+
+TEST(TestDtype, TestComplexNumericLimitsAndIsnan) {
+  using cf = torch::headeronly::complex<float>;
+  EXPECT_TRUE(std::numeric_limits<cf>::is_specialized);
+  EXPECT_EQ(std::numeric_limits<cf>::max(), std::numeric_limits<float>::max());
+
+  EXPECT_FALSE(std::isnan(cf(1.0f, 2.0f)));
+  EXPECT_TRUE(std::isnan(cf(std::nan(""), 2.0f)));
+  EXPECT_TRUE(std::isnan(cf(1.0f, std::nan(""))));
+}
+
 TEST(TestDtype, TestQuintsQintsAndBits) {
   // There's not much you can do with these dtypes...
   // so we'll just check that it compiles

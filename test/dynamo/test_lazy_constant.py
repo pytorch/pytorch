@@ -1,14 +1,18 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import sys
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class LazyConstantVariableTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
@@ -538,6 +542,337 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager6[1], compiled6[1])
         self.assertEqual(eager6[2], compiled6[2])
         self.assertEqual(counter_multi.frame_count, 1)
+
+
+class ComputedLazyConstantTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _check(self, fn, arg_sets, expected_frames):
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        for args in arg_sets:
+            eager = fn(*args)
+            compiled = opt_fn(*args)
+            self.assertTrue(same(eager, compiled))
+        self.assertEqual(counter.frame_count, expected_frames)
+
+    def test_unused_computed_int_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 100, -5)], expected_frames=1)
+
+    def test_unused_computed_ops_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a, b: (t.sin(), a - b), [(t, 5, 2), (t, 9, 3)]),
+            (lambda t, a, b: (t.sin(), a * b), [(t, 5, 2), (t, 9, 3)]),
+            (lambda t, a, b: (t.sin(), a + b), [(t, "x", "y"), (t, "p", "q")]),
+            (lambda t, a, b: (t.sin(), a & b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a | b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a ^ b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a == b), [(t, 1, 1), (t, 1, 2)]),
+            (lambda t, a, b: (t.sin(), a != b), [(t, 1, 1), (t, 1, 2)]),
+            (lambda t, a, b: (t.sin(), a < b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a <= b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a > b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a >= b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a < b), [(t, "x", "y"), (t, "p", "q")]),
+        ]
+        for i, (fn, arg_sets) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_unused_computed_inplace_op_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            a += b
+            return t.sin(), a
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=1)
+
+    def test_unused_computed_inplace_bitwise_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            a &= b
+            return t.sin(), a
+
+        self._check(fn, [(t, 6, 3), (t, 12, 10)], expected_frames=1)
+
+    def test_unused_unary_ops_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("neg_int", lambda t, a: (t.sin(), -a), [(t, 5), (t, 9)]),
+            ("pos_int", lambda t, a: (t.sin(), +a), [(t, 5), (t, 9)]),
+            ("abs_int", lambda t, a: (t.sin(), abs(a)), [(t, -5), (t, 9)]),
+            ("not_int", lambda t, a: (t.sin(), not a), [(t, 5), (t, 0)]),
+            ("neg_float", lambda t, a: (t.sin(), -a), [(t, 5.5), (t, -9.25)]),
+            ("neg_bool", lambda t, a: (t.sin(), -a), [(t, True), (t, False)]),
+            ("not_bool", lambda t, a: (t.sin(), not a), [(t, True), (t, False)]),
+            ("not_str", lambda t, a: (t.sin(), not a), [(t, "x"), (t, "")]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_invert_falls_back(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), ~a
+
+        opt_fn = torch.compile(fn, backend="eager")
+        for a in (5, 9):
+            self.assertTrue(same(fn(t, a), opt_fn(t, a)))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_unary_symbolic_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("neg", lambda t, a: t * (-a)),
+            ("pos", lambda t, a: t * (+a)),
+            ("abs", lambda t, a: t * abs(a)),
+            ("not", lambda t, a: t * (not a)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, [(t, 5), (t, 7)], expected_frames=1)
+
+    def test_unary_type_error_surfaces(self):
+        t = torch.ones(2)
+        cases = [("neg", lambda a: -a), ("pos", lambda a: +a), ("abs", abs)]
+        for name, unary in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+
+                def fn(t, a):
+                    return t.sin(), unary(a)
+
+                opt_fn = torch.compile(fn, backend="eager")
+                with self.assertRaisesRegex(TypeError, "bad operand type"):
+                    opt_fn(t, "x")
+
+    def test_unused_builtin_fns_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("len_str", lambda t, a: (t.sin(), len(a)), [(t, "xy"), (t, "pqr")]),
+            ("bool_int", lambda t, a: (t.sin(), bool(a)), [(t, 5), (t, 0)]),
+            ("min_int", lambda t, a, b: (t.sin(), min(a, b)), [(t, 1, 2), (t, 9, 3)]),
+            ("max_int", lambda t, a, b: (t.sin(), max(a, b)), [(t, 1, 2), (t, 9, 3)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_min_max_mixed_types_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, flag):
+            if isinstance(max(flag, 0.5), bool):
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, True), (t, False)], expected_frames=2)
+
+    def test_str_on_symbolic_int_compiles(self):
+        t = torch.ones(2)
+        d = {str(i): i for i in range(4)}
+
+        def fn(t, idx):
+            return t.relu() * d[str(idx)]
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        for idx in range(4):
+            self.assertEqual(fn(t, idx), opt_fn(t, idx))
+        self.assertGreater(counter.frame_count, 1)
+
+    def test_builtin_fn_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if len(a) > 2:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, "xy"), (t, "pqrs")], expected_frames=2)
+
+    def test_len_on_int_falls_back(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            try:
+                return t.sin(), len(a)
+            except TypeError:
+                return t.cos(), 0
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
+    def test_unary_op_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if -a < 0:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 5), (t, -5)], expected_frames=2)
+
+    def test_chained_unary_binary_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), -(a + b) * 2
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=1)
+
+    def test_unused_division_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a / b
+
+        self._check(fn, [(t, 4, 2), (t, 9, 3)], expected_frames=2)
+
+    def test_unused_comparison_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + 1 == b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 5, 0)], expected_frames=1)
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_symbolic_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("and", lambda t, a, b: t * (a & b)),
+            ("or", lambda t, a, b: t * (a | b)),
+            ("xor", lambda t, a, b: t * (a ^ b)),
+            ("lt", lambda t, a, b: t * (a < b)),
+            ("eq", lambda t, a, b: t * (a == b)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                for a, b in ((6, 3), (12, 12), (10, 20)):
+                    self.assertTrue(same(fn(t, a, b), opt_fn(t, a, b)))
+
+    def test_operand_type_change_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 1.5, 2.5)], expected_frames=2)
+
+    def test_chained_computed_constants_do_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), (a + b) * 2 - a
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=1)
+
+    def test_long_left_associated_chain_no_recursion_error(self):
+        t = torch.ones(2)
+
+        def fn(t, vals):
+            total = 0
+            for v in vals:
+                total = total + v
+            return t.sin(), total
+
+        n = 300
+        arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
+        self._check(fn, arg_sets, expected_frames=2)
+
+    def test_recursion_limit_sized_chain_no_recursion_error(self):
+        t = torch.ones(2)
+
+        def fn(t, vals):
+            total = 0
+            for v in vals:
+                total = total + v
+            return t.sin(), total
+
+        n = sys.getrecursionlimit()
+        arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
+        self._check(fn, arg_sets, expected_frames=2)
+
+    @torch._dynamo.config.patch(computed_lazy_constant_max_nodes=2)
+    def test_over_budget_chain_falls_back_to_guards(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), a + a + a + a
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
+    @torch._dynamo.config.patch(computed_lazy_constant_max_nodes=0)
+    def test_disabled_computed_lazy_constant_installs_guards(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_computed_constant_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            if a + b > 5:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=2)
+
+    def test_computed_constant_in_tensor_math_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t * (a + b)
+
+        self._check(fn, [(t, 1.5, 2.0), (t, 3.25, 4.0)], expected_frames=2)
+
+    def test_computed_constant_as_dict_key_realizes(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            d = {a + b: t}
+            return d[a + b].sin()
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_computed_constant_as_list_index_realizes(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            lst = [t, t + 1, t + 2]
+            return lst[a + b]
+
+        self._check(fn, [(t, 0, 1), (t, 1, 1)], expected_frames=2)
+
+    def test_computed_constant_type_query_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            c = a + b
+            if isinstance(c, str):
+                return t.sin(), c
+            return t.cos(), c
+
+        self._check(fn, [(t, "a", "b"), (t, "c", "d")], expected_frames=1)
 
 
 if __name__ == "__main__":
