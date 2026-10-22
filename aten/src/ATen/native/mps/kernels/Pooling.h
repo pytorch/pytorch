@@ -1,6 +1,10 @@
 #pragma once
 #include <c10/metal/common.h>
 
+// Tile of outputs computed by each thread of max_pool2d_s1_nchw
+C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_cols = 8;
+C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_rows = 2;
+
 // N is the maximum allowed number of dimensions in the input and outputs. The
 // maximum allowed pooling dimensions is N-2, because the input may have up to 2
 // leading dimensions that are not pooled. To support up to 3-D pooling, N=5 is
