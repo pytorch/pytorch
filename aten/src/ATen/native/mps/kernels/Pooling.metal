@@ -107,9 +107,10 @@ void max_pool_3d_input_iter(
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2 += d2) {
         auto offset2 = input_strides[2] * i2;
         auto input_value = input[offset0 + offset1 + offset2];
-        // Match CPU: a NaN anywhere in the window wins.
-        bool is_greater = input_value > max_value ||
-            ::metal::isnan(static_cast<float>(input_value));
+        // Match CPU/CUDA: NaN propagates and the last NaN in the window wins.
+        // x != x instead of metal::isnan, see c10::metal::less.
+        bool is_greater =
+            input_value > max_value || input_value != input_value;
 
         max_value = is_greater ? input_value : max_value;
 
@@ -151,9 +152,10 @@ void max_pool_2d_input_iter(
       auto offset1 = input_strides[1] * i1;
 
       auto input_value = input[offset0 + offset1];
-      // Match CPU: a NaN anywhere in the window wins.
-      bool is_greater = input_value > max_value ||
-          ::metal::isnan(static_cast<float>(input_value));
+      // Match CPU/CUDA: NaN propagates and the last NaN in the window wins.
+      // x != x instead of metal::isnan, see c10::metal::less.
+      bool is_greater =
+          input_value > max_value || input_value != input_value;
 
       max_value = is_greater ? input_value : max_value;
 
