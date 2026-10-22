@@ -2043,12 +2043,20 @@ with open(sys.argv[1], "w") as f:
     json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
 """
         with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
             result = subprocess.run(
                 [sys.executable, "-c", script, filename],
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=120,
+                env=env,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             with open(filename) as f:
