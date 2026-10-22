@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
-    skipIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -41,12 +40,43 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import (
+    clone_preserve_strides_offset,
     HAS_CPU,
     HAS_GPU,
     HAS_MPS,
+    HAS_TRITON,
     patch_inductor_backend,
 )
-from torch.utils._triton import has_triton
+
+
+def _triton_unavailable(device_type):
+    """Whether inductor would lower `device_type` through Triton but no working
+    Triton installation is present.
+
+    Derived from the backend inductor selects for the injected device instead
+    of a table of device names, so out-of-tree accelerators and future in-tree
+    backends are handled without editing this file.
+    """
+    return is_triton_backend(device_type) and not HAS_TRITON
+
+
+def _skip_out_of_tree_triton(fn):
+    """Skip tests asserting on the in-tree Triton codegen when the injected
+    device is served by an out-of-tree Triton backend (privateuse1).
+
+    Those backends reuse the Triton runtime but lower differently (block-size
+    heuristics, persistent-reduction selection, simd lowering), so the kernel
+    source assertions do not hold; measured on torch_npu. This is a blacklist:
+    any other backend, including new in-tree Triton backends, still runs.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.device_type == torch._C._get_privateuse1_backend_name():
+            raise unittest.SkipTest("out-of-tree Triton codegen differs")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 # Make the helper files in test/ importable
@@ -54,9 +84,9 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model,
-    check_model_gpu,
     CommonTemplate,
     copy_tests,
+    is_triton_backend,
     TestFailure,
 )
 
@@ -216,9 +246,49 @@ class DynamicShapesGPUTests(
     DynamicShapesOpTests, DynamicShapesCommonTemplate, DynamicShapesTestCase
 ):
     hw_classification = HardwareClassification.ACCELERATOR
-    common = check_model_gpu
+
+    # Matches the patch main applied to check_model_gpu; without it the
+    # GPU-shape tests would inherit whatever triton.cudagraphs the
+    # environment sets.
+    @torch._inductor.config.patch("triton.cudagraphs", False)
+    def common(self, model, example_inputs, call_kwargs=None, **opts):
+        # check_model_gpu resolves the target device from the process-wide
+        # GPU_TYPE, which would make every generated variant exercise that
+        # single backend. This class is instantiated once per device, so move
+        # the model and inputs to the injected device instead.
+        device = self.device
+        if hasattr(model, "to"):
+            model = model.to(device=device)
+        if opts.get("copy_to_gpu", True):
+            example_inputs = tuple(
+                clone_preserve_strides_offset(x, device=device) for x in example_inputs
+            )
+
+        check_model(self, model, example_inputs, call_kwargs, **opts)
+
+        if opts.get("check_lowp", True):
+
+            def downcast_fn(x):
+                if not isinstance(x, torch.Tensor) or x.dtype != torch.float:
+                    return x
+                return torch.empty_strided(
+                    x.size(), x.stride(), device=device, dtype=torch.half
+                ).copy_(x)
+
+            example_inputs = list(map(downcast_fn, example_inputs))
+            if hasattr(model, "to"):
+                model = model.to(torch.half)
+            lowp_opts = dict(opts)
+            if lowp_opts.get("rtol") is not None:
+                lowp_opts["rtol"] = max(2e-3, lowp_opts["rtol"])
+            check_model(self, model, example_inputs, call_kwargs, **lowp_opts)
 
     def setUp(self):
+        # Skip devices whose inductor backend needs (but lacks) a working
+        # Triton installation instead of failing with "Cannot find a working
+        # triton installation".
+        if _triton_unavailable(self.device_type):
+            self.skipTest("Inductor requires a working Triton installation")
         super().setUp()
         self.device = self.device_type
 
@@ -312,6 +382,14 @@ class TestInductorDynamic(DynamicShapesTestCase):
         return torch.compile(fn, *args, dynamic=True, **kwargs)
 
     def setUp(self):
+        # Pre-PR boundary: the CPU variant only ran on machines with a
+        # first-party GPU backend. Keep that for CPU without gating
+        # out-of-tree accelerators, which this class now instantiates.
+        if self.device_type == "cpu":
+            if not HAS_GPU:
+                self.skipTest("Triton not available")
+        elif _triton_unavailable(self.device_type):
+            self.skipTest("Triton not available")
         torch._dynamo.reset()
         super().setUp()
         # this should be in setUpClass, but device-generic tests
@@ -768,15 +846,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
-        # Compiling data-dependent output sizes (`x.item()` feeding a shape)
-        # is not uniformly supported yet: depending on the environment it may
-        # either raise or succeed. On configurations where it has historically
-        # been expected to fail (plain CPU without cpp_wrapper, excluding
-        # ARM64), tolerate the failure instead of asserting an xfail, which
-        # produces spurious "expected to fail, but actually passed" errors on
-        # environments where compilation now succeeds. On all other
-        # configurations, require success.
-        tolerate_failure = (
+        expect_fail = (
             device == "cpu" and not IS_ARM64 and not torch._inductor.config.cpp_wrapper
         )
         try:
@@ -789,8 +859,11 @@ class TestInductorDynamic(DynamicShapesTestCase):
             arg = torch.tensor(5, device=device)
             self.assertEqual(f(arg), cf(arg))
         except Exception:
-            if not tolerate_failure:
+            if not expect_fail:
                 raise
+        else:
+            if expect_fail:
+                self.fail("expected to fail, but actually passed")
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -854,6 +927,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(orig_w, w.grad)
 
     @onlyAccelerator
+    @_skip_out_of_tree_triton
     @parametrize("avoid_guards", [False, True])
     def test_avoid_32bit_indexing_guards(self, device, avoid_guards):
         def fn(x):
@@ -1442,7 +1516,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @onlyAccelerator
-    @skipIf(not has_triton(), "Requires Triton")
+    @_skip_out_of_tree_triton
     def test_dynamic_rblock_bounds(self, device):
         class ForcePersistent(InductorChoices):
             @staticmethod
@@ -1472,6 +1546,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             self.assertEqual(fn(x), actual)
             FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
+    @_skip_out_of_tree_triton
     def test_non_persistent_dynamic_rblock(self, device):
         def reduce_bounded(x, y):
             """Reduce over a dimension with bounded size."""
@@ -1609,6 +1684,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
     @onlyAccelerator
+    @_skip_out_of_tree_triton
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_sympy_infinity_bounds_in_persistent_reduction(self, device):
