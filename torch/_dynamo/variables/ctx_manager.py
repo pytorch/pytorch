@@ -44,10 +44,12 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import (
+    MethodDescriptorVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedMethodDescriptorVariable,
     WrappedNestedUserFunctionVariable,
     WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
@@ -147,10 +149,12 @@ class ContextWrappingVariable(VariableTracker):
         if not isinstance(
             args[0],
             (
+                MethodDescriptorVariable,
                 NestedUserFunctionVariable,
                 SkipFunctionVariable,
                 UserMethodVariable,
                 UserFunctionVariable,
+                WrappedMethodDescriptorVariable,
             ),
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
@@ -163,6 +167,10 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedNestedUserFunctionVariable(fn, self)
         elif isinstance(fn, SkipFunctionVariable):
             return WrappedSkipFunctionVariable(fn, self)
+        elif isinstance(
+            fn, (MethodDescriptorVariable, WrappedMethodDescriptorVariable)
+        ):
+            return WrappedMethodDescriptorVariable(fn, self)
         elif isinstance(fn, UserMethodVariable):
             return WrappedUserMethodVariable(fn, self)
         elif isinstance(fn, UserFunctionVariable):
