@@ -292,6 +292,7 @@ def _format_blockscaled_tma_output(
         scale_m = scale_m.view(
             (spec.B, *scale_m_shape) if spec.is_batched else scale_m_shape
         ).view(torch.float8_e8m0fnu)
+        scale_m = scale_m.transpose(-2, -1)
         output_m = output_m.transpose(-2, -1)
     if spec.do_dim_k:
         if output_k is None:
@@ -318,10 +319,12 @@ def _format_blockscaled_tma_output(
     if spec.input_transposed:
         if output_k is not None:
             output_k = output_k.transpose(-2, -1)
-            if scale_k is not None and not spec.is_scale_swizzled:
+            if scale_k is not None:
                 scale_k = scale_k.transpose(-2, -1)
         if output_m is not None:
             output_m = output_m.transpose(-2, -1)
+            if scale_m is not None:
+                scale_m = scale_m.transpose(-2, -1)
 
     if spec.do_dim_k and not spec.do_dim_m:
         if output_k is None:

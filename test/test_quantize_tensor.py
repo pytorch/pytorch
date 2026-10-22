@@ -75,12 +75,9 @@ def _quantize_mxfp8_reference_inner(
     else:
         scales, qdata = to_mxfp8_reference(source, format="mxfp8", swizzle_type=swizzle)
     if dim == 0:
-        # Note: we only transpose qdata here because swizzled scales are packed
-        # and we always return them with respect to the contiguous qdata axis
-        # permutation.
         qdata = qdata.t()
-        if not is_scale_swizzled:
-            scales = scales.t()
+        # For packed scales, the singleton axis makes this a metadata-only transpose.
+        scales = scales.t()
     return qdata, scales
 
 
@@ -208,6 +205,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         M, K = shape[-2:]
         self.assertEqual(qdata.stride(), (M * K, 1, M) if len(shape) == 3 else (1, M))
         self.assertEqual(scales.shape, scales_ref.shape)
+        self.assertEqual(scales.shape[-1], 1)
         self.assertEqual(scales, scales_ref)
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
@@ -250,11 +248,13 @@ class TestMXFP8ReferenceNumerics(TestCase):
             B = shape[0]
             stride_k = (M * K, K, 1)
             stride_m = (M * K, 1, M)
-            scale_shape = (B, 1, scale_bytes)
+            scale_k_shape = (B, 1, scale_bytes)
+            scale_m_shape = (B, scale_bytes, 1)
         else:
             stride_k = (K, 1)
             stride_m = (1, M)
-            scale_shape = (1, scale_bytes)
+            scale_k_shape = (1, scale_bytes)
+            scale_m_shape = (scale_bytes, 1)
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(qdata_m, qdata_m_ref)
         self.assertEqual(scales_k, scales_k_ref)
@@ -263,8 +263,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.shape, shape)
         self.assertEqual(qdata_k.stride(), stride_k)
         self.assertEqual(qdata_m.stride(), stride_m)
-        self.assertEqual(scales_k.shape, scale_shape)
-        self.assertEqual(scales_m.shape, scale_shape)
+        self.assertEqual(scales_k.shape, scale_k_shape)
+        self.assertEqual(scales_m.shape, scale_m_shape)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
@@ -298,7 +298,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
         if len(shape) == 3:
-            self.assertEqual(scales.shape, (3, 1, 2 * 2 * 512))
+            scale_shape = (3, 2 * 2 * 512, 1) if transposed else (3, 1, 2 * 2 * 512)
+            self.assertEqual(scales.shape, scale_shape)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @skipIfNoCuteDSL
@@ -356,10 +357,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
         expected_stride = (K, 1) if axis == 1 else (1, M)
         if len(shape) == 3:
             expected_stride = (M * K, *expected_stride)
-            self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(qdata.stride(), expected_stride)
+        if is_scale_swizzled:
+            scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
+            scale_shape = (1, scale_bytes) if axis == 1 else (scale_bytes, 1)
+        else:
+            scale_shape = (M // 32, K)
+        if len(shape) == 3:
+            scale_shape = (shape[0], *scale_shape)
+        self.assertEqual(scales.shape, scale_shape)
         if len(shape) == 2 and not is_scale_swizzled:
-            self.assertEqual(scales.shape, (M // 32, K))
             self.assertEqual(scales.stride(), (1, M // 32))
 
     @parametrize(
@@ -392,13 +399,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if len(shape) == 3:
             stride_k = (M * K, *stride_k)
             stride_m = (M * K, *stride_m)
-            B = shape[0]
-            m_blocks, k_blocks = (M + 127) // 128, (K + 127) // 128
-            scale_shape = (B, 1, m_blocks * k_blocks * 512)
-            self.assertEqual(scales_k.shape, scale_shape)
-            self.assertEqual(scales_m.shape, scale_shape)
         self.assertEqual(qdata_k.stride(), stride_k)
         self.assertEqual(qdata_m.stride(), stride_m)
+        scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
+        scale_k_shape = (1, scale_bytes)
+        scale_m_shape = (scale_bytes, 1)
+        if len(shape) == 3:
+            scale_k_shape = (shape[0], *scale_k_shape)
+            scale_m_shape = (shape[0], *scale_m_shape)
+        self.assertEqual(scales_k.shape, scale_k_shape)
+        self.assertEqual(scales_m.shape, scale_m_shape)
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_transposed_input_square(self, device):
@@ -408,7 +418,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp.t())
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), True, True)
         self.assertEqual(qdata, qdata_ref.t())
-        self.assertEqual(scales, scales_ref)
+        self.assertEqual(scales, scales_ref.t())
+        self.assertEqual(scales.shape, (scales.numel(), 1))
         self.assertEqual(qdata.shape, data_hp.shape)
         self.assertEqual(qdata.stride(), (1, data_hp.shape[0]))
 
@@ -448,7 +459,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             if is_scale_swizzled
             else (M, K // 32)
         )
-        scale_m_shape = (1, ((K + 127) // 128) * ((M + 127) // 128) * 32 * 16)
+        scale_m_shape = (((K + 127) // 128) * ((M + 127) // 128) * 32 * 16, 1)
         scale_shape = scale_k_shape if dim[-1] == -1 else scale_m_shape
         if len(shape) == 3:
             scale_shape = (shape[0], *scale_shape)
@@ -485,12 +496,14 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         self.assertEqual(qdata_k.shape, shape)
         self.assertEqual(qdata_m.shape, shape)
-        m_blocks, k_blocks = (M + 127) // 128, (K + 127) // 128
-        scale_shape = (1, m_blocks * k_blocks * 512)
+        scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
+        scale_k_shape = (1, scale_bytes)
+        scale_m_shape = (scale_bytes, 1)
         if len(shape) == 3:
-            scale_shape = (shape[0], *scale_shape)
-        self.assertEqual(scales_k.shape, scale_shape)
-        self.assertEqual(scales_m.shape, scale_shape)
+            scale_k_shape = (shape[0], *scale_k_shape)
+            scale_m_shape = (shape[0], *scale_m_shape)
+        self.assertEqual(scales_k.shape, scale_k_shape)
+        self.assertEqual(scales_m.shape, scale_m_shape)
         for output in (qdata_k, scales_k, qdata_m, scales_m):
             self.assertEqual(output.device, data_hp.device)
             self.assertEqual(output.numel(), 0)
