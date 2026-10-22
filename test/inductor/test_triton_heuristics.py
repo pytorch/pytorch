@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import hashlib
+import json
 import math
 import os
 import sys
@@ -105,6 +107,84 @@ def get_autotuned_amd_sqr_kernel():
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
+
+    @staticmethod
+    def _config_with_extra_options(extra_options):
+        from torch._inductor.runtime.triton_compat import Config
+
+        cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        cfg.extra_options = extra_options
+        return cfg
+
+    def test_extra_options_distinguish_configs(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        first = self._config_with_extra_options({"backend_option": 2})
+        second = self._config_with_extra_options({"backend_option": 4})
+        self.assertNotEqual(hash_configs([first]), hash_configs([second]))
+        self.assertNotEqual(
+            triton_config_to_hashable(first), triton_config_to_hashable(second)
+        )
+        duplicate = self._config_with_extra_options({"backend_option": 2})
+        self.assertEqual(unique_configs([first, second, duplicate]), [first, second])
+
+        saved = {
+            **first.kwargs,
+            "num_warps": first.num_warps,
+            "num_stages": first.num_stages,
+            "configs_hash": hash_configs([first]),
+            "extra_options": first.extra_options,
+        }
+        self.assertIsNone(
+            _load_cached_autotuning(saved, hash_configs([second]), [second], {})
+        )
+
+    def test_extra_options_order_and_serialization(self):
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        first = self._config_with_extra_options(
+            {"tile": (2, 4), "flags": {"a": True, "b": False}}
+        )
+        second = self._config_with_extra_options(
+            {"flags": {"b": False, "a": True}, "tile": [2, 4]}
+        )
+        restored = self._config_with_extra_options(
+            json.loads(json.dumps(first.extra_options))
+        )
+        for cfg in (second, restored):
+            self.assertEqual(hash_configs([first]), hash_configs([cfg]))
+            self.assertEqual(
+                triton_config_to_hashable(first), triton_config_to_hashable(cfg)
+            )
+            self.assertEqual(unique_configs([first, cfg]), [first])
+
+    def test_empty_extra_options_preserve_identity(self):
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original = self._config_with_extra_options(None)
+        del original.extra_options
+        expected_hash = hashlib.sha256(
+            f"{sorted(original.kwargs.items())} {original.num_warps} {original.num_stages}\n".encode()
+        ).hexdigest()
+        for cfg in (
+            original,
+            self._config_with_extra_options(None),
+            self._config_with_extra_options({}),
+        ):
+            self.assertEqual(hash_configs([cfg]), expected_hash)
+            self.assertEqual(
+                triton_config_to_hashable(cfg), triton_config_to_hashable(original)
+            )
 
     def test_find_names_ignores_frame_locals(self):
         """
@@ -1380,6 +1460,41 @@ class TestDumpLaunchTensors(TestCase):
 
 class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    def test_static_restore_selects_extra_options_winner(self):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for value in (2, 4):
+            cfg = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+            cfg.extra_options = {"backend_option": value}
+            configs.append(cfg)
+        results = [self._make_compile_result(cfg) for cfg in configs]
+        # Only the device artifacts are mocked; use the real cache reader and
+        # static restore method, without creating a device context.
+        tuner = object.__new__(CachingAutotuner)
+        tuner.compile_results = results
+        tuner._could_rblock_scale = False
+        tuner.inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "coordinate_descent_tuning": False,
+            "is_fbcode": False,
+        }
+        reload_source = MagicMock(side_effect=AssertionError("unexpected compilation"))
+        with tempfile.TemporaryDirectory() as directory:
+            tuner.filename = os.path.join(directory, "kernel.py")
+            cache = AutotuneCache.create(
+                tuner.inductor_meta, tuner.filename, hash_configs(configs)
+            )
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], 1000)
+            tuner.recheck_autotune_cache(reload_source)
+        self.assertEqual(tuner.autotune_cache_info["autotune_cache_state"], "hit")
+        self.assertEqual(len(tuner.compile_results), 1)
+        self.assertIs(tuner.compile_results[0], results[1])
+        reload_source.assert_not_called()
 
     @staticmethod
     def _make_compile_result(cfg):
