@@ -742,18 +742,27 @@ class _TestFP8MatmulMixin:
 
     def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
         """Check in-place scaled-addmm capture and replay."""
+        device = input.device
+        device_mod = torch.get_device_module(device)
         for _ in range(3):
             scaled_addmm_(input.clone(), *args, **kwargs)
-        torch.cuda.synchronize()
+        device_mod.synchronize(device)
 
         captured_input = input.clone()
         data_ptr = captured_input.data_ptr()
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            captured_output = scaled_addmm_(captured_input, *args, **kwargs)
+        if device.type == "xpu":
+            stream = torch.Stream(device=device)
+            graph = torch.accelerator.Graph()
+            with stream, graph:
+                captured_output = scaled_addmm_(captured_input, *args, **kwargs)
+            torch.accelerator.current_stream(device).wait_stream(stream)
+        else:
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured_output = scaled_addmm_(captured_input, *args, **kwargs)
         captured_input.copy_(input)
         graph.replay()
-        torch.cuda.synchronize()
+        device_mod.synchronize(device)
 
         self.assertIs(captured_output, captured_input)
         self.assertEqual(captured_input.data_ptr(), data_ptr)
