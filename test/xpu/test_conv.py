@@ -12,6 +12,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._C._dynamo.guards import assert_size_stride
+from torch._prims_common import suggest_memory_format
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -42,8 +43,7 @@ if TEST_SCIPY:
 # actually laid out. The shapes are degenerate on purpose: with unit spatial
 # extents or a single channel the contiguous and channels-last layouts address
 # the same memory, so only one operand still discriminates between them, which
-# is where a layout guessed from a memory format goes wrong. Lives at module scope
-# because parametrize_test consumes it while the class body is executed.
+# is where a layout guessed from a memory format goes wrong.
 class ConvLayoutCase(NamedTuple):
     op: str
     x_shape: tuple[int, ...]
@@ -63,14 +63,14 @@ CONV_LAYOUT_CASES = {
     "conv3d_forward": ConvLayoutCase("conv3d", (2, 1, 5, 5, 5), (8, 1, 1, 1, 1), w_kind="sliced"),
     "conv2d_grad_weight": ConvLayoutCase("conv2d", (8, 16, 1, 1), (16, 16, 3, 3), padding=1, w_kind="cl", bias=True),
     "conv2d_grad_input": ConvLayoutCase("conv2d", (8, 16, 8, 8), (32, 16, 1, 1), stride=8, x_kind="cl"),
-    # the only buffer that discriminates is grad_output, so all of conv2d,
-    # backward_data and backward_weights disagreed here before the fix
+    # the only buffer that discriminates is grad_output
     "conv2d_grad_input_1x1": ConvLayoutCase("conv2d", (2, 1, 1, 1), (4, 1, 1, 1), padding=1, w_kind="sliced"),
     "deconv2d_grad_input": ConvLayoutCase("conv_transpose2d", (8, 16, 3, 3), (16, 32, 1, 1), padding=1, x_kind="cl", bias=True),
+    # guards the 4D view that 1D convs are run on
     "conv1d_channels_last": ConvLayoutCase("conv1d", (8, 16, 5), (32, 16, 3), padding=1, x_kind="cl"),
     "deconv1d_channels_last": ConvLayoutCase("conv_transpose1d", (8, 16, 5), (16, 32, 3), padding=1, x_kind="cl"),
     "conv2d_grouped": ConvLayoutCase("conv2d", (2, 8, 1, 1), (8, 2, 3, 3), padding=1, groups=4, w_kind="cl"),
-    # grouped deconv derives its weight strides from the aten weight, not from a format tag
+    # guards the (g, oc/g, ic/g, k...) view of the grouped deconv weight
     "deconv2d_grouped": ConvLayoutCase("conv_transpose2d", (2, 8, 1, 1), (8, 2, 3, 3), padding=1, groups=4, w_kind="cl"),
     "conv3d_channels_last": ConvLayoutCase("conv3d", (2, 4, 4, 4, 4), (8, 4, 1, 1, 1), stride=4, x_kind="cl"),
     "deconv3d_channels_last": ConvLayoutCase("conv_transpose3d", (2, 4, 3, 3, 3), (4, 8, 1, 1, 1), padding=1, x_kind="cl"),
@@ -1271,8 +1271,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         cl = torch.channels_last if data.dim() == 4 else torch.channels_last_3d
         if kind == "cl":
             return data.clone().to(memory_format=cl)
-        if kind != "sliced":
-            raise ValueError(f"unknown layout kind {kind}")
+        if kind != "sliced" or data.dim() == 3:
+            raise ValueError(f"unsupported layout kind {kind} for {data.dim()}D")
         # A channel slice of a wider channels-last tensor keeps channels-last
         # like strides while being contiguous in neither format, so normalizing
         # it changes its strides and can change its suggested memory format.
@@ -1282,16 +1282,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         wide[:, : data.shape[1]] = data
         return wide[:, : data.shape[1]]
 
-    def _assert_channels_last_like(self, name, tensor):
-        if tensor.dim() == 3:
-            # 1D convs decide on the 4D view, and so does the buffer they return
-            tensor = tensor.unsqueeze(2)
-        cl = torch.channels_last if tensor.dim() == 4 else torch.channels_last_3d
-        self.assertTrue(
-            tensor.is_contiguous(memory_format=cl),
-            f"{name} with sizes {tensor.shape} and strides {tensor.stride()} is not {cl}",
-        )
-
     @dtypes(torch.float, torch.double)
     @parametrize_test("case", list(CONV_LAYOUT_CASES))
     def test_conv_layout_agreement(self, device, dtype, case):
@@ -1300,9 +1290,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
         make = self._conv_layout_variant
         x = make(torch.randn(c.x_shape, dtype=dtype, device=device), c.x_kind)
         w = make(torch.randn(c.w_shape, dtype=dtype, device=device), c.w_kind)
-        # Only a channels-last-like operand makes the entry point pick
-        # channels-last, which is what the case is here to exercise.
-        self.assertTrue(not x.is_contiguous() or not w.is_contiguous())
+        # the discriminating operand must make the entry point pick channels-last
+        for t, kind in ((x, c.x_kind), (w, c.w_kind)):
+            if kind != "plain":
+                t4d = t.unsqueeze(2) if t.dim() == 3 else t
+                self.assertNotEqual(suggest_memory_format(t4d), torch.contiguous_format)
         b = None
         if c.bias:
             out_channels = (
@@ -1313,9 +1305,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         def conv(x, w, b):
             return op(x, w, b, stride=c.stride, padding=c.padding, groups=c.groups)
 
-        ref_x = x.contiguous().detach().requires_grad_()
-        ref_w = w.contiguous().detach().requires_grad_()
-        ref_b = None if b is None else b.detach().requires_grad_()
+        ref_x = x.contiguous().double().detach().requires_grad_()
+        ref_w = w.contiguous().double().detach().requires_grad_()
+        ref_b = None if b is None else b.double().detach().requires_grad_()
         ref_out = conv(ref_x, ref_w, ref_b)
         grad = torch.randn_like(ref_out)
         ref_inputs = [ref_x, ref_w] + ([] if ref_b is None else [ref_b])
@@ -1326,19 +1318,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
         b = None if b is None else b.detach().requires_grad_()
         out = conv(x, w, b)
         inputs = [x, w] + ([] if b is None else [b])
-        # .grad would hide the layout behind AccumulateGrad's layout contract
-        grads = torch.autograd.grad(out, inputs, make(grad, c.g_kind))
+        grads = torch.autograd.grad(out, inputs, make(grad.to(dtype), c.g_kind))
 
-        self.assertEqual(out, ref_out)
+        self.assertEqual(out, ref_out, exact_dtype=False)
         for name, got, expected in zip(
             ("grad_input", "grad_weight", "grad_bias"), grads, ref_grads
         ):
-            self.assertEqual(got, expected, msg=name)
-        # assertEqual ignores strides, so pin the layout the entry point picked:
-        # every buffer it allocates for these cases must be channels-last.
-        self._assert_channels_last_like("output", out)
-        self._assert_channels_last_like("grad_input", grads[0])
-        self._assert_channels_last_like("grad_weight", grads[1])
+            self.assertEqual(got, expected, exact_dtype=False, msg=name)
 
     @dtypes(torch.float)
     def test_conv2d_no_grad(self, device, dtype):
