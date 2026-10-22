@@ -345,7 +345,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -375,7 +374,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -406,7 +404,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     def test_checkpoint_shows_tags_in_tlparse(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -433,7 +430,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         _ = torch.compile(fn, backend=backend)(x, y)
 
-    @requires_gpu_and_triton
     def test_ac_tags_through_custom_autograd_function(self, device):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -481,7 +477,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         out = torch.compile(fn, backend=backend)(x, w)
         out.sum().backward()
 
-    @requires_gpu_and_triton
     def test_sac_tags_through_custom_autograd_function(self, device):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -539,7 +534,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         out = torch.compile(fn, backend=backend)(x, w)
         out.sum().backward()
 
-    @requires_gpu_and_triton
     def test_tangent_placeholders_have_is_backward_tag(self, device):
         """Test that tangent placeholders in the joint graph are tagged with is_backward."""
 
@@ -573,7 +567,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         _ = torch.compile(fn, backend=backend)(x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -609,7 +602,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -642,7 +634,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -681,7 +672,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -883,7 +873,6 @@ Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_n
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
         )
 
-    @requires_gpu_and_triton
     def test_fallback(self, device):
         def gn(x, y):
             torch._dynamo.graph_break()
@@ -911,7 +900,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
 
-    @requires_gpu_and_triton
     def test_kwargs(self, device):
         def gn(x, y, z=None):
             a = torch.matmul(x, y)
@@ -945,7 +933,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    @requires_gpu_and_triton
     def test_symints_location(self, device):
         def gn(x, y):
             return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
@@ -975,7 +962,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1142,7 +1128,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self.assertEqual(call_count, expected_calls)
             self.assertEqual(x.grad, x.cos())
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1198,7 +1183,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1328,7 +1312,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1385,7 +1368,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1457,7 +1439,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1510,7 +1491,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1562,7 +1542,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1737,7 +1716,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self._validate(fn, backend, x, skip_check=not preserve_rng_state)
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1782,7 +1760,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1948,7 +1925,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, y)
         self.assertEqual(x_ref.grad, x.grad)
 
-    @requires_gpu_and_triton
     def test_error_msg(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -1972,7 +1948,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             opt_fn(x)
 
-    @requires_gpu_and_triton
     def test_list_inputs(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2064,7 +2039,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
     @requires_distributed()
-    @requires_gpu_and_triton
     def test_distributed_utils_checkpoint_wrapper(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             checkpoint_wrapper as dist_checkpoint_wrapper,
@@ -2092,7 +2066,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, res)
 
     @requires_distributed()
-    @requires_gpu_and_triton
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
@@ -2909,6 +2882,11 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x).backward()
 
 
+instantiate_device_type_tests(
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
@@ -3032,6 +3010,14 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         self.assertEqual(cnt.frame_count, 1)
 
 
+instantiate_device_type_tests(
+    ActivationCheckpointingSharedModuleTests,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+
+
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
@@ -3063,7 +3049,6 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
     def test_ac_rematerialize_simple_forward_backward(self):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3577,7 +3562,6 @@ def forward(self, arg0_1):
         self.assertEqual(ref, result)
         self.assertEqual(x_ref.grad, x_test.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_multiple_user_phase_annotations_errors(self):
         x = torch.randn(4, 4, requires_grad=True)
         w = torch.randn(4, 4, requires_grad=True)
@@ -3598,7 +3582,6 @@ def forward(self, arg0_1):
         with self.assertRaisesRegex(RuntimeError, "backward regions annotated"):
             self._compile_and_capture(fn, True, (x, w))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_user_phase_annotation_with_extra_autograd_grad(self):
         """Only the user-annotated backward region gets rematerialization."""
         x = torch.randn(4, 4, requires_grad=True)
@@ -3751,7 +3734,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
+    RematerializeACNodesPassTests,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
 
 
@@ -4082,8 +4068,15 @@ def forward(self, arg0_1, arg1_1):
         )
 
 
+instantiate_device_type_tests(
+    ActivationCheckpointingNonStrictTracerTests,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+
+
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
-    @requires_gpu_and_triton
     def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
         from torch._guards import tracing, TracingContext
         from torch._subclasses import FakeTensorMode
@@ -4157,6 +4150,14 @@ def forward(self, x_1):
     alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
     return (alias_4, mul_1)""",
         )
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingNestedCompileTests,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
