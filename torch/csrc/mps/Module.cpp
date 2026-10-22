@@ -515,7 +515,7 @@ void initModule(PyObject* module) {
               self.startEncoding();
               for (auto idx : c10::irange(args.size())) {
                 if (THPVariable_Check(args[idx].ptr())) {
-                  auto t = THPVariable_Unpack(args[idx].ptr());
+                  const auto& t = THPVariable_Unpack(args[idx].ptr());
                   self.setArg(idx, t);
                   if (!threads) {
                     threads = {static_cast<uint64_t>(t.numel())};
