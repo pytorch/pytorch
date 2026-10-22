@@ -74,6 +74,7 @@ _MIN_DECL = """\
 ATEN_OP = "{op}"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "kernel.py"
+ARCHS = ("sm_90",)
 
 
 def kernel_precompile_grid():

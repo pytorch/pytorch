@@ -13,9 +13,8 @@ requires = [
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
     # scikit-build-core, but list it explicitly as a direct build-time
-    # dep. The CI Docker image ships 4.13.2 on Python <3.14, so do not
-    # raise the lower bound without bumping CI.
-    "typing-extensions>=4.13.0",
+    # dep. Keep the lower bound in sync with the wheel runtime requirement.
+    "typing-extensions>=4.15.0",
     # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
     # assembly loops at build time and does `import six`. NNPACK is on by
     # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
@@ -395,8 +394,6 @@ license-files = [
     "third_party/ideep/mkl-dnn/LICENSE",
     "third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD",
     "third_party/ideep/mkl-dnn/third_party/opencl/LICENSE",
-    "third_party/kineto/LICENSE",
-    "third_party/kineto/libkineto/third_party/dynolog_headers/LICENSE",
     "third_party/llvm-openmp/LICENSE.txt",
     "third_party/mimalloc/LICENSE",
     "third_party/miniz-3.0.2/LICENSE",
@@ -417,6 +414,8 @@ license-files = [
     "third_party/tensorpipe/third_party/libnop/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
+    "torch/csrc/profiler/kineto/LICENSE",
+    "torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -458,7 +457,7 @@ nccl2 = "torch.distributed.distributed_c10d:_register_builtin_nccl2_backend"
 "nccl-lazy" = "torch.distributed.distributed_c10d:_register_builtin_nccl_lazy_backend"
 ucc = "torch.distributed.distributed_c10d:_register_builtin_ucc_backend"
 xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
-nccl4py = "torch.distributed.nccl4py_backend:_register_nccl4py_backend"
+nccl4py = "torch.distributed._nccl4py:_register_nccl4py_backend"
 
 [project.urls]
 Homepage = "https://pytorch.org"
