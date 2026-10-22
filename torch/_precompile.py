@@ -241,6 +241,9 @@ it.
 # so concurrent backend="inductor" captures lower one at a time. The make_fx trace,
 # on either backend, is serialized by the reentrant _CAPTURE_LOCK, taken before
 # _COMPILE_LOCK whenever both are held (MakeFxTracer's docstring has the rules).
+# torch.compiler.export_python also holds _CAPTURE_LOCK across an artifact's whole
+# materialization (capture, lowering, file write, exec) and its first launch, so a
+# concurrent capture waits for all of that, not just a trace.
 #
 # tracer: the capture front-end, orthogonal to backend. MakeFxTracer is the non-strict
 # trace everything above describes (the invariants, the contract). DynamoTracer (the
