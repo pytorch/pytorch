@@ -282,6 +282,10 @@ class TestUtils(TestCase):
     def test_is_big_gpu_min_sms_config(self):
         # https://github.com/pytorch/pytorch/issues/201471
         jetson_like = types.SimpleNamespace(multi_processor_count=20, major=8, minor=7)
+        # The result is cached per (device, threshold); make sure the mocked
+        # GPU neither reads a cached real result nor leaks into later tests.
+        inductor_utils._is_big_gpu.cache_clear()
+        self.addCleanup(inductor_utils._is_big_gpu.cache_clear)
         with mock.patch.object(
             inductor_utils.DeviceProperties, "create", return_value=jetson_like
         ):
