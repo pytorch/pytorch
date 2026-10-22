@@ -11,6 +11,9 @@ log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
 # FlyDSL 0.3.x ``@fx.struct`` values must expose ``__cache_signature__()``.
 _FLYDSL_SUPPORTED_RELEASE = (0, 3)
+# The private APIs used by PyTorch's temporary AOT adapter moved before 0.3.2.
+_FLYDSL_AOT_MINIMUM_RELEASE = (0, 3, 2)
+_FLYDSL_AOT_MAXIMUM_RELEASE = (0, 4)
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
@@ -45,6 +48,26 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
     return None
 
 
+def _flydsl_aot_runtime_unavailable_reason() -> str | None:
+    reason = _flydsl_runtime_unavailable_reason()
+    if reason is not None:
+        return reason
+
+    flydsl_version = _available_version("flydsl")
+    if (
+        flydsl_version is None
+        or flydsl_version.release < _FLYDSL_AOT_MINIMUM_RELEASE
+        or flydsl_version.release >= _FLYDSL_AOT_MAXIMUM_RELEASE
+    ):
+        minimum = ".".join(map(str, _FLYDSL_AOT_MINIMUM_RELEASE))
+        maximum = ".".join(map(str, _FLYDSL_AOT_MAXIMUM_RELEASE))
+        return (
+            f"unsupported FlyDSL version `{flydsl_version}` for AOT compilation "
+            f"(expected `>={minimum},<{maximum}`)"
+        )
+    return None
+
+
 @functools.cache
 def _check_runtime_available() -> bool:
     import torch
@@ -65,3 +88,14 @@ def _check_runtime_available() -> bool:
 
 def runtime_available() -> bool:
     return _check_runtime_available()
+
+
+@functools.cache
+def aot_runtime_available() -> bool:
+    if not _check_runtime_available():
+        return False
+    reason = _flydsl_aot_runtime_unavailable_reason()
+    if reason is not None:
+        log.debug("FlyDSL AOT compilation is unavailable: %s", reason)
+        return False
+    return True

@@ -1397,6 +1397,12 @@ if not flydsl_utils.runtime_available():
         or "ROCm runtime support is unavailable"
     )
     raise RuntimeError(f"FlyDSL runtime is unavailable: {reason}")
+if not flydsl_utils.aot_runtime_available():
+    reason = (
+        flydsl_utils._flydsl_aot_runtime_unavailable_reason()
+        or "AOT runtime support is unavailable"
+    )
+    raise RuntimeError(f"FlyDSL AOT runtime is unavailable: {reason}")
 version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
@@ -1405,6 +1411,7 @@ PY
     inductor/test_flydsl_template.py \
     inductor/test_flydsl_grouped_scheduler.py \
     inductor/test_flydsl_flex_attention.py \
+    inductor/flydsl_aot/test_flydsl_aot_compiler.py \
     --verbose
   assert_git_not_dirty
 }
