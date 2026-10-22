@@ -307,6 +307,8 @@ def split_flydsl_launcher_arguments(
 def invoke_flydsl_launcher(
     registration: FlyDSLLauncherRegistration,
     args: tuple[Any, ...],
+    *,
+    stream: int | None = None,
 ) -> None:
     signature = registration.signature
     stream_parameter = registration.stream_parameter
@@ -315,7 +317,13 @@ def invoke_flydsl_launcher(
         parameters = list(signature.parameters.values())
         parameters.insert(stream_index, parameter)
         signature = signature.replace(parameters=parameters)
-        args = (*args[:stream_index], parameter.default, *args[stream_index:])
+        if stream is None:
+            stream_value = parameter.default
+        else:
+            if registration.stream_type is None:
+                raise AssertionError("missing FlyDSL Stream type")
+            stream_value = registration.stream_type(stream)
+        args = (*args[:stream_index], stream_value, *args[stream_index:])
     positional_args, keyword_args = split_flydsl_launcher_arguments(
         signature,
         args,
@@ -323,6 +331,42 @@ def invoke_flydsl_launcher(
     if registration.bound_self is not None:
         positional_args = (registration.bound_self, *positional_args)
     registration.launcher(*positional_args, **keyword_args)
+
+
+class FlyDSLPythonLauncher:
+    def __init__(self, launcher_idx: int, call_spec_idx: int) -> None:
+        self.launcher_idx = launcher_idx
+        self.call_spec_idx = call_spec_idx
+
+    def run(self, *runtime_args: Any, stream: int | None = None) -> None:
+        registration = flydsl_launcher_side_table.get_registration(self.launcher_idx)
+        constant_args = flydsl_launcher_side_table.get_call_spec(self.call_spec_idx)
+        runtime_args_iter = iter(runtime_args)
+        args = []
+        for idx in range(len(registration.signature.parameters)):
+            if idx in constant_args:
+                args.append(constant_args[idx])
+                continue
+            try:
+                args.append(next(runtime_args_iter))
+            except StopIteration as exc:
+                raise TypeError(
+                    "not enough runtime arguments for FlyDSL launcher"
+                ) from exc
+        try:
+            next(runtime_args_iter)
+        except StopIteration:
+            pass
+        else:
+            raise TypeError("too many runtime arguments for FlyDSL launcher")
+
+        if stream is not None and registration.stream_parameter is None:
+            if stream != torch.cuda.default_stream().cuda_stream:
+                raise RuntimeError(
+                    "FlyDSL launchers without a Stream parameter cannot run on "
+                    "a non-default stream through the Python wrapper"
+                )
+        invoke_flydsl_launcher(registration, tuple(args), stream=stream)
 
 
 class FlyDSLKernelWrapperMutation(HigherOrderOperator):
