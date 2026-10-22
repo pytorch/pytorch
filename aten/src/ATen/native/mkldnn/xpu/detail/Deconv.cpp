@@ -129,7 +129,7 @@ sycl::event deconvolution(
     args.insert({DNNL_ARG_BIAS, bia_m});
   }
   if (attr.with_binary())
-    attr.construct_post_binary(deconv_fwd_pd, args);
+    attr.construct_post_binary(args);
 
   size_t scratchpad_size = deconv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(

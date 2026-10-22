@@ -114,8 +114,6 @@ struct PostOpParam {
   float beta_ = 0.0;
   // for binary
   at::Tensor binary_ = at::Tensor();
-  at::Tensor expected_binary_ = at::Tensor();
-  void* binary_ptr_ = nullptr;
   dnnl::memory::desc meta_ = dnnl::memory::desc();
   // for prelu
   int mask_ = 0;
@@ -306,9 +304,7 @@ class Attr {
     return false;
   }
 
-  void construct_post_binary(
-      dnnl::primitive_desc& pd,
-      std::unordered_map<int, dnnl::memory>& args) {
+  void construct_post_binary(std::unordered_map<int, dnnl::memory>& args) {
     // This function is used to construct binary memory desc in binary post ops.
     // According to oneDNN doc, the binary tensor can be in shape of
     // [1, 1, 1, 1], tensor broadcast

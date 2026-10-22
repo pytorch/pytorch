@@ -328,8 +328,8 @@ Tensor _convolution_out(
   weight = make_contiguous_and_aligned(weight, mfmt);
   check_shape_forward(input, weight, bias, params);
 
-  // a caller-supplied output is described to oneDNN by its own strides, so it
-  // is written in place in any non-overlapping layout
+  // a caller-supplied output is described to oneDNN by its own strides and
+  // written in place; callers must ensure it does not overlap the inputs
   Tensor output;
   if (output_r.defined()) {
     output = ndim == 3 ? view4d(output_r) : output_r;
@@ -706,6 +706,9 @@ Tensor& convolution_pointwise_binary_(
   at::assert_no_overlap(other_t, input_t);
   at::assert_no_overlap(other_t, weight_t);
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  if (bias.defined()) {
+    at::assert_no_overlap(other_t, bias);
+  }
   // Step1: Construct binary attr
   Attr attr;
   attr = construct_binary_attr(attr, binary_attr, other_t);
