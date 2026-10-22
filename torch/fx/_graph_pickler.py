@@ -20,6 +20,7 @@ if dill is not None:
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
+from torch._higher_order_ops.flydsl_kernel_wrap import _is_flydsl_kernel_wrapper
 from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import (
@@ -753,6 +754,11 @@ class _OpPickleData:
             return cls._pickle_op(name, _OpOverloadPickleData, options)
         elif isinstance(op, torch._ops.OpOverloadPacket):
             return cls._pickle_op(name, _OpOverloadPacketPickleData, options)
+        elif _is_flydsl_kernel_wrapper(op):
+            raise NotImplementedError(
+                "FlyDSL kernel wrappers cannot be pickled because launcher and "
+                "call-spec indices are process-local"
+            )
         elif name.startswith(_OpFunctionPickleData.SUPPORTED_ROOTS):
             root, detail = name.split(".", 1)
             return _OpFunctionPickleData(root, detail)
