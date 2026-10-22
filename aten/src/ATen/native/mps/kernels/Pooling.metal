@@ -149,18 +149,19 @@ void max_pool_2d_input_iter(
       auto offset1 = input_strides[1] * i1;
 
       auto input_value = input[offset0 + offset1];
-      bool is_greater = input_value > max_value;
+      // Matches CPU: NaN wins, (val != val) is false for integral types
+      bool is_greater = input_value > max_value || input_value != input_value;
 
       max_value = is_greater ? input_value : max_value;
 
-      if (return_indices) {
+      if IF_CONSTEXPR (return_indices) {
         auto input_index = i0 * geom.input_sizes[1] + i1;
         max_index = is_greater ? input_index : max_index;
       }
     }
   }
   *output = max_value;
-  if (return_indices) {
+  if IF_CONSTEXPR (return_indices) {
     *indices = max_index;
   }
 }
@@ -337,6 +338,70 @@ kernel void max_pool(
           pooling_dim_indices,
           geom,
           return_indices);
+  }
+}
+
+// Specialization of max_pool for 2D pooling of dense NCHW or NHWC tensors that
+// ignores strides. The grid maps directly to output coordinates, which avoids
+// most of the div/mod by runtime sizes that find_pool_offsets needs.
+template <typename T, bool return_indices, bool channels_last>
+kernel void max_pool2d_dense(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    device int64_t* indices [[buffer(2)]],
+    constant PoolingParams<5>& p [[buffer(3)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  const int32_t C = p.input_sizes[p.dims - 3];
+  const int32_t IH = p.input_sizes[p.dims - 2], IW = p.input_sizes[p.dims - 1];
+  const int32_t OH = p.output_sizes[p.dims - 2],
+                OW = p.output_sizes[p.dims - 1];
+  int32_t oh, ow, stride_h, stride_w, in_base, out_offset;
+  if IF_CONSTEXPR (channels_last) {
+    // pos = (c, ow, n * OH + oh)
+    oh = pos.z % OH;
+    ow = pos.y;
+    stride_w = C;
+    stride_h = IW * C;
+    in_base = (pos.z / OH) * IH * stride_h + pos.x;
+    out_offset = (pos.z * OW + ow) * C + pos.x;
+  } else {
+    // pos = (ow, oh, n * C + c)
+    oh = pos.y;
+    ow = pos.x;
+    stride_w = 1;
+    stride_h = IW;
+    in_base = pos.z * IH * IW;
+    out_offset = (pos.z * OH + oh) * OW + ow;
+  }
+  const auto dh = p.dilation[0], dw = p.dilation[1];
+  auto h_start = oh * p.stride[0] - p.padding[0];
+  auto w_start = ow * p.stride[1] - p.padding[1];
+  const auto h_end = min(h_start + (p.kernel_size[0] - 1) * dh + 1, IH);
+  const auto w_end = min(w_start + (p.kernel_size[1] - 1) * dw + 1, IW);
+  if (h_start < 0) {
+    h_start += dh * ((dh - 1 - h_start) / dh);
+  }
+  if (w_start < 0) {
+    w_start += dw * ((dw - 1 - w_start) / dw);
+  }
+
+  input += in_base;
+  T max_value = input[h_start * stride_h + w_start * stride_w];
+  int32_t max_index = h_start * IW + w_start;
+  for (auto ih = h_start; ih < h_end; ih += dh) {
+    for (auto iw = w_start; iw < w_end; iw += dw) {
+      const auto val = input[ih * stride_h + iw * stride_w];
+      // Matches CPU: NaN wins, (val != val) is false for integral types
+      const bool take = val > max_value || val != val;
+      max_value = take ? val : max_value;
+      if IF_CONSTEXPR (return_indices) {
+        max_index = take ? ih * IW + iw : max_index;
+      }
+    }
+  }
+  output[out_offset] = max_value;
+  if IF_CONSTEXPR (return_indices) {
+    indices[out_offset] = max_index;
   }
 }
 
@@ -834,6 +899,31 @@ REGISTER_POOL_OP(short);
 REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
+
+#define REGISTER_MAX_POOL2D_DENSE(DTYPE, IDX, CL, SUFFIX)       \
+  template [[host_name("max_pool2d_dense_" SUFFIX "_" #DTYPE)]] \
+  kernel void max_pool2d_dense<DTYPE, IDX, CL>(                 \
+      device const DTYPE* input [[buffer(0)]],                  \
+      device DTYPE* output [[buffer(1)]],                       \
+      device int64_t* indices [[buffer(2)]],                    \
+      constant PoolingParams<5>& p [[buffer(3)]],               \
+      uint3 pos [[thread_position_in_grid]]);
+
+#define REGISTER_MAX_POOL2D_DENSE_ALL(DTYPE)                \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, false, false, "nchw")    \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, true, false, "nchw_idx") \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, false, true, "nhwc")     \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, true, true, "nhwc_idx")
+
+REGISTER_MAX_POOL2D_DENSE_ALL(float);
+REGISTER_MAX_POOL2D_DENSE_ALL(half);
+REGISTER_MAX_POOL2D_DENSE_ALL(bfloat);
+REGISTER_MAX_POOL2D_DENSE_ALL(int);
+REGISTER_MAX_POOL2D_DENSE_ALL(long);
+REGISTER_MAX_POOL2D_DENSE_ALL(short);
+REGISTER_MAX_POOL2D_DENSE_ALL(char);
+REGISTER_MAX_POOL2D_DENSE_ALL(uchar);
+REGISTER_MAX_POOL2D_DENSE_ALL(bool);
 
 REGISTER_POOL_BACKWARD_OP(float);
 REGISTER_POOL_BACKWARD_OP(half);
