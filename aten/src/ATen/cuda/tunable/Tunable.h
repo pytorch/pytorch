@@ -100,6 +100,12 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
         const std::string& op_signature,
         const std::string& concrete_params_signature);
 
+    // Borrow the tuned solution of a neighbouring shape: identical except in one
+    // free dim (M, N or batch count), rounded up. Separate from Lookup so a caller
+    // can tell a measured hit from a borrow, which is expected to be validated.
+    ResultEntry LookupNearest(const std::string& op_signature,
+        const std::string& params_signature);
+
     void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
@@ -108,6 +114,13 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     void Add(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best);
+
+    // Persist a compile-time decision for a shape that was never tuned: a borrowed
+    // solution, or Default when the default kernel benchmarked faster. Unlike Add()
+    // this works while tuning is disabled, gated on IsRecordBorrowedEnabled.
+    void RecordBorrowed(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry entry);
 
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
@@ -232,6 +245,16 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
+    // Runtime-settable rather than env-only: the reuse pass and the runtime
+    // execution that follows it share a process and need opposite values.
+    void EnableNearestMatch(bool value);
+    bool IsNearestMatchEnabled() const;
+
+    // Lets the reuse pass write results while tuning is off; the normal write path
+    // is gated on IsTuningEnabled().
+    void EnableRecordBorrowed(bool value);
+    bool IsRecordBorrowedEnabled() const;
+
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
     void SetNumericalCheckConfig(bool enabled, double atol, double rtol);
@@ -287,6 +310,8 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
+    bool nearest_match_enable_;
+    bool record_borrowed_enable_;
     bool manager_initialized_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;

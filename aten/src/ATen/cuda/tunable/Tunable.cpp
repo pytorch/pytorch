@@ -10,6 +10,7 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/cuda/CUDAContextLight.h>
+#include <ATen/cuda/tunable/GemmLdRules.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -103,6 +105,124 @@ std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
 
 // TuningResultsManager
 
+namespace {
+
+std::vector<std::string> SplitUnderscore(const std::string& s) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  while (true) {
+    const size_t pos = s.find('_', start);
+    if (pos == std::string::npos) {
+      out.push_back(s.substr(start));
+      break;
+    }
+    out.push_back(s.substr(start, pos - start));
+    start = pos + 1;
+  }
+  return out;
+}
+
+// Parsed form of a params signature: ab_M_N_K_[B_<b>_]ld_lda_ldb_ldc[_<suffix...>].
+struct GemmShape {
+  bool ok = false;
+  std::string transab;  // [0]=transa, [1]=transb
+  int64_t m = 0, n = 0, k = 0;
+  bool has_b = false;
+  int64_t b = 0;
+  int64_t lda = 0, ldb = 0, ldc = 0;
+  std::string suffix;  // tail after ldc (e.g. scaled_mm "_rw_1_bias_BFloat16")
+};
+
+GemmShape ParseGemmShape(const std::vector<std::string>& t) {
+  GemmShape s;
+  if (t.size() < 8 || t[0].size() != 2) {
+    return s;
+  }
+  size_t i = 0;
+  try {
+    s.transab = t[i++];
+    s.m = std::stoll(t[i++]);
+    s.n = std::stoll(t[i++]);
+    s.k = std::stoll(t[i++]);
+    if (t[i] == "B") {
+      s.has_b = true;
+      i++;
+      s.b = std::stoll(t[i++]);
+    }
+    if (i >= t.size() || t[i] != "ld") {
+      return s;
+    }
+    i++;
+    if (i + 2 >= t.size()) {
+      return s;
+    }
+    s.lda = std::stoll(t[i++]);
+    s.ldb = std::stoll(t[i++]);
+    s.ldc = std::stoll(t[i++]);
+  } catch (...) {
+    return s;
+  }
+  for (; i < t.size(); i++) {
+    s.suffix += "_" + t[i];
+  }
+  s.ok = true;
+  return s;
+}
+
+// True iff `c` can serve `q` by rounding exactly one of {M, N, B} UP to c's value;
+// `delta` is the gap, so the caller can pick the closest candidate. Which ld's
+// may differ is decided by LdsCompatibleWhen*Varies in GemmLdRules.h, which
+// applies the same transpose and tightness rules as ShouldWildcardLd*: an ld
+// that is padded rather than tight is not a function of m/n/k, so it must match
+// exactly even when the dim it would otherwise track is the one being rounded.
+bool NearestLargerMatch(const GemmShape& q, const GemmShape& c, int64_t& delta) {
+  if (!q.ok || !c.ok) {
+    return false;
+  }
+  if (q.transab != c.transab || q.has_b != c.has_b || q.k != c.k ||
+      q.suffix != c.suffix) {
+    return false;
+  }
+  const bool dm = q.m != c.m;
+  const bool dn = q.n != c.n;
+  const bool db = q.has_b && q.b != c.b;
+  if ((dm ? 1 : 0) + (dn ? 1 : 0) + (db ? 1 : 0) != 1) {
+    return false;
+  }
+  const char ta = q.transab[0];
+  const char tb = q.transab[1];
+  const GemmLeadingDims q_lds{q.lda, q.ldb, q.ldc};
+  const GemmLeadingDims c_lds{c.lda, c.ldb, c.ldc};
+  int64_t qv = 0;
+  int64_t cv = 0;
+  if (dm) {
+    if (!LdsCompatibleWhenMVaries(ta, q_lds, q.m, c_lds, c.m)) {
+      return false;
+    }
+    qv = q.m;
+    cv = c.m;
+  } else if (dn) {
+    if (!LdsCompatibleWhenNVaries(tb, q_lds, q.n, c_lds, c.n)) {
+      return false;
+    }
+    qv = q.n;
+    cv = c.n;
+  } else {  // db: no ld depends on B, so all must match.
+    if (q.lda != c.lda || q.ldb != c.ldb || q.ldc != c.ldc) {
+      return false;
+    }
+    qv = q.b;
+    cv = c.b;
+  }
+  if (cv < qv) {
+    return false;
+  }
+  delta = cv - qv;
+  return true;
+}
+
+} // namespace
+
 KernelMap TuningResultsManager::Lookup(const std::string& op_signature) {
   std::scoped_lock l{lock_};
   auto it = results_.find(op_signature);
@@ -170,6 +290,62 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
   }
   return ResultEntry::Null();
 }
+
+ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
+    const std::string& params_signature) {
+  // Never borrow during a tuning pass: that shape should be tuned for real.
+  auto* ctx = getTuningContext();
+  if (!ctx->IsNearestMatchEnabled() || ctx->IsTuningEnabled()) {
+    return ResultEntry::Null();
+  }
+
+  std::scoped_lock l{lock_};
+  auto kernel_map_it = results_.find(op_signature);
+  if (kernel_map_it == results_.cend()) {
+    return ResultEntry::Null();
+  }
+
+  const GemmShape q = ParseGemmShape(SplitUnderscore(params_signature));
+  if (!q.ok) {
+    TUNABLE_LOG3("unparseable params_signature, no nearest match for ", op_signature, ",", params_signature);
+    return ResultEntry::Null();
+  }
+
+  // Deliberately not memoized: the result is unmeasured for this shape, and the
+  // caller is expected to validate it and persist the outcome instead.
+  const std::string* best_sig = nullptr;
+  const ResultEntry* best = nullptr;
+  int64_t best_delta = std::numeric_limits<int64_t>::max();
+  for (const auto& [cand_sig, cand_result] : kernel_map_it->second) {
+    // Normal tuning records Default when it wins, so Default entries sit in the
+    // map alongside specialized ones. Borrowing exists to find a specialized
+    // kernel worth validating: a near Default would otherwise mask a farther
+    // specialized donor, and the validator would then benchmark Default against
+    // Default and persist it. Missing here is cheap -- the caller already falls
+    // back to Default when there is no match.
+    if (cand_result == ResultEntry::Default()) {
+      continue;
+    }
+    int64_t delta = 0;
+    if (!NearestLargerMatch(q, ParseGemmShape(SplitUnderscore(cand_sig)), delta)) {
+      continue;
+    }
+    if (delta < best_delta) {
+      best = &cand_result;
+      best_sig = &cand_sig;
+      best_delta = delta;
+    }
+  }
+
+  if (best == nullptr) {
+    TUNABLE_LOG3("no nearest match for ", op_signature, ",", params_signature);
+    return ResultEntry::Null();
+  }
+  TUNABLE_LOG3("nearest match for ", op_signature, ",", params_signature, " -> ", *best,
+      " from ", *best_sig, " (delta ", best_delta, ")");
+  return *best;
+}
+
 void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
@@ -204,8 +380,15 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   }
    if (!is_new) return;  // only write once per unique (op, params)
 
-   TuningContext* ctx = getTuningContext();
-  if (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled()) {
+  TuningContext* ctx = getTuningContext();
+  // Tuning writes unless the run is only collecting untuned shapes. Borrowed
+  // results must persist regardless: the reuse pass suppresses RecordUntuned
+  // precisely so it can RecordBorrowed instead, and nothing bulk-writes
+  // results_ at shutdown, so gating this on !record_untuned would drop the
+  // borrowed decision on process exit.
+  const bool persist = ctx->IsRecordBorrowedEnabled() ||
+      (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled());
+  if (persist) {
     InitRealtimeAppend(ctx->GetFilename(), ctx->GetTuningResultsValidator().GetAllValidators());
 
     if (is_new && realtime_out_ && realtime_out_->good()) {
@@ -246,6 +429,16 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
+}
+
+void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
+    const std::string& params_signature,
+    ResultEntry entry) {
+  if (!getTuningContext()->IsRecordBorrowedEnabled()) {
+    TORCH_WARN_ONCE("RecordBorrowed called while record-borrowed is disabled; ignoring");
+    return;
+  }
+  Add(op_signature, params_signature, entry);
 }
 
 void TuningResultsManager::ClearUntuned() {
@@ -589,6 +782,8 @@ TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
     record_untuned_enable_{false},
+    nearest_match_enable_{false},
+    record_borrowed_enable_{false},
     manager_initialized_{false},
     numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
@@ -705,6 +900,37 @@ std::ofstream& TuningContext::GetUntunedFile(){
     untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::app);
   }
   return untuned_file_;
+}
+
+void TuningContext::EnableNearestMatch(bool value) {
+  nearest_match_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Nearest Match for TunableOp");
+  } else {
+    TUNABLE_LOG1("Disable Nearest Match for TunableOp");
+  }
+}
+
+bool TuningContext::IsNearestMatchEnabled() const {
+  // The env var is a force-off override only; the member is what the reuse pass sets.
+  static const bool disabled = c10::utils::get_env("INDUCTOR_ATEN_TUNABLEOP_NEAREST_MATCH") == "0";
+  if (disabled) {
+    return false;
+  }
+  return nearest_match_enable_;
+}
+
+void TuningContext::EnableRecordBorrowed(bool value) {
+  record_borrowed_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Record Borrowed for TunableOp");
+  } else {
+    TUNABLE_LOG1("Disable Record Borrowed for TunableOp");
+  }
+}
+
+bool TuningContext::IsRecordBorrowedEnabled() const {
+  return record_borrowed_enable_;
 }
 
 
