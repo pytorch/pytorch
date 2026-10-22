@@ -7338,7 +7338,7 @@ class Scheduler:
             """(lower, upper) from ShapeEnv, each None when unbounded or symbolic."""
             try:
                 vr = sizevars.shape_env.bound_sympy(expr)
-            except Exception:  # noqa: BLE001 - no range for this expression
+            except Exception:  # no range for this expression
                 return None, None
             lo = hi = None
             try:
@@ -7355,7 +7355,7 @@ class Scheduler:
 
         try:
             sym_hint = sizevars.optimization_hint(s)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         sym_lo, sym_hi = _declared(s)
         # A declared bound narrower than the cap wins. The cap is raised to the
@@ -7386,7 +7386,7 @@ class Scheduler:
         # a flat 16384 would have cut a GEMM served at 294912 down to 12288.
         try:
             served_dim = _eval_at(dyn_expr, sym_hint)
-        except Exception:  # noqa: BLE001 - unevaluatable at the hint
+        except Exception:  # unevaluatable at the hint
             served_dim = 0
         dim_ceiling = max(_TUNABLEOP_MAX_DYN_SYM, served_dim)
 
@@ -7395,7 +7395,7 @@ class Scheduler:
         for sym_val in sym_vals:
             try:
                 dim_val = _eval_at(dyn_expr, sym_val)
-            except Exception:  # noqa: BLE001 - unevaluatable at this value
+            except Exception:  # unevaluatable at this value
                 continue
             if not (_TUNABLEOP_MIN_DYN_DIM <= dim_val <= dim_ceiling):
                 continue
@@ -7471,7 +7471,7 @@ class Scheduler:
                     winner.name,
                 )
                 return
-        except Exception as e:  # noqa: BLE001 - cannot prove density, do not guess
+        except Exception as e:  # cannot prove density, do not guess
             log.info(
                 "TunableOp range pre-tune: skipping %s, layout check failed: %s",
                 winner.name,
@@ -7504,11 +7504,13 @@ class Scheduler:
         bmreqs: list[Any] = []
         try:
             for v in buckets:
-                bmreq = copy.copy(winner.bmreq)
-                bmreq.input_tensor_meta = [_meta_at(n, v) for n in winner.input_nodes]
-                bmreq.output_tensor_meta = _meta_at(winner.layout, v)
-                bmreqs.append(bmreq)
-        except Exception as e:  # noqa: BLE001
+                sized_bmreq: Any = copy.copy(winner.bmreq)
+                sized_bmreq.input_tensor_meta = [
+                    _meta_at(n, v) for n in winner.input_nodes
+                ]
+                sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v)
+                bmreqs.append(sized_bmreq)
+        except Exception as e:  # bmreq build must not fail the compile
             log.warning(
                 "TunableOp range pre-tune: failed to build bmreqs for %s: %s",
                 winner.name,

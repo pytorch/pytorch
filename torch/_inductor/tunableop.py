@@ -73,7 +73,7 @@ class BenchmarkJob:
         """
         try:
             self.bmreq.benchmark()
-        except Exception:  # noqa: BLE001 - a failed warm must still yield a timing
+        except Exception:  # a failed warm must still yield a timing
             log.warning(
                 "TunableOp warm-up failed; measuring the untuned kernel instead",
                 exc_info=True,
@@ -210,7 +210,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "timeout")
     except EOFError:
         return Outcome(None, "crash")
-    except Exception as e:  # noqa: BLE001 - a failed benchmark must not fail the compile
+    except Exception as e:  # a failed benchmark must not fail the compile
         log.debug("TunableOp benchmark failed: %s", e)
         return Outcome(None, "error")
     # inf is what a benchmark returns when it declines to run the op, and
