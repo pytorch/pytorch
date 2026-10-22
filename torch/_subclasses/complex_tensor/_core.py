@@ -164,6 +164,123 @@ class ComplexTensor(Tensor):
         return self._re.is_pinned(device)
 
 
+class InterleavedComplexTensor(Tensor):
+    """A complex Tensor that keeps the interleaved layout, viewing the original input's storage.
+
+    Ops are computed via `ComplexTensor`; mutations are written back into the original storage.
+    """
+
+    _data: Tensor
+
+    def __new__(cls, t: Tensor, /) -> Self:
+        from ._ops.common import COMPLEX_TO_REAL
+
+        if t.dtype not in COMPLEX_TO_REAL:
+            raise TypeError(
+                f"Unsupported dtype {t.dtype}. Supported dtypes are: {set(COMPLEX_TO_REAL.keys())!r}."
+            )
+        if t.is_conj():
+            raise RuntimeError(
+                "Cannot view a conjugated tensor; call `resolve_conj()` first."
+            )
+
+        res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            t.shape,
+            device=t.device,
+            dtype=t.dtype,
+            storage_offset=t.storage_offset(),
+            strides=t.stride(),
+            pin_memory=t.is_pinned(),
+            layout=t.layout,
+            requires_grad=False,
+        )
+        res._data = torch.view_as_real(t.detach())
+        return res
+
+    def __init__(self, *a: Any, **kw: Any) -> None:
+        super().__init__()
+
+    @property
+    def re(self) -> Tensor:
+        return self._data[..., 0]
+
+    @property
+    def im(self) -> Tensor:
+        return self._data[..., 1]
+
+    @property
+    def real(self) -> Tensor:  # type: ignore[bad-override]
+        return self.re
+
+    @real.setter
+    def real(self, value: Tensor) -> None:
+        self.re[...] = value
+
+    @property
+    def imag(self) -> Tensor:  # type: ignore[bad-override]
+        return self.im
+
+    @imag.setter
+    def imag(self, value: Tensor) -> None:
+        self.im[...] = value
+
+    def as_interleaved(self) -> Tensor:
+        return torch.view_as_complex(self._data)
+
+    def to_complex_tensor(self) -> ComplexTensor:
+        return ComplexTensor(self.re, self.im)
+
+    @classmethod
+    def __torch_dispatch__(  # type: ignore[bad-override]
+        cls,
+        func: OpOverload,
+        types: tuple[type, ...],
+        # pyrefly: ignore [implicit-any]
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        from torch.utils._pytree import tree_flatten, tree_map
+
+        from ._ops.common import lookup_complex
+
+        kwargs = {} if kwargs is None else kwargs
+
+        if func.is_view and isinstance(args[0], InterleavedComplexTensor):
+            out = func(args[0].as_interleaved(), *args[1:], **kwargs)
+            flat_out = tree_flatten(out)[0]
+            # Conj/neg views can't be represented interleaved; fall back to ComplexTensor.
+            if not any(t.is_conj() or t.is_neg() for t in flat_out):
+                return tree_map(
+                    lambda t: InterleavedComplexTensor(t) if t.dtype.is_complex else t,
+                    out,
+                )
+
+        impl = lookup_complex(func, *args, **kwargs)
+        if impl is None:
+            return NotImplemented
+
+        return impl(*args, **kwargs)
+
+    @staticmethod
+    def __tensor_unflatten__(
+        inner_tensors: dict[str, Tensor],
+        meta: Any,
+        outer_size: tuple[int, ...],
+        outer_stride: tuple[int, ...],
+    ) -> InterleavedComplexTensor:
+        return InterleavedComplexTensor(torch.view_as_complex(inner_tensors["_data"]))
+
+    def __tensor_flatten__(self) -> tuple[list[str], Any]:
+        return ["_data"], None
+
+    def __repr__(self, *, tensor_contents: object | None = None) -> str:
+        return f"InterleavedComplexTensor({self.as_interleaved()!r})"
+
+    def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
+        return self._data.is_pinned(device)
+
+
 class Complex(Function):
     @staticmethod
     def forward(  # type: ignore[bad-override]
