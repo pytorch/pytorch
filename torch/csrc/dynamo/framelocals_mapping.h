@@ -7,7 +7,6 @@
 #include <string>
 #include <unordered_map>
 
-#include <c10/util/SmallVector.h>
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -52,8 +51,7 @@ typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
   // - in 3.11+, the closure vars in the frame's closure object and
   //   the corresponding localsplus entry is nullptr
   // - regardless of Python version, we need to unbox the cell variable
-  // Inline capacity covers most frames, avoiding a heap allocation per call.
-  c10::SmallVector<py::handle, 16> _framelocals;
+  std::vector<py::handle> _framelocals;
 
   py::object _dict{py::none()};
 
