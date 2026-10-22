@@ -531,8 +531,8 @@ struct MPPTile {
   METAL_FUNC void load_safe(
       const device U* src,
       const int ld,
-      const short n_rows,
-      const short n_cols) {
+      const int n_rows,
+      const int n_cols) {
     MPP_PRAGMA_UNROLL
     for (short i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
@@ -566,8 +566,8 @@ struct MPPTile {
   METAL_FUNC void store_safe(
       device U* dst,
       const int ld,
-      const short n_rows,
-      const short n_cols) const {
+      const int n_rows,
+      const int n_cols) const {
     MPP_PRAGMA_UNROLL
     for (short i = 0; i < kTileRows; ++i) {
       MPP_PRAGMA_UNROLL
@@ -900,7 +900,7 @@ prefill_attention_mpp(
             if constexpr (is_bool) {
               fg[jj] = mfrag[jj] ? fg[jj] : (AccumType)-INFINITY;
             } else {
-              fg[jj] += M_LOG2E_F * static_cast<AccumType>(mfrag[jj]);
+              fg[jj] += mask_log2e(mfrag[jj]);
             }
           }
         }
@@ -1044,14 +1044,15 @@ prefill_attention_mpp(
   instantiate_mpp_attn(dtype, 96, hm, dc, 0, mtype);     \
   instantiate_mpp_attn(dtype, 64, hm, dc, 0, mtype)
 
-// Without a mask the mask name is the query dtype.
+// Without a mask the mask name is the query dtype. A mask together with
+// is_causal is rejected on the host, so there are no hm1_dc1 variants; an
+// fp32 additive mask is taken as is and added in fp32, like the CPU math path.
 #define instantiate_mpp_attn_masks(dtype)         \
   instantiate_mpp_attn_tiles(dtype, 0, 0, dtype); \
   instantiate_mpp_attn_tiles(dtype, 0, 1, dtype); \
   instantiate_mpp_attn_tiles(dtype, 1, 0, dtype); \
-  instantiate_mpp_attn_tiles(dtype, 1, 1, dtype); \
   instantiate_mpp_attn_tiles(dtype, 1, 0, bool);  \
-  instantiate_mpp_attn_tiles(dtype, 1, 1, bool)
+  instantiate_mpp_attn_tiles(dtype, 1, 0, float)
 
 instantiate_mpp_attn_masks(half);
 instantiate_mpp_attn_masks(bfloat);

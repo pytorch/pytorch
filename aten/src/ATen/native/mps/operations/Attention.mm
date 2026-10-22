@@ -9,6 +9,7 @@
 #include <ATen/native/mps/kernels/Attention.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/util/env.h>
 #include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -147,6 +148,12 @@ static constexpr int64_t kSplitTargetThreadgroups = 128, kSplitMinKBlocks = 8, k
 // The staged V/O slab passes materialize the fp32 scores S[B * H * qL, kL];
 // above this many bytes each slab recomputes the scores instead.
 static constexpr int64_t kStagedScoresMaxBytes = int64_t(1) << 30;
+// PYTORCH_MPS_SDPA_STAGED_SCORES_MAX_BYTES overrides the cap (0 disables
+// staging); read per call, on the wide V/O path only, so tests can set it.
+static int64_t staged_scores_max_bytes() {
+  const auto env = c10::utils::get_env("PYTORCH_MPS_SDPA_STAGED_SCORES_MAX_BYTES");
+  return env ? strtoll(env->c_str(), nullptr, 10) : kStagedScoresMaxBytes;
+}
 // The full-width V/O slabs of the MPP and P @ V kernels run in one launch,
 // and the staged scores pass splits the keys, while the grid stays below
 // kGridThreadgroupsPerCore per GPU core (an M5 Pro fills at 128); past that,
@@ -198,7 +205,7 @@ static void sdpa_prefill_mps(const Tensor& q,
   // Wide V/O on the simdgroup kernel: prefill_attention_scores writes the
   // scaled, masked scores and row stats once, then prefill_attention_pv runs
   // P @ V over the slabs.
-  const bool staged = !use_mpp && dv > bd && rows * k.size(2) * int64_t(sizeof(float)) <= kStagedScoresMaxBytes;
+  const bool staged = !use_mpp && dv > bd && rows * k.size(2) * int64_t(sizeof(float)) <= staged_scores_max_bytes();
   static const int64_t core_grid = kGridThreadgroupsPerCore * std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
   const int64_t grid_xy = nq * q.size(0) * q.size(1);
   const int64_t max_splits = std::clamp(nk / kSplitMinKBlocks, int64_t(1), kMaxSplits);
@@ -329,16 +336,27 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto batch_dims = [](const Tensor& t) { return t.sym_sizes().slice(0, t.dim() - 3); };
   auto batch_shape = at::infer_size_symdimvector(batch_dims(query), batch_dims(key_));
   batch_shape = at::infer_size_symdimvector(batch_shape, batch_dims(value_));
+  const auto batch_numel = c10::multiply_integers(batch_shape);
+  // A zero QK head dim makes every score zero, so attention is uniform over the
+  // unmasked keys as the CPU math path computes it; the kernels get a single
+  // zero column instead (which also keeps the default scale finite).
+  auto zero_column = [](const Tensor& t) {
+    auto shape = t.sym_sizes().vec();
+    shape.back() = 1;
+    return t.new_zeros_symint(shape);
+  };
+  const bool zero_head_dim = query.size(-1) == 0;
   // Broadcasts the batch dims and flattens them into one. Kernels load head-dim
   // elements linearly, so stride(-1) == 1 is the only layout requirement.
   auto expand_batch = [&](const Tensor& t) {
     auto shape = batch_shape;
     shape.append(t.sym_sizes().end() - 3, t.sym_sizes().end());
-    const auto t4d = t.expand_symint(shape).reshape_symint({-1, t.sym_size(-3), t.sym_size(-2), t.sym_size(-1)});
+    const auto t4d =
+        t.expand_symint(shape).reshape_symint({batch_numel, t.sym_size(-3), t.sym_size(-2), t.sym_size(-1)});
     return t4d.stride(-1) == 1 ? t4d : t4d.contiguous();
   };
-  const auto q_ = expand_batch(query);
-  const auto k_ = expand_batch(key_);
+  const auto q_ = expand_batch(zero_head_dim ? zero_column(query) : query);
+  const auto k_ = expand_batch(zero_head_dim ? zero_column(key_) : key_);
   const auto v_ = expand_batch(value_);
   // The kernels index with 32-bit sizes (strides stay 64-bit).
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -349,12 +367,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   out_shape.append({query.sym_size(-3), query.sym_size(-2), value_.sym_size(-1)});
   std::optional<Tensor> mask;
   if (attn_mask) {
-    // Cast before expanding so a broadcast mask stays a view.
+    // An additive mask is added in fp32 like the CPU math path, so an fp32 mask
+    // stays fp32 for any query dtype (to() is then a no-op). Cast before
+    // expanding so a broadcast mask stays a view.
     const auto m =
-        attn_mask->scalar_type() == kBool || attn_mask->scalar_type() == dtype ? *attn_mask : attn_mask->to(dtype);
+        attn_mask->scalar_type() == kBool || attn_mask->scalar_type() == dtype ? *attn_mask : attn_mask->to(kFloat);
     auto mask_shape = out_shape;
     mask_shape.back() = key_.sym_size(-2);
-    mask = m.expand_symint(mask_shape).reshape_symint({-1, query.sym_size(-3), query.sym_size(-2), key_.sym_size(-2)});
+    mask = m.expand_symint(mask_shape)
+               .reshape_symint({batch_numel, query.sym_size(-3), query.sym_size(-2), key_.sym_size(-2)});
   }
 
   const int64_t q_len = q_.size(2), d = q_.size(3), dv = v_.size(3);
@@ -366,8 +387,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   } else if (out.numel() > 0) {
     sdpa_prefill_mps(q_, k_, v_, out, mask, is_causal, scale_factor);
   }
-  // The attention weights output is never materialized (nothing consumes it).
-  return {out.view_symint(out_shape), Tensor()};
+  // The attention weights are never materialized (nothing consumes them); an
+  // empty tensor stands in, as the flash attention ops do for unrequested outputs.
+  return {out.view_symint(out_shape), at::empty({0}, q_.options())};
 }
 } // namespace native
 } // namespace at

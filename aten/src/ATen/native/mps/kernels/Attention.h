@@ -70,6 +70,14 @@ struct PrefillAttnMaskParams {
 // in place of the output and merged by sdpa_merge_partials.
 template <typename T, bool SPLIT>
 using SplitOutT = metal::conditional_t<SPLIT, float, T>;
+// An additive mask enters the exp2 softmax as mask * log2(e). The product
+// overflows finite sentinels such as finfo(float32).min to -inf, which would
+// zero a fully masked row where the CPU math path (fp32) averages it:
+// saturate instead, keeping a true -inf and NaN as they are.
+METAL_FUNC float mask_log2e(float m) {
+  const float m2 = m * M_LOG2E_F;
+  return m2 == -INFINITY && m != -INFINITY ? -FLT_MAX : m2;
+}
 #define instantiate_kernel(name, func, ...) \
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>

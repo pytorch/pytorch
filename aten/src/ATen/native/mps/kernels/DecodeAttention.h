@@ -249,16 +249,27 @@ template <typename T>
   instantiate_decode_pass("", 1, dtype, bd); \
   instantiate_decode_pass("_2pass", kDecodeBlocks, dtype, bd)
 
+// Half and bfloat also take an fp32 additive mask (the public API allows one
+// with any query dtype), added in fp32 like the CPU math path.
+#define instantiate_decode_float_mask_tile(dtype, bd)       \
+  instantiate_decode("", 1, dtype, bd, float, 0, 1, float); \
+  instantiate_decode("_2pass", kDecodeBlocks, dtype, bd, float, 0, 1, float)
+
 // Keep the tiles in sync with decode_bucket in Attention.mm.
-#define instantiate_decode_tiles(dtype) \
-  instantiate_decode_tile(dtype, 32);   \
-  instantiate_decode_tile(dtype, 64);   \
-  instantiate_decode_tile(dtype, 96);   \
-  instantiate_decode_tile(dtype, 128);  \
-  instantiate_decode_tile(dtype, 256);  \
-  instantiate_decode_tile(dtype, 512);  \
+#define instantiate_decode_tiles(dtype, tile) \
+  tile(dtype, 32);                            \
+  tile(dtype, 64);                            \
+  tile(dtype, 96);                            \
+  tile(dtype, 128);                           \
+  tile(dtype, 256);                           \
+  tile(dtype, 512)
+
+#define instantiate_decode_dtype(dtype)                     \
+  instantiate_decode_tiles(dtype, instantiate_decode_tile); \
   instantiate_kernel("sdpa_merge_partials_" #dtype, sdpa_merge_partials, dtype)
 
-instantiate_decode_tiles(float);
-instantiate_decode_tiles(half);
-instantiate_decode_tiles(bfloat);
+instantiate_decode_dtype(float);
+instantiate_decode_dtype(half);
+instantiate_decode_dtype(bfloat);
+instantiate_decode_tiles(half, instantiate_decode_float_mask_tile);
+instantiate_decode_tiles(bfloat, instantiate_decode_float_mask_tile);

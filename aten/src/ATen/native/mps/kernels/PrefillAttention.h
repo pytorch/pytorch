@@ -801,7 +801,7 @@ struct PrefillBlock {
             Stile.frag_at(0, j)[jj] =
                 mfrag[jj] ? Stile.frag_at(0, j)[jj] : AccumType(-INFINITY);
           } else {
-            Stile.frag_at(0, j)[jj] += AccumType(mfrag[jj]) * M_LOG2E_F;
+            Stile.frag_at(0, j)[jj] += mask_log2e(mfrag[jj]);
           }
         }
       }
@@ -1093,14 +1093,13 @@ prefill_attention(
 
 // P @ V reads scores the scores pass already masked, so it has no mask
 // variants; without a mask the mask name is the query dtype. Under split-K
-// it writes fp32 partials like the fused kernel.
+// it writes fp32 partials like the fused kernel. A mask together with
+// is_causal is rejected on the host, so there are no hm1_dc1 variants.
 #define instantiate_attn_masks(dtype)                               \
   instantiate_attn_tiles(dtype, 0, 0, dtype);                       \
   instantiate_attn_tiles(dtype, 0, 1, dtype);                       \
   instantiate_attn_tiles(dtype, 1, 0, dtype);                       \
-  instantiate_attn_tiles(dtype, 1, 1, dtype);                       \
   instantiate_attn_tiles(dtype, 1, 0, bool);                        \
-  instantiate_attn_tiles(dtype, 1, 1, bool);                        \
   instantiate_attn("_pv", kPVStage, dtype, 128, 0, 0, 0, 0, dtype); \
   instantiate_attn("_pv", kPVStage, dtype, 128, 0, 1, 0, 0, dtype); \
   instantiate_attn("_pv", kPVStage, dtype, 128, 0, 0, 0, 1, dtype); \
@@ -1109,3 +1108,7 @@ prefill_attention(
 instantiate_attn_masks(half);
 instantiate_attn_masks(bfloat);
 instantiate_attn_masks(float);
+// The public API allows an fp32 additive mask with any query dtype; half and
+// bfloat take it as is and add it in fp32, like the CPU math path.
+instantiate_attn_tiles(half, 1, 0, float);
+instantiate_attn_tiles(bfloat, 1, 0, float);
