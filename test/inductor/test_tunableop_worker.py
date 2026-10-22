@@ -3,7 +3,11 @@
 from unittest import mock
 
 from torch._inductor import tunableop
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    run_tests,
+)
 
 
 class _FakeProcess:
@@ -29,6 +33,7 @@ class _FakeProcess:
 
 
 class TunableOpWorkerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """The worker is a subprocess holding process-global TunableOp state, so the
     things worth pinning are which GPU it lands on and when it gets replaced.
     Neither needs a GPU to check, and a GPU-only test would not run in CI."""

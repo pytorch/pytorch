@@ -307,7 +307,7 @@ ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
 
   const GemmShape q = ParseGemmShape(SplitUnderscore(params_signature));
   if (!q.ok) {
-    TUNABLE_LOG3("unparseable params_signature, no nearest match for ", op_signature, ",", params_signature);
+    TUNABLE_LOG3("unparsable params_signature, no nearest match for ", op_signature, ",", params_signature);
     return ResultEntry::Null();
   }
 
