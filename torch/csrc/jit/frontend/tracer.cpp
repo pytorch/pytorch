@@ -3,6 +3,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
@@ -85,7 +86,7 @@ void TracingState::delValue(const IValue& var) {
   }
 }
 
-// Given a IValue 'var', return the 'node' which represents the instruction
+// Given an IValue 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this

@@ -89,10 +89,10 @@ def reverse_dict(d: dict[_T, Iterable[_T]]) -> dict[_T, tuple[_T, ...]]:
     {1: ('a',), 2: ('a', 'b'), 3: ('b',)}
 
     .. note::
-        dict order are not deterministic. As we iterate on the
-        input dict, it make the output of this function depend on the
+        dict order is not deterministic. As we iterate on the
+        input dict, it makes the output of this function depend on the
         dict order. So this function output order should be considered
-        as undeterministic.
+        as nondeterministic.
     """
     result = {}  # type: ignore[var-annotated]
     for key in d:

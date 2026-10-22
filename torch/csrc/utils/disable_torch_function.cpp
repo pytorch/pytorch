@@ -346,8 +346,7 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
       // correct: we want to exclude Python key and everything BEFORE it.)
   );
   auto r = PyObject_Call(func, py_args.ptr(), kwargs);
-  if (r == nullptr)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r != nullptr);
   return r;
   END_HANDLE_TH_ERRORS
 }

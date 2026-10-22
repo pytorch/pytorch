@@ -49,6 +49,7 @@ from .common import (
 )
 from .wrapper import (
     AllocateLine,
+    AssertAlignmentLine,
     BufferLike,
     CommentLine,
     DynamicScalarLine,
@@ -251,6 +252,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ) -> None:
         """FXIR does not emit deferred alignment copies."""
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
+        return False
+
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],
@@ -372,18 +377,36 @@ class FxConverter:
         name = buffer.get_name()
         del self.buffer_to_node[name]
 
-    def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+    def _lookup_args(
+        self, args: tuple[Any, ...], raw_args: Sequence[Any] | None
+    ) -> tuple[Any, ...]:
         """
-        Maps call args back to FX nodes.
+        Maps call args back to FX nodes. raw_args positionally pairs with args and
+        holds the IR node behind each; it is None for scheduler-generated kernels.
         """
-        return tuple(
-            self.buffer_to_node[arg]
-            if isinstance(arg, str)
-            else arg.inner_expr
-            if isinstance(arg, SymbolicCallArg)
-            else arg
-            for arg in args
-        )
+
+        def lookup(arg: Any, raw_arg: Any) -> Any:
+            if isinstance(arg, SymbolicCallArg):
+                return arg.inner_expr
+            if not isinstance(arg, str):
+                return arg
+            if arg in self.buffer_to_node:
+                return self.buffer_to_node[arg]
+            # If the buffer name cannot be resolved, try to unwrap `raw_args`.
+            # For example, the view `reinterpret_tensor(...)` will have a
+            # corresponding ir.ReinterpretView in raw_args.
+            if not isinstance(raw_arg, ir.IRNode):
+                raise AssertionError(f"Unrecognized arg type: {type(raw_arg)}")
+            return self._generate_buffer(raw_arg)
+
+        if raw_args is None:
+            raw_args = [None] * len(args)
+        elif len(raw_args) != len(args):
+            raise AssertionError(
+                f"call_args and raw_args do not match: {len(args)} vs {len(raw_args)}"
+            )
+
+        return tuple(lookup(arg, raw_arg) for arg, raw_arg in zip(args, raw_args))
 
     def _get_buffer(self, node: ir.IRNode) -> CodegenBuffer:
         """
@@ -582,7 +605,7 @@ class FxConverter:
                     zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                     device=device,
                     outer_name=unique_name,
-                    dtype=buffer.get_dtype(),
+                    dtype=node.get_dtype(),
                 )
 
                 # Generate FX IR for the view.
@@ -815,6 +838,16 @@ class FxConverter:
     def _generate_assert_size_stride(self, line: WrapperLine) -> None:
         pass
 
+    def _generate_assert_alignment(self, line: WrapperLine) -> None:
+        from torch._C._dynamo.guards import assert_alignment
+
+        if not isinstance(line, AssertAlignmentLine):
+            raise AssertionError(f"expected AssertAlignmentLine, got {type(line)}")
+        self.gm.graph.call_function(
+            assert_alignment,
+            args=(self.buffer_to_node[line.name], line.alignment, line.op_name),
+        )
+
     def _generate_comment(self, line: WrapperLine) -> None:
         if not isinstance(line, CommentLine):
             raise AssertionError(f"expected CommentLine, got {type(line)}")
@@ -932,6 +965,10 @@ class FxConverter:
 
         # Map ReinterpretView to as_strided.
         result_node = self._create_as_strided(input_node, size, stride, offset)
+        if layout.dtype != input_buffer.get_dtype():
+            result_node = self.gm.graph.call_function(
+                torch.ops.aten.view.dtype, args=(result_node, layout.dtype)
+            )
         result_node.name = name
         self._record_allocation(result_buffer, result_node)
 
@@ -1084,7 +1121,7 @@ class FxConverter:
             raise AssertionError(f"expected KernelCallLine, got {type(line)}")
 
         # Collect all kwargs, including autotuned block sizes.
-        call_args = self._lookup_args(line.call_args)
+        call_args = self._lookup_args(line.call_args, line.raw_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
 
@@ -1292,6 +1329,10 @@ class FxConverter:
             k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
             for k, v in kernel.kwargs.items()
         }
+        # Symbolic scalar args, e.g. a SymInt output_size, must be FX nodes.
+        args, kwargs = pytree.tree_map_only(
+            sympy.Expr, self._generate_sym_node, (args, kwargs)
+        )
 
         result_buffer: str | None = None
         if isinstance(kernel, ir.ExternKernelOut):
