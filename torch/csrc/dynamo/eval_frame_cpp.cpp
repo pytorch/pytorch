@@ -536,19 +536,19 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  std::optional<FrameLocalsMapping> locals;
+  std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           code,
           backend,
           isolate_recompiles_id,
           get_skip_guard_eval_unsafe(),
           &cache_hit)) {
-    locals.emplace(frame);
+    locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
         _pytorch_record_function_enter(cache_lookup_profiler_str);
     lookup(
         code,
-        &*locals,
+        locals.get(),
         backend,
         isolate_recompiles_id,
         get_skip_guard_eval_unsafe(),
@@ -574,8 +574,9 @@ PyObject* dynamo__custom_eval_frame(
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
   // time we've seen a frame in this region.
-  if (guard_complete_hook != nullptr &&
-      has_relevant_cache_entries(code, isolate_recompiles_id)) {
+  bool has_relevant_entries =
+      has_relevant_cache_entries(code, isolate_recompiles_id);
+  if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(!cache_hit.code.is_none());
@@ -610,8 +611,8 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
-  if (!locals) {
-    locals.emplace(frame);
+  if (locals == nullptr) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
   }
   CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
   py::object callback_result;
@@ -630,7 +631,7 @@ PyObject* dynamo__custom_eval_frame(
     callback_result = dynamo_call_callback(
         callback,
         frame,
-        &*locals,
+        locals.get(),
         inputs.cache_entry,
         inputs.frame_state.ptr());
     new_strategy =
