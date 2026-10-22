@@ -46,10 +46,6 @@
 #include <ATen/native/mtia/EmptyTensor.h>
 #endif
 
-#ifdef USE_MPS
-#include <ATen/mps/EmptyTensor.h>
-#endif
-
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -1390,12 +1386,6 @@ static PyObject* _empty_strided_device(
         sizes, strides, dtype, c10::DeviceType::MTIA));
   }
 #endif
-#ifdef USE_MPS
-  else if constexpr (device_type == c10::DeviceType::MPS) {
-    return THPVariable_Wrap(at::detail::empty_strided_mps(
-        sizes, strides, dtype, c10::DeviceType::MPS));
-  }
-#endif
   else {
     TORCH_CHECK(
         false, "PyTorch compiled without support for the specified device.");
@@ -1444,40 +1434,6 @@ static PyObject* _empty_strided_mtia(
     PyObject* const* args,
     Py_ssize_t nargs) {
   return _empty_strided_device<c10::DeviceType::MTIA>(args, nargs);
-}
-
-static PyObject* _empty_strided_mps(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  return _empty_strided_device<c10::DeviceType::MPS>(args, nargs);
-}
-
-static PyObject* _alloc_from_pool(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  HANDLE_TH_ERRORS;
-  TORCH_CHECK(
-      nargs == 5, "expects 5 args: pool, offset_bytes, dtype, size, stride");
-
-  TORCH_CHECK(THPVariable_Check(args[0]));
-  const auto& pool{THPVariable_Unpack(args[0])};
-
-  auto offset_bytes{PyLong_AsLongLong(args[1])};
-  if (offset_bytes == -1 && PyErr_Occurred()) {
-    return nullptr;
-  }
-
-  TORCH_CHECK(THPDtype_Check(args[2]));
-  auto dtype{reinterpret_cast<THPDtype*>(args[2])->scalar_type};
-
-  auto sizes{unwrap_size_tuple(args[3])};
-  auto strides{unwrap_size_tuple(args[4])};
-
-  return THPVariable_Wrap(torch::inductor::_alloc_from_pool(
-      pool, offset_bytes, dtype, sizes, strides));
-  END_HANDLE_TH_ERRORS;
 }
 
 static PyObject* _reinterpret_tensor(
@@ -2797,11 +2753,8 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
   }
 
   bool _check() {
-    // Interned once; PyObject_GetAttrString builds a new string every call.
-    static PyObject* current_level_name =
-        PyUnicode_InternFromString("_current_level");
-    PyObject* current_level = PyObject_GetAttr(
-        forward_ad_module.ptr(), current_level_name); // new ref
+    PyObject* current_level = PyObject_GetAttrString(
+        forward_ad_module.ptr(), "_current_level"); // new ref
     if (current_level == nullptr) {
       // Attribute absent, clear the exception and return false.
       PyErr_Clear();
@@ -5434,7 +5387,8 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     }
 
     for (int64_t idx = 0; (size_t)idx < len; idx++) {
-      const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
       if (mode_type != _ref_stack.at(idx)) {
@@ -6401,7 +6355,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return false;
     }
-    const at::Tensor& tensor = THPVariable_Unpack(obj);
+    at::Tensor tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
@@ -6436,7 +6390,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return GuardDebugInfo(false, "not a tensor" + get_source(), 0);
     }
-    const at::Tensor& tensor = THPVariable_Unpack(obj);
+    at::Tensor tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
@@ -7877,7 +7831,7 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  static std::array<PyMethodDef, 16> _methods{
+  static std::array<PyMethodDef, 14> _methods{
       {{"check_type_id",
         castPyCFunctionFast(check_type_id),
         METH_FASTCALL,
@@ -7918,14 +7872,6 @@ PyObject* torch_c_dynamo_guards_init() {
         nullptr},
        {"_empty_strided_mtia",
         castPyCFunctionFast(_empty_strided_mtia),
-        METH_FASTCALL,
-        nullptr},
-       {"_empty_strided_mps",
-        castPyCFunctionFast(_empty_strided_mps),
-        METH_FASTCALL,
-        nullptr},
-       {"_alloc_from_pool",
-        castPyCFunctionFast(_alloc_from_pool),
         METH_FASTCALL,
         nullptr},
        {"_reinterpret_tensor",
