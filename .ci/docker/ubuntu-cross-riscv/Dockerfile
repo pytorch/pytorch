@@ -161,7 +161,7 @@ SHELL ["/bin/bash", "-c"]
 # so it does not depend on pip resolving manylinux glibc tags for the target.
 RUN source /opt/riscv-cross-env/bin/activate \
     && pip install setuptools pyyaml typing_extensions wheel \
-                   build "scikit-build-core>=1.0" packaging six numpy==1.26.4
+                   build "scikit-build-core>=1.1.1" packaging six numpy==1.26.4
 
 # Set default environment variables for PyTorch build
 ENV Python_ROOT_DIR=${SYSROOT}
