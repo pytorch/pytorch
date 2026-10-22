@@ -731,6 +731,38 @@ def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
     return False
 
 
+def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
+    """Round a low-precision value in registers without materializing it.
+
+    A lowering that splits one user-visible low-precision op into several IR
+    nodes (e.g. peeling the bias off a convolution) must reproduce the rounding
+    of the op's declared output, otherwise a fused consumer can observe a value
+    eager never produces.
+    """
+    # bf16/fp16 are the only low-precision outputs aten.convolution can produce:
+    # aten's cudnn conv has no fp8/int4 dtype mapping, and quantized convs use
+    # separate ops that are not fused through this lowering. Extend this set
+    # together with Inductor's other low-precision barriers if a new conv kernel
+    # appears.
+    dtype = x.get_dtype()
+    if dtype not in (torch.bfloat16, torch.float16):
+        return x
+
+    x_loader = x.make_loader()
+
+    def inner_fn(index):
+        out = x_loader(index)
+        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+        return ops.to_dtype(downcast, dtype)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=x.get_size(),
+    )
+
+
 def make_pointwise(
     fn: Callable[..., Any],
     override_return_dtype: torch.dtype | None = None,
