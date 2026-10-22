@@ -1,6 +1,8 @@
 import time
 import timeit
 
+import numpy as np
+
 import torch
 
 
@@ -16,10 +18,10 @@ def bench(name, fn, requires_grad):
         fn(x)
     end = time.perf_counter()
 
-    results = timeit.repeat(lambda: fn(x), number=100_000, repeat=10)
-    min_us = min(results) * 10
-    print(f"{name} {min_us:.1f}us (warmup={end - start:.1f}s)")
-    return min_us
+    results = timeit.repeat(lambda: fn(x), number=1000, repeat=1000)
+    median_us = np.median(results) * 1000
+    print(f"{name} {median_us:.1f}us (warmup={end - start:.1f}s)")
+    return median_us
 
 
 def bench_overhead(label, requires_grad):
