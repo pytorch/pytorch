@@ -31,6 +31,14 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx: DeviceIdx) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
 
+    def device_exchange_functions(self) -> tuple[str, str] | None:
+        # The enter and exit of torch.cuda._DeviceGuard, except that the enter
+        # also makes the CUDA context current, as set_device() does.
+        return (
+            "torch._C._cuda_exchangeDeviceWithContext",
+            "torch._C._cuda_maybeExchangeDevice",
+        )
+
     def current_device_idx_expr(self) -> str:
         return "torch.cuda.current_device()"
 
