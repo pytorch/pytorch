@@ -198,9 +198,10 @@ def generate_test_with_additional_tensors():
 
 generate_basic_tests()
 generate_basic_tests_consts_cpp()
-generate_large_tests()
-generate_test_with_additional_tensors()
-generate_cuda_alloc_test()
+if torch.cuda.is_available():
+    generate_large_tests()
+    generate_test_with_additional_tensors()
+    generate_cuda_alloc_test()
 
 
 # Use this to communicate tensors to the cpp code
