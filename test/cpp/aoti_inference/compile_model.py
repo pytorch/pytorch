@@ -1,11 +1,7 @@
-import sys
+import argparse
 
 import torch
 from torch.export import Dim
-
-
-# custom op that loads the aot-compiled model
-torch.classes.load_library(sys.argv[1])
 
 
 class TensorSerializer(torch.nn.Module):
@@ -86,6 +82,14 @@ def compile_model(device, data):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "aoti_custom_class_lib",
+        help="path to libaoti_custom_class.so, which loads the aot-compiled model",
+    )
+    args = parser.parse_args()
+    torch.classes.load_library(args.aoti_custom_class_lib)
+
     data = {}
     for device in ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]:
         compile_model(device, data)

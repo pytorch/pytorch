@@ -74,7 +74,8 @@ void ensureTestDataGenerated() {
 
     // Generate test data files (data.pt, etc.) by running test.py directly
     std::string test_script = source_dir + "/test.py";
-    std::string test_data_cmd = "cd " + bindir + " && python " + test_script;
+    std::string test_data_cmd =
+        "cd \"" + bindir + "\" && python \"" + test_script + "\"";
     std::cout << "Generating test data: " << test_data_cmd << std::endl;
     int result1 = std::system(test_data_cmd.c_str());
     if (result1 != 0) {
@@ -84,8 +85,8 @@ void ensureTestDataGenerated() {
 
     // Generate model files (script_*.pt) by running compile_model.py directly
     std::string compile_script = source_dir + "/compile_model.py";
-    std::string models_cmd = "cd " + bindir + " && python " + compile_script +
-        " " + AOTI_CUSTOM_CLASS_LIB;
+    std::string models_cmd = "cd \"" + bindir + "\" && python \"" +
+        compile_script + "\" \"" + AOTI_CUSTOM_CLASS_LIB + "\"";
     std::cout << "Generating model files: " << models_cmd << std::endl;
     int result2 = std::system(models_cmd.c_str());
     if (result2 != 0) {
