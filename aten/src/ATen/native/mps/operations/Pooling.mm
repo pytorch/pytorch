@@ -67,9 +67,9 @@ static void pool2d_template(const Tensor& input,
                             PoolingOpBlock poolingBlock,
                             const std::string& op_name) {
   const int64_t ndims = input.ndimension();
-  const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
+  const Tensor& grad_output_ = *(at::borrow_from_optional_tensor(grad_output_opt));
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
-  const bool is_backward_pass = grad_output.defined();
+  const bool is_backward_pass = grad_output_.defined();
   const bool has_indices = indices.defined();
   const bool has_divisor = divisor_override.has_value() && divisor_override.value() != 0;
   // Use exact-match: a channel-slice of a channels-last tensor has CL-like
@@ -80,6 +80,10 @@ static void pool2d_template(const Tensor& input,
   // Because the returned indices will be selected based on NHWC memory layout which will
   // be incompatible with the PyTorch's global NCHW layout.
   const auto memory_format = has_indices ? MemoryFormat::Contiguous : suggested_memory_format;
+  // NHWC tensors are fed to the graph without gathering, so grad_output must be NHWC-packed as well
+  const auto grad_output = is_backward_pass && memory_format == MemoryFormat::ChannelsLast
+      ? grad_output_.contiguous(MemoryFormat::ChannelsLast)
+      : grad_output_;
 
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
               op_name,
