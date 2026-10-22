@@ -2308,6 +2308,39 @@ class ByteArrayVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, repr(self.data))
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # bytearray_init: https://github.com/python/cpython/blob/v3.13.3/Objects/bytearrayobject.c#L749-L924
+        if not all(a.is_python_constant() for a in [*args, *kwargs.values()]):
+            unimplemented(
+                gb_type="bytearray.__init__ with non-constant arguments",
+                context=f"bytearray.__init__ {self}",
+                explanation="Dynamo only models bytearray.__init__ with constant arguments.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not self.is_mutable():
+            raise AssertionError(
+                f"tp_init_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        # Run the real bytearray_init on a copy: on error it may already have
+        # cleared or partially filled the contents, and the copy captures that.
+        data = bytearray(self.data)
+        tx.output.side_effects.mutation(self)
+        self.data = data
+        try:
+            data.__init__(
+                *[a.as_python_constant() for a in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except (TypeError, ValueError, LookupError, OverflowError, MemoryError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(None)
+
     def nb_remainder_impl(
         self,
         tx: "InstructionTranslatorBase",
