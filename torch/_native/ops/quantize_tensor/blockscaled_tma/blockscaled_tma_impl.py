@@ -1,5 +1,6 @@
 """PyTorch-facing implementation for TMA-based block-scaled quantization."""
 
+from math import prod
 from typing import cast, NamedTuple, TypeAlias
 
 import torch
@@ -61,6 +62,157 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
     scale_m: torch.Tensor | None
 
 
+class _CanonicalMatrixInput(NamedTuple):
+    input: torch.Tensor
+    dim: _QuantDim
+    batch_shape: tuple[int, ...]
+    inverse_permutation: tuple[int, ...]
+    swap_dual_outputs: bool
+
+
+def _canonicalize_matrix_input(
+    input: torch.Tensor,
+    dim: _QuantDim,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+) -> _CanonicalMatrixInput:
+    ndim = input.ndim
+    if ndim < 2:
+        raise ValueError(f"blockscaled TMA requires at least 2 dimensions; got {ndim}")
+    if not isinstance(dim, tuple) or len(dim) != 2:
+        raise ValueError(f"unsupported quantization dim: {dim}")
+    pairs: tuple[_SingleQuantDim, ...] = (
+        cast(tuple[_SingleQuantDim, _SingleQuantDim], dim)
+        if isinstance(dim[0], tuple)
+        else (cast(_SingleQuantDim, dim),)
+    )
+    if len(pairs) not in (1, 2):
+        raise ValueError(f"unsupported quantization dim: {dim}")
+    normalized: list[tuple[int, int]] = []
+    for pair in pairs:
+        if (
+            not isinstance(pair, tuple)
+            or len(pair) != 2
+            or any(type(axis) is not int for axis in pair)
+        ):
+            raise ValueError(f"unsupported quantization dim: {dim}")
+        if any(axis < -ndim or axis >= ndim for axis in pair):
+            raise ValueError(f"unsupported quantization dim: {dim}")
+        first, second = (axis % ndim for axis in pair)
+        if first == second:
+            raise ValueError(f"expected two distinct quantization axes, got {dim}")
+        normalized.append((first, second))
+    if len(normalized) == 2 and normalized[1] != normalized[0][::-1]:
+        raise ValueError(f"unsupported quantization dim order: {dim}")
+    matrix_axes = tuple(sorted(normalized[0]))
+    if len(normalized) == 2 and normalized[0] != matrix_axes:
+        raise ValueError(f"dual quantization must start with dim-k: {dim}")
+    physical_axes = tuple(sorted(range(ndim), key=lambda axis: -input.stride(axis)))
+    physical_input = (
+        input if physical_axes == tuple(range(ndim)) else input.permute(physical_axes)
+    )
+    physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
+    fast_axis = physical_matrix_axes[-1]
+    quant_axis = normalized[0][-1]
+    physical_dim_k = quant_axis == fast_axis
+    use_tma_view = (
+        physical_input.is_contiguous()
+        and physical_axes[-1] == fast_axis
+        and (is_scale_swizzled or physical_dim_k)
+        and (not is_square_scaling or physical_dim_k)
+        and (physical_dim_k or input.shape[fast_axis] % 16 == 0)
+    )
+    if use_tma_view:
+        # TMA tiles the two matrix axes; batch axes between them become slice coordinates.
+        slow_axis = physical_matrix_axes[0]
+        slow_pos = physical_axes.index(slow_axis)
+        fast_pos = physical_axes.index(fast_axis)
+        outer_batch = prod(input.shape[axis] for axis in physical_axes[:slow_pos])
+        inner_batch = prod(
+            input.shape[axis] for axis in physical_axes[slow_pos + 1 : fast_pos]
+        )
+        batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
+        permutation = (*batch_axes, *physical_matrix_axes)
+        if inner_batch != 1:
+            matrix_input = physical_input.view(
+                outer_batch, input.shape[slow_axis], inner_batch, input.shape[fast_axis]
+            )
+            single_dim: _SingleQuantDim = (1, 3) if physical_dim_k else (3, 1)
+        elif batch_axes:
+            matrix_input = (
+                physical_input
+                if len(batch_axes) == 1 and ndim == 3
+                else physical_input.view(
+                    prod(input.shape[axis] for axis in batch_axes),
+                    input.shape[slow_axis],
+                    input.shape[fast_axis],
+                )
+            )
+            single_dim = (-2, -1) if physical_dim_k else (-1, -2)
+        else:
+            matrix_input = physical_input
+            single_dim = (-2, -1) if physical_dim_k else (-1, -2)
+        swap_dual_outputs = (
+            len(normalized) == 2 and normalized[0] != physical_matrix_axes
+        )
+    else:
+        batch_axes = tuple(axis for axis in range(ndim) if axis not in matrix_axes)
+        permutation = (*batch_axes, *matrix_axes)
+        matrix_input = (
+            input if permutation == tuple(range(ndim)) else input.permute(permutation)
+        ).contiguous()
+        if batch_axes:
+            matrix_input = matrix_input.view(
+                prod(input.shape[axis] for axis in batch_axes), *matrix_input.shape[-2:]
+            )
+        single_dim = (-2, -1) if normalized[0] == matrix_axes else (-1, -2)
+        swap_dual_outputs = False
+    if len(normalized) == 2:
+        canonical_dim: _QuantDim = (
+            ((1, 3), (3, 1)) if matrix_input.ndim == 4 else ((-2, -1), (-1, -2))
+        )
+    else:
+        canonical_dim = single_dim
+    inverse = tuple(permutation.index(axis) for axis in range(ndim))
+    if matrix_input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
+        matrix_input = matrix_input.clone()
+    batch_shape = tuple(input.shape[axis] for axis in batch_axes)
+    return _CanonicalMatrixInput(
+        matrix_input, canonical_dim, batch_shape, inverse, swap_dual_outputs
+    )
+
+
+def _restore_matrix_output(
+    output: _BlockscaledTmaOutput, canonical: _CanonicalMatrixInput
+) -> _BlockscaledTmaOutput:
+    if (
+        len(canonical.batch_shape) <= 1
+        and canonical.inverse_permutation
+        == tuple(range(len(canonical.inverse_permutation)))
+        and not canonical.swap_dual_outputs
+    ):
+        return output
+    restored = []
+    for tensor in output:
+        if canonical.batch_shape:
+            if tensor.shape[0] == 0:
+                # unflatten infers contiguous strides for empty tensors.
+                batch_strides = tuple(
+                    tensor.stride(0) * prod(canonical.batch_shape[axis + 1 :])
+                    for axis in range(len(canonical.batch_shape))
+                )
+                tensor = tensor.as_strided(
+                    (*canonical.batch_shape, *tensor.shape[1:]),
+                    (*batch_strides, *tensor.stride()[1:]),
+                )
+            else:
+                tensor = tensor.unflatten(0, canonical.batch_shape)
+        restored.append(tensor.permute(canonical.inverse_permutation))
+    if canonical.swap_dual_outputs:
+        restored = restored[2:] + restored[:2]
+    return cast(_BlockscaledTmaOutput, tuple(restored))
+
+
 def _validate_and_normalize_blockscaled_tma(
     input: torch.Tensor,
     *,
@@ -71,15 +223,15 @@ def _validate_and_normalize_blockscaled_tma(
     """Validate public arguments and return their canonical host-side form."""
 
     ndim = input.dim()
-    if ndim not in (2, 3):
+    if ndim not in (2, 3, 4):
         raise ValueError(
-            f"blockscaled TMA requires a 2D or 3D input; got {ndim} dimensions"
+            f"blockscaled TMA requires a 2D, 3D, or normalized 4D input; got {ndim} dimensions"
         )
     if not isinstance(dim, tuple) or len(dim) != 2:
         raise ValueError(f"unsupported quantization dim: {dim}")
     quant_dims: tuple[object, ...] = dim if isinstance(dim[0], tuple) else (dim,)
     normalized_dims: list[tuple[int, int]] = []
-    matrix_axes = (-2, -1, ndim - 2, ndim - 1)
+    matrix_axes = (1, 3) if ndim == 4 else (-2, -1, ndim - 2, ndim - 1)
     for axes in quant_dims:
         if not isinstance(axes, tuple) or len(axes) != 2:
             raise ValueError(f"unsupported quantization dim: {dim}")
@@ -88,7 +240,10 @@ def _validate_and_normalize_blockscaled_tma(
             raise ValueError(f"unsupported quantization dim: {dim}")
         if first not in matrix_axes or last not in matrix_axes:
             raise ValueError(f"unsupported quantization dim: {dim}")
-        normalized = (first % ndim - (ndim - 2), last % ndim - (ndim - 2))
+        if ndim == 4:
+            normalized = (0 if first == 1 else 1, 0 if last == 1 else 1)
+        else:
+            normalized = (first % ndim - (ndim - 2), last % ndim - (ndim - 2))
         if normalized not in ((0, 1), (1, 0)):
             raise ValueError(f"expected two distinct quantization axes, got {dim}")
         normalized_dims.append(normalized)
@@ -120,8 +275,12 @@ def _validate_and_normalize_blockscaled_tma(
         if do_dim_m:
             raise ValueError("square scaling currently supports only dim-k output")
     tma_input = input.transpose(-2, -1) if input_transposed else input
-    M, K = tma_input.shape[-2:]
-    B = input.shape[0] if ndim == 3 else 1
+    M, K = (input.shape[1], input.shape[3]) if ndim == 4 else tma_input.shape[-2:]
+    B = (
+        input.shape[0] * input.shape[2]
+        if ndim == 4
+        else (input.shape[0] if ndim == 3 else 1)
+    )
     if is_square_scaling and M % 32 != 0:
         raise ValueError("32x32 requires M % 32 == 0")
     if do_dim_m:
@@ -155,7 +314,7 @@ def _validate_and_normalize_blockscaled_tma(
         M=M,
         K=K,
         B=B,
-        is_batched=ndim == 3,
+        is_batched=ndim > 2,
         quant_orientation_id=quant_orientation_id,
         do_dim_k=do_dim_k,
         do_dim_m=do_dim_m,
@@ -357,6 +516,10 @@ def _blockscaled_tma_impl_on_current_device(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaOutput:
+    canonical = _canonicalize_matrix_input(
+        input, dim, is_square_scaling, is_scale_swizzled
+    )
+    input, dim = canonical.input, canonical.dim
     spec = _validate_and_normalize_blockscaled_tma(
         input,
         dim=dim,
@@ -369,7 +532,9 @@ def _blockscaled_tma_impl_on_current_device(
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
     if launch.plan is None:
-        return _format_blockscaled_tma_output(spec, launch)
+        return _restore_matrix_output(
+            _format_blockscaled_tma_output(spec, launch), canonical
+        )
 
     fn = _compile_blockscaled_tma(
         tma_input.dtype,
@@ -380,10 +545,23 @@ def _blockscaled_tma_impl_on_current_device(
         spec.quant_orientation_id,
         spec.is_square_scaling,
         spec.is_scale_swizzled,
-        spec.is_batched,
+        input.ndim - 2,
     )
     output_k, output_m = launch.output_k, launch.output_m
-    if spec.is_batched:
+    if input.ndim == 4:
+        B0, _, B1, _ = tma_input.shape
+        tma_input = tma_input.permute(1, 3, 2, 0)
+        output_k = (
+            output_k.view(B0, B1, spec.M, spec.K).permute(2, 3, 1, 0)
+            if output_k is not None
+            else None
+        )
+        output_m = (
+            output_m.view(B0, B1, spec.K, spec.M).permute(2, 3, 1, 0)
+            if output_m is not None
+            else None
+        )
+    elif spec.is_batched:
         tma_input = tma_input.permute(1, 2, 0)
         output_k = output_k.permute(1, 2, 0) if output_k is not None else None
         output_m = output_m.permute(1, 2, 0) if output_m is not None else None
@@ -398,7 +576,9 @@ def _blockscaled_tma_impl_on_current_device(
         launch.plan.grid_m,
         launch.plan.grid_k,
     )
-    return _format_blockscaled_tma_output(spec, launch)
+    return _restore_matrix_output(
+        _format_blockscaled_tma_output(spec, launch), canonical
+    )
 
 
 def _run_blockscaled_tma(
@@ -459,13 +639,15 @@ def _blockscaled_tma_impl_dual(
     input: torch.Tensor,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    dim: tuple[_SingleQuantDim, _SingleQuantDim] = ((-2, -1), (-1, -2)),
     **kwargs: object,
 ) -> _FourTensorOutput:
     return cast(
         _FourTensorOutput,
         _run_blockscaled_tma(
             input,
-            ((-2, -1), (-1, -2)),
+            dim,
             is_square_scaling,
             is_scale_swizzled,
             **kwargs,

@@ -48,7 +48,7 @@ class _BlockscaledTma:
         quant_orientation: int,
         is_square_scaling: bool,
         is_scale_swizzled: bool,
-        is_batched: bool,
+        batch_rank: int,
     ) -> None:
         self.input_element_type = input_element_type
         self.tile_m_size = tile_m_size
@@ -58,7 +58,7 @@ class _BlockscaledTma:
         self.quant_orientation = quant_orientation
         self.is_square_scaling = is_square_scaling
         self.is_scale_swizzled = is_scale_swizzled
-        self.is_batched = is_batched
+        self.batch_rank = batch_rank
 
     @cute.kernel
     def kernel(
@@ -78,6 +78,7 @@ class _BlockscaledTma:
         output_k_tv_layout: cute.Layout | None,
         M: cutlass.Int64,
         K: cutlass.Int64,
+        inner_batch_size: cutlass.Int64,
     ) -> None:
         r"""
         Kernel for MXFP8 quantization across dim-K, dim-M, and dim-KM.
@@ -110,7 +111,8 @@ class _BlockscaledTma:
         tile_k_size = cutlass.const_expr(self.tile_k_size)
         needs_boundary_masking = cutlass.const_expr(self.needs_boundary_masking)
         quant_orientation = cutlass.const_expr(self.quant_orientation)
-        is_batched = cutlass.const_expr(self.is_batched)
+        batch_rank = cutlass.const_expr(self.batch_rank)
+        is_batched = cutlass.const_expr(batch_rank != 0)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
         scale_group_size = 32
@@ -170,7 +172,20 @@ class _BlockscaledTma:
             ),
             input_smem_layout.outer,
         )
-        if cutlass.const_expr(is_batched):
+        if cutlass.const_expr(batch_rank == 2):
+            sInputTma = cute.make_tensor(
+                sInput.iterator,
+                cute.append(
+                    cute.append(input_smem_layout.outer, cute.make_layout(1)),
+                    cute.make_layout(1),
+                ),
+            )
+            gInput = cute.local_tile(
+                input_tma_tensor,
+                (tile_m_size, tile_k_size, 1, 1),
+                (None, None, None, None),
+            )
+        elif cutlass.const_expr(is_batched):
             sInputTma = cute.make_tensor(
                 sInput.iterator,
                 cute.append(input_smem_layout.outer, cute.make_layout(1)),
@@ -183,7 +198,7 @@ class _BlockscaledTma:
             gInput = cute.local_tile(
                 input_tma_tensor, (tile_m_size, tile_k_size), (None, None)
             )
-        tma_rank = 3 if cutlass.const_expr(is_batched) else 2
+        tma_rank = cutlass.const_expr(2 + batch_rank)
         tInputsInput, tInputgInput = cpasync.tma_partition(
             input_tma_atom,
             0,
@@ -201,7 +216,20 @@ class _BlockscaledTma:
                 ),
                 output_k_smem_layout.outer,
             )
-            if cutlass.const_expr(is_batched):
+            if cutlass.const_expr(batch_rank == 2):
+                sOutputKTma = cute.make_tensor(
+                    sOutputK.iterator,
+                    cute.append(
+                        cute.append(output_k_smem_layout.outer, cute.make_layout(1)),
+                        cute.make_layout(1),
+                    ),
+                )
+                gOutputK = cute.local_tile(
+                    output_k_tma_tensor,
+                    (tile_m_size, tile_k_size, 1, 1),
+                    (None, None, None, None),
+                )
+            elif cutlass.const_expr(is_batched):
                 sOutputKTma = cute.make_tensor(
                     sOutputK.iterator,
                     cute.append(output_k_smem_layout.outer, cute.make_layout(1)),
@@ -235,7 +263,20 @@ class _BlockscaledTma:
                 ),
                 output_m_smem_layout.outer,
             )
-            if cutlass.const_expr(is_batched):
+            if cutlass.const_expr(batch_rank == 2):
+                sOutputMTma = cute.make_tensor(
+                    sOutputM.iterator,
+                    cute.append(
+                        cute.append(output_m_smem_layout.outer, cute.make_layout(1)),
+                        cute.make_layout(1),
+                    ),
+                )
+                gOutputM = cute.local_tile(
+                    output_m_tma_tensor,
+                    (tile_k_size, tile_m_size, 1, 1),
+                    (None, None, None, None),
+                )
+            elif cutlass.const_expr(is_batched):
                 sOutputMTma = cute.make_tensor(
                     sOutputM.iterator,
                     cute.append(output_m_smem_layout.outer, cute.make_layout(1)),
@@ -273,11 +314,18 @@ class _BlockscaledTma:
                     tma_bar_ptr,
                     tile_m_size * tile_k_size * input_element_type.width // 8,
                 )
-            input_tile = (
-                (None, tile_m_idx, tile_k_idx, batch_idx)
-                if cutlass.const_expr(is_batched)
-                else (None, tile_m_idx, tile_k_idx)
-            )
+            if cutlass.const_expr(batch_rank == 2):
+                input_tile = (
+                    None,
+                    tile_m_idx,
+                    tile_k_idx,
+                    batch_idx % inner_batch_size,
+                    batch_idx // inner_batch_size,
+                )
+            elif cutlass.const_expr(is_batched):
+                input_tile = (None, tile_m_idx, tile_k_idx, batch_idx)
+            else:
+                input_tile = (None, tile_m_idx, tile_k_idx)
             cute.copy(
                 input_tma_atom,
                 tInputgInput[input_tile],
@@ -454,11 +502,18 @@ class _BlockscaledTma:
         if cutlass.const_expr(do_dim_k):
             # kick off dim-k TMA qdata store
             if warp == 0:
-                output_k_tile = (
-                    (None, tile_m_idx, tile_k_idx, batch_idx)
-                    if cutlass.const_expr(is_batched)
-                    else (None, tile_m_idx, tile_k_idx)
-                )
+                if cutlass.const_expr(batch_rank == 2):
+                    output_k_tile = (
+                        None,
+                        tile_m_idx,
+                        tile_k_idx,
+                        batch_idx % inner_batch_size,
+                        batch_idx // inner_batch_size,
+                    )
+                elif cutlass.const_expr(is_batched):
+                    output_k_tile = (None, tile_m_idx, tile_k_idx, batch_idx)
+                else:
+                    output_k_tile = (None, tile_m_idx, tile_k_idx)
                 cute.copy(
                     output_k_tma_atom,
                     tOutputsK,  # pyrefly: ignore[unbound-name]
@@ -467,11 +522,18 @@ class _BlockscaledTma:
                 cute.arch.cp_async_bulk_commit_group()
         if cutlass.const_expr(do_dim_m):
             if warp == 0:
-                output_m_tile = (
-                    (None, tile_k_idx, tile_m_idx, batch_idx)
-                    if cutlass.const_expr(is_batched)
-                    else (None, tile_k_idx, tile_m_idx)
-                )
+                if cutlass.const_expr(batch_rank == 2):
+                    output_m_tile = (
+                        None,
+                        tile_k_idx,
+                        tile_m_idx,
+                        batch_idx % inner_batch_size,
+                        batch_idx // inner_batch_size,
+                    )
+                elif cutlass.const_expr(is_batched):
+                    output_m_tile = (None, tile_k_idx, tile_m_idx, batch_idx)
+                else:
+                    output_m_tile = (None, tile_k_idx, tile_m_idx)
                 cute.copy(
                     output_m_tma_atom,
                     tOutputsM,  # pyrefly: ignore[unbound-name]
@@ -620,7 +682,8 @@ class _BlockscaledTma:
         tile_k_size = cutlass.const_expr(self.tile_k_size)
         cluster_k = cutlass.const_expr(self.cluster_k)
         quant_orientation = cutlass.const_expr(self.quant_orientation)
-        is_batched = cutlass.const_expr(self.is_batched)
+        batch_rank = cutlass.const_expr(self.batch_rank)
+        is_batched = cutlass.const_expr(batch_rank != 0)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
         scale_group_size = 32
@@ -629,6 +692,13 @@ class _BlockscaledTma:
 
         do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
         do_dim_m = quant_orientation != _QUANT_ORIENTATION_DIM_K
+
+        if cutlass.const_expr(batch_rank == 2):
+            batch_count = mInput.shape[2] * mInput.shape[3]
+        elif cutlass.const_expr(is_batched):
+            batch_count = mInput.shape[2]
+        else:
+            batch_count = 1
 
         if cutlass.const_expr(quant_orientation == _QUANT_ORIENTATION_DIM_K):
             if cutlass.const_expr(mOutputK is None):
@@ -681,18 +751,26 @@ class _BlockscaledTma:
                 target_profile=(1, 1),
             )
 
-        input_tma_smem_layout = (
-            cute.append(input_smem_layout, cute.make_layout(1))
-            if cutlass.const_expr(is_batched)
-            else input_smem_layout
-        )
+        if cutlass.const_expr(batch_rank == 2):
+            input_tma_smem_layout = cute.append(
+                cute.append(input_smem_layout, cute.make_layout(1)),
+                cute.make_layout(1),
+            )
+        elif cutlass.const_expr(is_batched):
+            input_tma_smem_layout = cute.append(input_smem_layout, cute.make_layout(1))
+        else:
+            input_tma_smem_layout = input_smem_layout
         input_tma_atom, input_tma_tensor = cpasync.make_tiled_tma_atom(
             cpasync.CopyBulkTensorTileG2SOp(),
             mInput,
             input_tma_smem_layout,
-            (tile_m_size, tile_k_size, 1)
-            if cutlass.const_expr(is_batched)
-            else (tile_m_size, tile_k_size),
+            (tile_m_size, tile_k_size, 1, 1)
+            if cutlass.const_expr(batch_rank == 2)
+            else (
+                (tile_m_size, tile_k_size, 1)
+                if cutlass.const_expr(is_batched)
+                else (tile_m_size, tile_k_size)
+            ),
         )
 
         if cutlass.const_expr(do_dim_k):
@@ -716,18 +794,28 @@ class _BlockscaledTma:
                 ),
                 target_profile=(1, 1),
             )
-            output_k_tma_smem_layout = (
-                cute.append(output_k_smem_layout, cute.make_layout(1))
-                if cutlass.const_expr(is_batched)
-                else output_k_smem_layout
-            )
+            if cutlass.const_expr(batch_rank == 2):
+                output_k_tma_smem_layout = cute.append(
+                    cute.append(output_k_smem_layout, cute.make_layout(1)),
+                    cute.make_layout(1),
+                )
+            elif cutlass.const_expr(is_batched):
+                output_k_tma_smem_layout = cute.append(
+                    output_k_smem_layout, cute.make_layout(1)
+                )
+            else:
+                output_k_tma_smem_layout = output_k_smem_layout
             output_k_tma_atom, output_k_tma_tensor = cpasync.make_tiled_tma_atom(
                 cpasync.CopyBulkTensorTileS2GOp(),
                 mOutputK,
                 output_k_tma_smem_layout,
-                (tile_m_size, tile_k_size, 1)
-                if cutlass.const_expr(is_batched)
-                else (tile_m_size, tile_k_size),
+                (tile_m_size, tile_k_size, 1, 1)
+                if cutlass.const_expr(batch_rank == 2)
+                else (
+                    (tile_m_size, tile_k_size, 1)
+                    if cutlass.const_expr(is_batched)
+                    else (tile_m_size, tile_k_size)
+                ),
             )
 
             if cutlass.const_expr(is_scale_swizzled):
@@ -742,7 +830,7 @@ class _BlockscaledTma:
                     scale_k_layout = cute.append(
                         scale_k_layout,
                         cute.make_layout(
-                            mInput.shape[2],
+                            batch_count,
                             stride=s_num_row_blk_k * s_num_col_blk_k * 32 * 16,
                         ),
                     )
@@ -848,18 +936,28 @@ class _BlockscaledTma:
                     stride=(tile_m_size, 1),
                 ),
             )
-            output_m_tma_smem_layout = (
-                cute.append(output_m_smem_layout, cute.make_layout(1))
-                if cutlass.const_expr(is_batched)
-                else output_m_smem_layout
-            )
+            if cutlass.const_expr(batch_rank == 2):
+                output_m_tma_smem_layout = cute.append(
+                    cute.append(output_m_smem_layout, cute.make_layout(1)),
+                    cute.make_layout(1),
+                )
+            elif cutlass.const_expr(is_batched):
+                output_m_tma_smem_layout = cute.append(
+                    output_m_smem_layout, cute.make_layout(1)
+                )
+            else:
+                output_m_tma_smem_layout = output_m_smem_layout
             output_m_tma_atom, output_m_tma_tensor = cpasync.make_tiled_tma_atom(
                 cpasync.CopyBulkTensorTileS2GOp(),
                 mOutputM,
                 output_m_tma_smem_layout,
-                (tile_k_size, tile_m_size, 1)
-                if cutlass.const_expr(is_batched)
-                else (tile_k_size, tile_m_size),
+                (tile_k_size, tile_m_size, 1, 1)
+                if cutlass.const_expr(batch_rank == 2)
+                else (
+                    (tile_k_size, tile_m_size, 1)
+                    if cutlass.const_expr(is_batched)
+                    else (tile_k_size, tile_m_size)
+                ),
             )
 
             s_num_row_blk_m = cute.ceil_div(K, 128)
@@ -873,7 +971,7 @@ class _BlockscaledTma:
                 scale_m_layout = cute.append(
                     scale_m_layout,
                     cute.make_layout(
-                        mInput.shape[2],
+                        batch_count,
                         stride=s_num_row_blk_m * s_num_col_blk_m * 32 * 16,
                     ),
                 )
@@ -900,8 +998,8 @@ class _BlockscaledTma:
             output_k_tv_layout,
             M,
             K,
+            mInput.shape[2] if cutlass.const_expr(batch_rank == 2) else 1,
         )
-        batch_count = mInput.shape[2] if cutlass.const_expr(is_batched) else 1
         grid = (grid_k, grid_m, batch_count)
         block_threads = max(_MIN_CTA_THREADS_128, tile_k_size)
         block = (block_threads, 1, 1)
@@ -918,10 +1016,27 @@ class _BlockscaledTma:
 
 
 def _make_dynamic_matrix_fake(
-    dtype: type[cutlass.Numeric], is_batched: bool
+    dtype: type[cutlass.Numeric], batch_rank: int
 ) -> cute.Tensor:
     """Match a 16-byte-aligned row-major tensor with a dynamic, 16-divisible K."""
-    if is_batched:
+    if batch_rank == 2:
+        return cute.runtime.make_fake_tensor(
+            dtype,
+            (
+                cute.sym_int64(),
+                cute.sym_int64(divisibility=16),
+                cute.sym_int64(),
+                cute.sym_int64(),
+            ),
+            stride=(
+                cute.sym_int64(divisibility=16),
+                1,
+                cute.sym_int64(divisibility=16),
+                cute.sym_int64(divisibility=16),
+            ),
+            assumed_align=16,
+        )
+    if batch_rank == 1:
         return cute.runtime.make_fake_tensor(
             dtype,
             (cute.sym_int64(), cute.sym_int64(divisibility=16), cute.sym_int64()),
@@ -969,14 +1084,14 @@ def _blockscaled_tma_compile_log_key(
     quant_orientation: int,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
-    is_batched: bool,
+    batch_rank: int,
 ) -> str:
     return (
         f"dtype={input_dtype} orientation={quant_orientation} "
         f"tile={tile_m_size}x{tile_k_size} cluster_k={cluster_k} "
         f"masking={needs_boundary_masking} rounding=RTNE "
         f"square={is_square_scaling} scale_swizzled={is_scale_swizzled} "
-        f"batched={is_batched}"
+        f"batch_rank={batch_rank}"
     )
 
 
@@ -993,7 +1108,7 @@ def _compile_blockscaled_tma(
     quant_orientation: int,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
-    is_batched: bool,
+    batch_rank: int,
 ) -> Callable[..., None]:
     input_element_type = torch2cute[input_dtype]
     do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
@@ -1008,12 +1123,12 @@ def _compile_blockscaled_tma(
         quant_orientation,
         is_square_scaling,
         is_scale_swizzled,
-        is_batched,
+        batch_rank,
     )
 
-    mInput = _make_dynamic_matrix_fake(input_element_type, is_batched)
+    mInput = _make_dynamic_matrix_fake(input_element_type, batch_rank)
     mOutputK = (
-        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, is_batched)
+        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, batch_rank)
         if do_dim_k
         else None
     )
@@ -1027,7 +1142,7 @@ def _compile_blockscaled_tma(
         else None
     )
     mOutputM = (
-        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, is_batched)
+        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, batch_rank)
         if do_dim_m
         else None
     )
