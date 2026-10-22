@@ -10284,6 +10284,13 @@ class TestExportPython(TestCase):
         with self.assertRaisesRegex(TypeError, "does not support None arguments"):
             optional(x)
 
+        @torch.compiler.export_python(path=self._tmp_path("mixed.py"), backend="eager")
+        def mixed(inp, opts):
+            return inp + 1
+
+        with self.assertRaisesRegex(TypeError, "instead of passing 3 as"):
+            mixed(x, (x, None, 3))
+
         @torch.compiler.export_python(
             path=self._tmp_path("nestmod.py"), backend="eager"
         )
