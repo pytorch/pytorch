@@ -29,6 +29,7 @@ from torch._inductor.ir import (
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -71,6 +72,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         description: str,
         make_fx_graph: Callable[..., Any],
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        *,
+        config_patches: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
 
@@ -116,7 +119,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, Any] = {}
         # Config patches to apply during kernel codegen (e.g., coordinate_descent_tuning)
-        self.config_patches: dict[str, Any] = {}
+        self.config_patches: dict[str, Any] = dict(config_patches or {})
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
         # Cache benchmark request for async autotuning
@@ -128,7 +131,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Must happen in __init__ because compilation requires virtualized context (V.graph, V.debug)
         if config.pipeline_max_autotune_gemm:
             with V.fake_mode:
-                self._compiled_module = self._compile_for_benchmarking()
+                with unset_fake_temporarily():
+                    self._compiled_module = self._compile_for_benchmarking()
                 self._bmreq = self._create_benchmark_request()
 
     def _compute_sym_input_values(self) -> list[int]:
@@ -322,6 +326,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 *[str(inp.get_size()) for inp in self.input_nodes],
                 *[str(inp.get_stride()) for inp in self.input_nodes],
                 str(self.gm.graph),
+                *(
+                    [str(sorted(self.config_patches.items()))]
+                    if self.config_patches
+                    else []
+                ),
             ]
         )
 
@@ -382,6 +391,7 @@ class SubgraphTemplate(KernelTemplate):
         make_fx_graph: Callable[..., Any],
         description: str = "",
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        config_patches: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -394,6 +404,7 @@ class SubgraphTemplate(KernelTemplate):
             make_fx_graph: Callable that creates the FX graph for this subgraph
             description: Optional description of this choice
             input_gen_fns: Optional dict mapping input indices to tensor generators
+            config_patches: Optional config patches used for benchmarking and codegen
             **kwargs: Additional keyword arguments
 
         Returns:
@@ -407,6 +418,7 @@ class SubgraphTemplate(KernelTemplate):
             description=description,
             make_fx_graph=make_fx_graph,
             input_gen_fns=input_gen_fns,
+            config_patches=config_patches,
         )
 
     def generate_custom_op_choices(
@@ -509,6 +521,7 @@ class SubgraphTemplate(KernelTemplate):
                     make_fx_graph=make_fx_graph,
                     description=f"CustomOp {decomp.__name__}",
                     input_gen_fns=input_gen_fns,
+                    config_patches=config_patches,
                 )
             except _ShapeEnvGuardError:
                 log.info(
@@ -520,8 +533,6 @@ class SubgraphTemplate(KernelTemplate):
 
             # Cache decomposition info for range-based dispatch
             choice.cache_decomposition(decomp, decomp_kwargs)
-            # Store config_patches for this choice
-            choice.config_patches = config_patches
             choices.append(choice)
 
         return choices
