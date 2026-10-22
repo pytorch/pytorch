@@ -8057,8 +8057,21 @@ class TestMPS(TestCaseMPS):
         y.backward(gradient=grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    # Test adaptive avg pool2d - when the input size is a multiple of output size
-    # Not testing for channels last right now
+    @parametrize("grad_channels_last", [False, True])
+    def test_avg_pool2d_channels_last_input_grad_memory_format(self, grad_channels_last):
+        cpu_x = torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last).requires_grad_()
+        x = cpu_x.detach().to('mps').requires_grad_()
+        out = F.avg_pool2d(x, 2)
+        out_cpu = F.avg_pool2d(cpu_x, 2)
+        self.assertEqual(out, out_cpu)
+
+        cpu_grad = torch.randn(out_cpu.shape)
+        if grad_channels_last:
+            cpu_grad = cpu_grad.to(memory_format=torch.channels_last)
+        out.backward(cpu_grad.to('mps'))
+        out_cpu.backward(cpu_grad)
+        self.assertEqual(x.grad, cpu_x.grad)
+
     def test_adaptive_avg_pool2d_simple(self):
         def helper(input_shape, out_shape, channels_last):
             cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -8097,10 +8110,21 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 4, 4), (16, 16), False)
 
-        try:
-            helper((2, 2, 3, 3), (7, 7), False)
-        except Exception as e:
-            pass
+        helper((2, 2, 3, 3), (7, 7), False)
+
+    @parametrize("pool", [F.adaptive_avg_pool2d, F.adaptive_max_pool2d], name_fn=lambda f: f.__name__)
+    def test_adaptive_pool2d_large_sizes(self, pool):
+        # (in + 1) * (out + 1) overflows int32, which selects the 64-bit index kernels
+        cpu_x = torch.randn(1, 2, 3, 50000, requires_grad=True)
+        x = cpu_x.detach().to('mps').requires_grad_()
+        out = pool(x, (2, 49999))
+        out_cpu = pool(cpu_x, (2, 49999))
+        self.assertEqual(out, out_cpu)
+
+        cpu_grad = torch.randn(out_cpu.shape)
+        out.backward(cpu_grad.to('mps'))
+        out_cpu.backward(cpu_grad)
+        self.assertEqual(x.grad, cpu_x.grad)
 
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
