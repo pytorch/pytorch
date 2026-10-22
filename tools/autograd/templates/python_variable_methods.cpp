@@ -1014,7 +1014,7 @@ static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
     return handle_torch_function(self, "tolist", args);
   }
   jit::tracer::warn("Converting a tensor to a Python list", jit::tracer::WARN_PYTHON_DATAFLOW);
-  auto self_ = THPVariable_Unpack(self);
+  const auto& self_ = THPVariable_Unpack(self);
   return torch::utils::tensor_to_list(self_);
   END_HANDLE_TH_ERRORS
 }
