@@ -19,6 +19,7 @@ import unittest
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
@@ -57,6 +58,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
     triton_key,
+    write_atomic,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
@@ -740,6 +742,60 @@ class TestPyCodeCache(TestCase):
 
         generated_source = load_async.call_args.args[0]
         self.assertIn("Py_NewRef(Py_None)", generated_source)
+
+    def test_write_atomic_concurrent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            num_threads = 16
+
+            def worker(idx):
+                target_file = tmp_path / f"output_{idx}.py"
+                content = f"content_{idx}"
+                write_atomic(target_file, content)
+                return target_file, content
+
+            with mock.patch("os.getpid", return_value=1):
+                with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    results = list(executor.map(worker, range(num_threads)))
+
+            for target_file, expected_content in results:
+                self.assertTrue(target_file.exists())
+                self.assertEqual(target_file.read_text(), expected_content)
+
+            tmp_files = [f for f in tmp_path.iterdir() if f.name.endswith(".tmp")]
+            self.assertEqual(len(tmp_files), 0)
+
+    def test_write_atomic_concurrent_same_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            target_file = tmp_path / "shared.py"
+            num_threads = 16
+
+            def worker(idx):
+                content = f"content_{idx}"
+                write_atomic(target_file, content)
+                return content
+
+            with mock.patch("os.getpid", return_value=1):
+                with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    list(executor.map(worker, range(num_threads)))
+
+            self.assertTrue(target_file.exists())
+            self.assertIn(target_file.read_text(), [f"content_{idx}" for idx in range(num_threads)])
+
+            tmp_files = [f for f in tmp_path.iterdir() if f.name.endswith(".tmp")]
+            self.assertEqual(len(tmp_files), 0)
+
+    def test_write_atomic_cleanup_on_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_file = Path(tmpdir) / "output.py"
+
+            with self.assertRaises(RuntimeError):
+                with mock.patch("pathlib.Path.open", side_effect=RuntimeError("write failure")):
+                    write_atomic(target_file, "content")
+
+            tmp_files = list(Path(tmpdir).iterdir())
+            self.assertEqual(len(tmp_files), 0)
 
 
 @instantiate_parametrized_tests
