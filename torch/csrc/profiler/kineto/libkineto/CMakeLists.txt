@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 project(kineto VERSION 0.1 LANGUAGES CXX C)
 
 #install libraries into correct locations on all platforms
@@ -228,7 +228,7 @@ elseif(KINETO_BACKEND STREQUAL "xpu")
     list(APPEND KINETO_COMPILE_OPTIONS "/Zc:__cplusplus")
   endif()
 
-  list(APPEND KINETO_COMPILE_OPTIONS ${XPUPTI_BUILD_FLAG})
+  list(APPEND KINETO_COMPILE_OPTIONS "-DHAS_XPUPTI")
   if(KINETO_BUILD_TESTS)
     set_target_properties(kineto_base PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(kineto_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -337,13 +337,8 @@ elseif(KINETO_BACKEND STREQUAL "rocm")
   target_link_libraries(kineto "${KINETO_HIP_LIBRARY}")
   target_link_libraries(kineto_base PUBLIC "${KINETO_HIP_LIBRARY}")
 elseif(KINETO_BACKEND STREQUAL "xpu")
-  # Bare form, not $<BUILD_INTERFACE:...>, because XPUPTI_INCLUDE_DIR is a
-  # multi-path semicolon list (SYCL + PTI). Wrapping a list in a single
-  # generator expression mangles paths after the first. kineto_base is not
-  # installed, so the install-interface concern that motivates BUILD_INTERFACE
-  # elsewhere doesn't apply here.
-  target_include_directories(kineto_base SYSTEM PUBLIC ${XPUPTI_INCLUDE_DIR})
-  target_link_libraries(kineto PRIVATE "${XPU_xpupti_LIBRARY}")
+  target_link_libraries(kineto PUBLIC Pti::pti_view torch::sycl)
+  target_link_libraries(kineto_base PUBLIC Pti::pti_view torch::sycl)
 endif()
 target_compile_definitions(kineto PUBLIC "${KINETO_DEFINITIONS}")
 
