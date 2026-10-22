@@ -327,29 +327,27 @@ def get_flydsl_grouped_mm_template_kwargs(
     ]
 
 
-def has_grouped_mm_triton_support() -> bool:
+def has_grouped_mm_triton_support(device: torch.device) -> bool:
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
         # The grouped GEMM Triton template is supported on ROCm too. ATen
         # remains a separate autotune choice when fallback kernels are enabled.
         return True
-    return torch.cuda.get_device_capability() >= (9, 0)
+    return torch.cuda.get_device_capability(device) >= (9, 0)
 
 
-def _rocm_gcn_arch() -> str:
-    return torch.cuda.get_device_properties(
-        torch.cuda.current_device()
-    ).gcnArchName.split(":", 1)[0]
+def _rocm_gcn_arch(device: torch.device) -> str:
+    return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
-def has_rocm_fp8_hardware_support() -> bool:
+def has_rocm_fp8_hardware_support(device: torch.device) -> bool:
     if not torch.version.hip:
         return False
 
     # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
     # this is the production-side equivalent used to gate Triton FP8 lowering.
-    arch = _rocm_gcn_arch()
+    arch = _rocm_gcn_arch(device)
     rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
     rocm_version = tuple(int(v) for v in rocm_version_str.split(".")[:2])
     if arch.startswith("gfx94"):
@@ -364,10 +362,11 @@ def has_rocm_fp8_hardware_support() -> bool:
 def has_scaled_grouped_mm_triton_support(mat_a: TensorBox, mat_b: TensorBox) -> bool:
     if not torch.version.hip:
         return True
-    if not has_rocm_fp8_hardware_support():
+    device = mat_a.get_device()
+    if not has_rocm_fp8_hardware_support(device):
         return False
 
-    arch = _rocm_gcn_arch()
+    arch = _rocm_gcn_arch(device)
     # Match ATen's ROCm rowwise scaled grouped GEMM contract: gfx94 uses the
     # FNUZ FP8 encoding, while newer FP8-capable arches use OCP FP8.
     expected_dtype = (
@@ -466,7 +465,7 @@ def can_use_triton_kernel(
     bias: TensorBox | None,
     scale_result: TensorBox | None,
 ) -> bool:
-    if not has_grouped_mm_triton_support():
+    if not has_grouped_mm_triton_support(mat_a.get_device()):
         return False
     if not has_triton():
         return False
@@ -495,7 +494,7 @@ def can_use_gluon_kernel(
         return False
 
     # Check for Blackwell GPU (SM 10.0 or 10.3)
-    major, minor = torch.cuda.get_device_capability()
+    major, minor = torch.cuda.get_device_capability(mat_a.get_device())
     if not (major == 10 and minor in [0, 3]):
         return False
 
@@ -516,9 +515,21 @@ def can_use_gluon_kernel(
     # configs, so it settles on a more conservative one.
 
     if len(mat_a.get_size()) == 2 or len(mat_b.get_size()) == 2:
-        return offs is not None
-    else:
-        return offs is None
+        if offs is None:
+            return False
+    elif offs is not None:
+        return False
+
+    # tcgen05 reads fp32 (tf32) operands from shared memory only K-major.
+    a_is_k_major = mat_a.get_stride()[-1] == 1
+    b_is_k_major = mat_b.get_stride()[-2] == 1
+    if mat_a.get_dtype() == torch.float32 and not (a_is_k_major and b_is_k_major):
+        return False
+
+    # Gluon descriptor shapes are int32, and it has no pointer-load fallback.
+    return _descriptor_shape_fits_in_int32(
+        mat_a.get_size(), add_guards=True
+    ) and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
 
 
 def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):

@@ -403,6 +403,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -444,6 +445,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -480,6 +482,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -511,6 +514,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -889,6 +893,7 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
         ),
@@ -902,6 +907,7 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
         ),
@@ -929,22 +935,6 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: tol(atol=0, rtol=4e-6),
                 }
-            ),
-        ),
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
             ),
         ),
     ),

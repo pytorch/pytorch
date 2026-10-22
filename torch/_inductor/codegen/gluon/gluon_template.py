@@ -10,6 +10,7 @@ implementation reuses Triton's pipeline.
 import functools
 import hashlib
 import logging
+import re
 from typing import Any
 
 from ...ir import ChoiceCaller
@@ -17,6 +18,9 @@ from ..common import KernelTemplate
 
 
 log = logging.getLogger(__name__)
+
+# The tl.* creation ops fail in Gluon kernels (no default layout); the gl.* ones use AutoLayout.
+_TL_CREATION_OPS = re.compile(r"\btl\.(full|arange|zeros|zeros_like)\(")
 
 
 # Import TritonTemplateKernel only when needed to avoid circular imports
@@ -37,7 +41,33 @@ def _get_gluon_template_kernel_class():
     """
     global _gluon_template_kernel_class
     if _gluon_template_kernel_class is None:
+        from torch.utils._ordered_set import OrderedSet
+
+        from ...utils import can_use_tma, triton_type
+        from ...virtualized import V
+        from ..triton import texpr, TritonKernelOverrides
+
         TritonTemplateKernel = _get_triton_kernel_class()
+
+        class _TmaStoreCapture(V.WrapperHandler):  # type: ignore[name-defined]
+            def __init__(self, inner, tma_store_vars):
+                super().__init__(inner)
+                self.tma_store_vars = tma_store_vars
+
+            def store(self, name, index, value, mode=None):
+                var = self.tma_store_vars.get(name)
+                if var is None:
+                    return self._inner.store(name, index, value, mode)
+                V.kernel.store_buffer_names.add(name)
+                V.kernel.cse.store_cache[name] = value
+                dtype = triton_type(V.graph.get_dtype(name))
+                V.kernel.compute.writeline(f"{var} = {value}.to({dtype})")
+
+        class _GluonKernelOverrides(TritonKernelOverrides):
+            # Gluon broadcasting needs equal ranks; scalars broadcast to any rank.
+            @classmethod
+            def constant(cls, value, dtype):
+                return cls._shaped_constant(value, dtype, shape=[])
 
         class _GluonTemplateKernelImpl(TritonTemplateKernel):
             """
@@ -46,6 +76,11 @@ def _get_gluon_template_kernel_class():
             Overrides jit_lines() to emit the @gluon.jit decorator
             with the necessary imports.
             """
+
+            overrides = _GluonKernelOverrides  # type: ignore[assignment]
+            # Gluon can't broadcast a scalar to a shape without a layout.
+            broadcast_scalar_loads = False
+            _tma_store_vars: dict[str, str] | None = None
 
             def _jit_decorator(self):
                 return "@gluon.jit"
@@ -79,6 +114,58 @@ from triton.experimental.gluon import language as gl
             def output_stride(self, index):
                 return self._output_stride_expr(index)
 
+            def _find_tma_store_targets(self, epilogue_nodes):
+                scheduler = V.graph.scheduler
+                sizevars = V.graph.sizevars
+                output = self.output_node
+                names = [output.get_name()]
+                names += [
+                    name for node in epilogue_nodes for name in node.get_buffer_names()
+                ]
+                fused_ops = OrderedSet(
+                    scheduler.name_to_buf[name].defining_op_name() for name in names
+                )
+                targets = []
+                for name in names:
+                    if scheduler.can_buffer_be_removed_through_fusion(name, fused_ops):
+                        continue
+                    buf = V.graph.get_buffer(name)
+                    itemsize = buf.get_dtype().itemsize
+                    # can_use_tma checks unguarded size hints; TMA needs this for every symbol value.
+                    aligned = all(
+                        sizevars.statically_known_multiple_of(stride * itemsize, 16)
+                        for stride in buf.get_stride()[:-1]
+                    )
+                    # The staging buffer is sized for the output dtype, so wider dtypes don't fit.
+                    if (
+                        not buf.get_mutation_names()
+                        and sizevars.statically_known_list_equals(
+                            buf.get_size(), output.get_size()
+                        )
+                        and sizevars.statically_known_equals(buf.get_stride()[-1], 1)
+                        and itemsize <= output.get_dtype().itemsize
+                        and aligned
+                        and can_use_tma(output_layout=buf.get_layout())
+                    ):
+                        targets.append(name)
+                return targets
+
+            def store_output(self, *args, **kwargs):
+                if not self._tma_store_vars:
+                    return super().store_output(*args, **kwargs)
+                capture = functools.partial(
+                    _TmaStoreCapture, tma_store_vars=self._tma_store_vars
+                )
+                # Also captures the template output's own store.
+                with V.set_ops_handler(capture(V.get_ops_handler())):
+                    subgraph_name = super().store_output(*args, **kwargs)
+                self.subgraph_bodies[subgraph_name].ops_handler = capture
+                return subgraph_name
+
+            def _make_codegen_hook(self, subgraph_name, indent_width=0):
+                hook = super()._make_codegen_hook(subgraph_name, indent_width)
+                return lambda: _TL_CREATION_OPS.sub(r"gl.\1(", hook())
+
             def _add_layout_kwargs(self, kwargs):
                 import torch
 
@@ -89,11 +176,8 @@ from triton.experimental.gluon import language as gl
                     input_torch_dtype = torch.bfloat16
                 output_torch_dtype = self.output_node.get_dtype()  # type: ignore[attr-defined]
 
-                def torch_dtype_to_gluon_str(dtype):
-                    return f"gl.{str(dtype).split('.')[1]}"
-
-                kwargs["INPUT_DTYPE"] = torch_dtype_to_gluon_str(input_torch_dtype)
-                kwargs["OUTPUT_DTYPE"] = torch_dtype_to_gluon_str(output_torch_dtype)
+                kwargs["INPUT_DTYPE"] = _gluon_dtype(input_torch_dtype)
+                kwargs["OUTPUT_DTYPE"] = _gluon_dtype(output_torch_dtype)
                 kwargs["INDEX_DTYPE_EXPR"] = _gluon_index_dtype(self.index_dtype)
 
                 from torch._inductor import config
@@ -102,19 +186,59 @@ from triton.experimental.gluon import language as gl
 
                 return kwargs
 
+            def _epilogue_fusion_kwargs(self, use_tma_store):
+                epilogue_nodes_by_subgraph = getattr(
+                    self, "_epilogue_nodes_by_subgraph", None
+                )
+                epilogue_nodes = (
+                    epilogue_nodes_by_subgraph[0] if epilogue_nodes_by_subgraph else []
+                )
+                has_epilogue_fusion = bool(epilogue_nodes)
+                targets = (
+                    self._find_tma_store_targets(epilogue_nodes)
+                    if has_epilogue_fusion and use_tma_store
+                    else []
+                )
+                self._tma_store_vars = {name: f"c{i}" for i, name in enumerate(targets)}
+                tma_store_targets = []
+                for name, var in self._tma_store_vars.items():
+                    buf = V.graph.get_buffer(name)
+                    strides = [texpr(self.rename_indexing(s)) for s in buf.get_stride()]
+                    tma_store_targets.append(
+                        {
+                            "var": var,
+                            "ptr": self.args.output(name),
+                            "dtype": _gluon_dtype(buf.get_dtype()),
+                            "strides": strides,
+                        }
+                    )
+                return {
+                    "HAS_EPILOGUE_FUSION": has_epilogue_fusion,
+                    "TMA_STORE_TARGETS": tma_store_targets,
+                }
+
             def render(
                 self, template, kwargs, record_input_dependent_tracked_event=False
             ):
                 kwargs = self._add_layout_kwargs(kwargs)
-
-                # Call parent render with updated kwargs
+                fusion_kwargs = self._epilogue_fusion_kwargs(
+                    kwargs.get("USE_TMA_STORE", False)
+                )
                 return super().render(
-                    template, kwargs, record_input_dependent_tracked_event
+                    template,
+                    kwargs | fusion_kwargs,
+                    record_input_dependent_tracked_event,
                 )
 
         _gluon_template_kernel_class = _GluonTemplateKernelImpl
 
     return _gluon_template_kernel_class
+
+
+def _gluon_dtype(dtype):
+    from ...utils import triton_type
+
+    return triton_type(dtype).replace("tl.", "gl.", 1)
 
 
 def _gluon_index_dtype(dtype: str):
@@ -247,6 +371,4 @@ class GluonTemplate(KernelTemplate):
         )
         if result is not None:
             result.log_info["backend"] = "Gluon"
-            # Gluon templates store their output directly, not via store_output().
-            result.supports_epilogue_fusion = False
         return result

@@ -252,6 +252,15 @@ def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
 
 
 BACKEND_CHOICES = ["aten", "triton", "cutedsl", "nvgemm", "gluon", "triton_gluon"]
+EPILOGUE_CHOICES = ["none", "relu", "scale"]
+
+
+def _grouped_mm_fn(epilogue, scale):
+    if epilogue == "relu":
+        return lambda a, b, offs: torch._grouped_mm(a, b, offs).relu()
+    if epilogue == "scale":
+        return lambda a, b, offs: torch._grouped_mm(a, b, offs) * scale
+    return torch._grouped_mm
 
 
 def _has_gluon():
@@ -506,7 +515,7 @@ def _print_results(results):
     first = results[0]
     print(
         f"A: {first['A dim']}d {first['A layout']}, B: {first['B dim']}d {first['B layout']}"
-        " | us = median time, x = speedup over ATen"
+        f", epilogue: {first.get('Epilogue', 'none')} | us = median time, x = speedup over ATen"
     )
     names = ("ATen", "Triton", "CuTeDSL", "NVGEMM", "Gluon", "Triton+Gluon")
     shape = {k: [r[k] for r in results] for k in ("G", "M", "N", "K")}
@@ -553,6 +562,7 @@ def benchmark_grouped_mm(
     proton_optimizations="clock32,time_shift",
     result_file=None,
     timing_details=False,
+    epilogue="none",
 ):
     torch.manual_seed(seed)
     if timing_details:
@@ -629,14 +639,20 @@ def benchmark_grouped_mm(
             "B dim": b_dim,
             "A layout": _major_label(a_k_major, "m"),
             "B layout": _major_label(b_k_major, "n"),
+            "Epilogue": epilogue,
         }
 
-        C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
+        scale = None
+        if epilogue == "scale":
+            rows = torch._grouped_mm(A, B.transpose(-2, -1), offs).shape[:-1]
+            scale = torch.rand(rows, device=device, dtype=dtype)[..., None]
+        grouped_mm_fn = _grouped_mm_fn(epilogue, scale)
+        C_ref = grouped_mm_fn(A, B.transpose(-2, -1), offs)
         done = []
 
         us_aten = None
         if "aten" in backends:
-            fn_aten = lambda: torch._grouped_mm(  # noqa: E731
+            fn_aten = lambda: grouped_mm_fn(  # noqa: E731
                 A, B.transpose(-2, -1), offs
             )
             bench_aten = _do_bench_cuda(
@@ -662,7 +678,7 @@ def benchmark_grouped_mm(
                 torch._dynamo.reset()
                 compile_start = time.perf_counter()
                 compiled_triton = torch.compile(
-                    torch._grouped_mm,
+                    grouped_mm_fn,
                     options={
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "TRITON",
@@ -712,7 +728,7 @@ def benchmark_grouped_mm(
                     torch._dynamo.reset()
                     compile_start = time.perf_counter()
                     compiled_cutedsl = torch.compile(
-                        torch._grouped_mm,
+                        grouped_mm_fn,
                         options={
                             "max_autotune": True,
                             "max_autotune_gemm_backends": "CUTEDSL",
@@ -764,7 +780,7 @@ def benchmark_grouped_mm(
                     torch._dynamo.reset()
                     compile_start = time.perf_counter()
                     compiled_nvgemm = torch.compile(
-                        torch._grouped_mm,
+                        grouped_mm_fn,
                         options={
                             "max_autotune": True,
                             "max_autotune_gemm_backends": "NVGEMM",
@@ -815,7 +831,7 @@ def benchmark_grouped_mm(
                     torch._dynamo.reset()
                     compile_start = time.perf_counter()
                     compiled_gluon = torch.compile(
-                        torch._grouped_mm,
+                        grouped_mm_fn,
                         options={
                             "max_autotune": True,
                             "max_autotune_gemm_backends": "TRITON",
@@ -877,7 +893,7 @@ def benchmark_grouped_mm(
                     torch._dynamo.reset()
                     compile_start = time.perf_counter()
                     compiled_both = torch.compile(
-                        torch._grouped_mm,
+                        grouped_mm_fn,
                         options={
                             "max_autotune": True,
                             "max_autotune_gemm_backends": "TRITON",
@@ -1150,6 +1166,16 @@ if __name__ == "__main__":
             "through the end of the first call, including autotuning)."
         ),
     )
+    parser.add_argument(
+        "--epilogue",
+        choices=EPILOGUE_CHOICES,
+        default="none",
+        help=(
+            "Pointwise op applied to the grouped MM output, to measure epilogue "
+            "fusion: 'relu', or 'scale' (multiply each output row by a scalar, "
+            "like MoE router weights)."
+        ),
+    )
     parser.add_argument("--result-file", dest="result_file", help=argparse.SUPPRESS)
     args = parser.parse_args()
     a_dim, a_k_major = args.a_spec
@@ -1180,6 +1206,8 @@ if __name__ == "__main__":
             str(args.cooldown_seconds),
             "--grouping",
             args.grouping,
+            "--epilogue",
+            args.epilogue,
         ]
         if args.use_cuda_graphs:
             child_args.append("--use-cuda-graphs")
@@ -1222,4 +1250,5 @@ if __name__ == "__main__":
         proton_optimizations=args.proton_optimizations,
         result_file=args.result_file,
         timing_details=args.timing_details,
+        epilogue=args.epilogue,
     )

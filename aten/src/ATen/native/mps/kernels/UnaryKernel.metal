@@ -555,11 +555,7 @@ struct log1p_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // TODO: Implement proper log1p algorithm
-    auto magnitude = c10::metal::hypot(1.0f + x.x, x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
-    return T(real, imag);
+    return T(c10::metal::log1p(float2(x)));
   }
   inline float operator()(const bool x) {
     return x ? M_LN2_F : 0;

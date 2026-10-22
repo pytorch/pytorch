@@ -1881,6 +1881,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     optional = {
         "TRACER",
         "SERVING_MODE",
+        "_ALLOW_SERVE_TIME_COMPILES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
     }
@@ -2293,6 +2294,9 @@ def _build_multigraph_python_source(
     buf.writeline(f"BACKEND = {backend!r}")
     buf.writeline('TRACER = "dynamo"')
     buf.writeline(f'SERVING_MODE = "{mode}"')
+    if mode == "installed":
+        # load(allow_serve_time_compiles=True) flips this to True before exec.
+        buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
@@ -2772,7 +2776,7 @@ class PrecompiledModule(PrecompiledRunnable):
 
 
 def _make_inlined_forward(
-    python_code: str, *, warn: bool = True
+    python_code: str, *, warn: bool = True, allow_serve_time_compiles: bool = False
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -2791,6 +2795,17 @@ def _make_inlined_forward(
             "untrusted executable input (it runs inlined kernels / graph code). Only "
             "exec python_code you produced or otherwise trust (Note [precompile "
             "programming model], invariant 7)."
+        )
+    if allow_serve_time_compiles:
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        if default not in python_code:
+            raise PrecompileError(
+                "allow_serve_time_compiles=True: the artifact's "
+                "_ALLOW_SERVE_TIME_COMPILES line is not in the form capture() writes, "
+                "so the flag cannot be applied. Recapture it under this torch."
+            )
+        python_code = python_code.replace(
+            default, "\n_ALLOW_SERVE_TIME_COMPILES = True\n", 1
         )
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
@@ -3167,7 +3182,11 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
 
 
 def _runnable_from_pair(
-    python_code: str, cache: bytes, *, _trusted: bool = False
+    python_code: str,
+    cache: bytes,
+    *,
+    allow_serve_time_compiles: bool = False,
+    _trusted: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
@@ -3191,6 +3210,26 @@ def _runnable_from_pair(
     # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
     # defaults the same way, so an older pair still matches.
     tracer = cast(str, meta.get("TRACER", "make_fx"))
+    installed = meta["SERVING_MODE"] == "installed"
+    if allow_serve_time_compiles and not installed:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True applies only to an installed artifact "
+            '(SERVING_MODE = "installed"), which serves through Dynamo; this '
+            "artifact is standalone and has no compiler behind it. Load it without "
+            "the flag, or recapture to cover the calls it misses."
+        )
+    if allow_serve_time_compiles and "_ALLOW_SERVE_TIME_COMPILES" not in meta:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True: this installed artifact predates the "
+            "flag and would still refuse every uncovered call. Recapture it under "
+            "this torch."
+        )
+    if meta.get("_ALLOW_SERVE_TIME_COMPILES", False) is not False:
+        raise PrecompileError(
+            "this artifact sets _ALLOW_SERVE_TIME_COMPILES to something other than "
+            "False; capture() always writes False, and serve-time compiles are "
+            "enabled only by load(..., allow_serve_time_compiles=True)."
+        )
 
     from torch.compiler._no_compile import is_compilation_forbidden
 
@@ -3244,9 +3283,11 @@ def _runnable_from_pair(
     # input/model validation) and JITs the kernels -- which hit the primed cache when
     # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
     # a separate runtime.
-    forward = _make_inlined_forward(python_code, warn=not _trusted)
-
-    installed = meta["SERVING_MODE"] == "installed"
+    forward = _make_inlined_forward(
+        python_code,
+        warn=not _trusted,
+        allow_serve_time_compiles=allow_serve_time_compiles,
+    )
     return PrecompiledModule._from_loaded(forward, backend=backend, installed=installed)
 
 
@@ -3291,7 +3332,24 @@ def capture(
     needs there, since one compiled or launched only before the block is not in
     the cache. Each write also freezes the compiled kernels the serving process
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
-    freeze.
+    freeze. That includes kernels launched directly through ``@triton.jit`` and
+    ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
+    directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
+    you set is not used inside the block, and a JIT kernel or autotuner already
+    used before the block compiles and tunes again on its first launch inside
+    it. That retune benchmarks on the block's real inputs, and the config it
+    picks, which is what ships and what the process keeps using afterwards, may
+    differ from the one picked before the block. Compiled JIT kernel
+    specializations and autotuning decisions the block does not produce again
+    are kept afterwards.
+    Triton does not cache the decision of an autotuner with ``pre_hook``
+    configs, so one that does not prune its configs keeps its earlier decision
+    in the block and is benchmarked again on first use in the serving process.
+    No other thread should launch Triton kernels while the block opens or
+    closes: the in-memory caches are dropped and restored then without
+    synchronizing with launches, so a concurrent autotuner launch can fail.
+    Triton kernels another thread compiles or tunes while the block is open
+    go into the block's cache directory and ship with it.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
@@ -3394,7 +3452,10 @@ def capture(
 
 
 def load(
-    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    *,
+    allow_serve_time_compiles: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from the two files a precompile capture wrote.
 
@@ -3452,6 +3513,22 @@ def load(
     Any other host rebuilds them, which needs a C++ compiler there:
     :func:`no_compilation` does not gate C++ builds.
 
+    ``allow_serve_time_compiles=True`` opts an installed artifact out of the
+    refusal: a call no captured variant covers compiles with the artifact's
+    backend, as ``torch.compile`` would, under the process-wide stance like any
+    other compile. The captured variants are still served first and do not
+    count toward ``torch._dynamo.config.recompile_limit``, so each frame gets
+    that many serve-time compiles on top of them; a missed call past the limit
+    runs eagerly instead of compiling.
+    Serve-time compiles are recorded nowhere, but they are built under the
+    process's Dynamo config: with ``torch._dynamo.config.caching_precompile`` on
+    they drop identity guards (``ID_MATCH``, ``CLOSURE_MATCH``, ...) exactly as
+    any other compile in that process does.
+    The flag does not lift the ``compiled_autograd`` refusal above. A standalone
+    artifact has no compiler behind it, and an installed artifact captured
+    before the flag existed cannot honor it, so passing the flag for either
+    raises ``PrecompileError``.
+
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
@@ -3462,4 +3539,6 @@ def load(
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(python_code, cache)
+    return _runnable_from_pair(
+        python_code, cache, allow_serve_time_compiles=allow_serve_time_compiles
+    )

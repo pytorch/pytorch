@@ -6,6 +6,13 @@
 {%- set M_IS_VARYING = A_IS_2D and not B_IS_2D -%}
 {%- set N_IS_VARYING = not A_IS_2D and B_IS_2D -%}
 {%- set K_IS_VARYING = A_IS_2D and B_IS_2D -%}
+{%- set FUSED_TMA_STORE = HAS_EPILOGUE_FUSION and TMA_STORE_TARGETS | length > 0 -%}
+{%- set USE_TMA_STORE = USE_TMA_STORE and (FUSED_TMA_STORE or not HAS_EPILOGUE_FUSION) -%}
+{%- if HAS_EPILOGUE_FUSION -%}
+{%- set TMA_STORES = TMA_STORE_TARGETS -%}
+{%- else -%}
+{%- set TMA_STORES = [{"var": "c", "ptr": "c_ptr", "strides": ["c_stride_g", "c_stride_m", "c_stride_n"]}] -%}
+{%- endif -%}
 
 import triton
 
@@ -55,16 +62,29 @@ class PartitionArgs:
     b_smem_layout: gl.constexpr
 {%- endif %}
 {%- if USE_TMA_STORE and not C_IS_2D %}
-    c_desc: tma.tensor_descriptor
+{%- for t in TMA_STORES %}
+    {{ t.var }}_desc: tma.tensor_descriptor
+{%- endfor %}
 {%- endif %}
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
     offs_ptr: gl.tensor
 {%- endif %}
+{%- if not HAS_EPILOGUE_FUSION %}
     c_ptr: gl.tensor
     c_stride_m: gl.tensor
     c_stride_n: gl.tensor
 {%- if not C_IS_2D %}
     c_stride_g: gl.tensor
+{%- endif %}
+{%- endif %}
+{%- if FUSED_TMA_STORE %}
+{%- for t in TMA_STORES %}
+{%- if C_IS_2D %}
+    {{ t.var }}_ptr: gl.tensor
+    {{ t.var }}_stride_m: gl.tensor
+{%- endif %}
+    {{ t.var }}_smem_layout: gl.constexpr
+{%- endfor %}
 {%- endif %}
     output_dtype: gl.constexpr
     c_smem_layout: gl.constexpr
@@ -108,26 +128,6 @@ class GroupIterator:
     NUM_PROGRAMS: gl.constexpr
 
     @gluon.jit
-    def create(
-        G, M, N, K,
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-        offs_ptr,
-{%- endif %}
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_PROGRAMS: gl.constexpr
-    ):
-        zero = gl.to_tensor(0)
-        return GroupIterator(
-            G, zero,
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-            offs_ptr,
-{%- endif %}
-            zero, M, zero, N, zero, K,
-            zero, gl.program_id(0),
-            gl.to_tensor(False),
-            BLOCK_M, BLOCK_N, NUM_PROGRAMS
-        ).next()
-
-    @gluon.jit
     def should_process(self):
         return self.g < self.G
 
@@ -160,16 +160,35 @@ class GroupIterator:
         tiles_processed = self.tiles_processed + (gl.cdiv(self.m_size, self.BLOCK_M) * gl.cdiv(self.n_size, self.BLOCK_N) if self.has_started else 0)
         tile_idx = self.tile_idx + (gl.cdiv(tiles_processed - self.tile_idx, self.NUM_PROGRAMS) * self.NUM_PROGRAMS if self.has_started else 0)
 
-        return GroupIterator(
-            self.G, g,
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-            self.offs_ptr,
-{%- endif %}
-            m_start_offset, m_size, n_start_offset, n_size, k_start_offset, k_size,
-            tiles_processed, tile_idx,
-            gl.to_tensor(True),
-            self.BLOCK_M, self.BLOCK_N, self.NUM_PROGRAMS
+        return gl.aggregate_replace(
+            self, g=g,
+            m_start_offset=m_start_offset, m_size=m_size,
+            n_start_offset=n_start_offset, n_size=n_size,
+            k_start_offset=k_start_offset, k_size=k_size,
+            tiles_processed=tiles_processed, tile_idx=tile_idx,
+            has_started=gl.to_tensor(True),
         )
+
+
+@gluon.jit
+def create_group_iterator(
+    G, M, N, K,
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
+    offs_ptr,
+{%- endif %}
+    BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_PROGRAMS: gl.constexpr
+):
+    zero = gl.to_tensor(0)
+    return GroupIterator(
+        G, zero,
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
+        offs_ptr,
+{%- endif %}
+        zero, M, zero, N, zero, K,
+        zero, gl.program_id(0),
+        gl.to_tensor(False),
+        BLOCK_M, BLOCK_N, NUM_PROGRAMS
+    ).next()
 
 
 @aggregate
@@ -191,25 +210,6 @@ class TileIterator:
     BLOCK_N: gl.constexpr
     NUM_PROGRAMS: gl.constexpr
     GROUP_SIZE_N: gl.constexpr
-
-    @gluon.jit
-    def create(
-        tile_idx,
-        m_start_offset, m_size, n_start_offset, n_size,
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_PROGRAMS: gl.constexpr,
-        GROUP_SIZE_N: gl.constexpr
-    ):
-        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
-        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
-        num_tiles = num_m_tiles * num_n_tiles
-        zero = gl.to_tensor(0)
-        return TileIterator(
-            tile_idx, num_m_tiles, num_n_tiles, num_tiles,
-            m_start_offset, m_size, n_start_offset, n_size,
-            zero, zero, zero, zero,
-            gl.to_tensor(False),
-            BLOCK_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
-        ).next()
 
     @gluon.jit
     def should_process(self):
@@ -234,13 +234,32 @@ class TileIterator:
         m_offset = self.m_start_offset + m_tile_offset
         n_offset = self.n_start_offset + n_tile_offset
 
-        return TileIterator(
-            tile_idx, self.num_m_tiles, self.num_n_tiles, self.num_tiles,
-            self.m_start_offset, self.m_size, self.n_start_offset, self.n_size,
-            m_offset, n_offset, m_tile_offset, n_tile_offset,
-            gl.to_tensor(True),
-            self.BLOCK_M, self.BLOCK_N, self.NUM_PROGRAMS, self.GROUP_SIZE_N
+        return gl.aggregate_replace(
+            self, tile_idx=tile_idx,
+            m_offset=m_offset, n_offset=n_offset,
+            m_tile_offset=m_tile_offset, n_tile_offset=n_tile_offset,
+            has_started=gl.to_tensor(True),
         )
+
+
+@gluon.jit
+def create_tile_iterator(
+    tile_idx,
+    m_start_offset, m_size, n_start_offset, n_size,
+    BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_PROGRAMS: gl.constexpr,
+    GROUP_SIZE_N: gl.constexpr
+):
+    num_m_tiles = gl.cdiv(m_size, BLOCK_M)
+    num_n_tiles = gl.cdiv(n_size, BLOCK_N)
+    num_tiles = num_m_tiles * num_n_tiles
+    zero = gl.to_tensor(0)
+    return TileIterator(
+        tile_idx, num_m_tiles, num_n_tiles, num_tiles,
+        m_start_offset, m_size, n_start_offset, n_size,
+        zero, zero, zero, zero,
+        gl.to_tensor(False),
+        BLOCK_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
+    ).next()
 
 
 # Counter abstraction for tracking barrier index and phase.
@@ -250,20 +269,21 @@ class Counter:
     phase: gl.tensor
     num_barriers: gl.constexpr
 
-    @gluon.jit
-    def create(phase, num_barriers: gl.constexpr):
-        return Counter(gl.to_tensor(0), gl.to_tensor(phase), num_barriers)
-
     @gluon.must_use_result
     @gluon.jit
     def next(self):
         incr = self.index + 1
         rollover = incr == self.num_barriers
-        return Counter(
-            gl.where(rollover, 0, incr),
-            gl.where(rollover, self.phase ^ 1, self.phase),
-            self.num_barriers,
+        return gl.aggregate_replace(
+            self,
+            index=gl.where(rollover, 0, incr),
+            phase=gl.where(rollover, self.phase ^ 1, self.phase),
         )
+
+
+@gluon.jit
+def create_counter(phase, num_barriers: gl.constexpr):
+    return Counter(gl.to_tensor(0), gl.to_tensor(phase), num_barriers)
 
 
 @gluon.jit
@@ -284,9 +304,9 @@ def load_partition(pargs: PartitionArgs):
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
-    state = Counter.create(1, load_buf_empty_bars.shape[0])
+    state = create_counter(1, load_buf_empty_bars.shape[0])
 
-    group_iter = GroupIterator.create(
+    group_iter = create_group_iterator(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
@@ -328,7 +348,7 @@ shape=[k_end, N],
         a_desc = pargs.a_desc
         b_desc = pargs.b_desc
 {%- endif %}
-        tile_iter = TileIterator.create(
+        tile_iter = create_tile_iterator(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
             TILE_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
@@ -420,13 +440,13 @@ def compute_partition(pargs: PartitionArgs):
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
-    load_state = Counter.create(0, load_buf_empty_bars.shape[0])
+    load_state = create_counter(0, load_buf_empty_bars.shape[0])
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
     acc_buf_full_bars = pargs.acc_buf_full_bars
-    acc_state = Counter.create(1, acc_buf_empty_bars.shape[0])
+    acc_state = create_counter(1, acc_buf_empty_bars.shape[0])
 
-    group_iter = GroupIterator.create(
+    group_iter = create_group_iterator(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
@@ -434,7 +454,7 @@ def compute_partition(pargs: PartitionArgs):
         TILE_M, BLOCK_N, NUM_PROGRAMS
     )
     while group_iter.should_process():
-        tile_iter = TileIterator.create(
+        tile_iter = create_tile_iterator(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
             TILE_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
@@ -496,8 +516,12 @@ def compute_partition(pargs: PartitionArgs):
 
 
 @gluon.jit
-def store_partition(pargs: PartitionArgs):
+def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argdefs()}}{% endif %}):
     _proton_enter_scope("store_partition")
+{%- if HAS_EPILOGUE_FUSION %}
+
+    INDEX_DTYPE: gl.constexpr = {{ INDEX_DTYPE_EXPR }}
+{%- endif %}
 
     G = pargs.G
     M = pargs.M
@@ -512,15 +536,21 @@ def store_partition(pargs: PartitionArgs):
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
     acc_buf_full_bars = pargs.acc_buf_full_bars
-    acc_state = Counter.create(0, acc_buf_empty_bars.shape[0])
+    acc_state = create_counter(0, acc_buf_empty_bars.shape[0])
 
 {%- if USE_TMA_STORE %}
+    {#- TODO: move the TMA store into a shared helper once other Gluon templates need it. #}
     c_smem = gl.allocate_shared_memory(
         pargs.output_dtype, [TILE_M, BLOCK_N], pargs.c_smem_layout
     )
+{%- if FUSED_TMA_STORE %}
+{%- for t in TMA_STORES %}
+    {{ t.var }}_smem = c_smem.reinterpret({{ t.dtype }}, [TILE_M, BLOCK_N], pargs.{{ t.var }}_smem_layout)
+{%- endfor %}
+{%- endif %}
 {%- endif %}
 
-    group_iter = GroupIterator.create(
+    group_iter = create_group_iterator(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
@@ -538,29 +568,31 @@ def store_partition(pargs: PartitionArgs):
         # "wait_group.read 0", currently a ptxas-bug workaround with a
         # removal TODO).
         tma.store_wait(pendings=0)
-        c_desc = tma.make_tensor_descriptor(
-            pargs.c_ptr,
+{%- for t in TMA_STORES %}
+        {{ t.var }}_desc = tma.make_tensor_descriptor(
+            pargs.{{ t.var }}_ptr,
 {%- if M_IS_VARYING %}
             shape=[group_iter.m_start_offset + group_iter.m_size, N],
 {%- else %}
             shape=[M, group_iter.n_start_offset + group_iter.n_size],
 {%- endif %}
-            strides=[pargs.c_stride_m, 1],
+            strides=[pargs.{{ t.var }}_stride_m, 1],
             block_shape=[TILE_M, BLOCK_N],
-            layout=pargs.c_smem_layout,
+            layout=pargs.{{ t.var }}_smem_layout,
         )
+{%- endfor %}
 {%- else %}
-        c_desc = pargs.c_desc
+{%- for t in TMA_STORES %}
+        {{ t.var }}_desc = pargs.{{ t.var }}_desc
+{%- endfor %}
 {%- endif %}
 {%- endif %}
-        tile_iter = TileIterator.create(
+        tile_iter = create_tile_iterator(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
             TILE_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
         )
         while tile_iter.should_process():
-            # FIXME: add epilogue here!
-
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
             _proton_enter_scope("store_wait")
@@ -578,23 +610,45 @@ def store_partition(pargs: PartitionArgs):
 
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
             acc_state = acc_state.next()
+{%- if not HAS_EPILOGUE_FUSION %}
 
             c = acc.to(pargs.output_dtype)
+{%- endif %}
 
             mbarrier.arrive(acc_buf_empty_bar, count=1)
 
+{%- if HAS_EPILOGUE_FUSION %}
+            offs_m = gl.arange(0, TILE_M)
+            offs_n = gl.arange(0, BLOCK_N)
+
+            idx_m = (tile_iter.m_offset + offs_m).to(INDEX_DTYPE)[:, None]
+            idx_n = (tile_iter.n_offset + offs_n).to(INDEX_DTYPE)[None, :]
+
+            mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
+            mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
+            mask = mask_m[:, None] & mask_n[None, :]
+
+{%- if C_IS_2D %}
+            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("TILE_M", "BLOCK_N"))}}
+{%- else %}
+            idx_g = group_iter.g.to(INDEX_DTYPE)
+            {{store_output(("idx_g", "idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("TILE_M", "BLOCK_N"))}}
+{%- endif %}
+{%- endif %}
 {%- if USE_TMA_STORE %}
+{%- for t in TMA_STORES %}
             tma.store_wait(pendings=0)
 
-            c_smem.store(c)
+            {{ t.var }}_smem.store({{ t.var }})
 
             fence_async_shared()
 {%- if C_IS_2D %}
-            tma.async_store(c_desc, [tile_iter.m_offset, tile_iter.n_offset], c_smem)
+            tma.async_store({{ t.var }}_desc, [tile_iter.m_offset, tile_iter.n_offset], {{ t.var }}_smem)
 {%- else %}
-            tma.async_store(c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
+            tma.async_store({{ t.var }}_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], {{ t.var }}_smem)
 {%- endif %}
-{%- else %}
+{%- endfor %}
+{%- elif not HAS_EPILOGUE_FUSION %}
             offs_m = gl.arange(0, TILE_M)
             offs_n = gl.arange(0, BLOCK_N)
 
@@ -651,8 +705,14 @@ def store_partition(pargs: PartitionArgs):
     a_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_K] if A_IS_K_MAJOR else [BLOCK_K, TILE_M], input_dtype, cga_layout=A_CGA_LAYOUT)
     b_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_N, BLOCK_K] if B_IS_K_MAJOR else [BLOCK_K, BLOCK_N], input_dtype, cga_layout=B_CGA_LAYOUT)
     c_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_N], output_dtype, cga_layout=M_CGA_LAYOUT)
+{%- if FUSED_TMA_STORE %}
+{%- for t in TMA_STORES %}
+    {{ t.var }}_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_N], {{ t.dtype }}, cga_layout=M_CGA_LAYOUT)
+{%- endfor %}
+{%- elif not HAS_EPILOGUE_FUSION %}
 
     c_ptr = {{ get_output() }}
+{%- endif %}
 
 {%- if A_IS_2D %}
 {%- if B_IS_2D %}
@@ -742,13 +802,15 @@ def store_partition(pargs: PartitionArgs):
     )
 
 {%- if USE_TMA_STORE and not C_IS_2D %}
-    c_desc = tma.make_tensor_descriptor(
-        c_ptr,
+{%- for t in TMA_STORES %}
+    {{ t.var }}_desc = tma.make_tensor_descriptor(
+        {{ t.ptr }},
         shape=[G, M, N],
-        strides=[c_stride_g, c_stride_m, c_stride_n],
+        strides=[{{ t.strides | join(", ") }}],
         block_shape=[1, TILE_M, BLOCK_N],
-        layout=c_smem_layout,
+        layout={{ t.var }}_smem_layout,
     )
+{%- endfor %}
 {%- endif %}
 
     # Allocate shared memory buffers
@@ -817,16 +879,29 @@ def store_partition(pargs: PartitionArgs):
         b_smem_layout,
 {%- endif %}
 {%- if USE_TMA_STORE and not C_IS_2D %}
-        c_desc,
+{%- for t in TMA_STORES %}
+        {{ t.var }}_desc,
+{%- endfor %}
 {%- endif %}
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
+{%- if not HAS_EPILOGUE_FUSION %}
         c_ptr,
         gl.to_tensor(c_stride_m),
         gl.to_tensor(c_stride_n),
 {%- if not C_IS_2D %}
         gl.to_tensor(c_stride_g),
+{%- endif %}
+{%- endif %}
+{%- if FUSED_TMA_STORE %}
+{%- for t in TMA_STORES %}
+{%- if C_IS_2D %}
+        {{ t.ptr }},
+        gl.to_tensor({{ t.strides[-2] }}),
+{%- endif %}
+        {{ t.var }}_smem_layout,
+{%- endfor %}
 {%- endif %}
         output_dtype,
         c_smem_layout,
@@ -849,10 +924,16 @@ def store_partition(pargs: PartitionArgs):
         USE_TWO_CTA,
     )
 
+    {#- The descriptors' smem scratch is reused for the operand buffers; ordering it once
+        here keeps Triton from fencing and cluster-syncing before every 2-CTA MMA. #}
+    if USE_TWO_CTA:
+        fence_async_shared(cluster=True)
+        gl.barrier(cluster=True)
+
     # Launch warp-specialized kernel
     gl.warp_specialize(
         [
-            (store_partition, (pargs,)),
+            (store_partition, (pargs,{% if HAS_EPILOGUE_FUSION %} {{gen_argdefs()}}{% endif %})),
             (load_partition, (pargs,)),
             (compute_partition, (pargs,)),
         ],

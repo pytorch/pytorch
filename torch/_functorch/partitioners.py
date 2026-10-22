@@ -2590,12 +2590,6 @@ def solve_min_cut(
             return None
         if node.target is operator.getitem:
             return None
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return "marked MUST_SAVE"
-        if config.recompute_views and op_types.is_view(node):
-            return None
-        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
-            return None
         if isinstance(node.meta.get("val"), torch.device):
             # A device-valued node (e.g. the coor::current_device() node
             # compile_on_one_rank substitutes for a baked device) has no tensor to
@@ -2604,7 +2598,15 @@ def solve_min_cut(
             # leaving min-cut unable to place it at all once a backward op needs it.
             # Recomputing is both free and correct: the op only reads the current
             # accelerator, and doing so on the backward side is what makes the graph
-            # follow each rank's own device.
+            # follow each rank's own device. This precedes the MUST_SAVE check because
+            # selective AC tags the node MUST_SAVE when it is created inside a
+            # checkpointed region, and saving it is just as impossible then.
+            return None
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
+            return "marked MUST_SAVE"
+        if config.recompute_views and op_types.is_view(node):
+            return None
+        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
