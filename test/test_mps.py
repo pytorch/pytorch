@@ -1838,6 +1838,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res2, res2_cpu)
         [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
 
+    def test_linalg_cross_mixed_dtypes_raise(self):
+        # Regression: MPS used to accept mixed floating dtypes and read the
+        # second operand as the first's dtype, returning wrong values (#201629).
+        a = torch.randn(4, 3, device="mps")
+        b = torch.randn(4, 3, device="mps", dtype=torch.float16)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, b)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(b, a)
+        out = torch.empty(4, 3, device="mps")
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, b, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, a, out=out.half())
+
     def test_bmm_conj(self):
         # bmm must respect the conjugate bit on input tensors.
         # See https://github.com/pytorch/pytorch/issues/177474
