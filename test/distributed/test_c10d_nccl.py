@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gzip
 import json
 import logging
 import os
@@ -51,12 +52,24 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
+from torch.profiler import (
+    CuspyConfig,
+    profile,
+    ProfilerActivity,
+    ProfilerActivityConfig,
+)
+from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    TEST_CUDA_GRAPH_TOOLS_ID,
+    TEST_CUPTI_V13_3,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_distributed import (
     core_dumps_disabled,
     get_required_world_size,
     get_timeout,
     init_multigpu_helper,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
@@ -72,6 +85,7 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_SANDCASTLE,
@@ -83,7 +97,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     skipIfRocmArch,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -150,6 +166,8 @@ _log_configure(level=logging.INFO, force=True)
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @retry_on_connect_failures
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
@@ -256,6 +274,8 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_nccl()
     @retry_on_connect_failures
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
@@ -264,6 +284,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
@@ -287,6 +308,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
 
 
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
     device_type = "cuda"
 
     def setUp(self):
@@ -338,6 +360,8 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
@@ -2101,7 +2125,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         """
         if self.rank in ranks_to_exclude:
             if shrink_flags & NCCL_SHRINK_ABORT:
-                pg._get_backend(torch.device(device)).abort()
+                dist.get_backend_impl(pg, torch.device(device)).abort()
             else:
                 c10d.destroy_process_group(pg)
             return
@@ -2207,7 +2231,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
             # Survivors shrink with NCCL_SHRINK_ABORT and abort the parent, so
             # the excluded rank must abort too; destroy here would hang.
-            pg1._get_backend(torch.device(device)).abort()
+            dist.get_backend_impl(pg1, torch.device(device)).abort()
             return
 
         # Performance analysis (only for participating ranks)
@@ -2345,6 +2369,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -4023,6 +4049,8 @@ class DistributedDataParallelTest(
 
 
 class WorkHookTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 2
@@ -4244,6 +4272,8 @@ class WorkHookTest(MultiProcessTestCase):
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -4545,6 +4575,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
@@ -4618,7 +4650,10 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
             nccl_debug_file_content = f.read()
             # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
             # should show successful registration in debug output
-            if torch.cuda.nccl.version() >= (2, 24, 3):
+            nccl_version = torch.cuda.nccl.version()
+            if nccl_version >= (2, 32):
+                self.assertRegex(nccl_debug_file_content, "NVLS UB registered")
+            elif nccl_version >= (2, 24, 3):
                 self.assertRegex(
                     nccl_debug_file_content, "successfully registered NVLS"
                 )
@@ -4682,6 +4717,8 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self):
         return f"cuda:{self.rank}"
@@ -5353,6 +5390,8 @@ class SetDeviceMethod(Enum):
 class NcclProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
@@ -5411,6 +5450,8 @@ instantiate_parametrized_tests(NcclProcessGroupWithDispatchedCollectivesTests)
 
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -5864,6 +5905,8 @@ instantiate_parametrized_tests(LargeCommTest)
 
 
 class SparseCollective(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 1
@@ -5938,6 +5981,8 @@ class SparseCollective(MultiProcessTestCase):
 
 
 class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 1
@@ -6102,6 +6147,8 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
 
 class NCCLTraceTest(NCCLTraceTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.10")
@@ -7501,6 +7548,8 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
@@ -7553,6 +7602,8 @@ instantiate_parametrized_tests(NCCLTraceTest)
 
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+    hw_classification = HardwareClassification.CUDA
+
     @check_if_test_is_skipped
     def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
@@ -7607,6 +7658,8 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 
 @skip_but_pass_in_sandcastle
 class NcclErrorDumpTest(NCCLTraceTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     def _wait_process(self, rank, timeout):
         try:
             self.processes[rank].join(timeout)
@@ -7663,6 +7716,8 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
 
 # tests that needs to be run with a larger world size
 class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
@@ -7835,6 +7890,75 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         # This must not hang.
         dist.destroy_process_group()
+
+
+@unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
+class CollectiveAnnotationTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @skipIfRocm
+    def test_captured_collective_is_annotated(self):
+        if not TEST_CUDA_GRAPH_TOOLS_ID:
+            self.skipTest("CUDA graph annotations are unavailable")
+        from torch.cuda.graph_annotations import get_kernel_annotations
+
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, enable_annotations=True):
+            dist.all_reduce(x)
+        annotations = [
+            a
+            for kernel_annotations in get_kernel_annotations().values()
+            for a in kernel_annotations
+            if "Collective name" in a
+        ]
+        self.assertTrue(annotations, "no kernel carries collective metadata")
+        for annotation in annotations:
+            self.assertEqual(annotation["Collective name"], "all_reduce")
+            self.assertEqual(annotation["In msg nelems"], 1024)
+
+    @skipIfRocm
+    def test_cuspy_collective_is_annotated(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        torch.cuda.synchronize()
+        cuda_config = ProfilerActivityConfig(profiler_configs=[CuspyConfig()])
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, {ProfilerActivity.CUDA: cuda_config}]
+            ) as prof:
+                dist.all_reduce(x)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            if os.path.exists(trace_path + ".gz"):
+                with gzip.open(trace_path + ".gz", "rt") as f:
+                    events = json.load(f)["traceEvents"]
+            else:
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+        kernels = [
+            e
+            for e in events
+            if e.get("cat") == "kernel" and "nccl" in e.get("name", "").lower()
+        ]
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
+            self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@
 #include <ck_tile/host.hpp>
 #include <ck_tile/ops/epilogue.hpp>
 #include <ck_tile/ops/gemm.hpp>
+#include <ATen/native/hip/ck_tile_group_gemm_utils.h>
 
 #include <array>
 #include <cstdint>

@@ -499,24 +499,6 @@ inline float log1p(float x) {
   return rc;
 }
 
-// The function is ported from mlx
-inline float2 log1p(float2 in) {
-  float x = in.x;
-  float y = in.y;
-  float zabs = ::metal::precise::sqrt(x * x + y * y);
-  float theta = ::metal::atan2(y, x + 1);
-  if (zabs < 0.5f) {
-    float r = x * (2 + x) + y * y;
-    if (r == 0) { // handle underflow
-      return {x, theta};
-    }
-    return {0.5f * log1p(r), theta};
-  } else {
-    auto z0 = ::metal::sqrt((x + 1) * (x + 1) + y * y);
-    return {::metal::log(z0), theta};
-  }
-}
-
 template <typename T1, typename T2 = T1>
 struct pair {
   T1 first;
@@ -548,7 +530,8 @@ inline float2 conj(float2 a) {
 // the square terms. If `a` or `b` are very large or very small floating point
 // numbers, then their squares will resolve to inf or 0.
 //
-// Assume `a >= b >= 0`. We can first change the formula to:
+// Inputs are replaced by their absolute values, so assume `a >= b >= 0`.
+// We can first change the formula to:
 // `h = a sqrt(1 + (b / a)^2)`
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
@@ -570,6 +553,8 @@ inline float hypot(float a_, float b_) {
   if (::metal::isinf(a_) || ::metal::isinf(b_)) {
     return INFINITY;
   }
+  a_ = ::metal::abs(a_);
+  b_ = ::metal::abs(b_);
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 
@@ -584,6 +569,36 @@ inline float hypot(float a_, float b_) {
   bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
 
   return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
+}
+
+// Knuth's TwoSum: returns (s, e) with s = fl(a + b) and s + e == a + b exactly
+inline float2 sum_and_error(float a, float b) {
+  const float s = a + b;
+  const float bb = s - a;
+  return {s, (a - (s - bb)) + (b - bb)};
+}
+
+// log1p(z) = log|1 + z| + i arg(1 + z). When 1 + z is close to the unit circle,
+// log|1 + z| = log1p(r) / 2 with r = |1 + z|^2 - 1 = 2x + x^2 + y^2, which
+// cancels catastrophically. r is computed as the exact sum h + e + exx + eyy,
+// where exx, eyy are the rounding errors of the squares (via fma), e that of
+// their sum s, and h = 2x + s is exact whenever it cancels (Sterbenz lemma).
+// The four remaining terms can still cancel, so they are summed with
+// compensation (Ogita-Rump-Oishi Sum2). Overflow makes r NaN, which falls back
+// to log(hypot(1 + x, y))
+inline float2 log1p(float2 z) {
+  const float x = z.x, y = z.y;
+  const float xx = x * x, yy = y * y;
+  const auto s = sum_and_error(xx, yy);
+  const auto a = sum_and_error(2 * x + s.x, s.y);
+  const auto b = sum_and_error(a.x, ::metal::fma(x, x, -xx));
+  const auto c = sum_and_error(b.x, ::metal::fma(y, y, -yy));
+  const float r = c.x + (a.y + b.y + c.y);
+  const float theta = ::metal::precise::atan2(y, x + 1);
+  if (::metal::abs(r) < 0.5f) {
+    return {0.5f * log1p(r), theta};
+  }
+  return {::metal::precise::log(hypot(x + 1, y)), theta};
 }
 
 // Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
