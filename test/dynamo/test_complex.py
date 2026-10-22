@@ -161,6 +161,32 @@ class ComplexTests(ComplexDynamoTestCase):
 
         self._check_input_mutation(f, backend)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_output_views_other_output(self, backend):
+        def f():
+            a = torch.randn(5, 5, dtype=torch.complex64)
+            return a, a.view(25), torch.view_as_real(a)
+
+        a, c, r = torch.compile(f, backend=backend, fullgraph=True)()
+        self.assertEqual(c, a.view(25))
+        self.assertEqual(r, torch.view_as_real(a))
+        self.assertEqual(c.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+        self.assertEqual(r.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+        a.add_(1)
+        self.assertEqual(c, a.view(25))
+        self.assertEqual(r, torch.view_as_real(a))
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_duplicate_complex_output(self, backend):
+        def f():
+            a = torch.randn(5, 5, dtype=torch.complex64)
+            return a, a
+
+        a, b = torch.compile(f, backend=backend, fullgraph=True)()
+        self.assertEqual(a.untyped_storage().data_ptr(), b.untyped_storage().data_ptr())
+        a.add_(1)
+        self.assertEqual(a, b)
+
     def test_aliasing_semantics(self):
         def mutate():
             a = torch.ones(2, 2, dtype=torch.complex64)
