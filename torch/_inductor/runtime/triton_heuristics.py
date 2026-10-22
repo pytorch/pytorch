@@ -4757,6 +4757,14 @@ def pointwise(
 
     from torch._inductor.heuristics.registry import get_codegen_heuristic
 
+    if inductor_meta.get("tma_variant"):
+        device = triton_meta["device"]
+        heuristic_meta = dict(inductor_meta)
+        heuristic_meta["tma_variant_sm100"] = (
+            device.type == "cuda" and device.cc == 100
+        )
+    else:
+        heuristic_meta = inductor_meta
     pointwise_heuristic = get_codegen_heuristic("pointwise", triton_meta["device"].type)
     configs = pointwise_heuristic.get_configs(
         size_hints,
@@ -4764,7 +4772,7 @@ def pointwise(
         triton_config_with_settings,
         hinted_configs,
         tile_hint=tile_hint,
-        inductor_meta=inductor_meta,
+        inductor_meta=heuristic_meta,
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)

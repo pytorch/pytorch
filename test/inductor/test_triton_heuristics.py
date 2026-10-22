@@ -65,6 +65,7 @@ from torch._inductor.runtime.triton_heuristics import (
     check_autotune_cache,
     DEFER,
     make_matmul_triton_config,
+    pointwise,
     template,
     triton_config,
 )
@@ -151,6 +152,28 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    @parametrize("cc,xblock,num_warps", [(90, 1024, 4), (100, 2048, 2)])
+    def test_tma_pointwise_config_is_sm100_specific(self, cc, xblock, num_warps):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=cc,
+            major=cc // 10,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        configs = pointwise(
+            {"x": 1024 * 1024},
+            triton_meta={"device": device},
+            inductor_meta={"tma_variant": True},
+            return_configs=True,
+        )
+
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0].kwargs["XBLOCK"], xblock)
+        self.assertEqual(configs[0].num_warps, num_warps)
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
