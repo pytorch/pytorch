@@ -12,11 +12,15 @@ from torch._environment import is_fbcode
 
 
 def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    env_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    cache_dir = env_cache_dir
     if cache_dir is None:
         cache_dir = default_cache_dir()
     cache_dir = os.path.abspath(cache_dir)
-    os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
+    # This runs on every compile, from any thread, and setting the variable
+    # races getenv() in other threads, so only set it when it changes.
+    if cache_dir != env_cache_dir:
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 

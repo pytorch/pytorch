@@ -16696,10 +16696,6 @@ fn
         compile_id = entry.compile_id
         trace_annotation = entry.trace_annotation
         entry_hash = hash(entry)
-        with self.assertRaises(RuntimeError):
-            entry.update_diff_guard_root_manager()
-        with self.assertRaises(RuntimeError):
-            entry.guard_manager.extra_state.invalidate(entry, entry.guard_manager)
 
         torch._dynamo.reset()
         self.assertEqual(_debug_get_cache_entry_list(fn), [])
@@ -16716,8 +16712,13 @@ fn
         self.assertEqual(entry.trace_annotation, trace_annotation)
         self.assertEqual(entry.isolate_recompiles_id, region_id)
         self.assertEqual(hash(entry), entry_hash)
-        self.assertIsNone(entry.guard_manager.cache_entry)
-        self.assertIsNone(entry.guard_manager.extra_state)
+        # The guard manager outlives its entry, and finds nothing to update.
+        eval_frame = torch._C._dynamo.eval_frame
+        eval_frame._update_diff_guard_root_manager(entry.guard_manager)
+        deleted = torch._dynamo.guards.DeletedGuardManagerWrapper("test")
+        self.assertFalse(
+            eval_frame._invalidate_cache_entry(entry.guard_manager, deleted)
+        )
 
     def test_inspect_signature_bind(self):
         import inspect
