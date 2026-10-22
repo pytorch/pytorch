@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
@@ -561,6 +562,25 @@ static PyMethodDef unwrapDeadWrappersDef = {
     METH_O,
     nullptr};
 
+// Raw C functions rather than pybind11 bindings: torch.compile calls these on
+// every compiled call, where pybind11's dispatch costs more than the work.
+static PyObject* get_dynamic_layer_stack_depth_py(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromSize_t(getDynamicLayerStack().size());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* pop_dynamic_layer_stack_and_undo_to_depth_py(
+    PyObject* /*self*/,
+    PyObject* depth) {
+  HANDLE_TH_ERRORS
+  popDynamicLayerStackToDepth(THPUtils_unpackUInt64(depth));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 void initFuncTorchBindings(PyObject* module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
@@ -675,12 +695,20 @@ void initFuncTorchBindings(PyObject* module) {
     auto result = stack.back().interpreter();
     return result;
   });
-  m.def("get_dynamic_layer_stack_depth", []() -> size_t {
-    return getDynamicLayerStack().size();
+  static auto dynamic_layer_stack_methods = std::to_array<PyMethodDef>({
+      {"get_dynamic_layer_stack_depth",
+       get_dynamic_layer_stack_depth_py,
+       METH_NOARGS,
+       nullptr},
+      {"pop_dynamic_layer_stack_and_undo_to_depth",
+       pop_dynamic_layer_stack_and_undo_to_depth_py,
+       METH_O,
+       nullptr},
+      {nullptr, nullptr, 0, nullptr},
   });
-  m.def(
-      "pop_dynamic_layer_stack_and_undo_to_depth",
-      &popDynamicLayerStackToDepth);
+  TORCH_CHECK(
+      PyModule_AddFunctions(m.ptr(), dynamic_layer_stack_methods.data()) == 0,
+      "failed to add dynamic layer stack functions to _functorch");
   m.def("pop_dynamic_layer_stack", &popDynamicLayer);
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
