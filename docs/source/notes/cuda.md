@@ -1450,6 +1450,33 @@ with `cudaHostRegister`. Buffer reuse reduces allocation overhead but does
 not guarantee fault-free transfers.
 ```
 
+For direct {meth}`~torch.Tensor.copy_` transfers between contiguous CPU and
+CUDA tensors of the same dtype, host blocking depends on `non_blocking`
+and the CPU memory:
+
+- With `non_blocking=False`, PyTorch synchronizes the CUDA stream before
+  returning, so the call blocks the host regardless of whether the CPU
+  memory is pinned or whether the copy reads from or writes to it.
+- With `non_blocking=True` and pinned or registered CPU memory, ordinary
+  copies do not block the host in either direction. For device-to-host
+  copies, explicitly synchronize before accessing the result on the CPU.
+- With `non_blocking=True` and pageable CPU memory, the call may block the
+  host. The behavior depends on staging and other system conditions,
+  including hardware coherence, and cannot be inferred from the flag alone.
+  Blocking can occur in either direction, with additional conditions when
+  writing to CPU memory.
+
+Even with pinned memory and `non_blocking=True`, CUDA calls can block the
+host when stream queues are full or when another thread holds a driver
+lock during a memory management operation. Other exceptions include
+`CUDA_LAUNCH_BLOCKING=1` when CUDA implements the copy with a kernel, and
+special confidential computing operations such as key rotation.
+
+Copies that require temporary buffers, such as non-contiguous copies or
+dtype conversions, can involve additional allocations and copy operations.
+The behavior above describes the underlying transfer, rather than all work
+performed by such a {meth}`~torch.Tensor.copy_` call.
+
 For repeated transfers, such as activation offloading, allocate pinned CPU
 buffers once and reuse them with {meth}`~torch.Tensor.copy_`:
 
