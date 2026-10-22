@@ -2409,7 +2409,7 @@ class PythonWrapperCodegen(CodeGen):
             f"empty_strided_mtia = {guards}._empty_strided_mtia",
             f"empty_strided_mps = {guards}._empty_strided_mps",
             f"reinterpret_tensor = {guards}._reinterpret_tensor",
-            "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
+            f"alloc_from_pool = {guards}._alloc_from_pool",
             "async_compile = AsyncCompile()",
         )
 
