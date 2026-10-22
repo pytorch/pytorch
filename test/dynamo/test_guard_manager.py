@@ -356,6 +356,14 @@ user_stack=None)
         with fx_traceback.annotate({"tag": "b"}):
             self.assertFalse(root.check({}))
 
+    def test_lambda_guard_no_args(self):
+        passes = True
+        root = RootGuardManager()
+        root.add_lambda_guard_no_args(lambda: passes, ["passes"], None)
+        self.assertTrue(root.check({}))
+        passes = False
+        self.assertFalse(root.check({}))
+
     def test_length_check_guard(self):
         root = RootGuardManager()
         foo = [1, 2, 3]
