@@ -5,6 +5,8 @@ import gc
 import inspect
 import os
 import sys
+import threading
+import time
 import unittest
 import weakref
 from unittest import mock
@@ -12,6 +14,7 @@ from unittest import mock
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.fx.traceback as fx_traceback
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -346,6 +349,51 @@ user_stack=None)
         finally:
             torch.set_default_device(None)
 
+    def test_fx_annotation_guard(self):
+        root = RootGuardManager()
+        root.add_fx_annotation_guard({"tag": "a"}, ["tag a"], None)
+        self.assertFalse(root.check({}))
+        with fx_traceback.annotate({"tag": "a"}):
+            self.assertTrue(root.check({}))
+        with fx_traceback.annotate({"tag": "b"}):
+            self.assertFalse(root.check({}))
+
+    def test_lambda_guard_no_args(self):
+        passes = True
+        root = RootGuardManager()
+        root.add_lambda_guard_no_args(lambda: passes, ["passes"], None)
+        self.assertTrue(root.check({}))
+        passes = False
+        self.assertFalse(root.check({}))
+
+    def test_concurrent_checks_are_serialized(self):
+        running = overlapped = False
+
+        def slow_guard(x):
+            nonlocal running, overlapped
+            overlapped |= running
+            running = True
+            # Releases the GIL while this thread holds the root's lock, so the
+            # other thread must wait for the lock without holding the GIL.
+            time.sleep(0.05)
+            running = False
+            return True
+
+        root = RootGuardManager()
+        root.add_lambda_guard(slow_guard, ["slow"], None)
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(root.check({})))
+            for _ in range(2)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        self.assertFalse(any(t.is_alive() for t in threads), "guard check deadlocked")
+        self.assertEqual(results, [True, True])
+        self.assertFalse(overlapped)
+
     def test_length_check_guard(self):
         root = RootGuardManager()
         foo = [1, 2, 3]
@@ -581,6 +629,32 @@ user_stack=None)
             with self.assertRaisesRegex(RuntimeError, err):
                 root.check_verbose({"x": nested})
             self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_tensor_match_guard_sparse_compressed(self):
+        # Compressed sparse layouts have no strides; the guard compares -1s.
+        for layout, blocksize in (
+            (torch.sparse_csr, None),
+            (torch.sparse_csc, None),
+            (torch.sparse_bsr, (1, 1)),
+            (torch.sparse_bsc, (1, 1)),
+        ):
+            with self.subTest(layout=layout):
+                x = torch.eye(4).to_sparse(layout=layout, blocksize=blocksize)
+                guard_manager = RootGuardManager()
+                guard_manager.add_tensor_match_guard(
+                    x,
+                    list(x.size()),
+                    [-1, -1],
+                    "x",
+                    ["check_tensor(x)"],
+                    None,
+                    type(x),
+                    torch._C._dispatch_keys(x),
+                    False,
+                )
+                self.assertTrue(guard_manager.check(x))
+                y = torch.eye(3).to_sparse(layout=layout, blocksize=blocksize)
+                self.assertFalse(guard_manager.check(y))
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
