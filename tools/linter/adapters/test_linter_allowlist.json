@@ -747,8 +747,6 @@
   "test/quantization/fx/test_numeric_suite_fx.py",
   "test/quantization/fx/test_quantize_fx.py",
   "test/quantization/fx/test_subgraph_rewriter.py",
-  "test/quantization/jit/test_ondevice_quantization.py",
-  "test/quantization/jit/test_quantize_jit.py",
   "test/scripts/codeowners/test_owners.py",
   "test/spincli/test_spin.py",
   "test/test_accelerator.py",
