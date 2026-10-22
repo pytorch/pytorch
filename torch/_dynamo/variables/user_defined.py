@@ -3202,12 +3202,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from .. import trace_rules
         from . import UserMethodVariable
-        from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return VariableTracker.tp_init_impl(self, tx, args, kwargs)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -3325,7 +3324,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return super().tp_init_impl(tx, args, kwargs)
         method = self._maybe_get_baseclass_method("__init__")
         if method is object.__init__:
-            return variables.ConstantVariable.create(None)
+            return VariableTracker.tp_init_impl(self, tx, args, kwargs)
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
