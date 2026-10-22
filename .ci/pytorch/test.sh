@@ -1412,6 +1412,7 @@ PY
     inductor/test_flydsl_grouped_scheduler.py \
     inductor/test_flydsl_flex_attention.py \
     inductor/flydsl_aot/test_flydsl_aot_compiler.py \
+    inductor/flydsl_aot/test_flydsl_aoti_e2e.py \
     inductor/flydsl_aot/test_flydsl_capture.py \
     inductor/flydsl_aot/test_flydsl_inductor.py \
     --verbose
