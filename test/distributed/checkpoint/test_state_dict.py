@@ -2,9 +2,11 @@
 
 import copy
 import functools
+import gc
 import sys
 from collections.abc import Callable
 from itertools import chain, product
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -49,7 +51,7 @@ from torch.testing._internal.common_dist_composable import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MultiProcessTestCase,
     with_comms,
 )
@@ -77,12 +79,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
+class TestStateDict(DTensorContinuousTestBase, VerifyStateDictMixin):
     """Tests state_dict and load_state_dict"""
 
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.accelerator.device_count())
+    world_size = min(4, torch.accelerator.device_count())
 
     def _test_save_load(
         self,
@@ -422,6 +422,62 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_strict,
         )
 
+    def _test_optimizer_missing_state_strict(
+        self, *, flatten_optimizer_state_dict: bool
+    ) -> None:
+        torch.manual_seed(0)
+        model = nn.Sequential(
+            nn.Linear(2, 2, device=device_type, bias=False),
+            nn.Linear(2, 2, device=device_type, bias=False),
+        )
+        optim = torch.optim.AdamW(model.parameters())
+        model(torch.rand(2, 2, device=device_type)).sum().backward()
+        optim.step()
+        optim.zero_grad()
+
+        options = StateDictOptions(
+            flatten_optimizer_state_dict=flatten_optimizer_state_dict
+        )
+        osd = get_optimizer_state_dict(model, optim, options=options)
+        if flatten_optimizer_state_dict:
+            for key in list(osd):
+                if key.startswith("state.1.weight."):
+                    del osd[key]
+        else:
+            del osd["state"]["1.weight"]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Missing optimizer state for parameter '1.weight'"
+        ):
+            set_optimizer_state_dict(
+                model,
+                torch.optim.AdamW(model.parameters()),
+                osd,
+                options=options,
+            )
+
+        strict_false_optim = torch.optim.AdamW(model.parameters())
+        set_optimizer_state_dict(
+            model,
+            strict_false_optim,
+            osd,
+            options=StateDictOptions(
+                flatten_optimizer_state_dict=flatten_optimizer_state_dict,
+                strict=False,
+            ),
+        )
+        strict_false_state = strict_false_optim.state_dict()["state"]
+        self.assertEqual(set(strict_false_state), {0})
+        self.assertEqual(strict_false_state[0], optim.state_dict()["state"][0])
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_optimizer_missing_state_strict(self) -> None:
+        self.run_subtests(
+            {"flatten_optimizer_state_dict": [False, True]},
+            self._test_optimizer_missing_state_strict,
+        )
+
     def _test_cpu_offload_full_state_dict(
         self, optimizer_class: type[Optimizer]
     ) -> None:
@@ -540,13 +596,14 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         def set_extra_state(self, state):
             return
 
-        UnitModule.get_extra_state = get_extra_state
-        UnitModule.set_extra_state = set_extra_state
-
-        target_model = copy.deepcopy(model)
-        set_model_state_dict(target_model, get_model_state_dict(target_model))
-        self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
-        self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
+        with (
+            mock.patch.object(UnitModule, "get_extra_state", get_extra_state),
+            mock.patch.object(UnitModule, "set_extra_state", set_extra_state),
+        ):
+            target_model = copy.deepcopy(model)
+            set_model_state_dict(target_model, get_model_state_dict(target_model))
+            self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
+            self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
 
     @skip_if_lt_x_gpu(1)
     def test_non_persistent_buffers(self) -> None:
@@ -891,6 +948,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # With the correlated changes in state_dict, meta device model should be accepted
         # in broadcasting and get copied successfully.
         torch.manual_seed(0)
+        # Workers are reused across tests, so measure memory relative to the start.
+        device_module = torch.get_device_module(device_type)
+        gc.collect()
+        device_module.empty_cache()
+        base_allocated = device_module.memory_allocated(0)
+        base_reserved = device_module.memory_reserved(0)
         with torch.device("meta"):
             meta_model = nn.Sequential(
                 *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
@@ -921,12 +984,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self.assertEqual(cpu_model_value, meta_model_value)
         # Memory allocated and reserved are lower due to the change at _distribute_tensors
         # from view to clone. This test would fail if with view due to higher memory cost.
-        memory_allocated = (
-            torch.get_device_module(device_type).memory_allocated(0) / 1024 / 1024
-        )
-        memory_reserved = (
-            torch.get_device_module(device_type).memory_reserved(0) / 1024 / 1024
-        )
+        memory_allocated = (device_module.memory_allocated(0) - base_allocated) / 2**20
+        memory_reserved = (device_module.memory_reserved(0) - base_reserved) / 2**20
         self.assertTrue(memory_allocated <= 384)
         self.assertTrue(memory_reserved <= 768)
 
