@@ -523,21 +523,28 @@ Tensor _weight_int4pack_mm_xpu(
     int64_t qGroupSize,
     const Tensor& qScale,
     const Tensor& qZeros) {
-  auto M = A.size(0); // M
+  // F.linear accepts non-contiguous activations (e.g. transformers gemma-3n
+  // embedding_projection produces a non-contiguous emb_norm), and the int4
+  // weight-only GEMM below requires a contiguous activation. Normalize A here.
+  // .contiguous() is a no-op when A is already contiguous (the common path).
+  const Tensor A_contiguous = A.contiguous();
+  auto M = A_contiguous.size(0); // M
   auto N = B.size(0); // N1=LCM(N, K)
   TORCH_CHECK(
-      A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      A_contiguous.dtype() == kBFloat16 || A_contiguous.dtype() == kHalf ||
+          A_contiguous.dtype() == kFloat,
       __func__,
       " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(), __func__, " : expect A to be contiguous.");
-  TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
+  TORCH_CHECK(
+      A_contiguous.is_contiguous(), __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A_contiguous.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
   TORCH_CHECK(
-      qScale.dtype() == A.dtype() || qScale.dtype() == kFloat,
+      qScale.dtype() == A_contiguous.dtype() || qScale.dtype() == kFloat,
       __func__,
       " : expect qScale dtype to match A dtype (",
-      A.dtype(),
+      A_contiguous.dtype(),
       ") or be float32, got ",
       qScale.dtype());
   TORCH_CHECK(
@@ -565,11 +572,12 @@ Tensor _weight_int4pack_mm_xpu(
       N,
       "]");
 
-  auto C = at::empty({M, N}, A.options());
+  auto C = at::empty({M, N}, A_contiguous.options());
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N]
-  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
+  at::native::onednn::woq_matmul_int4(
+      C, A_contiguous, B, qScale, qZeros, qGroupSize);
 
   return C;
 }
