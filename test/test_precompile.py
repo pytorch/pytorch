@@ -11038,6 +11038,13 @@ class TestExportPython(TestCase):
         with self.assertRaisesRegex(TypeError, "does not support None arguments"):
             optional(x)
 
+        @torch.compiler.export_python(path=self._tmp_path("mixed.py"), backend="eager")
+        def mixed(inp, opts):
+            return inp + 1
+
+        with self.assertRaisesRegex(TypeError, "instead of passing 3 as"):
+            mixed(x, (x, None, 3))
+
         @torch.compiler.export_python(
             path=self._tmp_path("nestmod.py"), backend="eager"
         )
@@ -12003,8 +12010,6 @@ class TestExportPython(TestCase):
 
         # A wrapper subclass reports data_ptr() == 0 with a real device, so comparing
         # its span directly would call every pair disjoint.
-        from torch.testing._internal.two_tensor import TwoTensor
-
         payload = torch.from_numpy(np.zeros(8, dtype=np.float32))
         self.assertTrue(
             _shares_memory(
@@ -12329,7 +12334,7 @@ class TestExportPython(TestCase):
         nonfinite = fn(x)
         nonfinite[0] = float("nan")
         with self.assertRaisesRegex(PrecompileError, "where the result is finite"):
-            _verify_against_eager(fn, (x,), (x,), nonfinite, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), nonfinite, path, _rng_state())
 
     def test_check_does_not_report_a_relative_diff_of_1e308(self, device):
         # The denominator was clamped to float64 tiny, so every exactly-zero reference
@@ -12346,7 +12351,7 @@ class TestExportPython(TestCase):
         torch.compiler.export_python(path=path)(fn)(x)
         wrong = torch.relu(x) + 1.0
         with self.assertRaises(PrecompileError) as cm:
-            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), wrong, path, _rng_state())
         message = str(cm.exception)
         self.assertIn("max rel diff", message)
         for absurd in ("e+30", "e+29", "e+308"):
@@ -12363,7 +12368,7 @@ class TestExportPython(TestCase):
         x = make_tensor((64,), device=device, dtype=torch.float32, low=0, high=10)
         path = self._tmp_path("int.py")
         with self.assertRaisesRegex(PrecompileError, "does not match"):
-            _verify_against_eager(fn, (x,), (x,), fn(x) + 1, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), fn(x) + 1, path, _rng_state())
 
     def test_check_reports_a_finite_diff_when_the_reference_has_inf(self, device):
         # Matching inf in both runs must not turn every reported statistic into nan.
@@ -12377,7 +12382,7 @@ class TestExportPython(TestCase):
         wrong[1:] += 1.0
         path = self._tmp_path("inf.py")
         with self.assertRaises(PrecompileError) as cm:
-            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), wrong, path, _rng_state())
         message = str(cm.exception)
         self.assertRegex(message, r"max abs diff 1\.000e\+00, max rel diff \d")
 
@@ -12390,7 +12395,7 @@ class TestExportPython(TestCase):
         x = make_tensor((8,), device=device, dtype=torch.float32)
         path = self._tmp_path("scalar.py")
         with self.assertRaisesRegex(PrecompileError, "returns 4 where fn returns 3"):
-            _verify_against_eager(fn, (x,), (x,), (x * 2, 4), path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), (x * 2, 4), path, _rng_state())
 
     def test_check_reports_an_output_on_the_wrong_device(self, device):
         if torch.device(device).type != "cuda":
@@ -12403,7 +12408,7 @@ class TestExportPython(TestCase):
         x = make_tensor((8,), device=device, dtype=torch.float32)
         path = self._tmp_path("dev.py")
         with self.assertRaisesRegex(PrecompileError, "/cpu but eager gives"):
-            _verify_against_eager(fn, (x,), (x,), fn(x).cpu(), path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), fn(x).cpu(), path, _rng_state())
 
     def test_check_tolerates_a_one_ulp_float8_difference(self, device):
         # One ulp of float8_e4m3fn is 12.5% relative: a rounding flip an honest artifact
@@ -12416,7 +12421,7 @@ class TestExportPython(TestCase):
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
         honest = torch.tensor([1.125, 2.0, 3.0], device=device).to(torch.float8_e4m3fn)
         path = self._tmp_path("fp8ulp.py")
-        _verify_against_eager(fn, (x,), (x,), honest, path, _rng_state())
+        _verify_against_eager(fn, (x,), (x,), (x,), honest, path, _rng_state())
 
     def test_check_uses_the_real_dtype_tolerances_for_complex(self, device):
         # complex128 fell back to fp32 tolerances, so a 1e-6 relative edit passed.
@@ -12428,7 +12433,7 @@ class TestExportPython(TestCase):
         x = make_tensor((16,), device=device, dtype=torch.complex128, low=1, high=2)
         path, wrong = self._tmp_path("c128.py"), fn(x) * (1 + 1e-6)
         with self.assertRaisesRegex(PrecompileError, "does not match"):
-            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), wrong, path, _rng_state())
 
     def test_check_names_a_finiteness_mismatch_in_a_complex_output(self, device):
         from torch.compiler._export_python import _rng_state, _verify_against_eager
@@ -12440,7 +12445,7 @@ class TestExportPython(TestCase):
         path, wrong = self._tmp_path("cfinite.py"), fn(x)
         wrong[0] = complex(float("nan"), 0)
         with self.assertRaisesRegex(PrecompileError, "where the result is finite"):
-            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), wrong, path, _rng_state())
 
     def test_check_names_a_non_finite_value_mismatch(self, device):
         # Both runs are non-finite at the same position, so the finite-only diff is 0;
@@ -12454,7 +12459,7 @@ class TestExportPython(TestCase):
         path, wrong = self._tmp_path("infsign.py"), fn(x)
         wrong[0] = -float("inf")
         with self.assertRaisesRegex(PrecompileError, "which non-finite value"):
-            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
+            _verify_against_eager(fn, (x,), (x,), (x,), wrong, path, _rng_state())
 
     def test_check_tolerates_rounding_where_eager_is_exactly_zero(self, device):
         # The atol cap is a fraction of the reference's magnitude, which is 0 here, so
@@ -12467,11 +12472,11 @@ class TestExportPython(TestCase):
         x = torch.ones(4, 16, device=device)
         path = self._tmp_path("zeros.py")
         _verify_against_eager(
-            fn, (x,), (x,), torch.full_like(x, 1e-6), path, _rng_state()
+            fn, (x,), (x,), (x,), torch.full_like(x, 1e-6), path, _rng_state()
         )
         with self.assertRaisesRegex(PrecompileError, "does not match"):
             _verify_against_eager(
-                fn, (x,), (x,), torch.full_like(x, 1e-3), path, _rng_state()
+                fn, (x,), (x,), (x,), torch.full_like(x, 1e-3), path, _rng_state()
             )
 
     def test_check_env_vars_are_parsed(self, device):
@@ -12527,7 +12532,7 @@ class TestExportPython(TestCase):
 
         # Only the width is baked into the strides, so a host whose ISA adds features
         # at the same width (AVX-512 -> AVX-512 VNNI) runs the artifact.
-        self.assertEqual(load_with_stamp((width, "")), expected)
+        self.assertEqual(load_with_stamp((width, name.split()[0])), expected)
         # A scalar capture (cpp.simdlen=0, ATEN_CPU_CAPABILITY=default) bakes no stride.
         scalar_path = self._tmp_path("isa_scalar.py")
         with ind_config.patch({"cpp.simdlen": 0}):
@@ -12627,7 +12632,7 @@ class TestExportPython(TestCase):
 
     def test_a_missing_or_malformed_cpu_isa_stamp_warns(self, device):
         # The only checked stamp that raises must not go quiet when a hand-edit drops
-        # it, leaves it unparsable or changes its shape: it warns, once per load.
+        # it or garbles it (unparsable, reshaped or retyped): it warns, once per load.
         if torch.device(device).type != "cpu":
             self.skipTest("the stamp is about C++ kernels")
         from torch.compiler._export_python import _CPU_ISA_TAG
@@ -12646,7 +12651,8 @@ class TestExportPython(TestCase):
         dropped = "\n".join(l for l in source.splitlines() if l != stamp)
         unparsable = source.replace(stamp, f"{_CPU_ISA_TAG}avx512")
         reshaped = source.replace(stamp, f"{_CPU_ISA_TAG}'avx512'")
-        for edited in (dropped, unparsable, reshaped):
+        retyped = source.replace(stamp, f"{_CPU_ISA_TAG}('512', 'avx512')")
+        for edited in (dropped, unparsable, reshaped, retyped):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(edited)
             with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
@@ -12686,7 +12692,7 @@ class TestExportPython(TestCase):
         with mock.patch.dict(os.environ, {"COMPILER_EXPORT_PYTHON_CHECK_ATOL": "1e-9"}):
             with self.assertRaises(PrecompileError) as cm:
                 wrong = torch.relu(x) + 1.0
-                _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
+                _verify_against_eager(fn, (x,), (x,), (x,), wrong, path, _rng_state())
         self.assertNotIn("all near-zero", str(cm.exception))
 
     def test_a_small_magnitude_random_fn_is_skipped_not_blamed(self, device):
@@ -12732,6 +12738,29 @@ class TestExportPython(TestCase):
         self.assertIn("input 0 as the artifact", warned[0])
         self.assertNotIn("input 1", warned[0])
         self.assertNotIn("output 0", warned[0])
+
+    def test_an_in_place_random_write_with_a_grad_operand_is_skipped(self, device):
+        # The write leaves x a non-leaf, which refuses deepcopy; the detector copied the
+        # post-call inputs, swallowed that, and blamed a hand-edit nobody had made.
+        path = self._tmp_path("inplacerandgrad.py")
+
+        def fn(x, w):
+            x.add_(w * torch.rand_like(x))
+            return w * 2
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        w = make_tensor((4096,), device=device, dtype=torch.float32)
+        w.requires_grad_()
+        from torch.compiler._export_python import _CHECK_ENV
+
+        logger = "torch.compiler._export_python"
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            with self.assertLogs(logger, level="WARNING") as lg:
+                torch.compiler.export_python(path=path)(fn)(x.clone(), w)
+                torch.compiler.export_python(path=path)(fn)(x.clone(), w)
+        warned = [line for line in lg.output if "draws from the generator" in line]
+        self.assertEqual(len(warned), 1, lg.output)
+        self.assertIn("input 0 as the artifact", warned[0])
 
     def test_a_random_non_finite_mask_is_skipped_not_blamed(self, device):
         # The finite-pattern check ran before draw detection, so a random -inf mask
