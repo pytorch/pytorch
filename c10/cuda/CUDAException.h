@@ -40,6 +40,12 @@ class C10_CUDA_API CUDAErrorLogCapture {
   do {                                                              \
     c10::cuda::CUDAErrorLogCapture __cuda_error_log;                \
     const cudaError_t __err = EXPR;                                 \
+    if (C10_LIKELY(                                                 \
+            __err == cudaSuccess &&                                 \
+            !c10::cuda::detail::dsa_buffer_allocated.load(          \
+                std::memory_order_relaxed))) {                      \
+      break;                                                        \
+    }                                                               \
     c10::cuda::c10_cuda_check_implementation(                       \
         static_cast<int32_t>(__err),                                \
         __FILE__,                                                   \
