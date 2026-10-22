@@ -1,4 +1,3 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 #include <gtest/gtest.h>
 
 #include <ATen/cuda/tunable/GemmLdRules.h>
