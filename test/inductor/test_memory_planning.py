@@ -24,6 +24,7 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -103,6 +104,45 @@ class TestMemoryPlanningOutputGroups(TestCase):
         group = self.compute_single_group(scheduler_buffers=scheduler_buffers)
         self.assertEqual(group.names, ["buf16", "buf48"])
         self.assertTrue(group.is_output)
+
+
+class TestAllocFromPool(TestCase):
+    # The guards binding is a fast path for the inductor op; both must behave the same.
+    impls = {
+        "guards": torch._C._dynamo.guards._alloc_from_pool,
+        "op": torch.ops.inductor._alloc_from_pool,
+    }
+
+    @parametrize("impl", impls.keys())
+    @parametrize(
+        "scalar_type,size,stride",
+        [
+            (torch.float32, (4, 8), (8, 1)),
+            (torch.float16, (3, 5), (1, 3)),
+            (torch.int64, (), ()),
+        ],
+        # Each test uses a unique dtype, so override test name to only include that.
+        name_fn=lambda scalar_type, *_: str(scalar_type).removeprefix("torch."),
+    )
+    def test_views_pool_bytes(self, device, impl, scalar_type, size, stride):
+        pool = torch.randint(256, (1024,), dtype=torch.uint8, device=device)
+        offset_bytes = 64
+        elem_offset = offset_bytes // scalar_type.itemsize
+        expected = pool.view(scalar_type).as_strided(size, stride, elem_offset)
+
+        actual = self.impls[impl](pool, offset_bytes, scalar_type, size, stride)
+
+        self.assertEqual(actual, expected, exact_device=True, exact_stride=True)
+        self.assertEqual(actual.data_ptr(), expected.data_ptr())
+
+    @parametrize("impl", impls.keys())
+    def test_rejects_pool_with_storage_offset(self, device, impl):
+        pool = torch.empty(1024, dtype=torch.uint8, device=device)[8:]
+        with self.assertRaisesRegex(RuntimeError, "storage_offset"):
+            self.impls[impl](pool, 0, torch.float32, (4,), (1,))
+
+
+instantiate_device_type_tests(TestAllocFromPool, globals(), only_for=("cpu", GPU_TYPE))
 
 
 @requires_gpu()
