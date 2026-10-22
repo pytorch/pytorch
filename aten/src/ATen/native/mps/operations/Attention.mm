@@ -133,10 +133,17 @@ static void sdpa_vector_mps(const Tensor& q,
 static constexpr std::array<int64_t, 8> kPrefillTiles{32, 64, 72, 80, 96, 128, 160, 192};
 static constexpr std::array<int64_t, 4> kMppTiles{64, 96, 128, 256};
 static constexpr int64_t kChunkTile = 128;
+// Split-K spreads the keys of a Q block over threadgroups until the grid
+// reaches kSplitTargetThreadgroups (fills an M5 Pro), keeping at least
+// kSplitMinKBlocks K blocks per split so the partial rows and merge pay off,
+// and at most kMaxSplits of them.
+static constexpr int64_t kSplitTargetThreadgroups = 128, kSplitMinKBlocks = 8, kMaxSplits = 32;
 
 // Prefill: flash attention on simdgroup matrices (PrefillAttention.h) or, on
 // macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h) for half and
-// bfloat on their exact tiles. One threadgroup per (Q block, head, batch).
+// bfloat on their exact tiles. One threadgroup per (Q block, head, batch),
+// with the keys split across threadgroups when that grid is too small to
+// fill the GPU.
 static void sdpa_prefill_mps(const Tensor& q,
                              const Tensor& k,
                              const Tensor& v,
@@ -156,7 +163,7 @@ static void sdpa_prefill_mps(const Tensor& q,
   const int64_t bd = use_mpp          ? d
       : widest > kPrefillTiles.back() ? kChunkTile
                                       : *std::lower_bound(kPrefillTiles.begin(), kPrefillTiles.end(), widest);
-  const int64_t bq = use_mpp ? kMppBQ : kPrefillBQ;
+  const int64_t bq = use_mpp ? kMppBQ : kPrefillBQ, bk = use_mpp ? kMppBK : prefill_bk(bd);
 
   std::optional<Tensor> mask = mask_;
   PrefillAttnMaskParams mask_params{};
@@ -168,12 +175,23 @@ static void sdpa_prefill_mps(const Tensor& q,
     mask_params = {.M_strides = {mask->stride(0), mask->stride(1), mask->stride(2), mask->stride(3)}};
   }
 
+  const int64_t rows = q.size(0) * q.size(1) * q.size(2);
+  const int64_t nq = c10::metal::ceil_div(q.size(2), bq), nk = c10::metal::ceil_div(k.size(2), bk);
+  const int64_t max_splits = std::clamp(nk / kSplitMinKBlocks, int64_t(1), kMaxSplits);
+  const int64_t n_splits = std::clamp(kSplitTargetThreadgroups / (nq * q.size(0) * q.size(1)), int64_t(1), max_splits);
+  const bool split = n_splits > 1;
+  const auto float_opts = q.options().dtype(kFloat);
+  Tensor sums, maxs;
+  if (split) {
+    sums = at::empty({rows, n_splits}, float_opts);
+    maxs = at::empty_like(sums);
+  }
   const auto dtype = scalarToMetalTypeString(q);
   std::string kname;
   if (use_mpp) {
     const auto mpp_dtype = q.scalar_type() == kHalf ? "float16"sv : "bfloat16"sv;
     const auto mpp_mask_dtype = mask && mask->scalar_type() == kBool ? "bool_"sv : mpp_dtype;
-    kname = fmt::format("prefill_attention_mpp_{}_{}_bq{}_bk{}_bd{}_wm{}_wn1_hm{:d}_dc{:d}_mask{}",
+    kname = fmt::format("prefill_attention_mpp_{}_{}_bq{}_bk{}_bd{}_wm{}_wn1_hm{:d}_dc{:d}_split{:d}_mask{}",
                         is_apple10_or_newer ? "a10"sv : "a9"sv,
                         mpp_dtype,
                         kMppBQ,
@@ -182,24 +200,30 @@ static void sdpa_prefill_mps(const Tensor& q,
                         kPrefillSimdgroups,
                         mask.has_value(),
                         is_causal,
+                        split,
                         mpp_mask_dtype);
   } else {
     const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
-    kname = fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_mask{}",
+    kname = fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}",
                         dtype,
                         bd,
                         mask.has_value(),
                         is_causal,
                         d > bd,
+                        split,
                         mask_dtype);
   }
   const auto pso = lib.getPipelineStateForFunc(kname);
-  const MTLSize grid = MTLSizeMake(c10::metal::ceil_div(q.size(2), bq), q.size(1), q.size(0));
+  const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * n_splits);
   const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, kPrefillSimdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
   for (int64_t v0 = 0; v0 < dv; v0 += bd) {
     const auto vs = v.narrow(3, v0, std::min(bd, dv - v0));
     const auto os = out.narrow(3, v0, vs.size(3));
+    Tensor partials;
+    if (split) {
+      partials = at::empty({rows, n_splits, bd}, float_opts);
+    }
     const PrefillAttnParams params{
         .B = c10::safe_conv<int32_t>(q.size(0)),
         .H = c10::safe_conv<int32_t>(q.size(1)),
@@ -209,6 +233,7 @@ static void sdpa_prefill_mps(const Tensor& q,
         .gqa_factor = c10::safe_conv<int32_t>(q.size(1) / k.size(1)),
         .scale = scale,
         .Dv = c10::safe_conv<int32_t>(vs.size(3)),
+        .n_splits = c10::safe_conv<int32_t>(n_splits),
         .Q_strides = {q.stride(0), q.stride(1), q.stride(2)},
         .K_strides = {k.stride(0), k.stride(1), k.stride(2)},
         .V_strides = {vs.stride(0), vs.stride(1), vs.stride(2)},
@@ -218,14 +243,22 @@ static void sdpa_prefill_mps(const Tensor& q,
       @autoreleasepool {
         auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
-        mtl_setArgs(computeEncoder, q, k, vs, os, params, mask_params);
-        // The kernels reference the mask in every instantiation; Metal
-        // validation wants it bound even when unused.
-        mtl_setArgs<6>(computeEncoder, uint32_t(0));
+        // Split-K launches write their partial rows in place of the output.
+        mtl_setArgs(computeEncoder, q, k, vs, split ? partials : os, params, mask_params);
+        // The kernels reference the mask and row-stats buffers in every
+        // instantiation; Metal validation wants them bound even when unused, and
+        // the writable row stats bound to a real buffer (the output stands in).
+        mtl_setArgs<6>(computeEncoder, uint32_t(0), os, os);
         if (mask) {
           mtl_setArgs<6>(computeEncoder, *mask);
         }
+        if (split) {
+          mtl_setArgs<7>(computeEncoder, sums, maxs);
+        }
         [computeEncoder dispatchThreadgroups:grid threadsPerThreadgroup:threadgroup];
+        if (split) {
+          merge_partials(computeEncoder, partials, sums, maxs, os);
+        }
       }
     });
   }

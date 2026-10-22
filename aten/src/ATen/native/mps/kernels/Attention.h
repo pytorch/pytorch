@@ -47,6 +47,7 @@ struct PrefillAttnParams {
   int gqa_factor; // num_q_heads / num_kv_heads
   float scale;
   int Dv; // V/O columns per slab, <= the tile width
+  int n_splits; // threadgroups sharing a Q block along kL; > 1 writes partials
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
   // 64-bit: a batch/head stride is a product of the other dimensions and
   // overflows 32 bits on large inputs, and the mask qL stride is multiplied
@@ -63,8 +64,8 @@ struct PrefillAttnMaskParams {
 
 #ifdef __METAL__
 // Output element type: the input dtype, or fp32 partial rows when the keys
-// are split across threadgroups (two-pass decode), written in place of the
-// output and merged by sdpa_merge_partials.
+// are split across threadgroups (two-pass decode, split-K prefill), written
+// in place of the output and merged by sdpa_merge_partials.
 template <typename T, bool SPLIT>
 using SplitOutT = metal::conditional_t<SPLIT, float, T>;
 // An additive mask enters the exp2 softmax as mask * log2(e). The product
