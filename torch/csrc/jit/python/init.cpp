@@ -170,6 +170,12 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
 TORCH_API void runJITCPPTests();
 #endif
 
+// A raw C function rather than a pybind11 binding: torch.compile calls it on
+// every compiled call, where pybind11's dispatch costs more than the work.
+static PyObject* is_tracing(PyObject* /*self*/, PyObject* /*noargs*/) {
+  return PyBool_FromLong(tracer::isTracing());
+}
+
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
@@ -2145,7 +2151,13 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
-  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
+  static auto is_tracing_methods = std::to_array<PyMethodDef>({
+      {"_is_tracing", is_tracing, METH_NOARGS, nullptr},
+      {nullptr, nullptr, 0, nullptr},
+  });
+  TORCH_CHECK(
+      PyModule_AddFunctions(module, is_tracing_methods.data()) == 0,
+      "failed to add _is_tracing to torch._C");
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")

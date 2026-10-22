@@ -3,9 +3,42 @@
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <atomic>
 #include <cstring>
 
 namespace c10 {
+
+namespace {
+// While no MemoryReportingInfoBase is alive, none can be installed as the
+// PROFILER_STATE debug info, so the allocator hooks skip the TLS lookup.
+// Relaxed suffices: a thread that sees an installed reporter is already
+// ordered after its construction and before its destruction.
+std::atomic<size_t> live_memory_reporters{0};
+
+MemoryReportingInfoBase* current_memory_reporter() {
+  if (C10_LIKELY(live_memory_reporters.load(std::memory_order_relaxed) == 0)) {
+    return nullptr;
+  }
+  return static_cast<MemoryReportingInfoBase*>(
+      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+}
+} // namespace
+
+MemoryReportingInfoBase::MemoryReportingInfoBase() noexcept {
+  live_memory_reporters.fetch_add(1, std::memory_order_relaxed);
+}
+
+MemoryReportingInfoBase::MemoryReportingInfoBase(
+    const MemoryReportingInfoBase& /*other*/) noexcept
+    : MemoryReportingInfoBase() {}
+
+MemoryReportingInfoBase::MemoryReportingInfoBase(
+    MemoryReportingInfoBase&& /*other*/) noexcept
+    : MemoryReportingInfoBase() {}
+
+MemoryReportingInfoBase::~MemoryReportingInfoBase() {
+  live_memory_reporters.fetch_sub(1, std::memory_order_relaxed);
+}
 
 DataPtr Allocator::clone(const void* data, std::size_t n) {
   DataPtr new_data = allocate(n);
@@ -58,8 +91,7 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
 }
 
 bool memoryProfilingEnabled() {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  auto* reporter_ptr = current_memory_reporter();
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
 }
 
@@ -69,8 +101,7 @@ void reportMemoryUsageToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  auto* reporter_ptr = current_memory_reporter();
   if (reporter_ptr) {
     reporter_ptr->reportMemoryUsage(
         ptr, alloc_size, total_allocated, total_reserved, device);
@@ -82,8 +113,7 @@ void reportOutOfMemoryToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  auto* reporter_ptr = current_memory_reporter();
   if (reporter_ptr) {
     reporter_ptr->reportOutOfMemory(
         alloc_size, total_allocated, total_reserved, device);

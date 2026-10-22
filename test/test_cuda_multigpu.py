@@ -166,6 +166,24 @@ class TestCudaMultiGPU(TestCase):
         self._test_copy_sync_current_stream(x0, x2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_empty_on_current_device(self):
+        # Inductor allocates every buffer through this binding.
+        from torch._C._dynamo.guards import _empty_strided_cuda
+
+        prev = torch.cuda.current_device()
+        target = (prev + 1) % torch.cuda.device_count()
+        with torch.cuda.device(target):
+            tensors = [
+                torch.empty(2, 3, device="cuda"),
+                torch.empty_strided((2, 3), (3, 1), device="cuda"),
+                _empty_strided_cuda((2, 3), (3, 1), torch.float32),
+            ]
+            self.assertEqual(torch.cuda.current_device(), target)
+        for t in tensors:
+            self.assertEqual(t.device, torch.device("cuda", target))
+        self.assertEqual(torch.cuda.current_device(), prev)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_cat_autogpu(self):
         x = torch.randn(4, 4).cuda(1)
         y = torch.randn(4, 4).cuda(1)
