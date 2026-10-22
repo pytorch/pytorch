@@ -290,6 +290,41 @@ def wildcard_fallback_is_enabled() -> bool:
     return torch._C._cuda_tunableop_wildcard_fallback_is_enabled()  # type: ignore[attr-defined]
 
 
+# The four helpers below drive the compile-time two-phase flow and are private:
+# the setters are called only by Inductor orchestration, the queries only by
+# tests. They are deliberately absent from __all__ and from
+# docs/source/cuda.tunable.md -- promoting them would commit us to a supported
+# contract for what is an internal compile-time mechanism.
+def _nearest_match_enable(val: bool = True) -> None:
+    r"""Allow borrowing a tuned solution from a neighbouring shape.
+
+    When a params signature has no exact entry, reuse the tuned solution identical
+    except in one free dimension (M, N or batch count), rounded up. Compile-time
+    only, and disabled during tuning: the borrowed solution is benchmarked and the
+    winner recorded in C++, so execution only needs exact matches.
+    """
+    torch._C._cuda_nearest_match_enable(val)  # type: ignore[attr-defined]
+
+
+def _nearest_match_is_enabled() -> bool:
+    r"""Returns whether a nearest-match solution may be borrowed."""
+    return torch._C._cuda_nearest_match_is_enabled()  # type: ignore[attr-defined]
+
+
+def _record_borrowed_enable(val: bool = True) -> None:
+    r"""Allow persisting borrowed results while tuning is disabled.
+
+    The normal write path only records results during tuning. Enable this so a
+    reuse pass can write what it decided.
+    """
+    torch._C._cuda_record_borrowed_enable(val)  # type: ignore[attr-defined]
+
+
+def _record_borrowed_is_enabled() -> bool:
+    r"""Returns whether borrowed results are persisted."""
+    return torch._C._cuda_record_borrowed_is_enabled()  # type: ignore[attr-defined]
+
+
 def set_max_tuning_duration(duration: int) -> None:
     r"""Set max time in milliseconds to spend tuning a given solution.
 
