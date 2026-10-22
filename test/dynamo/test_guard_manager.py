@@ -12,6 +12,7 @@ from unittest import mock
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.fx.traceback as fx_traceback
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -345,6 +346,15 @@ user_stack=None)
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
+
+    def test_fx_annotation_guard(self):
+        root = RootGuardManager()
+        root.add_fx_annotation_guard({"tag": "a"}, ["tag a"], None)
+        self.assertFalse(root.check({}))
+        with fx_traceback.annotate({"tag": "a"}):
+            self.assertTrue(root.check({}))
+        with fx_traceback.annotate({"tag": "b"}):
+            self.assertFalse(root.check({}))
 
     def test_length_check_guard(self):
         root = RootGuardManager()
