@@ -126,7 +126,7 @@ sycl::event convolution(
   }
   auto expected_dst_md = conv_fwd_pd.dst_desc();
   if (attr.with_binary())
-    attr.construct_post_binary(conv_fwd_pd, args);
+    attr.construct_post_binary(args);
 
   args.insert({DNNL_ARG_SRC, src_m});
   args.insert({DNNL_ARG_WEIGHTS, weight_m});
