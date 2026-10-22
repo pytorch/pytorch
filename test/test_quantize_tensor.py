@@ -41,12 +41,9 @@ def _quantize_mxfp8_reference(
     source = (input if dim == 1 else input.t()).contiguous()
     scales, qdata = to_mxfp8_reference(source, format="mxfp8", swizzle_type=swizzle)
     if dim == 0:
-        # Note: we only transpose qdata here because swizzled scales are packed
-        # and we always return them with respect to the contiguous qdata axis
-        # permutation.
         qdata = qdata.t()
-        if not is_scale_swizzled:
-            scales = scales.t()
+        # For packed scales, the singleton axis makes this a metadata-only transpose.
+        scales = scales.t()
     return qdata, scales
 
 
@@ -157,6 +154,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(qdata.shape, shape)
         self.assertEqual(qdata.stride(), (1, shape[0]))
+        self.assertEqual(scales.shape, (scales.numel(), 1))
         self.assertEqual(scales, scales_ref)
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
@@ -196,6 +194,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.shape, shape)
         self.assertEqual(qdata_m.stride(), (1, shape[0]))
         self.assertEqual(scales_k, scales_k_ref)
+        self.assertEqual(scales_m.shape, (scales_m.numel(), 1))
         self.assertEqual(scales_m, scales_m_ref)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
@@ -260,7 +259,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.shape, data_hp.shape)
         expected_stride = (data_hp.shape[1], 1) if axis == 1 else (1, data_hp.shape[0])
         self.assertEqual(qdata.stride(), expected_stride)
-        if not is_scale_swizzled:
+        if is_scale_swizzled:
+            expected_scale_shape = (
+                (1, scales.numel()) if axis == 1 else (scales.numel(), 1)
+            )
+            self.assertEqual(scales.shape, expected_scale_shape)
+        else:
             self.assertEqual(scales.shape, (data_hp.shape[0] // 32, data_hp.shape[1]))
             self.assertEqual(scales.stride(), (1, data_hp.shape[0] // 32))
 
@@ -282,6 +286,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.shape, data_hp.shape)
         self.assertEqual(qdata_k.stride(), (data_hp.shape[1], 1))
         self.assertEqual(qdata_m.stride(), (1, data_hp.shape[0]))
+        self.assertEqual(scales_k.shape, (1, scales_k.numel()))
+        self.assertEqual(scales_m.shape, (scales_m.numel(), 1))
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_transposed_input_square(self, device):
@@ -291,7 +297,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp.t())
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), True, True)
         self.assertEqual(qdata, qdata_ref.t())
-        self.assertEqual(scales, scales_ref)
+        self.assertEqual(scales, scales_ref.t())
+        self.assertEqual(scales.shape, (scales.numel(), 1))
         self.assertEqual(qdata.shape, data_hp.shape)
         self.assertEqual(qdata.stride(), (1, data_hp.shape[0]))
 
@@ -330,7 +337,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             if is_scale_swizzled
             else (M, K // 32)
         )
-        scale_m_shape = (1, ((K + 127) // 128) * ((M + 127) // 128) * 32 * 16)
+        scale_m_shape = (((K + 127) // 128) * ((M + 127) // 128) * 32 * 16, 1)
         expected_shapes = (
             (M, K),
             scale_k_shape if dim[-1] == -1 else scale_m_shape,
@@ -368,7 +375,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.shape, (M, K))
         scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
         self.assertEqual(scales_k.shape, (1, scale_bytes))
-        self.assertEqual(scales_m.shape, (1, scale_bytes))
+        self.assertEqual(scales_m.shape, (scale_bytes, 1))
         for output in (qdata_k, scales_k, qdata_m, scales_m):
             self.assertEqual(output.device, data_hp.device)
             self.assertEqual(output.numel(), 0)
