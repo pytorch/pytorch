@@ -345,8 +345,7 @@ class GlobalCallbackSession {
   // exited; returns true once drained (also returns true if the session was
   // never opened; it remained purely thread-local profiling). Closing is fused
   // with the wait, so the session cannot be closed without waiting out
-  // in-flight callbacks. It waits even if the session is already closed, so a
-  // later drain still catches a callback that an earlier drain timed out on.
+  // in-flight callbacks.
   //
   // Returns false if the drain does not complete within kDrainTimeout. A normal
   // drain takes microseconds (the in-flight window is just a callback's
@@ -356,7 +355,9 @@ class GlobalCallbackSession {
   // freeing it under a live callback would reintroduce the use-after-free this
   // session guards against.
   bool drain() {
-    active_.store(false);
+    if (!active_.exchange(false)) {
+      return true;
+    }
     std::unique_lock<std::mutex> lock(mutex_);
     return cv_.wait_for(
         lock, kDrainTimeout, [this] { return in_flight_.load() == 0; });
@@ -870,9 +871,15 @@ void enableProfiler(
 }
 
 void closeGlobalCallbackSession() {
-  // There is no path to finalizing the trace from here, so we only need to
-  // close the gate and don't need to check whether the drain timed out.
-  (void)globalCallbackSession().drain();
+  if (!globalCallbackSession().drain()) {
+    // A global callback is wedged. Pop the global state so a later
+    // disableProfiler() doesn't finalize the trace while that callback is
+    // still writing to it.
+    LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
+    if (auto state_ptr = ProfilerStateBase::pop(/*global=*/true)) {
+      state_ptr->removeCallback();
+    }
+  }
 }
 
 bool isProfilerEnabledInMainThread() {
