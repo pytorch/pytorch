@@ -55,6 +55,7 @@ from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
+    DeviceProperties,
     get_warp_size,
     native_matmul_persistent_rblock,
     ReductionHint,
@@ -9324,7 +9325,9 @@ class TritonScheduling(SIMDScheduling):
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         pins = (
-            self.tensor_descriptor_variant_pins()
+            self.tensor_descriptor_variant_pins(
+                DeviceProperties.create(V.graph.get_current_device_or_throw())
+            )
             if allow_tma_variants and not is_scan
             else []
         )
@@ -9352,13 +9355,25 @@ class TritonScheduling(SIMDScheduling):
         return choices
 
     @staticmethod
-    def tensor_descriptor_variant_pins() -> list[dict[str, bool]]:
+    def tensor_descriptor_variant_pins(
+        device_props: DeviceProperties,
+    ) -> list[dict[str, bool]]:
         """TMA settings pinned on each choice of a pool, the non-TMA baseline first, or [] for no pool."""
         pool = config.triton.autotune_tensor_descriptor
         if (
             pool not in ("auto", "all")
             or not config.triton.use_tensor_descriptor
             or not (config.max_autotune or config.max_autotune_pointwise)
+            or not has_triton_stable_tma_api()
+            or device_props.type == "hip"
+            or (
+                device_props.type == "cuda"
+                and (
+                    device_props.major is None
+                    or device_props.major < 9
+                    or not config.assume_aligned_inputs
+                )
+            )
             # Picking by measured time is what these forbid.
             or config.deterministic
             or config.batch_invariant

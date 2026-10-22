@@ -2711,30 +2711,43 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
         "triton.use_tensor_descriptor": True,
         "triton.autotune_tensor_descriptor": "auto",
         "max_autotune_pointwise": True,
+        "assume_aligned_inputs": True,
     }
 )
 class TensorDescriptorPoolGateTest(InductorTestCase):
     def test_pool_pins(self):
         pins = TritonScheduling.tensor_descriptor_variant_pins
-        self.assertEqual(
-            pins(),
-            [
-                {"override_tensor_descriptor": False},
-                {"override_tensor_descriptor": True, "override_host_side_tma": True},
-            ],
+        cuda = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=90,
+            major=9,
+            warp_size=32,
         )
+        expected = [
+            {"override_tensor_descriptor": False},
+            {"override_tensor_descriptor": True, "override_host_side_tma": True},
+        ]
+        self.assertEqual(
+            pins(cuda),
+            expected,
+        )
+        self.assertEqual(pins(cuda._replace(cc=80, major=8)), [])
+        self.assertEqual(pins(cuda._replace(type="hip")), [])
         with config.patch({"triton.autotune_tensor_descriptor": "all"}):
-            self.assertEqual(len(pins()), 3)
+            self.assertEqual(len(pins(cuda)), 3)
         for patches in (
             {"triton.autotune_tensor_descriptor": "off"},
             {"max_autotune_pointwise": False},
+            {"assume_aligned_inputs": False},
             {"deterministic": True},
             {"batch_invariant": True},
             {"triton.multi_kernel": 2},
             {"cpp_wrapper": True},
         ):
             with config.patch(patches):
-                self.assertEqual(pins(), [], msg=str(patches))
+                self.assertEqual(pins(cuda), [], msg=str(patches))
 
 
 @unittest.skipIf(
@@ -2813,15 +2826,14 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             counters["inductor"]["multi_kernel_sub_kernel_dropped"], 2
         )
 
-    @config.patch({"assume_aligned_inputs": False})
-    def test_tma_variant_that_falls_back_to_tl_load_is_dropped(self):
+    def test_tma_variant_with_unsupported_dtype_is_dropped(self):
         def fn(x):
-            return torch.nn.functional.silu(x) * 2
+            return torch.logical_not(x)
 
-        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randint(0, 2, (1024, 1024), dtype=torch.bool, device=GPU_TYPE)
         result, (code,) = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(result, fn(x), exact_device=True)
-        # Without aligned inputs no access takes a descriptor, so the TMA choice repeats the baseline.
+        # Bool has no tensor-map dtype, so the TMA choice repeats the baseline.
         FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
         FileCheck().check_not("async_compile.multi_kernel").run(code)
 
