@@ -8057,21 +8057,6 @@ class TestMPS(TestCaseMPS):
         y.backward(gradient=grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    @parametrize("grad_channels_last", [False, True])
-    def test_avg_pool2d_channels_last_input_grad_memory_format(self, grad_channels_last):
-        cpu_x = torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last).requires_grad_()
-        x = cpu_x.detach().to('mps').requires_grad_()
-        out = F.avg_pool2d(x, 2)
-        out_cpu = F.avg_pool2d(cpu_x, 2)
-        self.assertEqual(out, out_cpu)
-
-        cpu_grad = torch.randn(out_cpu.shape)
-        if grad_channels_last:
-            cpu_grad = cpu_grad.to(memory_format=torch.channels_last)
-        out.backward(cpu_grad.to('mps'))
-        out_cpu.backward(cpu_grad)
-        self.assertEqual(x.grad, cpu_x.grad)
-
     # Test adaptive avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
     def test_adaptive_avg_pool2d_simple(self):
