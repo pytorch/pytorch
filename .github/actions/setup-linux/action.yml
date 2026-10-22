@@ -50,17 +50,6 @@ runs:
   using: composite
   steps:
     # ── ARC-only steps ──────────────────────────────────────────────────
-    - name: Fix workspace permissions
-      if: ${{ inputs.use-arc == 'true' }}
-      shell: bash
-      run: |
-        # The CI image's jenkins user matches the GH runner uid 1001, but some
-        # non-ARC runners (e.g. DGX B200) may still own the workspace with a
-        # different uid. Keep the workspace writable until they move to 1001.
-        if sudo -n true 2>/dev/null; then
-          sudo chmod -R 777 "$GITHUB_WORKSPACE"
-        fi
-
     - name: Ack Git cache ownership
       if: ${{ inputs.use-arc == 'true' }}
       shell: bash
