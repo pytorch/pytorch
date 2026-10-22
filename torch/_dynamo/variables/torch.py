@@ -2144,6 +2144,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(fill_value, variables.TensorVariable) and not issubclass(
                 fill_value.python_type(), torch.nn.Parameter
             ):
+                # Eager converts fill_value with item(), which fails for meta tensors.
+                if fill_value.device.type == "meta":
+                    raise_observed_exception(
+                        RuntimeError,
+                        tx,
+                        args=["Tensor.item() cannot be called on meta tensors"],
+                    )
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
                 if (
