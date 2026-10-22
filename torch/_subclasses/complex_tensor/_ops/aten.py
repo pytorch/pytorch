@@ -5,7 +5,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 from .common import (
     _get_func_name,
     COMPLEX_TO_REAL,
@@ -152,7 +152,6 @@ del inplace_view_op
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [
     aten.col2im,
-    aten.alias,
     aten.lift_fresh,
     aten._unsafe_view,
     aten.index,
@@ -267,6 +266,19 @@ def reciprocal_impl(self: ComplexTensor) -> ComplexTensor:
         aten.div(self_r, den).to(out_dt),
         aten.div(-self_i, den).to(out_dt),
     )
+
+
+@register_complex(aten.alias)
+def alias_impl(
+    self: ComplexTensor | InterleavedComplexTensor,
+) -> ComplexTensor | InterleavedComplexTensor:
+    if isinstance(self, InterleavedComplexTensor):
+        out = InterleavedComplexTensor(self._data)
+        torch._C._set_neg(out, self.is_neg())
+        torch._C._set_conj(out, self.is_conj())
+        return out
+
+    return ComplexTensor(aten.alias(self.re), aten.alias(self.im))
 
 
 # reductions
