@@ -11038,6 +11038,13 @@ class TestExportPython(TestCase):
         with self.assertRaisesRegex(TypeError, "does not support None arguments"):
             optional(x)
 
+        @torch.compiler.export_python(path=self._tmp_path("mixed.py"), backend="eager")
+        def mixed(inp, opts):
+            return inp + 1
+
+        with self.assertRaisesRegex(TypeError, "instead of passing 3 as"):
+            mixed(x, (x, None, 3))
+
         @torch.compiler.export_python(
             path=self._tmp_path("nestmod.py"), backend="eager"
         )
@@ -11710,8 +11717,6 @@ class TestExportPython(TestCase):
 
         # A wrapper subclass reports data_ptr() == 0 with a real device, so comparing
         # its span directly would call every pair disjoint.
-        from torch.testing._internal.two_tensor import TwoTensor
-
         payload = torch.from_numpy(np.zeros(8, dtype=np.float32))
         self.assertTrue(
             _shares_memory(
@@ -12028,7 +12033,7 @@ class TestExportPython(TestCase):
 
         # Only the width is baked into the strides, so a host whose ISA adds features
         # at the same width (AVX-512 -> AVX-512 VNNI) runs the artifact.
-        self.assertEqual(load_with_stamp((width, "")), expected)
+        self.assertEqual(load_with_stamp((width, name.split()[0])), expected)
         # A scalar capture (cpp.simdlen=0, ATEN_CPU_CAPABILITY=default) bakes no stride.
         scalar_path = self._tmp_path("isa_scalar.py")
         with ind_config.patch({"cpp.simdlen": 0}):
@@ -12110,7 +12115,7 @@ class TestExportPython(TestCase):
 
     def test_a_missing_or_malformed_cpu_isa_stamp_warns(self, device):
         # The only checked stamp that raises must not go quiet when a hand-edit drops
-        # it, leaves it unparsable or changes its shape: it warns, once per load.
+        # it or garbles it (unparsable, reshaped or retyped): it warns, once per load.
         if torch.device(device).type != "cpu":
             self.skipTest("the stamp is about C++ kernels")
         from torch.compiler._export_python import _CPU_ISA_TAG
@@ -12129,7 +12134,8 @@ class TestExportPython(TestCase):
         dropped = "\n".join(l for l in source.splitlines() if l != stamp)
         unparsable = source.replace(stamp, f"{_CPU_ISA_TAG}avx512")
         reshaped = source.replace(stamp, f"{_CPU_ISA_TAG}'avx512'")
-        for edited in (dropped, unparsable, reshaped):
+        retyped = source.replace(stamp, f"{_CPU_ISA_TAG}('512', 'avx512')")
+        for edited in (dropped, unparsable, reshaped, retyped):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(edited)
             with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:

@@ -1127,11 +1127,12 @@ def export_python(
         the ISA on one machine, so they count as part of the machine type, and an
         artifact containing a C++ kernel records the ISA it was generated against
         and refuses to load under a different vector width or an ISA lacking one of
-        its features. Running a CUDA artifact on a different architecture fails
-        with a kernel-image error. Commit an artifact only
-        alongside the machine type it captured on, and regenerate (delete ``path``)
-        when that changes; apart from the CPU ISA, nothing detects the change for
-        you.
+        the features its name lists (CPU features the C++ GEMM templates select on
+        separately, such as AMX-FP16 and AVX-512 BF16, are not in that name and are
+        not checked). Running a CUDA artifact on a different architecture fails with
+        a kernel-image error. Commit an artifact only alongside the machine type it
+        captured on, and regenerate (delete ``path``) when that changes; apart from
+        the CPU ISA, nothing detects the change for you.
 
     Keyword call arguments and positional defaults are normalized onto ``fn``'s full
     positional signature (so ``rope(q=..., k=...)`` works and omitted defaults do not
@@ -1145,7 +1146,7 @@ def export_python(
     rejected, since neither is expressible in the artifact's positional convention.
 
     Six things that ``make_fx`` or the code generator resolves without emitting a guard
-    are recorded as comment stamps and checked on every call: each ``nn.Module``
+    are recorded as comment stamps; the first five are checked on every call: each ``nn.Module``
     argument's per-submodule ``training`` state, which input tensors shared memory at
     capture (aliasing decides what an in-place mutation means), which input positions
     held the *same* tensor object (AOTAutograd folds those into a single graph slot,
