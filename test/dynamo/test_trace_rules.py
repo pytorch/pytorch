@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import cmath
 import dataclasses
 import importlib
 import inspect
@@ -172,7 +173,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                     c_binding_in_graph_functions.add(obj)
 
     def _is_allowed_module_prefix(obj):
-        allowed_modules = ("torch", "math")
+        allowed_modules = ("torch", "math", "cmath")
         # torch.nn.modules.rnn is disallowed because these modules internally
         # flatten their parameters.  This flattening process will call
         # Tensor.set_ with a Storage, and Storages cannot be traced with
@@ -304,6 +305,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
+    _find_torch_objects(cmath)
 
     return AllowedObjects(
         torch_object_ids,
@@ -434,6 +436,23 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+
+    def test_consume_prefix_in_state_dict_if_present(self):
+        def fn(state_dict):
+            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+                state_dict, "module."
+            )
+            return state_dict["weight"] + 1
+
+        weight = torch.randn(2)
+        state_dict = {"module.weight": weight, "other": torch.randn(2)}
+        cnt = CompileCounter()
+        result = torch.compile(fn, backend=cnt, fullgraph=True)(state_dict)
+
+        self.assertEqual(result, weight + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(list(state_dict), ["other", "weight"])
+        self.assertIs(state_dict["weight"], weight)
 
     @parametrize("device", ("cuda", torch.device("cuda")))
     def test_is_compile_supported_constant(self, device):

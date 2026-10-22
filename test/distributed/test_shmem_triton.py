@@ -50,6 +50,16 @@ def requires_h100():
     )
 
 
+# rocSHMEM device reduce only supports these dtypes.
+ROCSHMEM_REDUCE_SUPPORTED_DTYPES = (
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.float32,
+    torch.float64,
+)
+
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -451,6 +461,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         SIGNAL_VAL = 1  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
 
+        # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
+        dist.barrier()
+
         if rank == 0:
             # Rank 0 puts into Rank 1
             my_putmem_signal_block_kernel[(1, 1, 1)](
@@ -509,6 +522,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
 
+        # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
+        dist.barrier()
+
         if rank == 0:
             # Rank 0 puts into Rank 1
             my_putmem_signal_block_kernel[(1, 1, 1)](
@@ -556,6 +572,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         expected_flag = torch.tensor(
             [FLAG_FINAL_VALUE], dtype=torch.int32, device=self.device
         )
+
+        # Barrier so the local flag init cannot erase the peer's incoming write.
+        dist.barrier()
 
         if rank == 0:
             # Rank 0 (the waiter)
@@ -610,6 +629,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         # Use the signal pad for synchronization, as in previous tests
         flag_dtype = torch.int64
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=flag_dtype).fill_(0)
+
+        # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
+        dist.barrier()
 
         if rank == 0:
             # Producer (rank 0): Puts data into rank 1's `out` buffer and then sets the flag
@@ -680,6 +702,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             [flag_val], dtype=torch.int32, device=self.device
         )
         NVSHMEM_CMP_EQ = 0  # compare equal
+
+        # Barrier so the local flag init cannot erase the peer's incoming write.
+        dist.barrier()
 
         if rank == 0:
             my_put_with_fence_kernel[(1,)](
@@ -933,7 +958,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -946,11 +970,15 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.uint8,
             torch.float16,
             torch.float32,
-            # torch.float64,  # Tensor-likes are not close
+            torch.float64,
             torch.bfloat16,
         ],
     )
     def test_triton_sum_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
+        if not TEST_WITH_ROCM and dtype == torch.float64:
+            self.skipTest("NVSHMEM float64 reduce: Tensor-likes are not close")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -995,7 +1023,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1012,6 +1039,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         ],
     )
     def test_triton_minmax_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1080,7 +1109,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst_max, torch.tensor(expected_max, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1092,11 +1120,15 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.int64,
             torch.float16,
             torch.float32,
-            # torch.float64,  # Tensor-likes are not close
+            torch.float64,
             torch.bfloat16,
         ],
     )
     def test_triton_prod_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
+        if not TEST_WITH_ROCM and dtype == torch.float64:
+            self.skipTest("NVSHMEM float64 reduce: Tensor-likes are not close")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name

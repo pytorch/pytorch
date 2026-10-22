@@ -104,6 +104,12 @@ class TestCppExtensionMTIABackend(common.TestCase):
         self.assertTrue(default_stream.query())
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_is_current_stream_capturing(self):
+        was_initialized = torch.mtia.is_initialized()
+        self.assertFalse(torch.mtia.is_current_stream_capturing())
+        self.assertEqual(torch.mtia.is_initialized(), was_initialized)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_context(self):
         mtia_stream_0 = torch.mtia.Stream(device="mtia:0")
         mtia_stream_1 = torch.mtia.Stream(device="mtia:0")
