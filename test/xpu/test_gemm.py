@@ -1453,10 +1453,10 @@ class TestBasicGEMM(TestCase):
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
-    def _quantize_per_token(self, a, dtype):
+    def _quantize_rowwise(self, a, dtype):
         qrange = {torch.int8: (-128, 127), torch.uint8: (0, 255)}
         if dtype not in qrange:
-            raise ValueError(f"_quantize_per_token: unsupported dtype {dtype}")
+            raise ValueError(f"_quantize_rowwise: unsupported dtype {dtype}")
         qmin, qmax = qrange[dtype]
         min_val = a.amin(dim=-1, keepdim=True)
         max_val = a.amax(dim=-1, keepdim=True)
@@ -1486,9 +1486,7 @@ class TestBasicGEMM(TestCase):
         b_fp32 = torch.rand((k, n), dtype=torch.float32, device=device)
         bias = torch.rand(n, dtype=out_dtype, device=device) if use_bias else None
 
-        mat_a, mat_a_scale, mat_a_zero_point = self._quantize_per_token(
-            a_fp32, act_dtype
-        )
+        mat_a, mat_a_scale, mat_a_zero_point = self._quantize_rowwise(a_fp32, act_dtype)
         b_uint8, mat_b_scales, mat_b_zero_points = self._group_quantize_tensor(
             b_fp32, n_bit=4, q_group_size=q_group
         )
