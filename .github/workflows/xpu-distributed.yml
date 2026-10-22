@@ -30,13 +30,13 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-noble-xpu-n-py3_10-distributed-build:
-    name: linux-noble-xpu-n-py3.10-distributed
+  linux-noble-xpu-n-py3_11-distributed-build:
+    name: linux-noble-xpu-n-py3.11-distributed
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      build-environment: linux-noble-xpu-n-py3.10-distributed
+      build-environment: linux-noble-xpu-n-py3.11-distributed
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -49,12 +49,12 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-noble-xpu-n-py3_10-distributed-test:
-    name: linux-noble-xpu-n-py3.10-distributed
+  linux-noble-xpu-n-py3_11-distributed-test:
+    name: linux-noble-xpu-n-py3.11-distributed
     uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-noble-xpu-n-py3_10-distributed-build
+    needs: linux-noble-xpu-n-py3_11-distributed-build
     with:
-      build-environment: ${{ needs.linux-noble-xpu-n-py3_10-distributed-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-xpu-n-py3_10-distributed-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-distributed-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-xpu-n-py3_11-distributed-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-xpu-n-py3_11-distributed-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-xpu-n-py3_11-distributed-build.outputs.test-matrix }}
     secrets: inherit
