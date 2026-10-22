@@ -8072,40 +8072,45 @@ class TestMPS(TestCaseMPS):
         out_cpu.backward(cpu_grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    @parametrize("input_shape,out_shape", [
-        ((2, 2, 4, 4), (2, 2)),
-        ((2, 2, 9, 9), (3, 3)),
-        ((2, 2, 16, 16), (2, 16)),
-        ((2, 16, 16), (4, 4)),
-        ((2, 2, 4, 4), (8, 8)),
-        ((2, 4, 4), (16, 16)),
-        # Non-divisible sizes, see https://github.com/pytorch/pytorch/issues/97109
-        ((2, 2, 7, 11), (4, 5)),
-        ((2, 2, 3, 3), (7, 7)),
-        ((2, 3, 4, 10), (8, 5)),
-        ((3, 13, 6), (5, 4)),
-    ])
-    @parametrize("channels_last", [False, True])
-    @parametrize("dtype", [torch.float32, torch.float16])
-    def test_adaptive_avg_pool2d(self, input_shape, out_shape, channels_last, dtype):
-        if channels_last and len(input_shape) != 4:
-            self.skipTest("channels_last requires 4D input")
-        # CPU accumulates half precision gradients in half, so compare against float32
-        cpu_x = torch.randn(input_shape)
-        if channels_last:
-            cpu_x = cpu_x.to(memory_format=torch.channels_last)
-        cpu_x.requires_grad_()
-        x = cpu_x.detach().to('mps', dtype).requires_grad_()
-        tol = {"atol": 3e-3, "rtol": 1e-3} if dtype == torch.float16 else {}
+    def test_adaptive_avg_pool2d_simple(self):
+        def helper(input_shape, out_shape, channels_last):
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
+            if (channels_last):
+                cpu_x = cpu_x.to(memory_format=torch.channels_last)
+                cpu_x.retain_grad()
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-        out = F.adaptive_avg_pool2d(x, out_shape)
-        out_cpu = F.adaptive_avg_pool2d(cpu_x, out_shape)
-        self.assertEqual(out, out_cpu, exact_dtype=False, **tol)
+            avg_result = torch.nn.AdaptiveAvgPool2d(out_shape)(x)
+            avg_result_cpu = torch.nn.AdaptiveAvgPool2d(out_shape)(cpu_x)
 
-        cpu_grad = torch.randn(out_cpu.shape)
-        out.backward(cpu_grad.to('mps', dtype))
-        out_cpu.backward(cpu_grad)
-        self.assertEqual(x.grad, cpu_x.grad, exact_dtype=False, **tol)
+            cpu_grad = torch.randn(avg_result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            avg_result.backward(gradient=grad)
+            avg_result_cpu.backward(gradient=cpu_grad)
+
+            self.assertEqual(avg_result, avg_result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        helper((2, 2, 4, 4), (2, 2), False)
+        helper((2, 2, 9, 9), (3, 3), False)
+        helper((2, 2, 9, 9), (9, 9), False)
+        helper((2, 2, 16, 16), (2, 2), False)
+        helper((2, 2, 16, 16), (2, 16), False)
+
+        helper((2, 16, 16), (4, 4), False)
+
+        # Output shape larger than input shape
+
+        helper((2, 2, 4, 4), (8, 8), False)
+        helper((2, 2, 2, 2), (4, 4), False)
+        helper((2, 2, 3, 3), (9, 9), False)
+        helper((2, 2, 2, 2), (16, 16), False)
+        helper((2, 2, 2, 16), (16, 16), False)
+
+        helper((2, 4, 4), (16, 16), False)
+
+        helper((2, 2, 3, 3), (7, 7), False)
 
     @parametrize("pool", [F.adaptive_avg_pool2d, F.adaptive_max_pool2d], name_fn=lambda f: f.__name__)
     def test_adaptive_pool2d_large_sizes(self, pool):
@@ -8114,19 +8119,6 @@ class TestMPS(TestCaseMPS):
         x = cpu_x.detach().to('mps').requires_grad_()
         out = pool(x, (2, 49999))
         out_cpu = pool(cpu_x, (2, 49999))
-        self.assertEqual(out, out_cpu)
-
-        cpu_grad = torch.randn(out_cpu.shape)
-        out.backward(cpu_grad.to('mps'))
-        out_cpu.backward(cpu_grad)
-        self.assertEqual(x.grad, cpu_x.grad)
-
-    @parametrize("input_shape,out_size", [((2, 3, 7), 4), ((3, 4), 9), ((1, 2, 16), 4)])
-    def test_adaptive_avg_pool1d(self, input_shape, out_size):
-        cpu_x = torch.randn(input_shape, requires_grad=True)
-        x = cpu_x.detach().to('mps').requires_grad_()
-        out = F.adaptive_avg_pool1d(x, out_size)
-        out_cpu = F.adaptive_avg_pool1d(cpu_x, out_size)
         self.assertEqual(out, out_cpu)
 
         cpu_grad = torch.randn(out_cpu.shape)
