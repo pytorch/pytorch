@@ -2079,9 +2079,15 @@ class _SuperInitExtraArg:
         super().__init__(a)
 
 
+class _NewOnly:
+    def __new__(cls, *args):
+        return super().__new__(cls)
+
+
 # object_init: extra arguments are an error unless the type overrides __new__
 # but not __init__.
 _OBJECT_INIT_CASES = {
+    "explicit_on_new_override": lambda: object.__init__(_NewOnly(), 1),
     "explicit_on_init_override": lambda: object.__init__(_InitOnly(1), 1),
     "explicit_on_plain": lambda: object.__init__(Plain(), 1),
     "explicit_kwargs_on_plain": lambda: object.__init__(Plain(), k=1),
