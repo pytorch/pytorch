@@ -6636,14 +6636,11 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         """Add the names ``module``, this subgraph's code, uses to the set shared with
         the root, which splices that code in unscanned. Unlike the root's scan, it sets
         no ``used_names``: it keeps or drops no line of its own."""
+        if self.conditional_lines:
+            # Only the root keeps or drops them; this scan never would.
+            name = self.subgraph_name
+            raise AssertionError(f"subgraph {name} wrote a line kept only if used")
         self.names_used_unscanned |= self.names_used_in(module)
-
-    def write_if_used(
-        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
-    ) -> None:
-        # Only the root keeps or drops such a line; it splices this code in unscanned.
-        name = self.subgraph_name
-        raise AssertionError(f"subgraph {name} wrote a line kept only if used")
 
     def benchmark_compiled_module(self, output):
         pass
