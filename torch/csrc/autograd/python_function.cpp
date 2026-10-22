@@ -451,8 +451,8 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
     if (size > 0) {
       opaque_objs.reserve(static_cast<size_t>(size));
       for (Py_ssize_t i = 0; i < size; i += 1) {
-        opaque_objs.emplace_back(c10::SafePyObject(
-            PySequence_GetItem(opaque_objs_ptr.get(), i), getPyInterpreter()));
+        opaque_objs.emplace_back(
+            PySequence_GetItem(opaque_objs_ptr.get(), i), getPyInterpreter());
       }
     } else if (size < 0) {
       PyErr_Clear();
@@ -743,7 +743,9 @@ static void _wrap_outputs(
     bool is_executable,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     c10::intrusive_ptr<Node>& attached_node) {
-  auto cdata_if_executable = is_executable ? self->cdata : nullptr;
+  // Bind by reference to skip a refcount bump on self->cdata.
+  const c10::intrusive_ptr<Node> no_node;
+  const auto& cdata_if_executable = is_executable ? self->cdata : no_node;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
     self->output_info.clear();
