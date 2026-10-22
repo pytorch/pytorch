@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/RNN.h>
