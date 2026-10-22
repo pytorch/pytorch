@@ -13,6 +13,7 @@
 #include <ATen/native/hip/ck_tile_group_gemm_utils.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <tuple>
@@ -328,15 +329,14 @@ namespace at::hip::detail {
 			}
 		}
 
-		// Fills one ck_tile::GemmTransKernelArg per group on the device. 
-		// Basically extracts A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
-		// This is a kernel intended to be launched with one thread per group on the device so offs is never read on the host.
+		// Writes one ck_tile::GemmTransKernelArg per group: the A, B and output pointers, sizes and leading dims of that
+		// group's GEMM. Launched with one thread per group so offs is never read on the host.
 		template <typename InputType, typename OutputType>
 		__global__ void prepare_grouped_gemm_data(
 				const InputType* A,                         // base pointer of mat_a (2D (sumM, K) / (M, sumK), or 3D (G, M, K))
 				const InputType* B,                         // base pointer of mat_b (2D (K, sumN) / (sumK, N), or 3D (G, K, N))
 				OutputType* output,                         // base pointer of out (2D (sumM, N) / (M, sumN), or 3D (G, M, N))
-				ck_tile::GemmTransKernelArg<>* group_args,  // output: one entry per group, read by GroupedGemmKernel
+				void* group_args,                           // output: group_count GemmTransKernelArg<>, read by GroupedGemmKernel
 				const int32_t* offs,                        // cumulative end offset of each group along the jagged dim; nullptr for 3D x 3D
 				int32_t M,                                  // rows of each group's A and C, or -1 if jagged (2D x 3D)
 				int32_t N,                                  // columns of each group's B and C, or -1 if jagged (3D x 2D)
@@ -407,23 +407,18 @@ namespace at::hip::detail {
 				ldc = tensor_StrideOutput[1]; // output is ALWAYS row-major
 			}
 
-			auto& arg = group_args[thread_id];
-			auto& karg = arg.group_karg;
-
-			// looks sketch but it is a hack to set as_ptr and bs_ptr without going through the constructor
-			const_cast<std::array<const void*, 1>&>(karg.as_ptr)[0] = a_ptr;
-			const_cast<std::array<const void*, 1>&>(karg.bs_ptr)[0] = b_ptr;
-			karg.e_ptr = output_ptr;
-
-			karg.M = M;
-			karg.N = N;
-			karg.K = K;
-			karg.stride_As[0] = lda;
-			karg.stride_Bs[0] = ldb;
-			karg.stride_E = ldc;
-			karg.k_batch = 1;
-			arg.block_start = 0;
-			arg.block_end = 0;
+			// GemmTransKernelArg's constructors are host-only, so build its UniversalGemmKernelArgs the way CK's MakeKargs does
+			// (aggregate init, which also value-initializes fields we don't set) and copy it and the block range into place.
+			// The persistent kernel ignores the block range; CK's single-argument constructor sets it to 0.
+			using GroupArg = ck_tile::GemmTransKernelArg<>;
+			static_assert(std::is_trivially_copyable_v<GroupArg> && std::is_standard_layout_v<GroupArg>);
+			const ck_tile::UniversalGemmKernelArgs<> karg{{a_ptr}, {b_ptr}, {}, output_ptr, M, N, K,
+					{static_cast<index_t>(lda)}, {static_cast<index_t>(ldb)}, {}, static_cast<index_t>(ldc), /*k_batch=*/1};
+			const index_t no_blocks = 0;
+			char* arg = static_cast<char*>(group_args) + thread_id * sizeof(GroupArg);
+			__builtin_memcpy(arg + offsetof(GroupArg, group_karg), &karg, sizeof(karg));
+			__builtin_memcpy(arg + offsetof(GroupArg, block_start), &no_blocks, sizeof(no_blocks));
+			__builtin_memcpy(arg + offsetof(GroupArg, block_end), &no_blocks, sizeof(no_blocks));
 		}
 
 		// Launches the ck_tile grouped GEMM for one dtype / layout / config combination.
@@ -476,7 +471,7 @@ namespace at::hip::detail {
 					reinterpret_cast<const InputType*>(mat_a.const_data_ptr()),
 					reinterpret_cast<const InputType*>(mat_b.const_data_ptr()),
 					reinterpret_cast<OutputType*>(out.data_ptr()),
-					reinterpret_cast<ck_tile::GemmTransKernelArg<>*>(group_args.data_ptr()),
+					group_args.data_ptr(),
 					offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
 					M, N, K,
 					to_strides(mat_a.strides()), to_strides(mat_b.strides()), to_strides(out.strides()),
