@@ -82,7 +82,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
 
 class IntraNodeCommWork : public c10d::Work {
  public:
-  bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
+  bool wait(std::chrono::milliseconds /*timeout*/ = kNoTimeout) override {
     return true;
   }
 };

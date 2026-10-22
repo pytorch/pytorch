@@ -1,6 +1,9 @@
 #include <ATen/core/List.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <version>
+
 using namespace c10;
 
 namespace {
@@ -22,8 +25,36 @@ static_assert(list_iterators_conform<
               at::Tensor,
               std::optional<std::string>>);
 
-// The random_access_iterator check above passes via a stdlib fallback on
-// libstdc++/libc++ even without the specialization; this instantiates
+template <class T>
+using ListMoveIter = std::move_iterator<ListIter<T>>;
+
+template <class... Ts>
+constexpr bool list_move_iterator_refs_conform =
+    ((std::same_as<std::iter_rvalue_reference_t<ListIter<Ts>>, Ts> &&
+      std::same_as<std::iter_reference_t<ListMoveIter<Ts>>, Ts>) &&
+     ...);
+
+static_assert(list_move_iterator_refs_conform<
+              c10::IValue,
+              int64_t,
+              at::Tensor,
+              std::optional<std::string>>);
+
+#if defined(__cpp_lib_move_iterator_concept) && \
+    __cpp_lib_move_iterator_concept >= 202207L
+template <class... Ts>
+constexpr bool list_move_iterators_are_random_access =
+    (std::random_access_iterator<ListMoveIter<Ts>> && ...);
+
+static_assert(list_move_iterators_are_random_access<
+              c10::IValue,
+              int64_t,
+              at::Tensor,
+              std::optional<std::string>>);
+#endif
+
+// The plain ListIter random_access_iterator check above passes via a stdlib
+// fallback on libstdc++/libc++ even without the specialization; this instantiates
 // basic_common_reference's ::type directly so removing it fails to compile.
 template <class T>
 using ListRef =
@@ -1230,6 +1261,15 @@ TEST(ListTest, canAccessStringByReference) {
   const std::string& strRef = listRef[1];
   EXPECT_EQ("two", str);
   EXPECT_EQ("two", strRef);
+}
+
+TEST(ListTest, rangesMoveTransfersElements) {
+  List<std::string> source({"one", "two"});
+  std::vector<std::string> destination;
+
+  std::ranges::move(source, std::back_inserter(destination));
+
+  EXPECT_EQ((std::vector<std::string>{"one", "two"}), destination);
 }
 
 TEST(ListTest, canAccessOptionalStringByReference) {
