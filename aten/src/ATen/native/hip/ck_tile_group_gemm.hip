@@ -87,12 +87,8 @@ namespace at::hip::detail {
 				ALayout, BLayout, CLayout
 			>;
 
-			using PipelineProblem = ck_tile::UniversalGemmPipelineProblem<
-				InputType, InputType, AccDataType, GemmShape, GemmTraits,
-				ck_tile::GemmPipelineScheduler::Intrawave,
-				PassThrough, PassThrough, InputType, InputType,
-				Config::FixedVectorSizeAB, Config::VectorSizeAB, Config::VectorSizeAB
-			>;
+			using PipelineProblem = ck_tile_group_gemm::PipelineProblem<
+				InputType, AccDataType, GemmShape, GemmTraits, Config::FixedVectorSizeAB, Config::VectorSizeAB>;
 
 			// Eight-wave tiles avoid the 256-accumulator register limit of four-wave 256x256 tiles. CK's eight-wave
 			// support has two bugs we work around: CompV3's tail selection (FourWaveTailCompV3) and CShuffleEpilogue,
