@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -47,6 +47,7 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "export_python",
     "PrecompileError",
     "wrap_numpy",
     "is_compiling",
@@ -1078,4 +1079,78 @@ def load_compiled_function(
     data = file.read()
     return AOTCompiledFunction.deserialize(
         data, f_globals, external_data, guard_globals=f_globals
+    )
+
+
+def export_python(
+    *,
+    path: str,
+    backend: str = "inductor",
+    tracer: str = "make_fx",
+    decompositions: dict | None = None,
+    example_inputs: Sequence[object] | None = None,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    r"""Export the Python emitted by a ``torch.compiler.precompile`` capture to disk.
+
+    The first call captures ``fn`` and writes a self-contained, readable Python file to
+    ``path``; later calls exec that file. ``path`` is a build artifact meant to be
+    committed and shipped: what runs in production is source you can open, review and
+    diff, not a cache entry reconstructed at startup.
+
+    A hand edit to ``path`` is what runs from then on: there is no recapture and no
+    cache to defeat. The artifact is read and exec'd once per decorated object per
+    process, so an edit takes effect on the next run of the process, not in one already
+    running.
+
+    **``path`` is the whole cache key**: nothing hashes ``fn``'s body, the ambient
+    config, or the machine. In production that is the property you want -- the artifact
+    you tested is the one that runs, nothing recompiles behind you, and a kernel someone
+    spent a week tuning is never silently thrown away by a recapture. The cost falls on
+    development: **edit ``fn`` and rerun, and you get the old compiled code with no
+    warning.** Delete ``path`` to recapture.
+
+    .. warning::
+        This API is experimental and subject to change.
+
+    Python attributes and Python control flow are specialized at capture and must
+    remain compatible with the example. That includes ``torch.is_grad_enabled()``:
+    capture traces with grad enabled so a backward inside ``fn`` is built as graph
+    ops, so a ``fn`` that branches on it always captures the grad-enabled branch,
+    whatever the grad mode of the call that triggered capture. Calling the artifact
+    under ``torch.no_grad()`` is unaffected and is the ordinary inference path.
+
+    Args:
+        path: Filesystem path for the emitted Python source. Parent directories are
+            created as needed. Its presence is the sole signal used to decide whether
+            to precompile or to load: an existing ``path`` is loaded as-is, even by a
+            different ``fn`` or with a different ``backend``, ``tracer``,
+            ``decompositions`` or ``example_inputs``. Loading any existing artifact
+            also warns before executing it because ``path`` is trusted executable
+            Python and may have been edited or replaced. New files use the
+            permissions selected by the process umask.
+        backend: How the captured graph is realized: ``"inductor"`` (default) or
+            ``"eager"``. Forwarded to the capture.
+        tracer: Capture front-end; ``"make_fx"`` (default) is the only one
+            implemented. Forwarded to the capture.
+        decompositions: Optional decomposition table forwarded to ``make_fx`` during
+            capture.
+        example_inputs: Positional inputs used to drive precompilation, matching
+            ``fn``'s own positional signature (``nn.Module`` arguments stay at their
+            original positions; the rest are the runtime inputs). If None, the first
+            call's own arguments are deep-copied for capture so a mutating ``fn`` is
+            applied exactly once; the copy transiently doubles the memory of any
+            ``nn.Module`` argument. Pass ``example_inputs`` explicitly when the
+            first-call arguments are not deep-copyable (e.g. non-leaf tensors or
+            ``weight_norm`` modules) or too large to clone. Capture runs ``fn`` once on
+            them and may mutate them (e.g. module buffers), so they must not be objects
+            that also appear in the runtime call args.
+    """
+    from torch.compiler._export_python import export_python as _export_python
+
+    return _export_python(
+        path=path,
+        backend=backend,
+        tracer=tracer,
+        decompositions=decompositions,
+        example_inputs=example_inputs,
     )
