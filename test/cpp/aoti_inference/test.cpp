@@ -39,9 +39,10 @@ bool testDataFilesExist() {
   std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
   std::vector<std::string> required_files = {
       "data.pt", "script_data.pt", "script_model_cpu.pt"};
-#if defined(USE_CUDA) || defined(USE_ROCM)
-  required_files.emplace_back("script_model_cuda.pt");
-#endif
+  // compile_model.py only writes CUDA data when a GPU is visible.
+  if (torch::cuda::is_available()) {
+    required_files.emplace_back("script_model_cuda.pt");
+  }
 
   for (const auto& filename : required_files) {
     std::string filepath = bindir + "/" + filename;
