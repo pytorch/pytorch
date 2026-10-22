@@ -4,7 +4,7 @@ from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
-from torch._decomp import get_decompositions
+from torch._decomp import decomposition_table
 from torch._ops import OpOverload, OpOverloadPacket
 from torch._refs import is_complex as _is_complex
 from torch.types import Number
@@ -124,7 +124,11 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
-DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
+DECOMPOSITIONS = {
+    op: fn
+    for op, fn in decomposition_table.items()
+    if isinstance(op, OpOverload) and op.namespace == "aten"
+}
 
 
 def lookup_complex(
@@ -285,6 +289,25 @@ def register_simple(
             ComplexTensor(ui, vi) for ui, vi in zip(u_flat, v_flat, strict=False)
         ]
         return tree_unflatten(out_flat, u_spec)
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
+def register_inductor(
+    op: OpType,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    def impl(*a, **kw):
+        a, kw = tree_map(_as_interleaved, (a, kw), is_leaf=is_complex_tensor)
+        out = op(*a, **kw)
+        return tree_map(
+            _as_complex_tensor,
+            out,
+            is_leaf=lambda x: isinstance(x, Tensor) and x.dtype.is_complex,
+        )
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
