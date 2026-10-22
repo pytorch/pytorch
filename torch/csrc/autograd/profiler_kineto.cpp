@@ -375,7 +375,8 @@ class GlobalCallbackSession {
   std::condition_variable cv_; // guarded by mutex_
 };
 
-GlobalCallbackSession global_callback_session;
+// We use a leaky singleton because callbacks still check it during exit.
+GlobalCallbackSession& global_callback_session = *new GlobalCallbackSession();
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -864,6 +865,12 @@ void enableProfiler(
     state_info_ptr->scopes = scopes;
     profilerStateInfo() = std::move(state_info_ptr);
   }
+}
+
+void closeGlobalCallbackSession() {
+  // There is no path to finalizing the trace from here, so we only need to
+  // close the gate and don't need to check whether the drain timed out.
+  (void)global_callback_session.drain();
 }
 
 bool isProfilerEnabledInMainThread() {

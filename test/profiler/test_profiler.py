@@ -1273,6 +1273,20 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_global_callback_session_closed_at_exit(self):
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            profile_all_threads=True
+        )
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            experimental_config=experimental_config,
+        ) as prof:
+            # What the atexit hook does at interpreter shutdown.
+            torch.autograd._close_global_callback_session()
+            torch.ones(10) * 2
+
+        self.assertFalse(any(e.name == "aten::mul" for e in prof.events()))
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
