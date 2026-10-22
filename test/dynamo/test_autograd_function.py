@@ -2049,6 +2049,7 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(res2.requires_grad)
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_set_output_grad_dtype(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -2089,6 +2090,7 @@ class GraphModule(torch.nn.Module):
         )
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_set_output_grad_dtype_non_tensor_output(self):
         # The traced autograd.Function drops the non-tensor output, so the
         # declarations must be remapped to its remaining outputs.
