@@ -98,14 +98,14 @@ class InplacePaddingTest(TestCase):
         #   empty_strided_cuda((2048, 2047), (2048, 1), torch.float32)
         # (note the stride is already padded)
         # We do
-        #   empty_strided_cuda((2048, 2048), (2048, 1), torch.float32).
-        #     as_strided((2048, 2047), (2048, 1))
+        #   reinterpret_tensor(empty_strided_cuda((2048, 2048), (2048, 1),
+        #     torch.float32), (2048, 2047), (2048, 1))
         # . This will allocate an extra item for the last row so that
         # inplace padding would be safe without accessing out of bound
         # memory.
         FileCheck().check_regex(
-            r"empty_strided.*\(\(2048, 2048\), \(2048, 1\), torch.float32\)."
-            r"as_strided\(\(2048, 2047\), \(2048, 1\)\)"
+            r"reinterpret_tensor\(empty_strided_.*\(\(2048, 2048\), \(2048, 1\), torch.float32\), "
+            r"\(2048, 2047\), \(2048, 1\)\)"
         ).run(code)
 
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
