@@ -590,11 +590,13 @@ class ExportedPythonArtifact:
             return None
 
     def _check_capture_environment(self, args: tuple[Any, ...]) -> None:
-        # Two more things make_fx specialized with no runtime guard. Input ALIASING
-        # decides what an in-place mutation means, so an artifact captured with two
-        # arguments sharing memory computes the wrong thing (and mutates the wrong
-        # thing) when they are distinct at runtime -- torch.compile guards this and
-        # recompiles. Ambient AUTOCAST decides the dtypes the kernels were built for.
+        # Three things make_fx specialized with no runtime guard; torch.compile guards
+        # them and recompiles. Input ALIASING decides what an in-place mutation means,
+        # so an artifact captured with two arguments sharing memory computes (and
+        # mutates) the wrong thing when they are distinct at runtime. Input IDENTITY
+        # matters separately: AOTAutograd folds one object passed twice into a single
+        # graph slot, which byte overlap alone cannot tell apart from two views.
+        # Ambient AUTOCAST decides the dtypes the kernels were built for.
         tensors: list[torch.Tensor] | None = None
 
         def input_tensors() -> list[torch.Tensor]:
