@@ -475,6 +475,7 @@ _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B7
 _device_mapping["Intel(R) Arc(TM) Pro B65 Graphics"] = _device_mapping["INTEL B65"]
 _device_mapping["Intel(R) Arc(TM) Pro B60 Graphics"] = _device_mapping["INTEL B60"]
 _device_mapping["Intel(R) Arc(TM) Pro B50 Graphics"] = _device_mapping["INTEL B50"]
+_device_mapping["NVIDIA GB300 Max-Q"] = _device_mapping["NVIDIA GB300"]
 
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).

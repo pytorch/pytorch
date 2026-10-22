@@ -12790,6 +12790,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
+    def test_index_add_after_reduction(self):
+        # https://github.com/pytorch/pytorch/issues/201455
+        def fn(x, index):
+            return torch.zeros(4, device=x.device).index_add(0, index, x.mean(-1))
+
+        self.common(
+            fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
+        )
+
+    def test_index_add_inside_reduction(self):
+        def fn(x, index):
+            out = torch.zeros(4, x.shape[1], device=x.device)
+            return x.sum(-1), out.index_add(0, index, x * 2)
+
+        self.common(
+            fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
+        )
+
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
@@ -14320,7 +14338,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # the triton signature specializes on 1 vs non-1, you might get 1
         # or 2 kernels. In newer versions of triton, there's no specialization
         # so we get only 1 kernel.
-        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        self.assertEqual(source_codes[0].count("@triton.jit"), 2)
 
     def test_roll(self):
         def fn(a):
