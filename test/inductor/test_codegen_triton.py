@@ -7,7 +7,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -163,6 +163,95 @@ class TestCodegenTriton(InductorTestCase):
         self._stack.close()
         super().tearDown()
 
+    def test_tma_store_can_use_descriptor_local_int32_indexing(self):
+        layout = SimpleNamespace(offset=0, stride=[512, 1])
+        buffer = Mock(spec=ir.Buffer)
+        buffer.get_layout.return_value = layout
+        buffer.get_name.return_value = "buf0"
+        buffer.has_tensor_output.return_value = True
+        kernel = SimpleNamespace(index_dtype="tl.int64", output_node=None)
+        checker = TMACompatibilityChecker(
+            kernel, torch.bfloat16, for_store=True, force=False, buffer_name="buf0"
+        )
+
+        with (
+            patch.object(self._graph, "try_get_buffer", return_value=buffer),
+            patch.object(
+                self._graph,
+                "get_current_device_or_throw",
+                return_value=torch.device("cuda"),
+            ),
+            patch.object(self._graph, "get_allocation_size", return_value=[128, 512]),
+            patch.object(
+                self._graph, "get_allocation_storage_size", return_value=128 * 512
+            ),
+        ):
+            self.assertTrue(checker.can_use_32bit_indexing())
+
+        kernel.output_node = buffer
+        with (
+            patch.object(self._graph, "try_get_buffer", return_value=None),
+            patch.object(
+                self._graph,
+                "get_current_device_or_throw",
+                return_value=torch.device("cuda"),
+            ),
+            patch.object(self._graph, "get_allocation_size", return_value=[128, 512]),
+            patch.object(
+                self._graph, "get_allocation_storage_size", return_value=128 * 512
+            ),
+        ):
+            self.assertTrue(checker.can_use_32bit_indexing())
+
+    def test_tma_descriptor_local_int32_indexing_fails_closed(self):
+        int32_max = torch.iinfo(torch.int32).max
+        size = sympy.Symbol("s", positive=True, integer=True)
+        kernel = SimpleNamespace(index_dtype="tl.int64", output_node=None)
+
+        def can_use(
+            *,
+            for_store=True,
+            device="cuda",
+            offset=0,
+            stride=(1,),
+            shape=(1,),
+            storage=1,
+        ):
+            layout = SimpleNamespace(offset=offset, stride=stride)
+            buffer = Mock(spec=ir.Buffer)
+            buffer.get_layout.return_value = layout
+            buffer.has_tensor_output.return_value = True
+            checker = TMACompatibilityChecker(
+                kernel,
+                torch.bfloat16,
+                for_store=for_store,
+                force=False,
+                buffer_name="buf0",
+            )
+            with (
+                patch.object(self._graph, "try_get_buffer", return_value=buffer),
+                patch.object(
+                    self._graph,
+                    "get_current_device_or_throw",
+                    return_value=torch.device(device),
+                ),
+                patch.object(self._graph, "get_allocation_size", return_value=shape),
+                patch.object(
+                    self._graph,
+                    "get_allocation_storage_size",
+                    return_value=storage,
+                ),
+            ):
+                return checker.can_use_32bit_indexing()
+
+        self.assertFalse(can_use(for_store=False))
+        self.assertFalse(can_use(device="cpu"))
+        self.assertFalse(can_use(offset=-1))
+        self.assertFalse(can_use(stride=(-1,)))
+        self.assertFalse(can_use(shape=(size,), storage=size))
+        self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
+        self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
+
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):
             self.assertEqual(
@@ -174,6 +263,28 @@ class TestCodegenTriton(InductorTestCase):
                     get_triton_reduction_function(reduction_type),
                     f"triton_helpers.{reduction_type}2_strict",
                 )
+
+    def test_gen_driver_setup_default(self):
+        setup = TritonKernel.gen_driver_setup
+        self.assertEqual(setup("cpu"), "triton_helpers.set_driver_to_cpu()")
+        self.assertEqual(setup(GPU_TYPE), "triton_helpers.set_driver_to_gpu()")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch(force_disable_caches=True)
+    def test_gen_driver_setup_override(self):
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(16, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertIn("triton_helpers.set_driver_to_gpu()", " ".join(code))
+
+        torch._dynamo.reset()
+        no_setup = classmethod(lambda cls, device_type: "")
+        with patch.object(TritonKernel, "gen_driver_setup", no_setup):
+            out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(out, fn(x))
+        self.assertNotIn("set_driver_to_gpu", " ".join(code))
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_strict_signed_zero_unrolled_reduction(self):
@@ -1304,6 +1415,47 @@ def helper(x):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "shape, stride, expected",
+        [
+            ((32, 32), (32, 1), True),
+            ((2**30 - 1,), (1,), True),
+            ((2**30,), (1,), False),
+            ((2,), (2**30,), False),
+        ],
+    )
+    def test_constant_pointer_range_survives_scheduling(
+        self, scheduled, shape, stride, expected
+    ):
+        self._graph.constants["weight"] = torch.empty_strided(
+            shape, stride, dtype=torch.float16, device="meta"
+        )
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "storage_numel, expected",
+        [(2**30 - 1, True), (2**30, False), (2**30 + 1, False)],
+    )
+    def test_constant_pointer_range_checks_backing_storage(
+        self, scheduled, storage_numel, expected
+    ):
+        self._graph.constants["weight"] = torch.empty(
+            storage_numel, dtype=torch.float16, device="meta"
+        )[:32]
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
     @inductor_config.patch("triton.emit_pointer_range_32", True)
     def test_config_of_emit_pointer_range_32_enabled(self):
         from torch._inductor.utils import (
@@ -1388,6 +1540,45 @@ def helper(x):
             self.skipTest(
                 "tt.pointer_range is only literal with the V4 attrs descriptor"
             )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch({"freezing": True, "triton.emit_pointer_range_32": True})
+    def test_constant_pointer_range_in_generated_code(self):
+        self._skip_unless_annotation_is_literal()
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "weight", torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return x + self.weight
+
+        x = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        with torch.no_grad():
+            _, kernels = run_and_get_kernels(
+                torch.compile(Module().eval(), fullgraph=True), x, remove_quote=True
+            )
+        self.assertEqual(len(kernels), 1)
+        meta = next(
+            keyword.value
+            for node in ast.walk(ast.parse(kernels[0]))
+            if isinstance(node, ast.Call)
+            for keyword in node.keywords
+            if keyword.arg == "triton_meta"
+        )
+        meta = {key.value: value for key, value in zip(meta.keys, meta.values)}
+        signature = ast.literal_eval(meta["signature"])
+        configs = ast.literal_eval(meta["configs"])
+        # Only the frozen weight has an fp16 pointer; input and output are fp32.
+        weight_indices = [
+            idx for idx, dtype in enumerate(signature.values()) if dtype == "*fp16"
+        ]
+        self.assertEqual(len(weight_indices), 1)
+        self.assertIn(["tt.pointer_range", 32], configs[0][(weight_indices[0],)])
 
     @staticmethod
     def _flex_inputs(requires_grad=False):
