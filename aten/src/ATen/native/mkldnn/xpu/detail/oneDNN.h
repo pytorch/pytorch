@@ -222,5 +222,7 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum,
-    const std::optional<at::Tensor>& alpha = std::nullopt);
+    const std::optional<at::Tensor>& alpha = std::nullopt,
+    float gemm_alpha = 1.0f,
+    float beta = 0.0f);
 } // namespace at::native::onednn
