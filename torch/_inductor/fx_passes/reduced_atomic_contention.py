@@ -410,10 +410,7 @@ def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     """
     if not torch.cuda.is_available() and not torch.xpu.is_available():
         return None
-
-    _, total_gpu = (
-        torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
-    )
+    _, total_gpu = torch.accelerator.get_memory_info()
 
     floor_bytes: int = config.partitioned_scatter_non_model_floor_bytes
     allowed_peak = max(0, total_gpu - floor_bytes)
