@@ -26,6 +26,7 @@ from torch._inductor.kernel.gemm_epilogue import (
     iter_fx_node_inputs,
 )
 from torch._inductor.kernel.gemm_epilogue_codegen import _cute_op_name
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch.fx.experimental.symbolic_shapes import (
     guard_int,
@@ -128,7 +129,7 @@ def node_preserves_tensor_shapes(node: torch.fx.Node) -> bool:
         if input_shape is None:
             continue
         input_shape_key = tuple(str(dim) for dim in input_shape)
-        if input_shape_key == output_shape_key:
+        if statically_known_shape_equal(input_shape, output_shape):
             has_same_shape_input = True
             continue
         try:

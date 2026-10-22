@@ -111,24 +111,29 @@ inline float erfinv(T y) {
 
   float x, z, num, dem; /*working variables */
 
-  float y_abs = ::metal::abs(static_cast<float>(y));
+  const auto yf = static_cast<float>(y);
+  float y_abs = ::metal::abs(yf);
   if (y_abs >= 1.0f) {
-    return y_abs > 1.0f ? NAN
-                        : ::metal::copysign(INFINITY, static_cast<float>(y));
+    return y_abs > 1.0f ? NAN : ::metal::copysign(INFINITY, yf);
   }
   if (y_abs <= 0.7f) {
-    z = y * y;
+    z = yf * yf;
     num = ((a[3] * z + a[2]) * z + a[1]) * z + a[0];
     dem = (((b[3] * z + b[2]) * z + b[1]) * z + b[0]) * z + 1.0f;
-    x = y * num / dem;
-  } else {
-    z = ::metal::sqrt(-1.0f * ::metal::log((1.0 - y_abs) / 2.0));
-    num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
-    dem = (d[1] * z + d[0]) * z + 1.0f;
-    x = ::metal::copysign(num, static_cast<float>(y)) / dem;
+    x = yf * num / dem;
+    // Two steps of Newton-Raphson correction
+    x -= (erf(x) - yf) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+    x -= (erf(x) - yf) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+    return x;
   }
-
-  return x;
+  z = ::metal::sqrt(-1.0f * ::metal::log((1.0f - y_abs) / 2.0f));
+  num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
+  dem = (d[1] * z + d[0]) * z + 1.0f;
+  x = num / dem;
+  // Two steps of Newton-Raphson using erfc, to avoid cancellation in erf(x) - y
+  x += (erfc(x) - (1.0f - y_abs)) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+  x += (erfc(x) - (1.0f - y_abs)) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+  return ::metal::copysign(x, yf);
 }
 
 /*
@@ -157,7 +162,7 @@ inline T chbevl(T x, const float array[], const int len) {
 
 template <typename T>
 inline T i0(T _x) {
-  auto x = ::metal::fabs(_x);
+  const auto x = ::metal::fabs(static_cast<float>(_x));
 
   if (x <= 8.0) {
     /* Chebyshev coefficients for exp(-x) I0(x)
@@ -262,7 +267,7 @@ inline T i0e(T _x) {
 
 template <typename T>
 inline T i1(T _x) {
-  const auto x = ::metal::fabs(_x);
+  const auto x = ::metal::fabs(static_cast<float>(_x));
 
   if (x <= 8.0) {
     // Chebyshev coefficients for exp(-x) i1(x) in the internal [0, 8]
@@ -449,7 +454,7 @@ inline float log_gamma(const T x) {
   float rc;
 
   const auto abs_x = ::metal::abs(static_cast<float>(x));
-  if (abs_x == 0) {
+  if (abs_x == 0 || ::metal::isinf(abs_x)) {
     return INFINITY;
   }
   if (abs_x < 12.0) {
@@ -475,12 +480,14 @@ inline float log_gamma(const T x) {
   if (x >= 0) {
     return rc;
   }
+  if (x == ::metal::trunc(x)) {
+    return INFINITY;
+  }
 
-  // Reflection formula
-  // Compute arg first to workaround Metal compiler bgg of sorts on M4
-  // See https://github.com/pytorch/pytorch/pull/145740 for more details
-  auto log_arg = abs_x * ::metal::abs(::metal::sinpi(abs_x));
-  return LOG_PI - rc - ::metal::log(log_arg);
+  // Reflection formula, with separate logs as abs_x * sinpi(abs_x) underflows
+  // for tiny abs_x
+  auto log_sin = ::metal::log(::metal::abs(::metal::sinpi(abs_x)));
+  return LOG_PI - rc - ::metal::log(abs_x) - log_sin;
 }
 
 inline float zeta(float x, float q) {
@@ -600,14 +607,9 @@ inline float digamma(T0 x) {
       // If the argument is a negative integer, NaN is returned
       return NAN;
     } else {
-      // Extracts the fractional part of x as r, since tan(pi * r) is more
-      // numerically accurate than tan(pi * x). While these operations are
-      // mathematically equivalent since both x and r are in radians and tan()
-      // has a periodicity of pi, in practice the computation of pi * x is a
-      // source of error (when |x| > 1).
-      float r = ::metal::fract(x);
+      // tanpi avoids the rounding error of computing pi * x near the poles
       return calc_digamma_positive_domain(1.0f - x) -
-          M_PI_F / ::metal::tan(M_PI_F * r);
+          M_PI_F / ::metal::precise::tanpi(x);
     }
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
@@ -816,7 +818,8 @@ inline T entr(T a) {
 
 // Copy-n-paste from aten/src/ATen/native/cuda/Math.cuh lines 1463-1915
 template <typename T>
-inline float bessel_j0_forward(T x) {
+inline float bessel_j0_forward(T x_) {
+  float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.96936729297347051624e-04,
       +8.28352392107440799803e-02,
@@ -876,12 +879,12 @@ inline float bessel_j0_forward(T x) {
       +1.71086294081043136091e+18,
   };
 
-  if (x < T(0)) {
+  if (x < 0) {
     x = -x;
   }
 
-  if (x <= T(5.0)) {
-    if (x < T(0.00001)) {
+  if (x <= 5.0) {
+    if (x < 0.00001) {
       return 1.0 - x * x / 4.0;
     }
 
@@ -898,7 +901,7 @@ inline float bessel_j0_forward(T x) {
     }
 
     return (x * x - 5.78318596294678452118e+00) *
-        (x * x - T(3.04712623436620863991e+01)) * rp / rq;
+        (x * x - 3.04712623436620863991e+01) * rp / rq;
   }
 
   float pp = 0.0;
@@ -927,7 +930,7 @@ inline float bessel_j0_forward(T x) {
 
   return (pp / pq *
               ::metal::precise::cos(
-                  x - T(0.785398163397448309615660845819875721)) -
+                  x - 0.785398163397448309615660845819875721) -
           5.0 / x * (qp / qq) *
               ::metal::precise::sin(
                   x - 0.785398163397448309615660845819875721)) *
@@ -935,7 +938,8 @@ inline float bessel_j0_forward(T x) {
 } // bessel_j0_forward(T x)
 
 template <typename T>
-inline float bessel_y0_forward(T x) {
+inline float bessel_y0_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.96936729297347051624e-04,
       +8.28352392107440799803e-02,
@@ -998,12 +1002,12 @@ inline float bessel_y0_forward(T x) {
       +2.50596256172653059228e+17,
   };
 
-  if (x <= T(5.0)) {
-    if (x == T(0.0)) {
+  if (x <= 5.0) {
+    if (x == 0.0) {
       return -INFINITY;
     }
 
-    if (x < T(0.0)) {
+    if (x < 0.0) {
       return NAN;
     }
 
@@ -1058,7 +1062,8 @@ inline float bessel_y0_forward(T x) {
 } // bessel_y0_forward(T x)
 
 template <typename T>
-inline float bessel_j1_forward(T x) {
+inline float bessel_j1_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.62125616208173112003e-04,
       +7.31397056940917570436e-02,
@@ -1118,11 +1123,11 @@ inline float bessel_j1_forward(T x) {
       +5.32278620332680085395e+18,
   };
 
-  if (x < T(0.0)) {
+  if (x < 0.0) {
     return -bessel_j1_forward(-x);
   }
 
-  if (x <= T(5.0)) {
+  if (x <= 5.0) {
     float rp = 0.0;
 
     for (auto index = 0; index <= 3; index++) {
@@ -1173,7 +1178,8 @@ inline float bessel_j1_forward(T x) {
 } // bessel_j1_forward(T x)
 
 template <typename T>
-inline float bessel_y1_forward(T x) {
+inline float bessel_y1_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.62125616208173112003e-04,
       +7.31397056940917570436e-02,
@@ -1235,12 +1241,12 @@ inline float bessel_y1_forward(T x) {
       +3.97270608116560655612e+18,
   };
 
-  if (x <= T(5.0)) {
-    if (x == T(0.0)) {
+  if (x <= 5.0) {
+    if (x == 0.0) {
       return -INFINITY;
     }
 
-    if (x <= T(0.0)) {
+    if (x <= 0.0) {
       return NAN;
     }
 
@@ -1295,7 +1301,8 @@ inline float bessel_y1_forward(T x) {
 } // bessel_y1_forward(T x)
 
 template <typename T>
-inline float modified_bessel_i0_forward(T x) {
+inline float modified_bessel_i0_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float A[] = {
       -4.41534164647933937950e-18, +3.33079451882223809783e-17,
       -2.43127984654795469359e-16, +1.71539128555513303061e-15,
@@ -1342,7 +1349,7 @@ inline float modified_bessel_i0_forward(T x) {
       a = (.5 * ::metal::fabs(x) - 2.0) * q - p + A[index];
     }
 
-    return ::metal::exp(::metal::fabs(x)) * (T(0.5) * (a - p));
+    return ::metal::exp(::metal::fabs(x)) * (0.5 * (a - p));
   }
 
   float b = B[0];
@@ -3128,7 +3135,8 @@ inline T erfcx_y100(T y100) {
 }
 
 template <typename T>
-float erfcx(T x) {
+float erfcx(T x_) {
+  const float x = static_cast<float>(x_);
   if (x != x) {
     return x;
   }

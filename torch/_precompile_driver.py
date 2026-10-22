@@ -48,6 +48,8 @@ if TYPE_CHECKING:
     # An installed artifact carries the pickled Dynamo package and its backend
     # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
     _PACKAGE: str = ""
+    # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
+    _ALLOW_SERVE_TIME_COMPILES: bool = False
     BACKEND: str = ""
     FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
@@ -738,7 +740,9 @@ def _build_installed_forward():
     callback is a _RefuseRecompileCallback bound at load, which
     _callback_from_stance keeps even under stances that would compile, so, as
     for a standalone artifact, a call no captured variant covers raises instead
-    of compiling.
+    of compiling. load(allow_serve_time_compiles=True) flips the artifact's
+    _ALLOW_SERVE_TIME_COMPILES = False to True to keep the ordinary compiling
+    callback instead.
     """
     import base64
     import importlib
@@ -809,18 +813,25 @@ def _build_installed_forward():
                 f"would still serve any call the installed entries miss: load this "
                 f"artifact in a fresh process."
             )
-        context = torch._dynamo.optimize(BACKEND, package=package)
-        if not isinstance(context, OptimizeContext):
-            raise _PrecompileError(
-                "precompile: an installed artifact serves through Dynamo, which is "
-                "disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
-                "enable_dynamo killswitch)."
+        # A serve-time compile is not part of the artifact: record it nowhere.
+        # caching_precompile would make optimize(package=None) create its own
+        # package, which context(fn) fills from the on-disk Dynamo cache.
+        with torch._dynamo.config.patch(caching_precompile=False):
+            context = torch._dynamo.optimize(
+                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
             )
-        # The refusal is this callable's own callback, not the process-global
-        # stance, so other threads' compiles are unaffected. It must be bound
-        # before context(fn), which captures the callback when it wraps.
-        context.callback = _RefuseRecompileCallback(context.callback)
-        compiled = context(fn)
+            if not isinstance(context, OptimizeContext):
+                raise _PrecompileError(
+                    "precompile: an installed artifact serves through Dynamo, which "
+                    "is disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
+                    "enable_dynamo killswitch)."
+                )
+            # The refusal is this callable's own callback, not the process-global
+            # stance, so other threads' compiles are unaffected. It must be bound
+            # before context(fn), which captures the callback when it wraps.
+            if not _ALLOW_SERVE_TIME_COMPILES:
+                context.callback = _RefuseRecompileCallback(context.callback)
+            compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
         raise

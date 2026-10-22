@@ -84,7 +84,10 @@ class PrecompileSummary:
     slot one frame's filter rejected and another frame's invariance policy
     dropped is in both drop lists. Nothing is enforced, as for the frame lists
     below: a report that raised on its own bookkeeping would lose the coverage
-    it exists to describe.
+    it exists to describe. The one exception to "every captured frame" is a
+    frame the artifact runs as plain Python (see ``frames``): its guards are left
+    out, so a slot only such frames kept, dropped or riskily dropped is not in
+    that list.
 
     The frame lists differ in what an entry is. ``bypassed`` and
     ``uncovered_frames`` hold one bare ``co_name`` per frame, read off the
@@ -99,7 +102,13 @@ class PrecompileSummary:
         frames: Captured frames: every frame the package holds an entry for, the
             ``bypassed``, ``truncated`` and ``uncovered_frames`` ones included,
             so the digest's frame clauses cut into this count rather than add
-            to it.
+            to it. Also included are the frames the artifact deliberately runs
+            as plain Python: a frame other than the entry that compiled no
+            graph or graph-break continuation and either lost a guard to the
+            filter or was bypassed. Running its original bytecode gives up no
+            compiled code, so it is served that way rather than through a
+            variant missing a guard, and it is listed in neither ``bypassed``
+            nor ``uncovered_frames``.
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
@@ -107,7 +116,8 @@ class PrecompileSummary:
             servable for: no compile of the frame recorded a guarded code and
             one was bypassed (its guards could not be serialized, or its graph
             held parameters by static address), or a backend artifact was
-            missing when the package was saved. Not an eager fallback: the
+            missing when the package was saved. A graphless frame run as plain
+            Python (see ``frames``) is not listed. Not an eager fallback: the
             frame ran compiled during capture, but the package kept no variant
             of it a load can serve, so a call that reaches it raises.
         truncated: ``co_name (filename:firstlineno)`` of each frame that hit the

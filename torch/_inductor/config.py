@@ -3358,6 +3358,7 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+    "bundled_autotune_remote_cache",
 ]
 
 
