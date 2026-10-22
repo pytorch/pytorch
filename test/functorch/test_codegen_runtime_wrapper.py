@@ -20,10 +20,17 @@ from common_utils import capture_codegen_source
 import torch
 import torch._dynamo
 import torch._functorch.config as functorch_config
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestCodegenRuntimeWrapper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -108,7 +115,8 @@ class TestCodegenRuntimeWrapper(TestCase):
         source = captured[0]
         self.assertIn("torch._C._set_view_replay_enabled(True)", source)
         self.assertIn("if not prev_view_replay_enabled:", source)
-        self.assertIn("torch.enable_grad()", source)
+        self.assertIn("torch._C._set_grad_enabled(True)", source)
+        self.assertIn("if not prev_grad_enabled:", source)
 
     def test_training_with_detach_indices(self):
         """

@@ -52,12 +52,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import (
-    MI350_ARCH,
-    skipIfRocmArch,
-    skipIfTorchInductor,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -1102,7 +1097,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1829,7 +1823,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
@@ -2114,7 +2107,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model(hidden_states)
         torch.accelerator.synchronize()
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
@@ -2811,6 +2803,28 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, expected):
             fn(x)
 
+    def test_nn_functional_deprecated(self):
+        import torch.distributed.nn.functional as F
+
+        x = torch.randn(4)
+        calls = {
+            "broadcast": lambda: F.broadcast(x, src=0),
+            "gather": lambda: F.gather(x, dst=0),
+            "scatter": lambda: F.scatter([x, x], src=0),
+            "reduce": lambda: F.reduce(x, dst=0),
+            "reduce_scatter": lambda: F.reduce_scatter(x, [x, x]),
+            "all_gather": lambda: F.all_gather(x),
+            "_all_gather_base": lambda: F._all_gather_base(torch.empty(8), x),
+            "all_to_all": lambda: F.all_to_all([x, x], [x, x]),
+            "all_to_all_single": lambda: F.all_to_all_single(torch.empty(4), x),
+            "all_reduce": lambda: F.all_reduce(x),
+        }
+        for name, call in calls.items():
+            with self.subTest(name=name):
+                msg = f"torch.distributed.nn.functional.{name} is deprecated"
+                with self.assertWarnsOnceRegex(FutureWarning, re.escape(msg)):
+                    call()
+
     def test_nn_functional_all_reduce_unsupported(self):
         from torch.distributed.nn.functional import all_reduce
 
@@ -2822,7 +2836,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_reduce",
-            suggestion="torch.distributed._functional_collectives.all_reduce",
+            suggestion="torch.distributed.functional_collectives.all_reduce",
         )
 
     def test_nn_functional_all_gather_unsupported(self):
@@ -2836,7 +2850,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_single",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
         )
 
     def test_nn_functional_reduce_scatter_unsupported(self):
@@ -2851,7 +2865,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             [torch.randn(4, 4), torch.randn(4, 4)],
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
+            suggestion="torch.distributed.functional_collectives.reduce_scatter_single",
         )
 
     def test_nn_functional_all_to_all_single_unsupported(self):
@@ -2866,7 +2880,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_to_all_single",
-            suggestion="torch.distributed._functional_collectives.all_to_all_single",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
         )
 
     def test_nn_functional_broadcast_unsupported(self):
@@ -2880,7 +2894,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4),
             "broadcast",
-            suggestion="torch.distributed._functional_collectives.broadcast",
+            suggestion="torch.distributed.functional_collectives.broadcast",
         )
 
     def test_nn_functional_reduce_unsupported(self):
@@ -2890,7 +2904,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return reduce(x, dst=0)
 
-        self._assert_not_supported(fn, torch.randn(4), "reduce")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "reduce",
+            suggestion="torch.distributed.functional_collectives.all_reduce",
+        )
 
     def test_nn_functional_gather_unsupported(self):
         from torch.distributed.nn.functional import gather
@@ -2899,7 +2918,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return gather(x, dst=0)
 
-        self._assert_not_supported(fn, torch.randn(4), "gather")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "gather",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
+        )
 
     def test_nn_functional_scatter_unsupported(self):
         from torch.distributed.nn.functional import scatter
@@ -2908,7 +2932,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return scatter([x, x], src=0)
 
-        self._assert_not_supported(fn, torch.randn(4), "scatter")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "scatter",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
+        )
 
     def test_nn_functional_all_to_all_unsupported(self):
         from torch.distributed.nn.functional import all_to_all
@@ -2917,7 +2946,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return all_to_all([torch.empty_like(x)], [x])
 
-        self._assert_not_supported(fn, torch.randn(4), "all_to_all")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "all_to_all",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
+        )
 
     def test_nn_functional_all_gather_base_unsupported(self):
         from torch.distributed.nn.functional import _all_gather_base
@@ -2927,7 +2961,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             output = torch.empty(8)
             return _all_gather_base(output, x)
 
-        self._assert_not_supported(fn, torch.randn(4), "_all_gather_base")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "_all_gather_base",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
+        )
 
 
 if __name__ == "__main__":

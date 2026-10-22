@@ -305,28 +305,43 @@ class Vectorized<float> {
   Vectorized<float> conj() const {
     return *this;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+    name, sleef_name)                                                   \
+  Vectorized<float> name() const;
+#else
 #define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(      \
     name, sleef_name)                                                        \
   Vectorized<float> name() const {                                           \
     return USE_SLEEF(Vectorized<float>(sleef_name(values)), map(std::name)); \
   }
+#endif
 
 #define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(name)      \
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
       name, Sleef_##name##f4_u10)
 
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acos)
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> acosh() const;
+#else
   // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
   // C library returns finite results, because Sleef uses float-range
   // intermediates internally while the scalar C library uses double precision.
   Vectorized<float> acosh() const {
     return map(std::acosh);
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asin)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asinh)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atan)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atanh)
 
+#ifdef AT_VEC_CUSTOM_MATH
+#define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+    name, sleef_name)                                                    \
+  Vectorized<float> name(const Vectorized<float>& arg) const;
+#else
 #define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
     name, sleef_name)                                                    \
   Vectorized<float> name(const Vectorized<float>& arg) const {           \
@@ -334,6 +349,7 @@ class Vectorized<float> {
         Vectorized<float>(sleef_name(values, arg.values)),               \
         map2(arg, std::name));                                           \
   }
+#endif
 
 #define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(name)      \
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
@@ -347,15 +363,23 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       erfc,
       Sleef_erfcf4_u15)
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erfinv() const;
+#else
   Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp)
 #if defined(CPU_CAPABILITY_SVE128) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> exp2() const;
+#else
   Vectorized<float> exp2() const {
     return Vectorized<float>(
         sve_to_neon(Sleef_exp2fx_u10sve(neon_to_sve(values))));
   }
+#endif
 #else
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp2)
 #endif
@@ -472,6 +496,13 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       hypot,
       Sleef_hypotf4_u05)
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> i0() const;
+  Vectorized<float> i0e() const;
+  Vectorized<float> digamma() const;
+  Vectorized<float> igamma(const Vectorized<float>& x) const;
+  Vectorized<float> igammac(const Vectorized<float>& x) const;
+#else
   Vectorized<float> i0() const {
     return map(calc_i0);
   }
@@ -487,6 +518,7 @@ class Vectorized<float> {
   Vectorized<float> igammac(const Vectorized<float>& x) const {
     return map2(x, calc_igammac);
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log10)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log1p)
@@ -501,12 +533,21 @@ class Vectorized<float> {
   // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
   // return finite results, because Sleef uses float-range intermediates
   // internally while the scalar C library uses double precision.
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> sinh() const;
+#else
   Vectorized<float> sinh() const {
     return map(std::sinh);
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       cos,
       Sleef_cosf4_u35)
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> cosh() const;
+  Vectorized<float> ceil() const;
+  Vectorized<float> floor() const;
+#else
   Vectorized<float> cosh() const {
     return map(std::cosh);
   }
@@ -516,14 +557,19 @@ class Vectorized<float> {
   Vectorized<float> floor() const {
     return map(at::native::floor_impl);
   }
+#endif
   Vectorized<float> neg() const {
     return Vectorized<float>(vnegq_f32(values));
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> round() const;
+#else
   Vectorized<float> round() const {
     // We do not use std::round because we would like to round midway numbers to
     // the nearest even integer.
     return map(at::native::round_impl);
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tan)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tanh)
   Vectorized<float> trunc() const {
@@ -780,6 +826,7 @@ Vectorized<float> inline fnmsub(
 
 #endif
 
+#ifndef AT_VEC_CUSTOM_MATH
 inline Vectorized<float> Vectorized<float>::erf() const {
   // constants
   const Vectorized<float> neg_zero_vec(-0.f);
@@ -811,6 +858,7 @@ inline Vectorized<float> Vectorized<float>::erf() const {
   auto tmp7 = fmadd(tmp6, r, one_vec);
   return tmp7 ^ sign_mask;
 }
+#endif
 #undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC
 #undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC
 #endif /* defined(aarch64) */

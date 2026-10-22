@@ -50,7 +50,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
         {batch_size + 1}, TensorOptions().device(at::kCPU).dtype(at::kInt));
 
     const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
-    auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
+    auto* cumulative_seqlen_ptr = cumulative_seqlen.mutable_data_ptr<int32_t>();
 
     int64_t sum = 0;
     int64_t max_seqlen = -1;

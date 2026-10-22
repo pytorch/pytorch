@@ -2267,6 +2267,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         outputs = torch.empty(global_size, device=self.device)
         correct_outputs = torch.empty(global_size, device=self.device)
         counter = CompileCounter()
+
+        fullgraph_compiled = torch.compile(
+            func, backend=CompileCounter(), fullgraph=True
+        )
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            fullgraph_compiled(inputs, outputs, pg=GroupMember.WORLD)
+        message = str(cm.exception)
+        self.assertIn(
+            "Dynamo can only remap synchronous torch.distributed collectives",
+            message,
+        )
+        self.assertIn("set async_op=False", message)
+        self.assertIn("torch.distributed.functional_collectives", message)
+        self.assertIn("https://github.com/pytorch/pytorch/issues/119890", message)
+
         compiled = torch.compile(func, backend=counter)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
@@ -2333,6 +2348,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
+        # The collective runs on the process group's stream; wait before comparing.
+        out = [torch.ops.c10d_functional.wait_tensor(t) for t in out]
+        correct = [torch.ops.c10d_functional.wait_tensor(t) for t in correct]
         if counter.frame_count != 1:
             raise AssertionError(
                 f"Expected frame_count == 1, got {counter.frame_count}"
@@ -4627,7 +4645,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, 2, pg_node),
         )
         ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
-        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32, None))
 
     def test_rs_group_key_with_node_group_name(self):
         from torch._inductor.fx_passes.bucketing import _rs_group_key
@@ -4638,7 +4656,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, "sum", 2, pg_node),
         )
         rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
-        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32, None))
 
     def test_ar_group_key_with_node_group_name(self):
         from torch._inductor.fx_passes.bucketing import _ar_group_key
@@ -4649,7 +4667,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, "sum", pg_node),
         )
         ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
-        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32, None))
 
 
 def _build_graph_with_duplicate_rs(
