@@ -567,6 +567,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._activate_gpu_trace",
         "torch._C._add_cached_tensor",
         "torch._C._add_docstr",
+        "torch._C._aot_runtime_enter",
+        "torch._C._aot_runtime_exit",
         "torch._C._are_functorch_transforms_active",
         "torch._C._autograd_init",
         "torch._C._autograd._saved_tensors_hooks_disable",
