@@ -1617,6 +1617,10 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
+                batched = self.genSparseCSRTensor((batch_size, m, k), nnz, dtype=dtype,
+                                                  device=device, index_dtype=index_dtype)
+                self.assertEqual(torch.baddbmm(c, batched, b), torch.baddbmm(c, batched.to_dense(), b))
+
     @onlyAccelerator
     @skipCUDAIfNoSparseGeneric
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1651,6 +1655,10 @@ class TestSparseCSR(TestCase):
                 b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+                batched = self.genSparseCSRTensor((batch_size, m, k), nnz, dtype=dtype,
+                                                  device=device, index_dtype=index_dtype)
+                self.assertEqual(torch.bmm(batched, b), torch.bmm(batched.to_dense(), b))
 
     def run_test_block_addmm_addmv(self,
                                    addmv_addmm,
