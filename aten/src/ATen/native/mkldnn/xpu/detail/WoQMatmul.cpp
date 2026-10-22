@@ -208,13 +208,17 @@ void matmul_int4_impl(
   }
   if (quantized_act) {
     dnnl::memory::desc act_sc_md(
-        {m}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
+        get_onednn_dims(*mat1_scale),
+        get_onednn_dtype(*mat1_scale),
+        get_onednn_strides(*mat1_scale));
     auto act_sc_m =
         make_onednn_memory(act_sc_md, engine, mat1_scale->data_ptr());
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, act_sc_m});
 
     dnnl::memory::desc act_zp_md(
-        {m}, dnnl::memory::data_type::s32, dnnl::memory::format_tag::x);
+        get_onednn_dims(*mat1_zero_point),
+        get_onednn_dtype(*mat1_zero_point),
+        get_onednn_strides(*mat1_zero_point));
     auto act_zp_m =
         make_onednn_memory(act_zp_md, engine, mat1_zero_point->data_ptr());
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, act_zp_m});
