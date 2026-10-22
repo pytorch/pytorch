@@ -582,6 +582,32 @@ user_stack=None)
                 root.check_verbose({"x": nested})
             self.assertEqual(torch._C._get_torch_function_state(), state)
 
+    def test_tensor_match_guard_sparse_compressed(self):
+        # Compressed sparse layouts have no strides; the guard compares -1s.
+        for layout, blocksize in (
+            (torch.sparse_csr, None),
+            (torch.sparse_csc, None),
+            (torch.sparse_bsr, (1, 1)),
+            (torch.sparse_bsc, (1, 1)),
+        ):
+            with self.subTest(layout=layout):
+                x = torch.eye(4).to_sparse(layout=layout, blocksize=blocksize)
+                guard_manager = RootGuardManager()
+                guard_manager.add_tensor_match_guard(
+                    x,
+                    list(x.size()),
+                    [-1, -1],
+                    "x",
+                    ["check_tensor(x)"],
+                    None,
+                    type(x),
+                    torch._C._dispatch_keys(x),
+                    False,
+                )
+                self.assertTrue(guard_manager.check(x))
+                y = torch.eye(3).to_sparse(layout=layout, blocksize=blocksize)
+                self.assertFalse(guard_manager.check(y))
+
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
