@@ -21,10 +21,6 @@ PyObject* guard_complete_hook = NULL;
 
 typedef struct {
   int active_dynamo_threads;
-  // Whether a disabled region runs in run-only mode (callback False) rather
-  // than with Dynamo off (callback None); true under the eager_on_recompile
-  // stance.  eval_frame.py's _set_stance keeps this in sync.
-  int disabled_region_run_only;
 } ModuleState;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -671,7 +667,39 @@ void clear_old_frame_if_python_312_plus(
 
 #endif // !IS_PYTHON_3_13_PLUS
 
-static PyObject* set_eval_frame(PyObject* new_callback, ModuleState* state) {
+static PyObject* increment_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+
+  if (state != NULL) {
+    state->active_dynamo_threads = state->active_dynamo_threads + 1;
+    if (state->active_dynamo_threads > 0) {
+      enable_eval_frame_shim(tstate);
+    }
+  }
+
+  Py_RETURN_NONE;
+}
+
+static PyObject* decrement_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+
+  if (state != NULL) {
+    if (state->active_dynamo_threads > 0) {
+      state->active_dynamo_threads = state->active_dynamo_threads - 1;
+      if (state->active_dynamo_threads == 0) {
+        enable_eval_frame_default(tstate);
+      }
+    }
+  }
+
+  Py_RETURN_NONE;
+}
+
+static PyObject* set_eval_frame(PyObject* new_callback, PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -684,14 +712,9 @@ static PyObject* set_eval_frame(PyObject* new_callback, ModuleState* state) {
   // reference counts.
   if (old_callback != new_callback) {
     if (Py_IsNone(new_callback)) {
-      if (state->active_dynamo_threads) {
-        if (!(--state->active_dynamo_threads)) {
-          enable_eval_frame_default(PyThreadState_GET());
-        }
-      }
+      decrement_working_threads(PyThreadState_GET(), module);
     } else {
-      ++state->active_dynamo_threads;
-      enable_eval_frame_shim(PyThreadState_GET());
+      increment_working_threads(PyThreadState_GET(), module);
     }
 
     Py_INCREF(new_callback);
@@ -723,119 +746,7 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       !Py_IsNone(callback),
       Py_IsFalse(callback));
-  return set_eval_frame(callback, PyModule_GetState(module));
-}
-
-static PyObject* set_disabled_region_run_only_py(
-    PyObject* module,
-    PyObject* run_only) {
-  if (!PyBool_Check(run_only)) {
-    PyErr_SetString(PyExc_TypeError, "expected bool");
-    return NULL;
-  }
-  ((ModuleState*)PyModule_GetState(module))->disabled_region_run_only =
-      Py_IsTrue(run_only);
-  Py_RETURN_NONE;
-}
-
-// C version of torch._dynamo.disable's wrapper, for Dynamo-compiled graphs
-// (see _disable_compiled_graph).
-typedef struct {
-  PyObject_HEAD
-  PyObject* fn;
-  // The eval_frame module of the interpreter that created this wrapper.
-  PyObject* module;
-  PyObject* dict;
-  vectorcallfunc vectorcall;
-} DisabledGraph;
-
-static PyObject* DisabledGraph_vectorcall(
-    PyObject* self,
-    PyObject* const* args,
-    size_t nargsf,
-    PyObject* kwnames) {
-  // Same transitions as the Python wrapper. Going through None keeps
-  // set_eval_frame's working-thread count balanced.
-  DisabledGraph* graph = (DisabledGraph*)self;
-  ModuleState* state = PyModule_GetState(graph->module);
-  PyObject* prior = set_eval_frame(Py_None, state);
-  Py_DECREF(set_eval_frame(
-      state->disabled_region_run_only ? Py_False : Py_None, state));
-  PyObject* result = PyObject_Vectorcall(graph->fn, args, nargsf, kwnames);
-  Py_DECREF(set_eval_frame(Py_None, state));
-  Py_DECREF(set_eval_frame(prior, state));
-  Py_DECREF(prior);
-  return result;
-}
-
-static int DisabledGraph_traverse(
-    DisabledGraph* self,
-    visitproc visit,
-    void* arg) {
-  Py_VISIT(self->fn);
-  Py_VISIT(self->module);
-  Py_VISIT(self->dict);
-  return 0;
-}
-
-static int DisabledGraph_clear(DisabledGraph* self) {
-  Py_CLEAR(self->fn);
-  Py_CLEAR(self->module);
-  Py_CLEAR(self->dict);
-  return 0;
-}
-
-static void DisabledGraph_dealloc(DisabledGraph* self) {
-  PyObject_GC_UnTrack(self);
-  DisabledGraph_clear(self);
-  Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
-// Matches the repr of the Python wrapper this replaces, which
-// functools.update_wrapper also gives the wrapped function's __qualname__.
-static PyObject* DisabledGraph_repr(PyObject* self) {
-  PyObject* qualname = PyObject_GetAttrString(self, "__qualname__");
-  if (qualname == NULL) {
-    PyErr_Clear();
-    return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
-  }
-  PyObject* repr = PyUnicode_FromFormat("<function %S at %p>", qualname, self);
-  Py_DECREF(qualname);
-  return repr;
-}
-
-static PyGetSetDef DisabledGraph_getset[] = {
-    {"__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL},
-    {NULL}};
-
-static PyTypeObject DisabledGraphType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C._dynamo.eval_frame._DisabledGraph",
-    .tp_basicsize = sizeof(DisabledGraph),
-    .tp_dealloc = (destructor)DisabledGraph_dealloc,
-    .tp_repr = DisabledGraph_repr,
-    .tp_vectorcall_offset = offsetof(DisabledGraph, vectorcall),
-    .tp_call = PyVectorcall_Call,
-    .tp_flags =
-        Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL,
-    .tp_traverse = (traverseproc)DisabledGraph_traverse,
-    .tp_clear = (inquiry)DisabledGraph_clear,
-    .tp_getset = DisabledGraph_getset,
-    .tp_dictoffset = offsetof(DisabledGraph, dict),
-};
-
-// Built here rather than via tp_new so the wrapper can hold this interpreter's
-// module.
-static PyObject* make_disabled_graph_py(PyObject* module, PyObject* fn) {
-  PyTypeObject* type = &DisabledGraphType;
-  DisabledGraph* self = (DisabledGraph*)type->tp_alloc(type, 0);
-  if (!self) {
-    return NULL;
-  }
-  self->fn = Py_NewRef(fn);
-  self->module = Py_NewRef(module);
-  self->vectorcall = DisabledGraph_vectorcall;
-  return (PyObject*)self;
+  return set_eval_frame(callback, module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
@@ -975,11 +886,6 @@ static PyObject* set_fullgraph_error_on_nested_compile_py(
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
-    {"_set_disabled_region_run_only",
-     set_disabled_region_run_only_py,
-     METH_O,
-     NULL},
-    {"_make_disabled_graph", make_disabled_graph_py, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
@@ -1055,10 +961,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
 #endif
 
   if (PyModule_AddType(module, &THPPyInterpreterFrameType) < 0) {
-    return NULL;
-  }
-
-  if (PyModule_AddType(module, &DisabledGraphType) < 0) {
     return NULL;
   }
 
