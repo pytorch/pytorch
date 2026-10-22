@@ -126,10 +126,9 @@ class TestWrapperPreamble(TestCase):
         self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\n")
 
     def test_a_subgraph_cannot_write_a_line_kept_only_if_used(self):
-        (_, subgraph), buf = self._root_and_subgraph(), IndentedBuffer()
-        subgraph.write_if_used(buf, "import os")
+        _, subgraph = self._root_and_subgraph()
         with self.assertRaisesRegex(AssertionError, "subgraph_0 wrote a line"):
-            subgraph.scan_for_used_names(buf)
+            subgraph.write_if_used(IndentedBuffer(), "import os")
 
     def test_the_scan_reads_the_text_that_is_emitted(self):
         # getrawvalue would join `y = a\` and `os.sep` into `y = aos.sep`.
