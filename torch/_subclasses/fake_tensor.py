@@ -151,6 +151,15 @@ def _pin_device_index(device: torch.device) -> torch.device:
     return torch.device(device.type, 0)
 
 
+def _is_target_device_available(device_type: str) -> bool:
+    if device_type in ("cpu", "meta"):
+        return True
+    try:
+        return torch.get_device_module(device_type).is_available()
+    except (RuntimeError, AttributeError):
+        return False
+
+
 # Small helper that increments recursion count, and
 # resets it when the object goes out of scope.  Useful
 # if you don't want to increase indentation which is
@@ -547,7 +556,7 @@ def run_real_op(
             )
         try:
             real_out = func(*real_args, **real_kwargs)
-        except ZeroDivisionError as exc:
+        except (ZeroDivisionError, NotImplementedError) as exc:
             # we shouldn't broadly catch all errors here;
             # some come from real-kernel mutation/aliasing checks we want to run.
             # add more exception types as needed.
@@ -3066,6 +3075,20 @@ class FakeTensorMode(TorchDispatchMode):
                 avoiding_device_init = True
             if func is torch.ops.prims.device_put.default:
                 avoiding_device_init = True
+        elif (
+            func is torch.ops.aten._to_copy.default
+            and "device" in kwargs
+            and kwargs["device"].type not in ("cpu", "meta")
+            and not _is_target_device_available(kwargs["device"].type)
+        ) or (
+            func is torch.ops.prims.device_put.default
+            and not _is_target_device_available(torch.device(args[1]).type)
+        ):
+            # The destination device has no real backend in this build
+            # (e.g. faking cuda/xpu on a privateuse1-only machine).
+            # Const-prop would run the real kernel and raise
+            # NotImplementedError; skip it and compute on meta instead.
+            avoiding_device_init = True
 
         # skip const prop for aten._to_copy if
         # 1. input tensor is on "meta" device
@@ -3206,7 +3229,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         real = (
             run_real_op(self, func, args, kwargs)
-            if self.propagate_real_tensors
+            if self.propagate_real_tensors and not avoiding_device_init
             else None
         )
 
