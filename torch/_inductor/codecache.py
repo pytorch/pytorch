@@ -3001,7 +3001,7 @@ class AotCodeCompiler:
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
-                consts: bytes | bytearray, align_bytes: int, symbol_prefix: str
+                consts: bytes | bytearray, align_bytes: int
             ) -> tuple[str, str]:
                 consts_size = len(consts)
                 asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
@@ -3013,7 +3013,9 @@ class AotCodeCompiler:
 ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp = asan_attr
                 const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                const_cpp += (
+                    f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
+                )
                 count_bytes = 0
                 for c in consts:
                     const_cpp += f"{c}, "
@@ -3021,7 +3023,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
                 return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
@@ -3080,9 +3082,7 @@ end
                         ALIGN_BYTES, symbol_prefix
                     )
                 else:
-                    consts_code, code_ext = format_consts_to_cpp(
-                        consts, ALIGN_BYTES, symbol_prefix
-                    )
+                    consts_code, code_ext = format_consts_to_cpp(consts, ALIGN_BYTES)
 
             _, consts_s = write(
                 consts_code,
