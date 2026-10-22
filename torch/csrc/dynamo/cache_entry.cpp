@@ -5,7 +5,6 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
     : guard_manager{guarded_code.attr("guard_manager")},
@@ -88,28 +87,22 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
   return py::cast(e, py::return_value_policy::reference).release().ptr();
 }
 
-static PyObject* get_orig_backend_str() {
+static const py::str& get_orig_backend_str() {
   // NB: leak
-  constinit static py::gil_safe_call_once_and_store<py::str> storage;
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::str> storage;
   return storage
       .call_once_and_store_result([]() {
         return py::reinterpret_steal<py::str>(
             PyUnicode_InternFromString("_torchdynamo_orig_backend"));
       })
-      .get_stored()
-      .ptr();
+      .get_stored();
 }
 
 PyObject* get_backend(PyObject* callback) {
-  PyObject* orig_backend_str{get_orig_backend_str()};
-  PyObject* next{nullptr};
-
-  // PyObject_GetOptionalAttr is in the C-API compat file, and more efficient
-  // than calling hasattr/getattr.
-  while (PyObject_GetOptionalAttr(callback, orig_backend_str, &next) > 0) {
-    // Return borrowed; the previous hop's attribute keeps it alive.
-    Py_DECREF(next);
-    callback = next;
+  py::handle handle{callback};
+  const auto& orig_backend{get_orig_backend_str()};
+  while (py::hasattr(handle, orig_backend)) {
+    handle = handle.attr(orig_backend);
   }
-  return callback;
+  return handle.ptr();
 }

@@ -14,9 +14,7 @@ TensorBase empty_xpu(
   at::globalContext().lazyInitDevice(kXPU);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_xpu());
-  // A device without an index means the current device: nothing to switch to.
-  const c10::OptionalDeviceGuard device_guard(
-      device.has_index() ? std::make_optional(device) : std::nullopt);
+  const c10::DeviceGuard device_guard(device);
   auto* allocator = c10::GetAllocator(kXPU);
   constexpr c10::DispatchKeySet xpu_dks(c10::DispatchKey::XPU);
   return at::detail::empty_generic(
@@ -58,8 +56,7 @@ TensorBase empty_strided_xpu(
   at::globalContext().lazyInitDevice(kXPU);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_xpu());
-  const c10::OptionalDeviceGuard device_guard(
-      device.has_index() ? std::make_optional(device) : std::nullopt);
+  const c10::DeviceGuard device_guard(device);
   auto* allocator = c10::GetAllocator(kXPU);
   constexpr c10::DispatchKeySet xpu_dks(c10::DispatchKey::XPU);
   return at::detail::empty_strided_generic(
