@@ -9,6 +9,7 @@
 #include <ATen/native/mps/kernels/Attention.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/util/env.h>
 #include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -145,6 +146,18 @@ static constexpr int64_t kSplitTargetThreadgroups = 128, kSplitMinKBlocks = 8, k
 // past that, one launch per slab keeps the slab's V hot across the wave (M4,
 // M5 Pro).
 static constexpr int64_t kGridThreadgroupsPerCore = 8;
+// The staged V/O slab passes materialize the fp32 scores S[B * H * qL, kL];
+// above this many bytes each slab recomputes the scores instead.
+static constexpr int64_t kStagedScoresMaxBytes = int64_t(1) << 30;
+// PYTORCH_MPS_SDPA_STAGED_SCORES_MAX_BYTES overrides the cap (0 disables
+// staging); read per call, on the wide V/O path only, so tests can set it.
+static int64_t staged_scores_max_bytes() {
+  const auto env = c10::utils::get_env("PYTORCH_MPS_SDPA_STAGED_SCORES_MAX_BYTES");
+  return env ? strtoll(env->c_str(), nullptr, 10) : kStagedScoresMaxBytes;
+}
+
+enum class Stage { fused, scores, pv };
+static constexpr std::array<std::string_view, 3> kStageSuffix{""sv, "_scores"sv, "_pv"sv};
 
 // Prefill: flash attention on simdgroup matrices (PrefillAttention.h) or, on
 // macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h). One threadgroup
@@ -194,44 +207,47 @@ static void sdpa_prefill_mps(const Tensor& q,
 
   const int64_t rows = q.size(0) * q.size(1) * q.size(2);
   const int64_t nq = c10::metal::ceil_div(q.size(2), bq), nk = c10::metal::ceil_div(k.size(2), bk);
+  // Wide V/O on the simdgroup kernel: prefill_attention_scores writes the
+  // scaled, masked scores and row stats once, then prefill_attention_pv runs
+  // P @ V over the slabs.
+  const bool staged = !use_mpp && dv > bd && rows * k.size(2) * int64_t(sizeof(float)) <= staged_scores_max_bytes();
   static const int64_t core_grid = kGridThreadgroupsPerCore * std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
   const int64_t grid_xy = nq * q.size(0) * q.size(1);
   const int64_t max_splits = std::clamp(nk / kSplitMinKBlocks, int64_t(1), kMaxSplits);
   const int64_t n_splits = std::clamp(kSplitTargetThreadgroups / grid_xy, int64_t(1), max_splits);
-  const bool split = n_splits > 1;
+  const int64_t score_grid = std::max(kSplitTargetThreadgroups, core_grid);
+  const int64_t n_score_splits = std::clamp(score_grid / grid_xy, int64_t(1), max_splits);
   const auto float_opts = q.options().dtype(kFloat);
-  Tensor sums, maxs;
-  if (split) {
+  Tensor sums, maxs, scores, score_sums, score_maxs;
+  if (n_splits > 1) {
     sums = at::empty({rows, n_splits}, float_opts);
     maxs = at::empty_like(sums);
   }
+  if (staged) {
+    scores = at::empty({rows, k.size(2)}, float_opts);
+    score_sums = at::empty({rows, n_score_splits}, float_opts);
+    score_maxs = at::empty_like(score_sums);
+  }
   const auto dtype = scalarToMetalTypeString(q);
-  const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
   const auto family = use_mpp ? (is_apple10_or_newer ? "_mpp_a10"sv : "_mpp_a9"sv) : ""sv;
-  const auto kname = fmt::format("prefill_attention{}_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}",
-                                 family,
-                                 dtype,
-                                 bd,
-                                 mask.has_value(),
-                                 is_causal,
-                                 d > bd,
-                                 split,
-                                 mask_dtype);
-  const auto pso = lib.getPipelineStateForFunc(kname);
   const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, kPrefillSimdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
-  // Only the MPP kernel takes slabs in one launch.
-  const int64_t full = dv / bd * bd;
-  const int64_t step = use_mpp && grid_xy * n_splits < core_grid ? std::max(full, bd) : bd;
-  for (int64_t v0 = 0; v0 < dv; v0 += step) {
-    const auto vs = v.narrow(3, v0, std::min(step, dv - v0));
-    const auto os = out.narrow(3, v0, vs.size(3));
-    const int64_t slabs = c10::metal::ceil_div(vs.size(3), bd);
-    const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * n_splits * slabs);
+  auto launch = [&](Stage stage, const Tensor& vs, const Tensor& os) {
+    const bool has_mask = mask && stage != Stage::pv;
+    const bool chunked = stage != Stage::pv && d > bd;
+    const bool split = stage != Stage::scores && n_splits > 1;
+    const int64_t slabs = stage == Stage::scores ? 1 : c10::metal::ceil_div(vs.size(3), bd);
+    const int64_t splits = stage == Stage::scores ? n_score_splits : n_splits;
+    const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * splits * slabs);
     Tensor partials;
     if (split) {
-      partials = at::empty({rows, n_splits, use_mpp ? vs.size(3) : bd}, float_opts);
+      // The simdgroup fused kernel writes tile-wide partial rows.
+      partials = at::empty({rows, n_splits, use_mpp || stage == Stage::pv ? vs.size(3) : bd}, float_opts);
     }
+    const auto mask_dtype = has_mask ? scalarToMetalTypeString(*mask) : dtype;
+    auto kname = fmt::format("prefill_attention{}{}_{}_bd{}", family, kStageSuffix[size_t(stage)], dtype, bd);
+    kname += fmt::format("_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}", has_mask, is_causal, chunked, split, mask_dtype);
+    const auto pso = lib.getPipelineStateForFunc(kname);
     const PrefillAttnParams params{
         .B = c10::safe_conv<int32_t>(q.size(0)),
         .H = c10::safe_conv<int32_t>(q.size(1)),
@@ -241,8 +257,9 @@ static void sdpa_prefill_mps(const Tensor& q,
         .gqa_factor = c10::safe_conv<int32_t>(q.size(1) / k.size(1)),
         .scale = scale,
         .Dv = c10::safe_conv<int32_t>(vs.size(3) / slabs),
-        .n_splits = c10::safe_conv<int32_t>(n_splits),
+        .n_splits = c10::safe_conv<int32_t>(splits),
         .n_slabs = c10::safe_conv<int32_t>(slabs),
+        .n_score_splits = c10::safe_conv<int32_t>(n_score_splits),
         .Q_strides = {q.stride(0), q.stride(1), q.stride(2)},
         .K_strides = {k.stride(0), k.stride(1), k.stride(2)},
         .V_strides = {vs.stride(0), vs.stride(1), vs.stride(2)},
@@ -258,11 +275,16 @@ static void sdpa_prefill_mps(const Tensor& q,
         // instantiation; Metal validation wants them bound even when unused, and
         // the writable row stats bound to a real buffer (the output stands in).
         mtl_setArgs<6>(computeEncoder, uint32_t(0), os, os);
-        if (mask) {
+        if (has_mask) {
           mtl_setArgs<6>(computeEncoder, *mask);
         }
-        if (split) {
+        if (stage == Stage::scores) {
+          mtl_setArgs<7>(computeEncoder, score_sums, score_maxs);
+        } else if (split) {
           mtl_setArgs<7>(computeEncoder, sums, maxs);
+        }
+        if (staged) {
+          mtl_setArgs<9>(computeEncoder, scores, score_maxs);
         }
         [computeEncoder dispatchThreadgroups:grid threadsPerThreadgroup:threadgroup];
         if (split) {
@@ -270,6 +292,16 @@ static void sdpa_prefill_mps(const Tensor& q,
         }
       }
     });
+  };
+  if (staged) {
+    launch(Stage::scores, v, out);
+  }
+  // Only the MPP fused kernel and P @ V take slabs in one launch.
+  const int64_t full = dv / bd * bd;
+  const int64_t step = (use_mpp || staged) && grid_xy * n_splits < core_grid ? std::max(full, bd) : bd;
+  for (int64_t v0 = 0; v0 < dv; v0 += step) {
+    const auto vs = v.narrow(3, v0, std::min(step, dv - v0));
+    launch(staged ? Stage::pv : Stage::fused, vs, out.narrow(3, v0, vs.size(3)));
   }
 }
 
