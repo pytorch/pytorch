@@ -1140,8 +1140,8 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint_sympy_int(arg: sympy.Expr | int) -> int:
-                    return V.graph.sizevars.optimization_hint(arg)
+                def to_size_hint_sympy_int(arg: sympy.Expr | int) -> int | float:
+                    return V.graph.sizevars.size_arg_hint(arg)
 
                 def to_size_hint_list(arg: list[torch.SymInt | int]) -> list[int]:
                     args_sympy = [

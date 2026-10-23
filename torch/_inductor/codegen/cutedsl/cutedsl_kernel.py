@@ -276,9 +276,18 @@ class CuteDSLTemplateKernel(Kernel):
         return params.getvalue()
 
     def render(self, template, **kwargs):
-        from torch._inductor.select_algorithm import PartialRender
+        from torch._inductor.select_algorithm import PartialRender, RuntimeFloat
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        # The template's host-side Python computes runtime floats directly from
+        # the kernel's size args, so no precomputed kernel arg is needed.
+        for name, val in kwargs.items():
+            if isinstance(val, RuntimeFloat):
+                val = val.unwrap_if_number()
+                if isinstance(val, RuntimeFloat):
+                    expr = self.rename_indexing(sympy.sympify(val.value))
+                    val = f"float({PythonPrinter().doprint(expr)})"
+                kwargs[name] = val
         self._template_kwargs = dict(kwargs)
         self.aux_scalar_bindings = CuteDSLAuxScalarBindings(
             tuple(kwargs.get("AUX_SCALAR_SYMBOLS", ()))

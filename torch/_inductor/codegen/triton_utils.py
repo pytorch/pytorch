@@ -173,10 +173,11 @@ def signature_of(
                 return "fp64"
             return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
-            arg.expr, (SymT.UNBACKED_FLOAT)
+            arg.expr, (SymT.UNBACKED_FLOAT, SymT.PRECOMPUTED_FLOAT)
         ):
-            # Unbacked floats from .item() are runtime Python floats, so they
-            # follow the same eager-vs-Inductor signature policy as literals.
+            # Unbacked floats from .item() and host-computed float size
+            # expressions are runtime Python floats, so they follow the same
+            # eager-vs-Inductor signature policy as literals.
             if (
                 use_fp64_for_python_float
                 and config._use_fp64_for_unbacked_floats
