@@ -48,7 +48,7 @@ class _BlockscaledTma:
         quant_orientation: int,
         is_square_scaling: bool,
         is_scale_swizzled: bool,
-        batch_rank: int,
+        is_batched: bool,
     ) -> None:
         self.input_element_type = input_element_type
         self.tile_m_size = tile_m_size
@@ -58,7 +58,7 @@ class _BlockscaledTma:
         self.quant_orientation = quant_orientation
         self.is_square_scaling = is_square_scaling
         self.is_scale_swizzled = is_scale_swizzled
-        self.batch_rank = batch_rank
+        self.is_batched = is_batched
 
     @cute.kernel
     def kernel(
@@ -111,8 +111,7 @@ class _BlockscaledTma:
         tile_k_size = cutlass.const_expr(self.tile_k_size)
         needs_boundary_masking = cutlass.const_expr(self.needs_boundary_masking)
         quant_orientation = cutlass.const_expr(self.quant_orientation)
-        batch_rank = cutlass.const_expr(self.batch_rank)
-        is_batched = cutlass.const_expr(batch_rank != 0)
+        is_batched = cutlass.const_expr(self.is_batched)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
         scale_group_size = 32
@@ -190,7 +189,7 @@ class _BlockscaledTma:
             gInput = cute.local_tile(
                 input_tma_tensor, (tile_m_size, tile_k_size), (None, None)
             )
-        tma_rank = cutlass.const_expr(2 + batch_rank)
+        tma_rank = cutlass.const_expr(4 if is_batched else 2)
         tInputsInput, tInputgInput = cpasync.tma_partition(
             input_tma_atom,
             0,
@@ -648,8 +647,7 @@ class _BlockscaledTma:
         tile_k_size = cutlass.const_expr(self.tile_k_size)
         cluster_k = cutlass.const_expr(self.cluster_k)
         quant_orientation = cutlass.const_expr(self.quant_orientation)
-        batch_rank = cutlass.const_expr(self.batch_rank)
-        is_batched = cutlass.const_expr(batch_rank != 0)
+        is_batched = cutlass.const_expr(self.is_batched)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
         scale_group_size = 32
@@ -958,10 +956,10 @@ class _BlockscaledTma:
 
 
 def _make_dynamic_matrix_fake(
-    dtype: type[cutlass.Numeric], batch_rank: int
+    dtype: type[cutlass.Numeric], is_batched: bool
 ) -> cute.Tensor:
     """Match a 16-byte-aligned row-major tensor with a dynamic, 16-divisible K."""
-    if batch_rank == 2:
+    if is_batched:
         return cute.runtime.make_fake_tensor(
             dtype,
             (
@@ -1015,14 +1013,14 @@ def _blockscaled_tma_compile_log_key(
     quant_orientation: int,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
-    batch_rank: int,
+    is_batched: bool,
 ) -> str:
     return (
         f"dtype={input_dtype} orientation={quant_orientation} "
         f"tile={tile_m_size}x{tile_k_size} cluster_k={cluster_k} "
         f"masking={needs_boundary_masking} rounding=RTNE "
         f"square={is_square_scaling} scale_swizzled={is_scale_swizzled} "
-        f"batch_rank={batch_rank}"
+        f"is_batched={is_batched}"
     )
 
 
@@ -1039,7 +1037,7 @@ def _compile_blockscaled_tma(
     quant_orientation: int,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
-    batch_rank: int,
+    is_batched: bool,
 ) -> Callable[..., None]:
     input_element_type = torch2cute[input_dtype]
     do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
@@ -1054,12 +1052,12 @@ def _compile_blockscaled_tma(
         quant_orientation,
         is_square_scaling,
         is_scale_swizzled,
-        batch_rank,
+        is_batched,
     )
 
-    mInput = _make_dynamic_matrix_fake(input_element_type, batch_rank)
+    mInput = _make_dynamic_matrix_fake(input_element_type, is_batched)
     mOutputK = (
-        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, batch_rank)
+        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, is_batched)
         if do_dim_k
         else None
     )
@@ -1073,7 +1071,7 @@ def _compile_blockscaled_tma(
         else None
     )
     mOutputM = (
-        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, batch_rank)
+        _make_dynamic_matrix_fake(cutlass.Float8E4M3FN, is_batched)
         if do_dim_m
         else None
     )

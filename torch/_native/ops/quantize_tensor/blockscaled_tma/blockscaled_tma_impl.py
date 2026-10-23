@@ -535,7 +535,7 @@ def _blockscaled_tma_impl_on_current_device(
         spec.quant_orientation_id,
         spec.is_square_scaling,
         spec.is_scale_swizzled,
-        input.ndim - 2,
+        spec.is_batched,
     )
     output_k, output_m = launch.output_k, launch.output_m
     if spec.is_batched:
