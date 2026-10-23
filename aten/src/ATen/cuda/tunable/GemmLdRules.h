@@ -1,16 +1,27 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 // Leading-dimension rules for GEMM signatures, split out of GemmCommon.h so
-// they can be unit tested without pulling in ATen or CUDA. Pure integer and
-// character logic -- no dependencies beyond <cstdint>.
+// they can be unit tested without pulling in ATen or CUDA. Pure integer,
+// character and string logic -- no ATen or CUDA dependencies.
 //
-// Two consumers share these rules and must not drift apart:
-//   * ShouldWildcardLd* in GemmCommon.h, deciding whether an ld may be replaced
-//     by '*' when a logical dim is dynamic.
-//   * NearestLargerMatch in Tunable.cpp, deciding whether a tuned entry for one
-//     shape may be borrowed for another differing in a single logical dim.
+// Two sites share the transpose/tightness rules and must not drift apart:
+//   * ShouldWildcardLd* in GemmCommon.h decides whether an ld may be replaced
+//     by '*' when a logical dim is dynamic. It checks a SINGLE shape inline
+//     (ld == its logical extent) because there is no second shape to compare.
+//   * LdMayVary + LdsCompatibleWhen*Varies below compare TWO shapes when only
+//     one logical dim differs, requiring tightness in both.
+// What is shared is UsesMForLda/UsesKForLdb (which ld tracks which dim) and
+// the tightness principle (a padded ld is not a function of m/n/k); the call
+// shapes differ because the inputs differ.
+//
+// This header also hosts the signature parser (ParseGemmShape) and the
+// borrow-compatibility check (NearestLargerMatch) used by
+// TuningResultsManager::LookupNearest, so the grammar lives next to the rules
+// and both are covered by the same unit test.
 
 namespace at::cuda::tunable {
 
@@ -76,6 +87,130 @@ inline bool LdsCompatibleWhenNVaries(
     return q.ldb == c.ldb;
   }
   return LdMayVary(q.ldb, q_n, c.ldb, c_n);
+}
+
+// --- Signature parsing and borrow matching for LookupNearest ---
+//
+// Grammar produced by the Signature() builders in GemmCommon.h:
+//   ab_M_N_K_[B_<b>_]ld_lda_ldb_ldc[_<suffix...>]
+// e.g. "NN_1024_512_256_ld_1024_256_1024",
+//      "NN_8_512_256_B_4_ld_512_256_512",
+//      "NN_1024_512_256_ld_1024_256_1024_rw_1_bias_BFloat16".
+// Wildcard '*' tokens fail numeric conversion, so wildcard (dynamic) signatures
+// never parse: borrowing is concrete-to-concrete by design.
+
+inline std::vector<std::string> SplitUnderscore(const std::string& s) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  while (true) {
+    const size_t pos = s.find('_', start);
+    if (pos == std::string::npos) {
+      out.push_back(s.substr(start));
+      break;
+    }
+    out.push_back(s.substr(start, pos - start));
+    start = pos + 1;
+  }
+  return out;
+}
+
+// Parsed form of a params signature: ab_M_N_K_[B_<b>_]ld_lda_ldb_ldc[_<suffix...>].
+struct GemmShape {
+  bool ok = false;
+  std::string transab;  // [0]=transa, [1]=transb
+  int64_t m = 0, n = 0, k = 0;
+  bool has_b = false;
+  int64_t b = 0;
+  int64_t lda = 0, ldb = 0, ldc = 0;
+  std::string suffix;  // tail after ldc (e.g. scaled_mm "_rw_1_bias_BFloat16")
+};
+
+inline GemmShape ParseGemmShape(const std::vector<std::string>& t) {
+  GemmShape s;
+  if (t.size() < 8 || t[0].size() != 2) {
+    return s;
+  }
+  size_t i = 0;
+  try {
+    s.transab = t[i++];
+    s.m = std::stoll(t[i++]);
+    s.n = std::stoll(t[i++]);
+    s.k = std::stoll(t[i++]);
+    if (t[i] == "B") {
+      s.has_b = true;
+      i++;
+      s.b = std::stoll(t[i++]);
+    }
+    if (i >= t.size() || t[i] != "ld") {
+      return s;
+    }
+    i++;
+    if (i + 2 >= t.size()) {
+      return s;
+    }
+    s.lda = std::stoll(t[i++]);
+    s.ldb = std::stoll(t[i++]);
+    s.ldc = std::stoll(t[i++]);
+  } catch (...) {
+    return s;
+  }
+  for (; i < t.size(); i++) {
+    s.suffix += "_" + t[i];
+  }
+  s.ok = true;
+  return s;
+}
+
+// True iff `c` can serve `q` by rounding exactly one of {M, N, B} UP to c's value;
+// `delta` is the gap, so the caller can pick the closest candidate. Which ld's
+// may differ is decided by LdsCompatibleWhen*Varies above, which applies the
+// same transpose and tightness rules as ShouldWildcardLd*: an ld that is padded
+// rather than tight is not a function of m/n/k, so it must match exactly even
+// when the dim it would otherwise track is the one being rounded.
+inline bool NearestLargerMatch(const GemmShape& q, const GemmShape& c, int64_t& delta) {
+  if (!q.ok || !c.ok) {
+    return false;
+  }
+  if (q.transab != c.transab || q.has_b != c.has_b || q.k != c.k ||
+      q.suffix != c.suffix) {
+    return false;
+  }
+  const bool dm = q.m != c.m;
+  const bool dn = q.n != c.n;
+  const bool db = q.has_b && q.b != c.b;
+  if ((dm ? 1 : 0) + (dn ? 1 : 0) + (db ? 1 : 0) != 1) {
+    return false;
+  }
+  const char ta = q.transab[0];
+  const char tb = q.transab[1];
+  const GemmLeadingDims q_lds{q.lda, q.ldb, q.ldc};
+  const GemmLeadingDims c_lds{c.lda, c.ldb, c.ldc};
+  int64_t qv = 0;
+  int64_t cv = 0;
+  if (dm) {
+    if (!LdsCompatibleWhenMVaries(ta, q_lds, q.m, c_lds, c.m)) {
+      return false;
+    }
+    qv = q.m;
+    cv = c.m;
+  } else if (dn) {
+    if (!LdsCompatibleWhenNVaries(tb, q_lds, q.n, c_lds, c.n)) {
+      return false;
+    }
+    qv = q.n;
+    cv = c.n;
+  } else {  // db: no ld depends on B, so all must match.
+    if (q.lda != c.lda || q.ldb != c.ldb || q.ldc != c.ldc) {
+      return false;
+    }
+    qv = q.b;
+    cv = c.b;
+  }
+  if (cv < qv) {
+    return false;
+  }
+  delta = cv - qv;
+  return true;
 }
 
 } // namespace at::cuda::tunable
