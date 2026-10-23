@@ -447,7 +447,7 @@ class TestDecomp(NNTestCase):
     @parametrize("m,k", [(1, 4), (4, 1)])
     def test_addmm_zero_alpha_ignores_nan_matrix(self, device, m, k):
         def fn(x, a, b):
-            return torch.addmm(x, a, b, alpha=0)
+            return torch.addmm(x, a, b, alpha=0).relu()
 
         x = torch.ones(4, device=device)
         a = torch.full((m, k), float("nan"), device=device)
