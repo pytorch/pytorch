@@ -104,6 +104,8 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     // Borrow the tuned solution of a neighbouring shape: identical except in one
     // free dim (M, N or batch count), rounded up. Separate from Lookup so a caller
     // can tell a measured hit from a borrow, which is expected to be validated.
+    // Unconditional: TunableOp dispatch never calls this, so calling it is the
+    // opt-in and there is no flag to consult.
     ResultEntry LookupNearest(const std::string& op_signature,
         const std::string& params_signature);
 
@@ -118,7 +120,8 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     // Persist a compile-time decision for a shape that was never tuned: a borrowed
     // solution, or Default when the default kernel benchmarked faster. Unlike Add()
-    // this works while tuning is disabled, gated on IsRecordBorrowedEnabled.
+    // this writes while tuning is disabled. Also unconditional, for the same
+    // reason as LookupNearest.
     void RecordBorrowed(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry entry);
@@ -154,6 +157,14 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void CloseRealtimeAppend();  // For clean shutdown
   private:
+    // Shared body of Add() and RecordBorrowed(). force_persist writes the entry
+    // to the results file regardless of the tuning flags, so RecordBorrowed can
+    // override the write rule for itself without widening it for Add()'s callers.
+    void AddAndMaybePersist(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry best,
+        bool force_persist);
+
     std::mutex lock_;
     std::mutex realtime_file_mutex_;
     std::unique_ptr<std::ofstream> realtime_out_;
@@ -246,13 +257,14 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
-    // Runtime-settable rather than env-only: the reuse pass and the runtime
-    // execution that follows it share a process and need opposite values.
+    // Policy for the compile-time reuse pass, read by the pass itself to decide
+    // whether to borrow and whether to persist what it decided. Neither flag is
+    // consulted by TuningResultsManager or by TunableOp dispatch. Runtime-settable
+    // rather than env-only: the reuse pass and the runtime execution that follows
+    // it share a process and need opposite values.
     void EnableNearestMatch(bool value);
     bool IsNearestMatchEnabled() const;
 
-    // Lets the reuse pass write results while tuning is off; the normal write path
-    // is gated on IsTuningEnabled().
     void EnableRecordBorrowed(bool value);
     bool IsRecordBorrowedEnabled() const;
 
@@ -312,13 +324,11 @@ class TORCH_CUDA_CPP_API TuningContext {
     // Atomic: the reuse pass flips these while other threads may run GEMMs.
     // Single-flight contract: the reuse pass must not overlap execution -- the
     // atomics only make concurrent reads well-defined, they do not make a
-    // decision taken under transient flag values meaningful. LookupNearest's
-    // gate reads nearest_match_enable_ together with tuning_enable_, and
-    // Add()'s persist gate reads record_borrowed_enable_ with
-    // record_untuned_enable_, so every flag the reuse pass toggles is atomic;
-    // a split read can still observe a transitional combination. (Per-call
-    // dynamic-dims state instead goes through the thread-local push/pop stack;
-    // see TunableDynamicDimsGuard below.)
+    // decision taken under transient flag values meaningful. The reuse pass
+    // reads several of these per shape to decide whether to borrow and whether
+    // to persist, so a split read can still observe a transitional
+    // combination. (Per-call dynamic-dims state instead goes through the
+    // thread-local push/pop stack; see TunableDynamicDimsGuard below.)
     std::atomic<bool> tuning_enable_;
     std::atomic<bool> record_untuned_enable_;
     std::atomic<bool> nearest_match_enable_;

@@ -81,6 +81,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
+from torch._prims_common import compute_required_storage_length
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -460,6 +461,98 @@ class TestMaxAutotune(TestCase):
                 )
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
+
+    @parametrize(
+        "dtype,k_hint,expected,holds_at,fails_at",
+        [
+            # (dtype, K, takes TMA, a K the guards accept, a K they reject)
+            (torch.float16, 512, True, 520, 513),
+            (torch.float16, 513, False, 515, 520),  # aligned K recompiles to TMA
+            (torch.float8_e4m3fn, 64, True, 48, 16),  # fp8 also needs K >= 32
+            (torch.float8_e4m3fn, 16, False, 16, 64),
+        ],
+    )
+    def test_can_use_tma_guards_requirements_not_sizes(
+        self, dtype, k_hint, expected, holds_at, fails_at
+    ):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import can_use_tma
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        m = shape_env.create_symbol(1024, ConstantSource("m"))
+        k = shape_env.create_symbol(k_hint, ConstantSource("k"))
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))(), shape_env=shape_env)
+        mat = mock.Mock()
+        mat.get_size.return_value = [m, k]
+        mat.get_stride.return_value = [k, 1]
+        mat.get_dtype.return_value = dtype
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch.utils._triton.has_triton_tma_device", return_value=True),
+        ):
+            self.assertEqual(can_use_tma(mat, add_guards=True), expected)
+
+        # Only the requirements are guarded: no size is specialized, M is free.
+        guards = [g.expr for g in shape_env.guards]
+        self.assertFalse(shape_env.replacements)
+        self.assertFalse(any(m in g.free_symbols for g in guards))
+        self.assertTrue(all(g.xreplace({k: holds_at}) for g in guards))
+        self.assertFalse(all(g.xreplace({k: fails_at}) for g in guards))
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    @parametrize("aot", (False, True))
+    def test_max_autotune_persistent_tma_dynamic(self, aot):
+        from torch._inductor import aoti_compile_and_package, aoti_load_package, utils
+
+        class Mm(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        can_use_tma, offered = utils.can_use_tma, []
+
+        def spy(*args, **kwargs):
+            offered.append(can_use_tma(*args, **kwargs))
+            return offered[-1]
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.native_matmul": False,
+                    # Without AOTI, TMA must be chosen (not just offered).
+                    "test_configs.autotune_choice_name_regex": (
+                        None if aot else "persistent_tma"
+                    ),
+                }
+            ),
+            mock.patch.object(utils, "can_use_tma", spy),
+        ):
+            if aot:
+                # AOTI can't check at runtime that K is aligned, so no TMA.
+                a = torch.randn(1024, 512, dtype=torch.float16, device=GPU_TYPE)
+                b = torch.randn(512, 256, dtype=torch.float16, device=GPU_TYPE)
+                k = torch.export.Dim("k", min=16, max=4096)
+                shapes = {"a": {1: k}, "b": {0: k}}
+                ep = torch.export.export(Mm(), (a, b), dynamic_shapes=shapes)
+                fn = aoti_load_package(aoti_compile_and_package(ep))
+                sizes = [(1024, 512), (1024, 513), (1024, 1000)]
+            else:
+                # M is not a TMA requirement, so any M reuses the TMA graph.
+                fn = torch.compile(Mm())
+                sizes = [(1024, 512), (777, 512), (33, 512)]
+            for m, k in sizes:
+                a = torch.randn(m, k, dtype=torch.float16, device=GPU_TYPE)
+                b = torch.randn(k, 256, dtype=torch.float16, device=GPU_TYPE)
+                torch._dynamo.mark_dynamic(a, 0)
+                ref = a.double() @ b.double()
+                self.assertEqual(fn(a, b).double(), ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(offered and set(offered), {not aot})
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
@@ -3601,6 +3694,123 @@ class TestMaxAutotune(TestCase):
 
         a = x[7 * batch :]
         torch.testing.assert_close(result, torch.mm(a, w), rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @parametrize("view_offset,shift,extern_offset", ((-2048, 2048, 0), (2048, 0, 2048)))
+    def test_max_autotune_mm_rebased_storage_offset_input(
+        self, view_offset, shift, extern_offset
+    ):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/200810.
+        as_strided storage offsets are relative to the input's storage, so a
+        view of an input gets rebased to a data-pointer-relative layout offset
+        that can point outside the input's own allocation: -2048 for
+        x[2048:].as_strided((64, 32), (32, 1), 0) and 2048 for
+        x[:2048].as_strided((64, 32), (32, 1), 2048). Kernels fold that offset
+        into their own pointer arithmetic, and eager as_strided rejects the
+        negative case, so the benchmark inputs have to be materialized with a
+        data pointer at the same relative position in a big enough allocation.
+        """
+        start = 2048 if view_offset < 0 else 0
+        as_strided_offset = max(view_offset, 0)
+        x = torch.arange(4096, device=GPU_TYPE, dtype=torch.float32)[
+            start : start + 2048
+        ]
+        w = torch.ones(32, 64, device=GPU_TYPE)
+
+        def mm(a, b):
+            return torch.mm(a.as_strided((64, 32), (32, 1), as_strided_offset), b)
+
+        autotune_args = []
+        orig_get_inputs = AlgorithmSelectorCache.get_inputs.__func__
+
+        def spy(cls, *args, **kwargs):
+            inputs = orig_get_inputs(cls, *args, **kwargs)
+            autotune_args.append(inputs)
+            return inputs
+
+        with (
+            mock.patch.object(AlgorithmSelectorCache, "get_inputs", classmethod(spy)),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }
+            ),
+        ):
+            result = torch.compile(mm, fullgraph=True)(x, w)
+
+        # Loads before the graph input pointer read back 0 on ROCm, so the
+        # negative case computes zeros there and cannot be compared. Same
+        # limitation as test_as_strided_past_input_extent in test_torchinductor.py.
+        if view_offset >= 0 or not TEST_WITH_ROCM:
+            torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
+
+        self.assertTrue(autotune_args, "autotuning did not build benchmark inputs")
+        # The fake input has to satisfy as_strided with the data pointer placed
+        # where the kernel's folded offset expects it: shift elements in front,
+        # then enough storage for the view on either side of the buffer.
+        fake_x = autotune_args[0].triton.input_tensors[0]
+        fake_items = fake_x.untyped_storage().size() // fake_x.element_size()
+        ptr_off = (
+            fake_x.data_ptr() - fake_x.untyped_storage().data_ptr()
+        ) // fake_x.element_size()
+        buffer_span = compute_required_storage_length((2048,), (1,), 0)
+        view_span = compute_required_storage_length((64, 32), (32, 1), 0)
+        self.assertEqual(fake_x.storage_offset(), shift)
+        self.assertEqual(ptr_off, shift)
+        # The kernel indexes the whole view, so the storage covers the buffer as
+        # well as the view, whichever reaches further past the data pointer.
+        self.assertEqual(fake_items, shift + max(buffer_span, view_span))
+        # The aten input stays a view at the rebased offset, backed by a base
+        # that also covers the input's own allocation.
+        extern_x = autotune_args[0].extern.input_tensors[0]
+        self.assertEqual(tuple(extern_x.size()), (64, 32))
+        self.assertEqual(tuple(extern_x.stride()), (32, 1))
+        self.assertEqual(extern_x.storage_offset(), extern_offset)
+        self.assertEqual(
+            extern_x.untyped_storage().size() // extern_x.element_size(), 4096
+        )
+
+    @fresh_cache()
+    @skipIfXpu
+    def test_max_autotune_negative_offset_layout(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/200810.
+        A layout with a negative offset that is not a view of anything reaches
+        benchmark_example_value with the same negative value as both extra_size
+        and view_offset. Its storage still has to be allocated: a negative
+        offset means the buffer has no leading region, not that it needs less.
+        """
+        from torch._inductor import ir
+
+        captured = {}
+
+        def patched_lowering(*args, **kwargs):
+            layout = ir.FixedLayout(
+                torch.device(GPU_TYPE), torch.float32, [64, 32], [32, 1], -2048
+            )
+            captured["example"] = AlgorithmSelectorCache.benchmark_example_value(layout)
+            return orig_add_lowering(*args, **kwargs)
+
+        orig_add_lowering = torch._inductor.lowering.lowerings[aten.add.Tensor]
+        with patch.dict(
+            torch._inductor.lowering.lowerings,
+            {aten.add.Tensor: patched_lowering},
+        ):
+            torch.compile(lambda x: x + 1)(
+                torch.randn(64, 32, device=GPU_TYPE, dtype=torch.float32)
+            )
+
+        example = captured["example"]
+        self.assertEqual(tuple(example.size()), (64, 32))
+        # The data pointer is shifted in by -offset so the view can start at 0.
+        self.assertEqual(example.storage_offset(), 2048)
+        self.assertGreaterEqual(
+            example.untyped_storage().size() // example.element_size(),
+            2048 + compute_required_storage_length((64, 32), (32, 1), 0),
+        )
 
     @fresh_cache()
     @skipIfXpu
@@ -7677,6 +7887,8 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
+        "test_max_autotune_mm_rebased_storage_offset_input": "get_inputs is not called on the pipelined path, so the benchmark inputs this test inspects are never built here",
+        "test_max_autotune_negative_offset_layout": "test-only lowering patch, drops the benchmark inputs the pipelined path needs",
         # grouped_mm's input_gen_fns forces
         # return_multi_template=False, so do_autotuning() takes its
         # pipelined-only branch and returns None instead of timings,
