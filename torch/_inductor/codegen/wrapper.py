@@ -3174,7 +3174,7 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = V.graph.sizevars.optimization_hint(dims)
+            dims = V.graph.sizevars.optimization_hints(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
         ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
