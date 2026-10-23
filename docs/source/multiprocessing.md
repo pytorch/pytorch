@@ -194,7 +194,7 @@ terminate processes upon detecting an error in one of them.
 ```
 
 ```{eval-rst}
-.. class:: SpawnContext
+.. class:: ProcessContext
 
    Returned by :func:`~spawn` when called with ``join=False``.
 
