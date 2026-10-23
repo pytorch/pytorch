@@ -29,7 +29,6 @@ if not TEST_CUTEDSL:
 import cutlass
 
 from torch._native.ops.reductions import (
-    inner_tree_kernel as up,
     kernel_general as kg,
     kernel_rowtile as rt,
     tile,
@@ -140,18 +139,15 @@ class TestInnerTreeOrder(TestCase):
                             self.assertLessEqual(tm.vec * tm.loads, tile.MAX_UNROLL)
 
     @parametrize("op", ["sum", "prod"])
-    def test_exact_bits_match_golden_and_upstream(self, op):
-        # One launch checks both the durable oracle and the temporary reference.
+    def test_exact_bits_match_golden(self, op):
         dtypes = {
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
             "float32": torch.float32,
             "float64": torch.float64,
         }
-        ikind = {2: torch.int16, 4: torch.int32, 8: torch.int64}
         prod = op == "prod"
         trait = T.ProdOps if prod else T.SumOps
-        into = up.inner_tree_prod_into if prod else up.inner_tree_sum_into
         checked = 0
         for (kop, dname, m, n), want in _GOLDEN.items():
             if kop != op:
@@ -160,8 +156,6 @@ class TestInnerTreeOrder(TestCase):
             with self.subTest(dtype=dname, shape=(m, n)):
                 x = _golden_input(m, n, dtype, prod)
                 got = self._run(trait, x)
-                ref = torch.empty(m, device="cuda", dtype=dtype)
-                into(ref, x)
                 torch.cuda.synchronize()
                 kind = rt.itree_plan(n, m, x.element_size()).shape
                 self.assertEqual(
@@ -169,27 +163,22 @@ class TestInnerTreeOrder(TestCase):
                     want,
                     f"{op} {dname} ({m}, {n}) [{kind}]: bit pattern changed",
                 )
-                self.assertEqual(
-                    got.view(ikind[x.element_size()]),
-                    ref.view(ikind[x.element_size()]),
-                    msg=f"{op} {dname} ({m}, {n}) [{kind}]: bits differ from upstream",
-                )
                 checked += 1
         self.assertGreater(checked, 0)
 
-    def test_signed_zero_matches_upstream_per_shape(self):
-        # A stray identity changes all -0.0 rows because 0.0 + -0.0 is +0.0. Upstream seeds
-        # only some shapes, and close comparison hides the resulting disagreement.
-        for m, n in ((256, 8), (256, 1024), (64, 100000)):
+    def test_signed_zero_per_shape(self):
+        # A stray identity changes -0.0 to +0.0. The reference DAG seeds only multirow.
+        for m, n, bits in (
+            (256, 8, -(2**31)),
+            (256, 1024, 0),
+            (64, 100000, 0),
+        ):
             with self.subTest(shape=(m, n), shape_kind=rt.itree_plan(n, m, 4).shape):
                 x = torch.full((m, n), -0.0, device="cuda")
                 got = self._run(T.SumOps, x)
-                ref = torch.empty(m, device="cuda")
-                up.inner_tree_sum_into(ref, x)
-                torch.cuda.synchronize()
-                self.assertTrue(
-                    torch.equal(got.view(torch.int32), ref.view(torch.int32)),
-                    f"{(m, n)}: signed zero differs from upstream",
+                self.assertEqual(
+                    got.view(torch.int32),
+                    torch.full((m,), bits, device="cuda", dtype=torch.int32),
                 )
 
     def test_order_is_reproducible_across_batch(self):
@@ -416,12 +405,17 @@ class TestInnerTreeOrder(TestCase):
                     [torch.float32],
                     order="inner_tree",
                 )
-                want = torch.empty(256, device="cuda")
-                up.inner_tree_sum_into(want, x)
-                torch.cuda.synchronize()
+                unstaged = rt.itree_plan(n, 256, 4, stage=False)
+                (want,) = rt._run_itree(
+                    T.SumOps(acc=cutlass.Float32),
+                    _trait_key(T.SumOps),
+                    x,
+                    [torch.float32],
+                    unstaged,
+                )
                 self.assertTrue(
                     torch.equal(got.view(torch.int32), want.view(torch.int32)),
-                    f"N={n}: staged fold diverged from the reference bit pattern",
+                    f"N={n}: staged fold changed the bit pattern",
                 )
 
 
