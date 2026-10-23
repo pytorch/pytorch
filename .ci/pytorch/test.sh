@@ -2421,7 +2421,7 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e . "pyarrow<26"
+  pip_install -e .
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)

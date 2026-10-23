@@ -546,8 +546,8 @@ def load_pending_mutation(
     or None if there isn't one. Shared by every writable getter that must
     prefer an in-progress mutation over re-deriving the value from source."""
     se = tx.output.side_effects
-    if se.has_pending_mutation_of_attr(self, name):
-        return se.load_attr(self, name)
+    if se.has_pending_mutation_of_attr(self, name, AttrMutationKind.GENERIC_SETATTR):
+        return se.load_attr(self, name, mutation_kind=AttrMutationKind.GENERIC_SETATTR)
     return None
 
 
@@ -1890,6 +1890,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     and cur in side_effects.store_attr_mutations
                 ):
                     children.extend(side_effects.store_attr_mutations[cur].values())
+                    children.extend(
+                        side_effects.attr_mutation_overlaps.get(cur, {}).values()
+                    )
             elif istype(cur, (list, tuple)):
                 children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
@@ -2249,6 +2252,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
+    def get_initial_instance_dict(self) -> dict[str, VariableTracker] | None:
+        """Return constructor-copied attributes for a synthetic object, if any."""
+        return None
+
+    def reconstruct_for_side_effects(self, codegen: PyCodegen) -> bool:
+        """Optionally construct a new object before replaying its attributes.
+
+        Return True with one object on the stack; the caller caches it and
+        assigns its TempLocalSource before replay. Return False without
+        emitting bytecode to use the default __new__ reconstruction instead.
+        """
+        return False
+
     def is_proxy(self) -> bool:
         try:
             self.as_proxy()
@@ -2301,7 +2317,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable | None:
         """If *name* has a pending mutation, return the hasattr result; else None."""
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name) and (
+            self.lookup_tp_getset_member(name) is None
+            or not tx.output.side_effects.has_pending_mutation_of_attr(
+                self, name, AttrMutationKind.INSTANCE_DICT
+            )
+        ):
             value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             return variables.ConstantVariable.create(
                 not isinstance(value, variables.DeletedVariable)

@@ -3902,7 +3902,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name, AttrMutationKind.GENERIC_SETATTR
             ):
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                result = tx.output.side_effects.load_attr(
+                    self,
+                    name,
+                    deleted_ok=True,
+                    mutation_kind=AttrMutationKind.GENERIC_SETATTR,
+                )
                 if isinstance(result, variables.DeletedVariable):
                     raise_observed_exception(
                         AttributeError,
@@ -3921,7 +3926,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name, AttrMutationKind.GENERIC_SETATTR
             ):
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                result = tx.output.side_effects.load_attr(
+                    self,
+                    name,
+                    deleted_ok=True,
+                    mutation_kind=AttrMutationKind.GENERIC_SETATTR,
+                )
                 if isinstance(result, variables.DeletedVariable):
                     raise_observed_exception(
                         AttributeError,

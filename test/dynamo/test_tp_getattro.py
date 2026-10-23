@@ -22,6 +22,10 @@ from torch.testing._internal.common_utils import (
 from torch.utils._triton import has_triton_package
 
 
+def _staticmethod_identity(value):
+    return value
+
+
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -889,6 +893,19 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    @parametrize(
+        "name", ["__func__", "__wrapped__", "__isabstractmethod__", "__dict__"]
+    )
+    def test_staticmethod_hasattr_after_deleting_shadow(self, name):
+        def fn(x):
+            sm = staticmethod(len)
+            sm.__dict__[name] = "shadow"
+            del sm.__dict__[name]
+            return hasattr(sm, name), getattr(sm, name, None) is not None, x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_staticmethod_missing_attribute_errors(self):
         def fn():
             sm = staticmethod(None)
@@ -921,6 +938,48 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertIs(sm.__dict__, attrs)
         self.assertEqual(sm.x, 42)
         self.assertEqual(sm(5), 5)
+
+    def test_staticmethod_call_in_graph(self):
+        def fn(x):
+            def f(value):
+                return value.sin() + 1
+
+            return staticmethod(f)(x)
+
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter, fullgraph=True)(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
+
+    def test_staticmethod_noncallable_in_graph(self):
+        def fn(x):
+            try:
+                staticmethod(None)()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x, None
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_staticmethod_function_backed_self_reference_escapes(self):
+        def fn(x):
+            sm = staticmethod(_staticmethod_identity)
+            sm.alias = sm
+            return sm, sm.__dict__, sm, x + 1
+
+        x = torch.randn(3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        previous = None
+        for _ in range(2):
+            sm, attrs, alias, result = compiled(x)
+            self.assertIs(sm, alias)
+            self.assertIs(sm.alias, sm)
+            self.assertIs(attrs, sm.__dict__)
+            self.assertIsNot(sm, previous)
+            self.assertEqual(result, x + 1)
+            previous = sm
 
     @parametrize("use_dict", [False, True])
     @parametrize("reinsert", [False, True])
@@ -1083,7 +1142,50 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         def fn():
             return inspect_staticmethod(staticmethod(len))
 
-        self.assertTrue(torch.compile(fn, backend="eager", fullgraph=True)())
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "assume_constant_result argument conversion"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(torch.compile(fn, backend="eager")())
+
+    def test_staticmethod_constant_result_preserves_identity(self):
+        @torch._dynamo.assume_constant_result
+        def same(first, second):
+            return first is second
+
+        def fn():
+            sm = staticmethod(len)
+            return same(sm, sm)
+
+        self.assertTrue(torch.compile(fn, backend="eager")())
+
+    def test_staticmethod_constant_result_pending_mutation(self):
+        @torch._dynamo.assume_constant_result
+        def read_attr(sm):
+            return sm.label
+
+        def fn():
+            sm = staticmethod(len)
+            sm.label = "changed"
+            return read_attr(sm)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "assume_constant_result argument conversion"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(torch.compile(fn, backend="eager")(), "changed")
+
+    def test_existing_staticmethod_constant_result(self):
+        @torch._dynamo.assume_constant_result
+        def same(first, second):
+            return first is second
+
+        def fn(sm):
+            return same(sm, sm)
+
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(staticmethod(len))
+        )
 
     def test_staticmethod_in_reconstructed_generator(self):
         def fn():

@@ -230,6 +230,17 @@ class ExceptionVariable(VariableTracker):
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
+    def get_dict_vt(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "variables.DunderDictVariable":
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            tx.output.side_effects.track_attribute_mutation_new(self)
+        return super().get_dict_vt(tx)
+
+    def reconstruct_for_side_effects(self, codegen: "PyCodegen") -> bool:
+        self.reconstruct(codegen)
+        return True
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
@@ -440,6 +451,7 @@ class ExceptionVariable(VariableTracker):
 
     tp_getset = {
         "__class__": GetSet(getset_build(lambda s: s.exc_type), unmodeled_setter),
+        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
         "__context__": GetSet(lambda s, _: s.__context__, _set_context),
         "__cause__": GetSet(lambda s, _: s.__cause__, _set_cause),
         "__traceback__": GetSet(lambda s, _: s.__traceback__, _set_traceback),

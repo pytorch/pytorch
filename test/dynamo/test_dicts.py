@@ -3520,10 +3520,273 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(p.keys()), list("bc"))
 
 
+@instantiate_parametrized_tests
 class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
     """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
 
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("reinsert", [False, True])
+    def test_existing_dunder_dict_key_order(self, reinsert):
+        class Object:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(obj, x):
+            attrs = obj.__dict__
+            if reinsert:
+                del attrs["a"]
+            attrs["b"] = 3
+            attrs["c"] = 4
+            if reinsert:
+                attrs["a"] = 5
+            return obj, attrs, tuple(attrs), x + 1
+
+        x = torch.randn(3)
+        expected, _, keys, _ = fn(Object(), x)
+        obj, attrs, traced_keys, result = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(Object(), x)
+        self.assertIs(attrs, obj.__dict__)
+        self.assertEqual(attrs, expected.__dict__)
+        self.assertEqual(tuple(attrs), keys)
+        self.assertEqual(traced_keys, keys)
+        self.assertEqual(result, x + 1)
+
+    @parametrize("kind", ["object", "exception", "function", "staticmethod"])
+    @parametrize("return_owner", [False, True])
+    def test_new_dunder_dict_alias_escapes(self, kind, return_owner):
+        class Object:
+            pass
+
+        def fn(x):
+            def f(value):
+                return value
+
+            if kind == "object":
+                obj = Object()
+            elif kind == "exception":
+                obj = ValueError("test")
+            elif kind == "function":
+                obj = f
+            else:
+                obj = staticmethod(f)
+            attrs = obj.__dict__
+            attrs["a"] = 1
+            attrs["b"] = 2
+            del attrs["a"]
+            attrs["c"] = x
+            attrs["a"] = 3
+            return obj if return_owner else None, attrs, tuple(attrs), x + 1
+
+        x = torch.randn(3)
+        _, expected, keys, _ = fn(x)
+        obj, attrs, traced_keys, result = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x)
+        if return_owner:
+            self.assertIs(attrs, obj.__dict__)
+        else:
+            self.assertIsNone(obj)
+        self.assertIs(attrs["c"], x)
+        self.assertEqual(attrs, expected)
+        self.assertEqual(tuple(attrs), keys)
+        self.assertEqual(traced_keys, keys)
+        self.assertEqual(result, x + 1)
+
+    @parametrize("kind", ["object", "exception", "function", "staticmethod"])
+    def test_instance_dict_descriptor_does_not_bind(self, kind):
+        class Object:
+            pass
+
+        def fn(x):
+            def f(value):
+                return value
+
+            if kind == "object":
+                obj = Object()
+            elif kind == "exception":
+                obj = ValueError("test")
+            elif kind == "function":
+                obj = f
+            else:
+                obj = staticmethod(f)
+            child = staticmethod(len)
+            obj.__dict__["child"] = child
+            return obj.child is child, obj.child, child, x + 1
+
+        x = torch.randn(3)
+        same, result, child, value = torch.compile(fn, backend="eager", fullgraph=True)(
+            x
+        )
+        self.assertTrue(same)
+        self.assertIs(result, child)
+        self.assertIs(child.__func__, len)
+        self.assertEqual(value, x + 1)
+
+    @parametrize("kind", ["object", "exception", "function", "staticmethod"])
+    @parametrize("mutation", ["delete", "owner_cycle", "dict_cycle", "slot_shadow"])
+    def test_dunder_dict_mutations_escape_without_owner(self, kind, mutation):
+        class Object:
+            pass
+
+        def fn(x):
+            def f(value):
+                return value
+
+            if kind == "object":
+                obj = Object()
+            elif kind == "exception":
+                obj = ValueError("test")
+            elif kind == "function":
+                obj = f
+            else:
+                obj = staticmethod(f)
+            attrs = obj.__dict__
+            attrs["x"] = x
+            attrs["a"] = 1
+            if mutation == "delete":
+                del attrs["a"]
+            elif mutation == "owner_cycle":
+                attrs["alias"] = obj
+            elif mutation == "dict_cycle":
+                attrs["alias"] = attrs
+            else:
+                attrs["__name__"] = "shadow"
+            return attrs, tuple(attrs), x + 1
+
+        x = torch.randn(3)
+        _, keys, _ = fn(x)
+        attrs, traced_keys, value = torch.compile(fn, backend="eager", fullgraph=True)(
+            x
+        )
+        self.assertIs(attrs["x"], x)
+        self.assertEqual(tuple(attrs), keys)
+        self.assertEqual(traced_keys, keys)
+        if mutation == "delete":
+            self.assertNotIn("a", attrs)
+        elif mutation == "owner_cycle":
+            self.assertIs(attrs["alias"].__dict__, attrs)
+        elif mutation == "dict_cycle":
+            self.assertIs(attrs["alias"], attrs)
+        else:
+            self.assertEqual(attrs["__name__"], "shadow")
+        self.assertEqual(value, x + 1)
+
+    @parametrize("wrap_count", [1, 2])
+    def test_decorated_function_dict_escapes(self, wrap_count):
+        def fn(x):
+            def inner(y):
+                return y * 2
+
+            inner.label = "original"
+            decorated = inner
+            for _ in range(wrap_count):
+                decorated = torch.no_grad()(decorated)
+            inner.label = "changed"
+            decorated.tag = x
+            return decorated, decorated.__dict__, tuple(decorated.__dict__), x + 1
+
+        x = torch.randn(3, requires_grad=True)
+        result, attrs, keys, value = torch.compile(fn, backend="eager", fullgraph=True)(
+            x
+        )
+        expected, _, expected_keys, _ = fn(x)
+        self.assertIs(result.__dict__, attrs)
+        self.assertIs(attrs["tag"], x)
+        self.assertEqual(result.label, expected.label)
+        self.assertEqual(tuple(attrs), expected_keys)
+        self.assertEqual(keys, expected_keys)
+        self.assertFalse(result(x).requires_grad)
+        self.assertEqual(result(x), expected(x))
+        self.assertEqual(value, x + 1)
+
+    @parametrize("slot_first", [False, True])
+    @parametrize("delete_shadow", [False, True])
+    def test_function_slot_and_instance_dict_same_name(self, slot_first, delete_shadow):
+        def fn(x):
+            def inner(y):
+                return y
+
+            if slot_first:
+                inner.__name__ = "renamed"
+                inner.__doc__ = x
+            inner.__dict__["__name__"] = "shadow"
+            inner.__dict__["__doc__"] = "dict doc"
+            if not slot_first:
+                inner.__name__ = "renamed"
+                inner.__doc__ = x
+            if delete_shadow:
+                del inner.__dict__["__name__"]
+            return inner, inner.__dict__, inner.__name__, inner.__doc__, x + 1
+
+        x = torch.randn(3)
+        fn, attrs, name, doc, value = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x)
+        self.assertIs(attrs, fn.__dict__)
+        self.assertEqual(fn.__name__, "renamed")
+        self.assertEqual(name, "renamed")
+        self.assertIs(fn.__doc__, x)
+        self.assertIs(doc, x)
+        self.assertEqual(attrs["__doc__"], "dict doc")
+        if delete_shadow:
+            self.assertNotIn("__name__", attrs)
+        else:
+            self.assertEqual(attrs["__name__"], "shadow")
+        self.assertEqual(value, x + 1)
+
+    def test_object_slot_and_instance_dict_same_name(self):
+        class Object:
+            __slots__ = ("name", "__dict__")
+
+        def fn(x):
+            obj = Object()
+            obj.name = "slot"
+            obj.__dict__["name"] = "dict"
+            return obj, obj.__dict__, obj.name, hasattr(obj, "name"), x + 1
+
+        x = torch.randn(3)
+        obj, attrs, name, has_name, value = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x)
+        self.assertIs(attrs, obj.__dict__)
+        self.assertEqual(obj.name, "slot")
+        self.assertEqual(name, "slot")
+        self.assertEqual(attrs["name"], "dict")
+        self.assertTrue(has_name)
+        self.assertEqual(value, x + 1)
+
+    @parametrize("mutation_before", [False, True])
+    def test_decorated_function_metadata_snapshot(self, mutation_before):
+        def fn(x):
+            def inner(y):
+                "original doc"
+                return y * 2
+
+            if mutation_before:
+                inner.__name__ = "renamed"
+                inner.__doc__ = "changed doc"
+            decorated = torch.no_grad()(inner)
+            if not mutation_before:
+                inner.__name__ = "renamed"
+                inner.__doc__ = "changed doc"
+            return decorated, inner, decorated.__name__, decorated.__doc__, x + 1
+
+        x = torch.randn(3, requires_grad=True)
+        result, inner, name, doc, value = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x)
+        expected, _, expected_name, expected_doc, _ = fn(x)
+        self.assertEqual(result.__name__, expected_name)
+        self.assertEqual(result.__doc__, expected_doc)
+        self.assertEqual((name, doc), (expected_name, expected_doc))
+        self.assertEqual(inner.__name__, "renamed")
+        self.assertEqual(inner.__doc__, "changed doc")
+        self.assertFalse(result(x).requires_grad)
+        self.assertEqual(result(x), expected(x))
+        self.assertEqual(value, x + 1)
 
     def test_dunder_dict_items_includes_mutations(self):
         """Test that __dict__.items() includes both original and mutated keys"""
@@ -3738,11 +4001,6 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
     def test_method_dict_direct_fullgraph(self):
-        """
-        Regression test: Accessing __dict__ directly on UserMethodVariable.
-        This should fail with: unsupported variable type for __dict__ access
-        """
-
         class Foo:
             def bar(self):
                 return 42
@@ -3755,8 +4013,7 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
             d = method.__dict__
             return d
 
-        # This should not raise Unsupported
-        fn()
+        self.assertIs(fn(), Foo.bar.__dict__)
 
     def test_dunder_dict_non_str_key_setitem(self):
         # CPython's instance __dict__ accepts arbitrary hashable keys when set

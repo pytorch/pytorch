@@ -4422,6 +4422,7 @@ class InstructionTranslatorBase(
             kwdefaults,
             closure,
         )
+        self.output.side_effects.track_attribute_mutation_new(fn)
         if annotations:
             if not isinstance(annotations, TupleVariable):
                 raise AssertionError(

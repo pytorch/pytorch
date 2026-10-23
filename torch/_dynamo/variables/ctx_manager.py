@@ -152,7 +152,7 @@ class ContextWrappingVariable(VariableTracker):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
         if isinstance(args[0], NestedUserFunctionVariable):
-            return WrappedNestedUserFunctionVariable(args[0], self)
+            return WrappedNestedUserFunctionVariable(args[0], self, tx)
         elif isinstance(args[0], SkipFunctionVariable):
             return WrappedSkipFunctionVariable(args[0], self)
         elif isinstance(args[0], UserMethodVariable):
