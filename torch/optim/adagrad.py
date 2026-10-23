@@ -170,6 +170,31 @@ class Adagrad(Optimizer):
                 params_with_grad.append(p)
                 grads.append(p.grad)
                 state = self.state[p]
+                if len(state) == 0:
+                    if group["fused"]:
+                        _device_dtype_check_for_fused(p)
+
+                    state["step"] = (
+                        torch.zeros(
+                            (),
+                            dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                            device=p.device,
+                        )
+                        if group["capturable"] or group["fused"]
+                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                    )
+
+                    initial_accumulator_value = self.defaults[
+                        "initial_accumulator_value"
+                    ]
+                    init_value = (
+                        complex(initial_accumulator_value, initial_accumulator_value)
+                        if torch.is_complex(p)
+                        else initial_accumulator_value
+                    )
+                    state["sum"] = torch.full_like(
+                        p, init_value, memory_format=torch.preserve_format
+                    )
                 state_sums.append(state["sum"])
                 state_steps.append(state["step"])
 

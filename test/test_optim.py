@@ -1378,6 +1378,41 @@ class TestOptimRenewed(TestCase):
             param_device.grad = torch.rand_like(param_device)
             optimizer_device.step()
 
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls is torch.optim.Adagrad],
+        dtypes=[torch.float32],
+    )
+    def test_adagrad_add_param_group(self, device, dtype, optim_info):
+        optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+        for optim_input in optim_inputs:
+            with self.subTest(optim_input=optim_input.desc):
+                params = [torch.randn(3, device=device, dtype=dtype) for _ in range(2)]
+                reference_params = [p.clone() for p in params]
+                optimizer = torch.optim.Adagrad([params[0]], **optim_input.kwargs)
+                reference = torch.optim.Adagrad(reference_params, **optim_input.kwargs)
+                self.assertEqual(
+                    optimizer.state[params[0]], reference.state[reference_params[0]]
+                )
+                params[0].grad = torch.ones_like(params[0])
+                reference_params[0].grad = params[0].grad.clone()
+                optimizer.step()
+                reference.step()
+
+                optimizer.add_param_group({"params": [params[1]]})
+                for _ in range(2):
+                    for param, reference_param in zip(params, reference_params):
+                        param.grad = torch.randn_like(param)
+                        reference_param.grad = param.grad.clone()
+                    optimizer.step()
+                    reference.step()
+                    self.assertEqual(params, reference_params)
+                    for param, reference_param in zip(params, reference_params):
+                        self.assertEqual(
+                            optimizer.state[param], reference.state[reference_param]
+                        )
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_weight_decay(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
