@@ -10,12 +10,12 @@ namespace detail {
 
 /**
  * @brief Tile the group gemm operation.
- * 
- * @param mat_a 
- * @param mat_b 
- * @param offs 
- * @param bias IGNORE THIS. SHOULD BE std::nullopt otherwise. Parent function that calls this crashes if not NULLOPT.  
- * @param out 
+ *
+ * @param mat_a
+ * @param mat_b
+ * @param offs
+ * @param bias IGNORE THIS. SHOULD BE std::nullopt otherwise. Parent function that calls this crashes if not NULLOPT.
+ * @param out
  */
 void group_gemm_ck_tile(
     const at::Tensor& mat_a,
