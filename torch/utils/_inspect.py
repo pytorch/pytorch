@@ -33,12 +33,30 @@ def _cached_parameters(fn: Callable[..., Any]) -> _Parameters:
     return params
 
 
-def _signature_metadata(
-    sig: inspect.Signature,
-) -> tuple[tuple[inspect.Parameter, ...], bool, int]:
+_SignatureMetadata = tuple[tuple[inspect.Parameter, ...], bool, int]
+
+# Keyed by id, since signatures can't be weakly referenced. Each entry keeps its
+# signature alive, so the id can't be reused while the entry exists.
+_metadata_cache: dict[int, tuple[inspect.Signature, _SignatureMetadata]] = {}
+_METADATA_CACHE_SIZE = 1024
+
+
+def _signature_metadata(sig: inspect.Signature) -> _SignatureMetadata:
     """
     Returns tuple(sig.parameters.values()), if any has VAR_POSITIONAL or VAR_KEYWORD, and the max_positional
     """
+    entry = _metadata_cache.get(id(sig))
+    if entry is not None:
+        return entry[1]
+    metadata = _compute_signature_metadata(sig)
+    # Some callers build a new signature for each call, so bound the cache
+    if len(_metadata_cache) >= _METADATA_CACHE_SIZE:
+        _metadata_cache.clear()
+    _metadata_cache[id(sig)] = (sig, metadata)
+    return metadata
+
+
+def _compute_signature_metadata(sig: inspect.Signature) -> _SignatureMetadata:
     params = tuple(sig.parameters.values())
     has_var_args = False
     max_positional = 0
