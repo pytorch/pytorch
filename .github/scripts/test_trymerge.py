@@ -52,6 +52,7 @@ from test_native_stack import (
 )
 from trymerge import (
     _AUTHORIZED_WITHOUT_GREENLIGHT,
+    _COMMENT_AUTHOR_URLS,
     _find_non_matching_files,
     _revlist_to_prs,
     can_skip_internal_checks,
@@ -92,6 +93,7 @@ from trymerge import (
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
+    reopen_reverted_prs,
     REVIEW_PAGE_LIMIT,
     REVIEWS_PER_PAGE,
     sha_from_committed_event,
@@ -637,6 +639,26 @@ class TestTryMerge(TestCase):
         )
         self.assertTrue(can_skip_internal_checks(pr, 123))
 
+    def test_meta_codesync_waiver_survives_leaving_the_prefetch_window(
+        self, *args: Any
+    ) -> None:
+        "merge() refetches the PR on retry; later comments can push its URL out."
+        self.addCleanup(_COMMENT_AUTHOR_URLS.clear)
+        first = self._pr_with_merge_comment(
+            "meta-codesync", "https://github.com/apps/meta-codesync"
+        )
+        refetched = self._pr_with_merge_comment("meta-codesync")
+        for pr in (first, refetched):
+            pr.org, pr.project, pr.pr_num = "pytorch", "pytorch", 1
+        self.assertTrue(can_skip_internal_checks(first, 123))
+        self.assertTrue(can_skip_internal_checks(refetched, 123))
+        # Remembered per comment: another comment id is not vouched for.
+        self.assertFalse(can_skip_internal_checks(refetched, 456))
+        # An edit made after the URL was remembered still voids the comment.
+        edited = self._pr_with_merge_comment("meta-codesync", editor_login="someone")
+        edited.org, edited.project, edited.pr_num = "pytorch", "pytorch", 1
+        self.assertFalse(can_skip_internal_checks(edited, 123))
+
     def test_meta_codesync_merge_without_url_keeps_internal_checks(
         self, *args: Any
     ) -> None:
@@ -669,6 +691,26 @@ class TestTryMerge(TestCase):
                 internal_check=status,
             )
             self.assertFalse(can_skip_internal_checks(pr, 123), status)
+
+    @mock.patch("trymerge.gh_update_pr_state")
+    @mock.patch("trymerge.gh_post_commit_comment")
+    @mock.patch("trymerge.gh_post_pr_comment")
+    def test_revert_warning_is_waived_per_pr(self, mock_post: Any, *args: Any) -> None:
+        "A revert comment's waiver covers only the PRs it vouches for."
+        waived, warned = mock.MagicMock(pr_num=1), mock.MagicMock(pr_num=2)
+        for pr in (waived, warned):
+            pr.has_internal_changes.return_value = True
+            pr.has_no_connected_diff.return_value = False
+        reopen_reverted_prs(
+            waived,
+            [("sha1", waived), ("sha2", warned)],
+            "reverted",
+            skip_internal_checks=lambda pr: pr is waived,
+            dry_run=True,
+        )
+        bodies = {c.args[2]: c.args[3] for c in mock_post.call_args_list}
+        self.assertNotIn("might contain internal changes", bodies[1])
+        self.assertIn("might contain internal changes", bodies[2])
 
     def test_legacy_bots_skip_any_internal_check(self, *args: Any) -> None:
         "The older export bots keep their unconditional waiver."

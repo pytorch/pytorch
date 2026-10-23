@@ -754,6 +754,13 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
+# author_url of each comment seen with one.  Only `comments(last: 5)` selects
+# `author { url }`, and merge()'s retry loop refetches the PR, so without this a
+# merge comment pushed out of that window while CI runs loses the App URL its
+# internal-checks waiver depends on.
+_COMMENT_AUTHOR_URLS: dict[tuple[str, str, int, int], str] = {}
+
+
 def _unedited_comment_author(
     pr: GitHubPR, comment_id: int | None
 ) -> tuple[str, str | None] | None:
@@ -767,7 +774,13 @@ def _unedited_comment_author(
     comment = pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
         return None
-    return comment.author_login, comment.author_url
+    key = (pr.org, pr.project, pr.pr_num, comment_id)
+    author_url = comment.author_url
+    if author_url is not None:
+        _COMMENT_AUTHOR_URLS[key] = author_url
+    else:
+        author_url = _COMMENT_AUTHOR_URLS.get(key)
+    return comment.author_login, author_url
 
 
 def can_skip_internal_checks(
@@ -790,9 +803,9 @@ def can_skip_internal_checks(
     # which failed the merge of #201671, so waive NEUTRAL and nothing else: a
     # reopened or out-of-sync PR is reported as FAILURE and still blocks.  Matched
     # on app URL because GraphQL spells the login bare ("meta-codesync"), which an
-    # ordinary user could register; a comment outside the prefetched window has no
-    # URL and keeps the guard.  The comment vouches only for its own PR's diff, so a
-    # PR stacked below gets no waiver from it.
+    # ordinary user could register; a comment never seen in the prefetched window
+    # has no URL and keeps the guard.  The comment vouches only for its own PR's
+    # diff, so a PR stacked below gets no waiver from it.
     if author_url == "https://github.com/apps/meta-codesync":
         if target is not None and target.pr_num != pr.pr_num:
             return False
@@ -805,12 +818,12 @@ def can_skip_internal_checks(
 # has landed. `meta-codesync` took this over from `facebook-github-tools`, so
 # both are listed: the older one still appears on long-lived PRs.
 #
-# Matched on login rather than on the App URL that can_skip_internal_checks
-# uses. Only `comments(last: 5)` selects `author { url }` — GH_GET_PR_PREV_COMMENTS
-# and the reviews fragment select `login` alone, so author_url is silently None
-# for any comment older than the prefetched window (see _comment_from_node's
-# `.get("url", None)`). `login` is selected everywhere, and a `[bot]` suffix is
-# unforgeable because GitHub usernames cannot contain brackets.
+# GitHub Apps are matched on App URL. GraphQL, which trymerge reads comments
+# through, spells an App's login bare ("meta-codesync"), so the `[bot]` logins
+# below only match REST-spelled data, and a bare login could be a user account.
+# Only `comments(last: 5)` selects `author { url }`; _unedited_comment_author
+# remembers a URL once seen, so a comment outside that window is recognized only
+# if this process saw it inside the window earlier.
 #
 # Deliberately NOT reusing can_skip_internal_checks' allowlist. That predicate
 # also waives the "must be landed via Phabricator" guard, so adding an identity
@@ -2980,11 +2993,13 @@ def reopen_reverted_prs(
     shas_and_prs: list[tuple[str, GitHubPR]],
     revert_msg: str,
     *,
-    skip_internal_checks: bool,
+    skip_internal_checks: Callable[[GitHubPR], bool],
     dry_run: bool,
 ) -> None:
     """Comment on, label and reopen the PRs of `shas_and_prs`, in order, once the
-    reverts of their commits landed, and comment `revert_msg` on those commits."""
+    reverts of their commits landed, and comment `revert_msg` on those commits.
+    skip_internal_checks says, per PR, whether the revert comment waives its
+    internal-changes warning."""
     for commit_sha, pr in shas_and_prs:
         revert_message = ""
         if pr.pr_num == original_pr.pr_num:
@@ -2999,7 +3014,7 @@ def reopen_reverted_prs(
         if (
             pr.has_internal_changes()
             and not pr.has_no_connected_diff()
-            and not skip_internal_checks
+            and not skip_internal_checks(pr)
         ):
             revert_message += "\n:warning: This PR might contain internal changes"
             revert_message += "\ncc: @pytorch/pytorch-dev-infra"
@@ -3021,7 +3036,7 @@ def do_revert_prs(
     *,
     author_login: str,
     extra_msg: str = "",
-    skip_internal_checks: bool = False,
+    skip_internal_checks: Callable[[GitHubPR], bool] = lambda _: False,
     dry_run: bool = False,
 ) -> None:
     revert_msg = commit_reverts(
@@ -3044,7 +3059,7 @@ def revert_with_dependents(
     *,
     author_login: str,
     extra_msg: str,
-    skip_internal_checks: bool,
+    skip_internal_checks: Callable[[GitHubPR], bool],
     dry_run: bool,
 ) -> None:
     """Revert `commit_sha`, which lands `pr`, or, if PRs stacked on `pr` landed on
@@ -3168,7 +3183,7 @@ def try_revert(
             commit_sha,
             author_login=author_login,
             extra_msg=extra_msg,
-            skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+            skip_internal_checks=partial(can_skip_internal_checks, pr, comment_id),
             dry_run=dry_run,
         )
         return
@@ -3194,7 +3209,7 @@ def try_revert(
         author_login=author_login,
         extra_msg=extra_msg,
         dry_run=dry_run,
-        skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+        skip_internal_checks=partial(can_skip_internal_checks, pr, comment_id),
     )
 
 
