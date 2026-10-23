@@ -44,6 +44,7 @@ from torch.testing._internal.common_device_type import (
 )
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     _restore_fp32_precision,
     _snapshot_fp32_precision,
     IS_JETSON,
@@ -194,6 +195,8 @@ def _float32_matrix_from_bits(bits, device):
 
 
 class TestMatmulCuda(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
@@ -1723,6 +1726,8 @@ class TestMatmulCuda(InductorTestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
         def run_test(
@@ -1835,8 +1840,8 @@ class TestMixedDtypesLinearCuda(TestCase):
                 atol,
             )
 
-instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMatmulCuda, globals(), only_for="cuda")
+instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
