@@ -459,6 +459,34 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         # Unanswered, so the newer finding is kept, not the one the stranger answered.
         self.assertEqual([i["id"] for i in out["items"]], [50, 12])
 
+    def test_a_reply_whose_finding_does_not_fit_is_kept_alone(self):
+        api = FakeApi(
+            issue=[comment("maint", id=20, when="2026-01-05", body="older")],
+            inline=[
+                finding(cid=10, when="2025-12-01", body="z" * 3000),
+                comment("maint", id=11, in_reply_to_id=10, when="2026-02-01"),
+            ],
+            reviews=[ours()],
+            maintainers={"maint"},
+        )
+        full = fpc.collect(api, REPO, PR)
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 2500):
+            out = fpc.collect(api, REPO, PR)
+        ids = [i["id"] for i in out["items"]]
+        self.assertIn(11, ids)
+        self.assertIn(20, ids)
+        self.assertNotIn(10, ids)
+
+    def test_the_latest_review_is_the_highest_id(self):
+        api = FakeApi(
+            reviews=[
+                {**ours(rid=50, body=fpc.MARKER + "\nolder"), "submitted_at": "5"},
+                {**ours(rid=51, body=fpc.MARKER + "\nnewer"), "submitted_at": "5"},
+            ]
+        )
+        (item,) = fpc.collect(api, REPO, PR)["items"]
+        self.assertEqual(item["id"], 51)
+
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [
             comment("maint", body="y" * fpc.MAX_BODY, when=f"2026-01-{i:02d}")

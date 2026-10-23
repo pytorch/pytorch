@@ -20,8 +20,9 @@ and maintainers, read for the newest ``MAX_REACTION_LOOKUPS`` reacted comments
 ``reactions_truncated`` is set when a limit or a failed lookup may have left
 some out. Bodies are capped. If the conversation is too long, ``truncated`` is
 set and items are selected in two phases. First, people's comments, newest
-first, each with the finding it replies to; the first that does not fit ends
-selection, so older comments and every finding are left out. Then, only if all
+first, each with the finding it replies to if both fit; the first comment that
+does not fit even alone ends selection, and older comments and findings not
+already selected are left out. Then, only if all
 of them fit, earlier findings: those with a reply or reaction seen and the
 latest review body, then the rest, newest first within each group, skipping
 any that does not fit. Kept items are written in time order.
@@ -189,7 +190,8 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         and (r.get("body") or "").startswith(MARKER)
     ]
     ours = {r.get("id") for r in marked}
-    latest = max(marked, key=lambda r: r.get("submitted_at") or "", default=None)
+    # By id, as post_review.py orders them: submitted_at ties within a second.
+    latest = max(marked, key=lambda r: r.get("id") or 0, default=None)
     roles: dict[str, str | None] = {}
 
     def role_of(login: str) -> str | None:
@@ -313,7 +315,7 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "items": [],
     }
     size = len(dumps(envelope))
-    # A reply from a person is kept together with the finding it answers.
+    # A reply from a person is kept with the finding it answers when both fit.
     findings = {
         i["id"]: n
         for n, i in enumerate(items)
@@ -323,13 +325,15 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     def take(n: int) -> bool:
         nonlocal size
         parent = findings.get(items[n].get("in_reply_to_id"))
-        unit = [m for m in (n, parent) if m is not None and m not in kept]
-        grow = sum(len(dumps(items[m])) + 1 for m in unit)
-        if len(kept) + len(unit) > MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
-            return False
-        size += grow
-        kept.extend(unit)
-        return True
+        # With the finding it replies to if both fit, else alone.
+        for unit in ((n, parent), (n,)) if parent is not None else ((n,),):
+            unit = [m for m in unit if m not in kept]
+            grow = sum(len(dumps(items[m])) + 1 for m in unit)
+            if len(kept) + len(unit) <= MAX_ITEMS and size + grow <= MAX_TOTAL_BYTES:
+                size += grow
+                kept.extend(unit)
+                return True
+        return False
 
     # People's comments are cut strictly oldest first. Earlier findings are
     # considered only if every person's comment fit, and one that does not fit
