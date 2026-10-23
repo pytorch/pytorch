@@ -270,7 +270,11 @@ def reaction(login, content, kind="User"):
 class TestEarlierAutomatedFindings(unittest.TestCase):
     def test_this_workflows_inline_findings_are_kept_with_their_replies(self):
         api = FakeApi(
-            reviews=[ours(), ours(rid=51, body="not ours")],
+            reviews=[
+                {**ours(rid=49), "submitted_at": "0"},
+                ours(),
+                ours(rid=51, body="not ours"),
+            ],
             inline=[
                 finding(),
                 finding(cid=11, rid=51),
@@ -284,13 +288,14 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(
             [(i["id"], i["author"], i["role"]) for i in out["items"]],
             [
+                (50, fpc.REVIEW_AUTHOR, fpc.AUTOMATED),
                 (10, fpc.REVIEW_AUTHOR, fpc.AUTOMATED),
                 (13, "author", "author"),
             ],
         )
-        self.assertEqual(out["items"][1]["in_reply_to_id"], 10)
-        # The review body itself stays out; only the inline findings come in.
-        self.assertFalse([i for i in out["items"] if i["kind"] == "review"])
+        self.assertEqual(out["items"][2]["in_reply_to_id"], 10)
+        # Of the review bodies, only the latest marked one comes in.
+        self.assertEqual(out["items"][0]["kind"], "review")
         self.assertFalse([c for c in api.calls if "/collaborators/" in c])
 
     def test_the_marker_and_author_match_post_review(self):
@@ -312,7 +317,19 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
             out = fpc.collect(api, REPO, PR)
         self.assertEqual(
             [(i["id"], i["author"], i["role"]) for i in out["items"]],
-            [(11, app, fpc.AUTOMATED)],
+            [(60, app, fpc.AUTOMATED), (11, app, fpc.AUTOMATED)],
+        )
+
+    def test_older_verdicts_stay_out_even_from_a_user_account(self):
+        acct = "review-user"
+        older = {**ours(rid=49), "user": user(acct), "submitted_at": "0"}
+        api = FakeApi(
+            reviews=[older, {**ours(), "user": user(acct)}], maintainers={acct}
+        )
+        with mock.patch.dict(os.environ, {"REVIEW_AUTHOR": acct}):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual(
+            [(i["id"], i["role"]) for i in out["items"]], [(50, fpc.AUTOMATED)]
         )
 
     def test_inline_comments_say_which_commit_and_review_they_belong_to(self):
@@ -323,7 +340,7 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         api.pull = {**api.pull, "head": {"sha": "moved-since"}}
         out = fpc.collect(api, REPO, PR, "def")
         self.assertEqual(out["head_sha"], "def")
-        (item,) = out["items"]
+        (item,) = [i for i in out["items"] if i["kind"] == "review_comment"]
         self.assertEqual(
             (item["pull_request_review_id"], item["original_commit_id"]), (50, "abc")
         )
@@ -341,17 +358,46 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
             issue=issue, inline=inline, reviews=[ours()], maintainers={"maint"}
         )
         full = fpc.collect(api, REPO, PR)
-        self.assertEqual(len(full["items"]), 10)
+        self.assertEqual(len(full["items"]), 11)
         with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 500):
             out = fpc.collect(api, REPO, PR)
         roles = [i["role"] for i in out["items"]]
         self.assertEqual(roles.count("maintainer"), 5)
-        self.assertEqual(roles.count(fpc.AUTOMATED), 4)
+        # The review body and the four newest inline findings.
+        self.assertEqual(roles.count(fpc.AUTOMATED), 5)
         # The oldest finding went, and what is left is still in time order.
         self.assertNotIn(101, [i["id"] for i in out["items"]])
         self.assertEqual(out["omitted_items"], 1)
         times = [i["created_at"] for i in out["items"]]
         self.assertEqual(times, sorted(times))
+
+    def test_answered_findings_are_kept_before_unanswered_ones(self):
+        inline = [
+            finding(cid=10, when="2026-01-01", body="old"),
+            comment("author", id=11, in_reply_to_id=10, when="2026-01-02"),
+            finding(cid=12, when="2026-01-03", reactions={"total_count": 1}),
+        ] + [
+            finding(cid=100 + i, when=f"2026-02-{i:02d}", body="z" * 1000)
+            for i in range(1, 6)
+        ]
+        api = FakeApi(
+            inline=inline,
+            reviews=[ours()],
+            reactions={"pulls/comments/12": [reaction("author", "-1")]},
+        )
+        full = fpc.collect(api, REPO, PR)
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 2500):
+            out = fpc.collect(api, REPO, PR)
+        ids = [i["id"] for i in out["items"]]
+        # The two oldest unanswered findings went; the answered ones stayed.
+        self.assertEqual(ids, [50, 10, 11, 12, 103, 104, 105])
+
+    def test_the_latest_review_body_has_its_own_cap(self):
+        body = fpc.MARKER + "\n" + "x" * fpc.MAX_REVIEW_BODY
+        api = FakeApi(reviews=[ours(body=body)])
+        (item,) = fpc.collect(api, REPO, PR)["items"]
+        self.assertEqual(item["role"], fpc.AUTOMATED)
+        self.assertEqual(len(item["body"]), fpc.MAX_REVIEW_BODY + len(" [truncated]"))
 
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [
@@ -421,10 +467,26 @@ class TestReactions(unittest.TestCase):
         )
         api.deleted.add(f"repos/{REPO}/pulls/comments/10/reactions")
         out = fpc.collect(api, REPO, PR)
-        self.assertEqual([i["id"] for i in out["items"]], [10, 20])
-        self.assertNotIn("reactions", out["items"][0])
+        self.assertEqual([i["id"] for i in out["items"]], [50, 10, 20])
+        self.assertNotIn("reactions", out["items"][1])
         self.assertTrue(out["reactions_truncated"])
         self.assertFalse(out["truncated"])
+
+    def test_any_lookup_failure_keeps_the_comment_and_the_run(self):
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint"},
+        )
+        real = api.__call__
+
+        def throttled(endpoint):
+            if "/reactions" in endpoint:
+                raise RuntimeError("gh api failed: HTTP 403 secondary rate limit")
+            return real(endpoint)
+
+        out = fpc.collect(throttled, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [20])
+        self.assertTrue(out["reactions_truncated"])
 
     def test_a_failed_lookup_does_not_inherit_the_previous_reactions(self):
         api = FakeApi(

@@ -8,22 +8,26 @@ variable, so it is one line of compact JSON capped at ``MAX_TOTAL_BYTES``.
 
 Kept: issue comments, reviews and inline review comments written by the PR
 author or by a user with triage access or above, and this workflow's own
-earlier inline findings still on the PR (role ``automated_review``), so the
-replies to them have something to answer. post_review.py deletes superseded
-findings nobody replied or reacted to, so those are normally not shown. Each
+earlier findings (role ``automated_review``): its inline findings still on the
+PR and the body of its latest review, which holds the findings it did not post
+inline. post_review.py deletes superseded inline findings nobody replied or
+reacted to, so those are normally not shown. Each
 inline comment's ``original_commit_id`` is the commit it was written against,
 and ``head_sha``, passed in by the caller, is the commit under review. Other
 bots and other users are dropped. A comment's ``reactions`` are the emoji
 reactions of the author and maintainers, read for the newest
 ``MAX_REACTION_LOOKUPS`` reacted comments, and ``reactions_truncated`` is set
 when a limit or a failed lookup may have left some out. Bodies are capped and,
-if the conversation is too long, the oldest items are dropped first, earlier
-automated findings before anything people wrote, and ``truncated`` is set.
+if the conversation is too long, ``truncated`` is set and items are dropped in
+this order: earlier automated findings with no reply or reaction seen, then
+other earlier automated findings, then the oldest comments people wrote; within each group
+the oldest go first.
 
-Every failure is fatal except a 404: a user with no permission record is not
-a maintainer, and a comment whose reactions are not found is kept with
-``reactions_truncated`` set. A review that silently saw no comments would
-approve a PR whose maintainer feedback it was never shown.
+Every failure is fatal except two. A user with no permission record (404) is
+not a maintainer, and a failed reaction lookup keeps the comment with
+``reactions_truncated`` set: reactions are context, while a review that
+silently saw no comments would approve a PR whose maintainer feedback it was
+never shown.
 """
 
 from __future__ import annotations
@@ -41,6 +45,8 @@ from urllib.parse import quote
 PER_PAGE = 100
 MAX_PAGES = 30
 MAX_BODY = 4000
+# Of the latest automated review's body, which lists its non-inline findings.
+MAX_REVIEW_BODY = 12_000
 # Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
 MAX_PR_BODY_BYTES = 40_000
 MAX_HUNK = 1500
@@ -173,12 +179,14 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "review_comment": paginate(api, f"repos/{repo}/pulls/{pr}/comments"),
     }
     bot = os.environ.get("REVIEW_AUTHOR", REVIEW_AUTHOR)
-    ours = {
-        r.get("id")
+    marked = [
+        r
         for r in sources["review"]
         if (r.get("user") or {}).get("login") == bot
         and (r.get("body") or "").startswith(MARKER)
-    }
+    ]
+    ours = {r.get("id") for r in marked}
+    latest = max(marked, key=lambda r: r.get("submitted_at") or "", default=None)
     roles: dict[str, str | None] = {}
 
     def role_of(login: str) -> str | None:
@@ -206,12 +214,17 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     lookups: dict[int, tuple[str, dict[str, Any]]] = {}
     for kind, raw in sources.items():
         for obj in raw:
-            if (
+            limit = MAX_BODY
+            if obj is latest:
+                login, role, limit = bot, AUTOMATED, MAX_REVIEW_BODY
+            elif (
                 kind == "review_comment"
                 and (obj.get("user") or {}).get("login") == bot
                 and obj.get("pull_request_review_id") in ours
             ):
                 login, role = bot, AUTOMATED
+            elif kind == "review" and obj.get("id") in ours:
+                continue  # an older verdict, superseded by the latest
             else:
                 login = human_login(obj)
                 if login is None:
@@ -234,7 +247,7 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
                     "submitted_at" if kind == "review" else "created_at"
                 )
                 or "",
-                "body": cap(obj.get("body"), MAX_BODY),
+                "body": cap(obj.get("body"), limit),
             }
             if kind == "review":
                 item["state"] = obj.get("state")
@@ -260,14 +273,33 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         unchecked = False
         try:
             reactions, full = reactions_of(api, repo, *lookups[id(item)], reactor_role)
-        except NotFound:
-            # Deleted since it was listed, or not found for some other reason:
+        except (RuntimeError, ValueError):
+            # Deleted since it was listed, rate-limited, or any other failure:
             # keep the comment and report its reactions as unknown.
             reactions, full = [], True
         if full or unchecked:
             partial.add(id(item))
         if reactions:
             item["reactions"] = reactions
+    # Answered: a finding with reactions or a reply people wrote, and the latest
+    # review's body, whose findings are not inline and so cannot be answered.
+    replied = {i.get("in_reply_to_id") for i in items if i["role"] != AUTOMATED}
+    answered = {
+        id(i)
+        for i in items
+        if i["role"] == AUTOMATED
+        and (i.get("reactions") or i["id"] in replied or i["kind"] == "review")
+    }
+    newest_first = list(reversed(range(len(items))))
+    groups = [
+        [n for n in newest_first if items[n]["role"] != AUTOMATED],
+        [n for n in newest_first if id(items[n]) in answered],
+        [
+            n
+            for n in newest_first
+            if items[n]["role"] == AUTOMATED and id(items[n]) not in answered
+        ],
+    ]
     kept: list[int] = []
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
@@ -278,20 +310,13 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "items": [],
     }
     size = len(dumps(envelope))
-    # Newest first, and earlier automated findings only once everything people
-    # wrote fits.
-    for automated in (False, True):
-        for n in reversed(range(len(items))):
-            if (items[n]["role"] == AUTOMATED) != automated:
-                continue
-            grow = len(dumps(items[n])) + 1
-            if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
-                break
-            size += grow
-            kept.append(n)
-        else:
-            continue
-        break
+    # A group is considered only if every item before it fit.
+    for n in (n for group in groups for n in group):
+        grow = len(dumps(items[n])) + 1
+        if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
+            break
+        size += grow
+        kept.append(n)
     omitted = len(items) - len(kept)
     return {
         **head,
