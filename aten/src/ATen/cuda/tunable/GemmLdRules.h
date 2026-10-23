@@ -1,7 +1,9 @@
 #pragma once
 
+#include <charconv>
 #include <cstdint>
 #include <string>
+#include <system_error>
 #include <vector>
 
 // Leading-dimension rules for GEMM signatures, split out of GemmCommon.h so
@@ -125,33 +127,51 @@ struct GemmShape {
   std::string suffix;  // tail after ldc (e.g. scaled_mm "_rw_1_bias_BFloat16")
 };
 
+// Parse a token that must be a whole non-negative decimal integer. Unlike
+// std::stoll this neither throws nor accepts a prefix match: "12abc", " 12",
+// "+12" and "" are all rejected, so a malformed signature cannot parse as ok.
+// It also matters for cost: every wildcard ('*') entry in the results map is
+// offered to this parser on every LookupNearest call, and throwing an
+// exception per candidate to reject them is far more expensive than a failed
+// from_chars. A leading '-' is rejected too -- no dim or leading dim is
+// negative, so that is a malformed signature rather than a value to accept.
+inline bool ParseWholeInt(const std::string& tok, int64_t& out) {
+  if (tok.empty() || tok.front() == '-') {
+    return false;
+  }
+  const char* const first = tok.data();
+  const char* const last = first + tok.size();
+  const auto [ptr, ec] = std::from_chars(first, last, out);
+  return ec == std::errc{} && ptr == last;
+}
+
 inline GemmShape ParseGemmShape(const std::vector<std::string>& t) {
   GemmShape s;
   if (t.size() < 8 || t[0].size() != 2) {
     return s;
   }
   size_t i = 0;
-  try {
-    s.transab = t[i++];
-    s.m = std::stoll(t[i++]);
-    s.n = std::stoll(t[i++]);
-    s.k = std::stoll(t[i++]);
-    if (t[i] == "B") {
-      s.has_b = true;
-      i++;
-      s.b = std::stoll(t[i++]);
-    }
-    if (i >= t.size() || t[i] != "ld") {
-      return s;
-    }
+  s.transab = t[i++];
+  if (!ParseWholeInt(t[i++], s.m) || !ParseWholeInt(t[i++], s.n) ||
+      !ParseWholeInt(t[i++], s.k)) {
+    return s;
+  }
+  if (t[i] == "B") {
     i++;
-    if (i + 2 >= t.size()) {
+    if (i >= t.size() || !ParseWholeInt(t[i++], s.b)) {
       return s;
     }
-    s.lda = std::stoll(t[i++]);
-    s.ldb = std::stoll(t[i++]);
-    s.ldc = std::stoll(t[i++]);
-  } catch (...) {
+    s.has_b = true;
+  }
+  if (i >= t.size() || t[i] != "ld") {
+    return s;
+  }
+  i++;
+  if (i + 2 >= t.size()) {
+    return s;
+  }
+  if (!ParseWholeInt(t[i++], s.lda) || !ParseWholeInt(t[i++], s.ldb) ||
+      !ParseWholeInt(t[i++], s.ldc)) {
     return s;
   }
   for (; i < t.size(); i++) {

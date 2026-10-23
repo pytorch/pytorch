@@ -11843,13 +11843,19 @@ class TestLinalgCudaOnly(TestCase):
             self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
             self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
 
-            torch.cuda.tunable._nearest_match_enable(True)
-            torch.cuda.tunable._record_borrowed_enable(True)
-            self.assertTrue(torch.cuda.tunable._nearest_match_is_enabled())
-            self.assertTrue(torch.cuda.tunable._record_borrowed_is_enabled())
+            # Both are process-global, so a failure between enabling and
+            # disabling them would leave them on for every later test in this
+            # process -- including ones that exercise Inductor, which reads
+            # them. The restore has to survive a failed assertion.
+            try:
+                torch.cuda.tunable._nearest_match_enable(True)
+                torch.cuda.tunable._record_borrowed_enable(True)
+                self.assertTrue(torch.cuda.tunable._nearest_match_is_enabled())
+                self.assertTrue(torch.cuda.tunable._record_borrowed_is_enabled())
+            finally:
+                torch.cuda.tunable._nearest_match_enable(False)
+                torch.cuda.tunable._record_borrowed_enable(False)
 
-            torch.cuda.tunable._nearest_match_enable(False)
-            torch.cuda.tunable._record_borrowed_enable(False)
             self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
             self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
 
