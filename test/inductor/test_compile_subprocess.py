@@ -18,11 +18,13 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
+    recover_orig_fp32_precision,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -119,6 +121,32 @@ class TestSubprocess(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
+    @requires_gpu()
+    @requires_triton()
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    @torch._inductor.config.patch(
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        layout_optimization=False,
+    )
+    @recover_orig_fp32_precision
+    def test_conv_template_follows_the_parent_conv_precision(self):
+        if (
+            GPU_TYPE != "cuda"
+            or torch.version.hip is not None
+            or not torch.cuda.is_tf32_supported()
+        ):
+            raise unittest.SkipTest("requires a CUDA GPU with TF32")
+        # The child's own default would be TF32.
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        x = torch.randn(2, 32, 32, 32, device=GPU_TYPE)
+        w = torch.randn(32, 32, 3, 3, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(torch.nn.functional.conv2d), x, w)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", code[0])
+        self.assertNotIn("ALLOW_TF32 : tl.constexpr = True", code[0])
 
     @requires_gpu()
     @requires_triton()

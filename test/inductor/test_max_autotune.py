@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    recover_orig_fp32_precision,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -1696,6 +1697,93 @@ class TestMaxAutotune(TestCase):
             torch.compile(m)(inp)
 
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("fp32_precision", ("default", "ieee", "tf32"))
+    @parametrize(
+        "kind",
+        (
+            "regular",
+            "regular_3d",
+            "single_channel",
+            "grouped",
+            "depthwise",
+            "depthwise_x2",
+        ),
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        layout_optimization=False,
+    )
+    @recover_orig_fp32_precision
+    def test_conv_template_follows_the_conv_fp32_precision(self, fp32_precision, kind):
+        # Eager cuDNN convolutions read the conv precision, which is TF32 by
+        # default while the cuDNN-wide setting stays "none".
+        ndim = 3 if kind == "regular_3d" else 2
+        in_channels = 1 if kind == "single_channel" else 32
+        # grouped has 8 input channels per group; depthwise_x2 has two output
+        # channels per input channel.
+        groups = {"grouped": 4, "depthwise": 32, "depthwise_x2": 32}.get(kind, 1)
+        out_channels = 64 if kind == "depthwise_x2" else 32
+        if fp32_precision != "default":
+            torch.backends.cudnn.conv.fp32_precision = fp32_precision
+        actual, expected, code = self._compile_small_integer_conv(
+            ndim, in_channels, out_channels, groups
+        )
+        self.assertEqual(actual, expected)
+        # CUDA keeps depthwise convolutions in full precision. ROCm follows the
+        # cuDNN-wide precision, which stays "none". Triton templates never use
+        # TF32 on a GPU that has none.
+        expect_tf32 = (
+            fp32_precision != "ieee"
+            and not kind.startswith("depthwise")
+            and torch.version.hip is None
+            and torch.cuda.is_tf32_supported()
+        )
+        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expect_tf32}", code[0])
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("with_bias", (False, True))
+    @config.patch(
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        layout_optimization=False,
+    )
+    @recover_orig_fp32_precision
+    def test_conv_template_keeps_an_explicit_ieee_convolution(self, with_bias):
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        actual, expected, code = self._compile_small_integer_conv(
+            2, 32, 32, 1, with_bias=with_bias, allow_tf32=False
+        )
+        self.assertEqual(actual, expected)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", code[0])
+        self.assertNotIn("ALLOW_TF32 : tl.constexpr = True", code[0])
+
+    def _compile_small_integer_conv(
+        self, ndim, in_channels, out_channels, groups, with_bias=False, allow_tf32=None
+    ):
+        # Small integers are exact in TF32, so both precisions match eager.
+        spatial = (16, 16) if ndim == 2 else (8, 8, 8)
+        x = torch.randint(-2, 3, (2, in_channels, *spatial), device=GPU_TYPE).float()
+        shape = (out_channels, in_channels // groups, *(3,) * ndim)
+        w = torch.randint(-2, 3, shape, device=GPU_TYPE).float()
+        b = torch.randint(-2, 3, (out_channels,), device=GPU_TYPE).float()
+        b = b if with_bias else None
+        functional_conv = (
+            torch.nn.functional.conv2d if ndim == 2 else torch.nn.functional.conv3d
+        )
+
+        def conv(x, w, b):
+            if allow_tf32 is None:
+                return functional_conv(x, w, b, groups=groups)
+            return torch._convolution(
+                x, w, b, [1] * ndim, [0] * ndim, [1] * ndim, False, [0] * ndim,
+                groups, False, False, True, allow_tf32,
+            )  # fmt: skip
+
+        actual, code = run_and_get_code(torch.compile(conv), x, w, b)
+        return actual, conv(x, w, b), code
 
     def test_non_contiguous_input_mm(self):
         """
@@ -7791,6 +7879,8 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
     SKIP_TESTS = {
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
+        "test_conv_template_follows_the_conv_fp32_precision": "ALLOW_TF32 is decided before autotuning",
+        "test_conv_template_keeps_an_explicit_ieee_convolution": "ALLOW_TF32 is decided before autotuning",
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",

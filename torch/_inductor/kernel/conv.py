@@ -471,8 +471,15 @@ def convolution(
     transposed: bool,
     output_padding: Sequence[int],
     groups: int,
+    *,
+    allow_tf32: bool = True,
 ):
-    """Lower aten.convolution using Inductor convolution kernels or fallbacks."""
+    """Lower aten.convolution using Inductor convolution kernels or fallbacks.
+
+    allow_tf32=False keeps the Triton conv templates in full precision, for an
+    aten._convolution that asks for it. The ATen choices and the 1x1-as-matmul
+    path ignore it and follow the global settings.
+    """
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -508,7 +515,13 @@ def convolution(
     if len(x.get_size()) == len(weight.get_size()) - 1:
         # add batch dimension to simplify rest of function
         return L[aten.squeeze](
-            convolution(L[aten.expand](x, [1, *x.get_size()]), weight, bias, **kwargs),
+            convolution(
+                L[aten.expand](x, [1, *x.get_size()]),
+                weight,
+                bias,
+                **kwargs,
+                allow_tf32=allow_tf32,
+            ),
             dim=0,
         )
 
@@ -531,7 +544,7 @@ def convolution(
         weight = L[aten.unsqueeze](weight, dim=2)
 
         return L[aten.squeeze](
-            convolution(x, weight, bias, **kwargs),
+            convolution(x, weight, bias, **kwargs, allow_tf32=allow_tf32),
             dim=2,
         )
 
@@ -570,7 +583,7 @@ def convolution(
 
     if bias is not None and device_type != "cpu":
         # peel off the bias, cudnn is slower with it
-        result = convolution(x, weight, None, **kwargs)
+        result = convolution(x, weight, None, **kwargs, allow_tf32=allow_tf32)
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
             # we should not add bias when the output channel is 0
             return result
@@ -624,7 +637,9 @@ def convolution(
     # More than one group with one input channel each, not transposed: how eager
     # defines a depthwise convolution.
     depthwise = groups > 1 and in_chan == 1 and not transposed
-    template_allow_tf32 = conv_template_allow_tf32(device_type, depthwise=depthwise)
+    template_allow_tf32 = allow_tf32 and conv_template_allow_tf32(
+        device_type, depthwise=depthwise
+    )
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
         choices = [
@@ -813,7 +828,16 @@ def _convolution(
     allow_tf32,
 ):
     return convolution(
-        x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        allow_tf32=allow_tf32,
     )
 
 

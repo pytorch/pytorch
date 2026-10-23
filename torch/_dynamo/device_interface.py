@@ -457,6 +457,19 @@ class CudaInterface(DeviceInterface):
         return torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     @staticmethod
+    def conv_allow_tf32(*, depthwise: bool = False) -> bool:
+        if torch.version.hip is not None:
+            return DeviceInterface.conv_allow_tf32(depthwise=depthwise)
+        # Keep depthwise convolutions in full precision, the conservative choice:
+        # eager runs contiguous ones on native kernels without TF32, and on an A100
+        # cuDNN did not use TF32 for channels-last ones either.
+        if depthwise:
+            return False
+        # Eager cuDNN convolutions read the conv precision, which is TF32 by default
+        # while the cuDNN-wide setting stays "none".
+        return torch._C._get_fp32_precision_getter("cuda", "conv") == "tf32"
+
+    @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         from torch._dynamo.exc import TritonUnavailableError
         from torch._inductor.exc import GPUTooOldForTriton
