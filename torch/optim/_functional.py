@@ -2,6 +2,7 @@ r"""Functional interface."""
 
 import math
 
+import torch
 from torch import Tensor
 
 from .adadelta import adadelta  # type: ignore[attr-defined]  # noqa: F401
@@ -38,6 +39,19 @@ def sparse_adam(
         grad = grads[i]
         grad = grad if not maximize else -grad
         grad = grad.coalesce()  # the update is non-linear so indices must be unique
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            grad = torch.sparse_coo_tensor(
+                grad.indices(),
+                torch.view_as_real(grad.values()),
+                param.shape,
+                device=grad.device,
+                is_coalesced=True,
+            )
         grad_indices = grad._indices()
         grad_values = grad._values()
         if grad_values.numel() == 0:
@@ -45,8 +59,6 @@ def sparse_adam(
             continue
         size = grad.size()
 
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
 
         def make_sparse(values: Tensor) -> Tensor:
