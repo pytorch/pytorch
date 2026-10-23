@@ -1621,6 +1621,13 @@ def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwa
     for input_shape, target, kwargs in inputs:
         yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
 
+    # weight passed positionally (p, margin, weight) so the functorch vmap OpInfo
+    # tests, which only batch positional args, exercise the batched-weight path.
+    yield SampleInput(
+        _make_tensor((M, S)),
+        args=(make_target([M], low=0, high=S), 1, 1.0, make_weight([S], low=-10., high=10.)),
+    )
+
 
 def reference_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs)
