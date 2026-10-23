@@ -35,6 +35,7 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _hint_proves_even_shard,
     _StridedShard,
     Partial,
     Placement,
@@ -280,12 +281,29 @@ class _FromTorchTensor(torch.autograd.Function):
                 input.dtype,
             ),
         )
+        ctx.match_input_shape_at_runtime = (
+            torch.compiler.config.compile_on_one_rank
+            and any(
+                num_shards > 1
+                and not _hint_proves_even_shard(tensor_shape[dim], num_shards)
+                for dim, num_shards in enumerate(dist_spec.num_shards_map)
+            )
+        )
+        # Uneven shards have rank-dependent local shapes. Preserve the original
+        # input so one captured graph can restore that shape on every rank.
+        if ctx.match_input_shape_at_runtime:
+            ctx.save_for_backward(input)
 
         # We want a fresh Tensor object that shares memory with the input tensor
+        local_tensor = (
+            torch.ops._dtensor._view_as_input(input, input)
+            if ctx.match_input_shape_at_runtime
+            else input.view_as(input)
+        )
         # pyrefly: ignore [bad-argument-type]
         dist_tensor = DTensor(
             # pyrefly: ignore [bad-argument-count]
-            input.view_as(input),
+            local_tensor,
             dist_spec,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
@@ -344,13 +362,20 @@ class _FromTorchTensor(torch.autograd.Function):
                 current_spec,
                 target_spec,
             )
+            if ctx.match_input_shape_at_runtime:
+                (input,) = ctx.saved_tensors
+                output = torch.ops._dtensor._view_as_input(output, input)
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
             return output, None, None, None, None, None, None
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
-        return grad_output.to_local(), None, None, None, None, None, None
+        output = grad_output.to_local()
+        if ctx.match_input_shape_at_runtime:
+            (input,) = ctx.saved_tensors
+            output = torch.ops._dtensor._view_as_input(output, input)
+        return output, None, None, None, None, None, None
 
 
 class DTensor(torch.Tensor):

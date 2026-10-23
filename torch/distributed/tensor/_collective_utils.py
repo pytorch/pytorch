@@ -47,6 +47,12 @@ _dtensor_lib.define(
     "torch.distributed.device_mesh.DeviceMesh mesh, int dim"
     ") -> torch.distributed.distributed_c10d.ProcessGroup"
 )
+# Keep rank-local shape handling opaque to tracing so a graph captured on one
+# rank reads the input sizes of the rank where it executes.
+_dtensor_lib.define(
+    "_pad_tensor_to_size(Tensor tensor, int dim, SymInt padded_size) -> Tensor"
+)
+_dtensor_lib.define("_view_as_input(Tensor(a) tensor, Tensor input) -> Tensor(a)")
 
 
 @torch.library.impl("_dtensor::mesh_get_process_group", "CompositeExplicitAutograd")
@@ -60,6 +66,51 @@ def _mesh_get_process_group_fake(mesh, dim):
 
     real_mesh = maybe_unwrap_fake_script_object(mesh)
     return real_mesh.get_group(dim)
+
+
+@torch.library.impl("_dtensor::_pad_tensor_to_size", "CompositeExplicitAutograd")
+def _pad_tensor_to_size_impl(tensor, dim, padded_size):
+    pad = [0, 0] * (tensor.ndim - dim)
+    pad[-1] = padded_size - tensor.size(dim)
+    return torch.nn.functional.pad(tensor, pad)
+
+
+@torch.library.register_fake("_dtensor::_pad_tensor_to_size")
+def _pad_tensor_to_size_fake(tensor, dim, padded_size):
+    shape = list(tensor.shape)
+    shape[dim] = padded_size
+    return tensor.new_empty(shape)
+
+
+@torch.library.impl("_dtensor::_view_as_input", "CompositeExplicitAutograd")
+def _view_as_input_impl(tensor, input):
+    return tensor.view_as(input)
+
+
+@torch.library.impl("_dtensor::_view_as_input", "Functionalize")
+def _view_as_input_functionalize(tensor, input):
+    torch._sync(tensor)
+    torch._sync(input)
+    tensor_inner = torch._from_functional_tensor(tensor)
+    input_inner = torch._from_functional_tensor(input)
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        output = torch.ops._dtensor._view_as_input(tensor_inner, input_inner)
+    return torch._to_functional_tensor(output)
+
+
+@torch.library.register_fake("_dtensor::_view_as_input")
+def _view_as_input_fake(tensor, input):
+    # The operator's contract is to match the reference input's shape.
+    return tensor.as_strided(input.shape, tensor.stride(), tensor.storage_offset())
+
+
+@maybe_run_for_local_tensor
+def pad_tensor_to_size(
+    tensor: torch.Tensor, pad_dim: int, padded_size: IntLikeType
+) -> torch.Tensor:
+    return torch.ops._dtensor._pad_tensor_to_size(tensor, pad_dim, padded_size)
 
 
 @torch.library.register_fake("_dtensor::shard_dim_alltoall")
