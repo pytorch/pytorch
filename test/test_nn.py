@@ -7981,6 +7981,7 @@ class TestNNDeviceType(NNTestCase):
         m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
                       (32, 32), (1024, 32), (1024, 1024),
                       (33, 33), (1025, 33), (1025, 1025),
+                      (1024, 130), (1024, 256), (1024, 320), (1024, 322), (1024, 640),
                       (128 * 1024, 32), (32, 128 * 1024)]
         boolean = [True, False]
         combinations = itertools.product(boolean, repeat=2)
@@ -8001,10 +8002,26 @@ class TestNNDeviceType(NNTestCase):
                 if m > 64 * 1024:
                     atol = 1e-3
                     rtol = 1e-3
+                self.assertEqual(x.grad, x_device.grad, lambda msg: f"{msg}\ninput grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if elementwise_affine:
                     self.assertEqual(ln.weight.grad, ln_device.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if bias and elementwise_affine:
                     self.assertEqual(ln.bias.grad, ln_device.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+
+    @onlyAccelerator
+    def test_rms_norm_backwards(self, device):
+        dtype = torch.float
+        m_x_n_list = [(1024, 32), (1024, 130), (1024, 256), (1024, 320), (1024, 322), (1024, 640), (1024, 1024)]
+        for elementwise_affine in [True, False]:
+            for m, n in m_x_n_list:
+                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+                grad_output = torch.rand_like(x)
+                x_device = x.clone().detach().to(device).requires_grad_()
+                rms = nn.RMSNorm(n, dtype=dtype, elementwise_affine=elementwise_affine)
+                rms_device = nn.RMSNorm(n, device=device, dtype=dtype, elementwise_affine=elementwise_affine)
+                rms(x).backward(grad_output)
+                rms_device(x_device).backward(grad_output.to(device))
+                self.assertEqual(x.grad, x_device.grad, lambda msg: f"{msg}\ninput grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
     @onlyAccelerator
     @largeTensorTest("40GB")
