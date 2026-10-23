@@ -35,11 +35,21 @@ def user(login, kind="User"):
 class FakeApi:
     pull = {"user": user("author")}
 
-    def __init__(self, *, issue=(), reviews=(), inline=(), maintainers=(), unknown=()):
+    def __init__(
+        self,
+        *,
+        issue=(),
+        reviews=(),
+        inline=(),
+        maintainers=(),
+        unknown=(),
+        reactions=None,
+    ):
         self.pages = {
             f"repos/{REPO}/issues/{PR}/comments": list(issue),
             f"repos/{REPO}/pulls/{PR}/reviews": list(reviews),
             f"repos/{REPO}/pulls/{PR}/comments": list(inline),
+            **{f"repos/{REPO}/{k}/reactions": v for k, v in (reactions or {}).items()},
         }
         self.maintainers = set(maintainers)
         self.unknown = set(unknown)
@@ -222,6 +232,144 @@ class TestCollect(unittest.TestCase):
         self.assertLessEqual(len(fpc.dumps(out)), fpc.MAX_TOTAL_BYTES)
         # Even a worst-case description leaves a quarter of the cap to comments.
         self.assertGreaterEqual(len(out["items"]), 5)
+
+
+def ours(rid=50, body=fpc.MARKER + "\nverdict"):
+    return {
+        "id": rid,
+        "user": user(fpc.REVIEW_AUTHOR, "Bot"),
+        "body": body,
+        "state": "CHANGES_REQUESTED",
+        "submitted_at": "1",
+    }
+
+
+def finding(cid=10, rid=50, when="2026-01-01", body="finding", **extra):
+    return comment(
+        fpc.REVIEW_AUTHOR,
+        body=body,
+        when=when,
+        kind="Bot",
+        id=cid,
+        pull_request_review_id=rid,
+        path="a.py",
+        line=3,
+        **extra,
+    )
+
+
+def reaction(login, content, kind="User"):
+    return {"user": user(login, kind), "content": content}
+
+
+class TestEarlierAutomatedFindings(unittest.TestCase):
+    def test_this_workflows_inline_findings_are_kept_with_their_replies(self):
+        api = FakeApi(
+            reviews=[ours(), ours(rid=51, body="not ours")],
+            inline=[
+                finding(),
+                finding(cid=11, rid=51),
+                comment("other-bot", kind="Bot", id=12, pull_request_review_id=50),
+                comment(
+                    "author", body="wrong", id=13, in_reply_to_id=10, when="2026-01-02"
+                ),
+            ],
+        )
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(
+            [(i["id"], i["author"], i["role"]) for i in out["items"]],
+            [
+                (10, fpc.REVIEW_AUTHOR, fpc.AUTOMATED),
+                (13, "author", "author"),
+            ],
+        )
+        self.assertEqual(out["items"][1]["in_reply_to_id"], 10)
+        # The review body itself stays out; only the inline findings come in.
+        self.assertFalse([i for i in out["items"] if i["kind"] == "review"])
+        self.assertFalse([c for c in api.calls if "/collaborators/" in c])
+
+    def test_the_marker_and_author_match_post_review(self):
+        import post_review
+
+        self.assertEqual(fpc.MARKER, post_review.MARKER)
+        self.assertEqual(fpc.REVIEW_AUTHOR, post_review.DEFAULT_AUTHOR)
+
+    def test_people_are_kept_before_earlier_findings(self):
+        issue = [
+            comment("maint", body="y" * 1000, when=f"2026-01-{i:02d}")
+            for i in range(1, 6)
+        ]
+        inline = [
+            finding(cid=100 + i, when=f"2026-02-{i:02d}", body="z" * 1000)
+            for i in range(1, 6)
+        ]
+        api = FakeApi(
+            issue=issue, inline=inline, reviews=[ours()], maintainers={"maint"}
+        )
+        full = fpc.collect(api, REPO, PR)
+        self.assertEqual(len(full["items"]), 10)
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 500):
+            out = fpc.collect(api, REPO, PR)
+        roles = [i["role"] for i in out["items"]]
+        self.assertEqual(roles.count("maintainer"), 5)
+        self.assertEqual(roles.count(fpc.AUTOMATED), 4)
+        # The oldest finding went, and what is left is still in time order.
+        self.assertNotIn(101, [i["id"] for i in out["items"]])
+        self.assertEqual(out["omitted_items"], 1)
+        times = [i["created_at"] for i in out["items"]]
+        self.assertEqual(times, sorted(times))
+
+
+class TestReactions(unittest.TestCase):
+    def test_reactions_of_the_author_and_maintainers_are_kept(self):
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[finding(reactions={"total_count": 4})],
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint"},
+            reactions={
+                "pulls/comments/10": [
+                    reaction("author", "-1"),
+                    reaction("maint", "+1"),
+                    reaction("drive-by", "heart"),
+                    reaction("pytorchbot", "eyes", "Bot"),
+                ],
+                "issues/comments/20": [reaction("author", "confused")],
+            },
+        )
+        out = fpc.collect(api, REPO, PR)
+        by_id = {i["id"]: i for i in out["items"]}
+        self.assertEqual(
+            by_id[10]["reactions"],
+            [
+                {"author": "author", "role": "author", "content": "-1"},
+                {"author": "maint", "role": "maintainer", "content": "+1"},
+            ],
+        )
+        self.assertEqual(
+            by_id[20]["reactions"],
+            [{"author": "author", "role": "author", "content": "confused"}],
+        )
+
+    def test_unreacted_comments_cost_no_call_and_carry_no_field(self):
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[finding(reactions={"total_count": 0})],
+            issue=[comment("maint", id=20)],
+            maintainers={"maint"},
+        )
+        out = fpc.collect(api, REPO, PR)
+        self.assertFalse([c for c in api.calls if "/reactions" in c])
+        self.assertFalse([i for i in out["items"] if "reactions" in i])
+
+    def test_only_drive_by_reactions_leave_no_field(self):
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint"},
+            reactions={"issues/comments/20": [reaction("drive-by", "-1")]},
+        )
+        (item,) = fpc.collect(api, REPO, PR)["items"]
+        self.assertNotIn("reactions", item)
 
 
 class TestFailsClosed(unittest.TestCase):
