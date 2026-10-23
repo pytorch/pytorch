@@ -1,4 +1,4 @@
-"""Repeatable torch.compile benchmarks for pretrained diffusion pipelines.
+"""Repeatable torch.compile benchmarks for diffusion pipelines and denoisers.
 
 Each requested scenario runs in a fresh worker with an isolated compiler cache.
 The parent process writes one CSV summary and a JSON-lines artifact compatible
@@ -9,6 +9,8 @@ Examples:
     python compile_benchmark.py --model flux --mode full --backend eager
     python compile_benchmark.py --model tiny_stable_diffusion --mode all \
         --check-outputs --output results.csv
+    python compile_benchmark.py --model sd35_medium --workload denoise_step \
+        --mode all --check-outputs
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import csv
 import dataclasses
 import hashlib
 import importlib.metadata
+import itertools
 import json
 import math
 import os
@@ -39,10 +42,23 @@ if TYPE_CHECKING:
 
 
 MODES = ("eager", "full", "regional", "hierarchical")
-OUTPUT_BOUNDARIES = ("latent", "decoded_tensor", "postprocessed_output")
+WORKLOADS = ("pipeline", "denoise_step")
+OUTPUT_BOUNDARIES = (
+    "latent",
+    "decoded_tensor",
+    "postprocessed_output",
+    "denoiser_prediction",
+)
 STATUS_VALUES = ("success", "failed", "timed_out", "killed", "missing", "malformed")
 DEFAULT_OUTPUT = "diffusion_benchmark.csv"
-BENCHMARK_NAME = "PyTorch diffusion pipeline benchmark"
+BENCHMARK_NAME = "PyTorch diffusion benchmark"
+# CLI flag destination -> workload parameter it overrides.
+WORKLOAD_OVERRIDES = {
+    "height": "height",
+    "width": "width",
+    "batch_size": "num_images_per_prompt",
+    "guidance_scale": "guidance_scale",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,6 +68,7 @@ class ModelArtifact:
     filename: str | None = None
     repo_type: str = "model"
     ignore_patterns: tuple[str, ...] = ()
+    allow_patterns: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -75,9 +92,20 @@ class ModelConfig:
 
 @dataclasses.dataclass(frozen=True)
 class WorkloadConfig:
+    name: str
     parameters: dict[str, Any]
     seed: int
     output_boundary: str
+    # Command-line values that differ from the recipe defaults; already merged
+    # into `parameters`.
+    overrides: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+def _workload_label(name: str, overrides: dict[str, Any]) -> str:
+    if not overrides:
+        return name
+    values = ",".join(f"{key}={value}" for key, value in sorted(overrides.items()))
+    return f"{name}[{values}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,6 +127,7 @@ class Recipe:
     model: ModelConfig
     workload: WorkloadConfig
     loader: str
+    tunable_parameters: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,7 +141,8 @@ class Scenario:
     @property
     def scenario_id(self) -> str:
         cg = "cudagraphs" if self.execution.cudagraphs else "no-cudagraphs"
-        return f"{self.model.name}:{self.mode}:{self.execution.backend}:{cg}"
+        workload = _workload_label(self.workload.name, self.workload.overrides)
+        return f"{self.model.name}:{workload}:{self.mode}:{self.execution.backend}:{cg}"
 
 
 @dataclasses.dataclass
@@ -121,6 +151,9 @@ class LoadedPipeline:
     component: Any
     make_request: Callable[[], tuple[tuple[Any, ...], dict[str, Any]]]
     output_fields: tuple[str, ...]
+    workload_details: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # Recomputes the latest request in higher precision; may mutate the model.
+    high_precision_reference: Callable[[], Any] | None = None
 
 
 def _artifact(
@@ -130,8 +163,11 @@ def _artifact(
     repo_type: str = "model",
     *,
     ignore_patterns: tuple[str, ...] = (),
+    allow_patterns: tuple[str, ...] = (),
 ) -> ModelArtifact:
-    return ModelArtifact(repo_id, revision, filename, repo_type, ignore_patterns)
+    return ModelArtifact(
+        repo_id, revision, filename, repo_type, ignore_patterns, allow_patterns
+    )
 
 
 COMMON_DEPENDENCIES = (
@@ -155,20 +191,23 @@ def _recipe(
     output_boundary: str,
     loader: str,
     *,
+    workload: str = "pipeline",
     component_attr: str = "transformer",
+    component: str | None = None,
     device: str = "cuda",
     dtype: str = "bfloat16",
     seed: int = 0,
     validation: str = "not executed in this change",
     dependencies: tuple[str, ...] = COMMON_DEPENDENCIES,
     artifacts: tuple[ModelArtifact, ...] | None = None,
+    tunable_parameters: tuple[str, ...] = (),
 ) -> Recipe:
     return Recipe(
         ModelConfig(
             name=name,
             checkpoint=checkpoint,
             revision=revision,
-            component=f"pipeline.{component_attr}",
+            component=component or f"pipeline.{component_attr}",
             component_attr=component_attr,
             repeated_block_classes=repeated_blocks,
             default_device=device,
@@ -179,15 +218,30 @@ def _recipe(
                 (_artifact(checkpoint, revision),) if artifacts is None else artifacts
             ),
         ),
-        WorkloadConfig(parameters, seed, output_boundary),
+        WorkloadConfig(workload, parameters, seed, output_boundary),
         loader,
+        tunable_parameters,
     )
 
 
-def _recipes() -> dict[str, Recipe]:
+SD3_TUNABLE_PARAMETERS = tuple(WORKLOAD_OVERRIDES.values())
+
+
+def _recipes() -> dict[str, dict[str, Recipe]]:
     pilot_repo = "diffusers/tiny-stable-diffusion-torch"
     pilot_revision = "c05d78754bd90a3ffea8fd3a0823ac17329cd1a6"
-    recipes = {
+    sd35_repo = "stabilityai/stable-diffusion-3.5-medium"
+    sd35_revision = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
+    sd35_validation = "not executed in this change; checkpoint access is gated"
+    sd35_request = {
+        "height": 1024,
+        "width": 1024,
+        "num_images_per_prompt": 1,
+        "guidance_scale": 4.5,
+        "num_inference_steps": 40,
+        "max_sequence_length": 256,
+    }
+    pipelines = {
         "tiny_stable_diffusion": _recipe(
             "tiny_stable_diffusion",
             pilot_repo,
@@ -336,11 +390,89 @@ def _recipes() -> dict[str, Recipe]:
             dependencies=("torch",),
             artifacts=(),
         ),
+        "sd35_medium": _recipe(
+            "sd35_medium",
+            sd35_repo,
+            sd35_revision,
+            ("JointTransformerBlock",),
+            {
+                "prompt": "A capybara holding a sign that reads Hello World",
+                **sd35_request,
+                "output_type": "latent",
+            },
+            "latent",
+            "_load_sd35_medium",
+            validation=sd35_validation,
+            artifacts=(
+                _artifact(
+                    sd35_repo,
+                    sd35_revision,
+                    ignore_patterns=(
+                        "sd3.5_medium.safetensors",
+                        "text_encoders/*",
+                        "*.fp16*",
+                    ),
+                ),
+            ),
+            tunable_parameters=SD3_TUNABLE_PARAMETERS,
+        ),
     }
-    return recipes
+    denoise_steps = {
+        "sd35_medium": _recipe(
+            "sd35_medium",
+            sd35_repo,
+            sd35_revision,
+            ("JointTransformerBlock",),
+            sd35_request,
+            "denoiser_prediction",
+            "_load_sd35_medium_denoise_step",
+            workload="denoise_step",
+            component="transformer",
+            validation=sd35_validation,
+            artifacts=(
+                _artifact(
+                    sd35_repo,
+                    sd35_revision,
+                    allow_patterns=(
+                        "transformer/*",
+                        "scheduler/*",
+                        "tokenizer/*",
+                        "vae/config.json",
+                    ),
+                ),
+            ),
+            tunable_parameters=SD3_TUNABLE_PARAMETERS,
+        ),
+        "tiny_sd3": _recipe(
+            "tiny_sd3",
+            "builtin://tiny-sd3-transformer",
+            "1",
+            ("JointTransformerBlock",),
+            {
+                "height": 64,
+                "width": 64,
+                "num_images_per_prompt": 1,
+                "guidance_scale": 4.5,
+                "num_inference_steps": 4,
+                "max_sequence_length": 4,
+            },
+            "denoiser_prediction",
+            "_load_tiny_sd3_denoise_step",
+            workload="denoise_step",
+            component="transformer",
+            device="cpu",
+            dtype="float32",
+            seed=5,
+            validation="download-free test workload with random weights",
+            dependencies=("torch", "diffusers", "transformers"),
+            artifacts=(),
+            tunable_parameters=SD3_TUNABLE_PARAMETERS,
+        ),
+    }
+    return {"pipeline": pipelines, "denoise_step": denoise_steps}
 
 
-BENCHMARKS = _recipes()
+RECIPES = _recipes()
 
 
 def _dtype_from_name(name: str) -> Any:
@@ -373,23 +505,32 @@ def _prefetch(artifacts: tuple[ModelArtifact, ...]) -> dict[str, str]:
     if not artifacts:
         return {}
     from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub.errors import GatedRepoError
 
     paths = {}
     for artifact in artifacts:
-        if artifact.filename is None:
-            path = snapshot_download(
-                repo_id=artifact.repo_id,
-                revision=artifact.revision,
-                repo_type=artifact.repo_type,
-                ignore_patterns=list(artifact.ignore_patterns),
-            )
-        else:
-            path = hf_hub_download(
-                repo_id=artifact.repo_id,
-                revision=artifact.revision,
-                filename=artifact.filename,
-                repo_type=artifact.repo_type,
-            )
+        try:
+            if artifact.filename is None:
+                path = snapshot_download(
+                    repo_id=artifact.repo_id,
+                    revision=artifact.revision,
+                    repo_type=artifact.repo_type,
+                    ignore_patterns=list(artifact.ignore_patterns),
+                    allow_patterns=list(artifact.allow_patterns) or None,
+                )
+            else:
+                path = hf_hub_download(
+                    repo_id=artifact.repo_id,
+                    revision=artifact.revision,
+                    filename=artifact.filename,
+                    repo_type=artifact.repo_type,
+                )
+        except GatedRepoError as error:
+            raise RuntimeError(
+                f"{artifact.repo_id}@{artifact.revision} is gated: accept its license "
+                f"at https://huggingface.co/{artifact.repo_id} and authenticate with "
+                "HF_TOKEN or `hf auth login`"
+            ) from error
         paths[artifact.key] = path
     return paths
 
@@ -427,6 +568,7 @@ def _finish_loading(
     request_parameters: dict[str, Any] | None = None,
     mutable_parameters: dict[str, Callable[[], Any]] | None = None,
     output_fields: tuple[str, ...] = ("images", "frames"),
+    workload_details: dict[str, Any] | None = None,
 ) -> LoadedPipeline:
     pipeline = pipeline.to(device)
     if hasattr(pipeline, "set_progress_bar_config"):
@@ -446,6 +588,7 @@ def _finish_loading(
             mutable_parameters,
         ),
         output_fields=output_fields,
+        workload_details=workload_details or {},
     )
 
 
@@ -553,6 +696,209 @@ def _load_flux(
     artifact = scenario.model.artifacts[0]
     pipeline = FluxPipeline.from_pretrained(paths[artifact.key], torch_dtype=dtype)
     return _finish_loading(pipeline, scenario, device)
+
+
+def _sd3_request_details(
+    parameters: dict[str, Any], tokenizer_max_length: int
+) -> dict[str, Any]:
+    batch_size = parameters["num_images_per_prompt"]
+    guidance_scale = parameters["guidance_scale"]
+    # StableDiffusion3Pipeline packs unconditional and conditional rows when
+    # guidance_scale > 1.
+    cfg = guidance_scale > 1
+    return {
+        "height": parameters["height"],
+        "width": parameters["width"],
+        "requested_batch_size": batch_size,
+        "effective_batch_size": batch_size * (2 if cfg else 1),
+        "guidance_scale": guidance_scale,
+        "classifier_free_guidance": cfg,
+        # CLIP token embeddings followed by T5 token embeddings.
+        "conditioning_length": tokenizer_max_length + parameters["max_sequence_length"],
+        "num_inference_steps": parameters["num_inference_steps"],
+    }
+
+
+def _load_sd35_medium(
+    scenario: Scenario, paths: dict[str, str], device: str, dtype: Any
+) -> LoadedPipeline:
+    from diffusers import StableDiffusion3Pipeline
+
+    artifact = scenario.model.artifacts[0]
+    pipeline = StableDiffusion3Pipeline.from_pretrained(
+        paths[artifact.key], torch_dtype=dtype
+    )
+    details = _sd3_request_details(
+        scenario.workload.parameters, pipeline.tokenizer_max_length
+    )
+    return _finish_loading(
+        pipeline,
+        scenario,
+        device,
+        output_fields=("images",),
+        workload_details=details,
+    )
+
+
+def _sd3_denoise_step(
+    transformer: Any,
+    scheduler: Any,
+    scenario: Scenario,
+    device: str,
+    dtype: Any,
+    *,
+    vae_scale_factor: int,
+    tokenizer_max_length: int,
+) -> LoadedPipeline:
+    from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import (
+        calculate_shift,
+        retrieve_timesteps,
+    )
+
+    import torch
+
+    parameters = scenario.workload.parameters
+    config = transformer.config
+    details = _sd3_request_details(parameters, tokenizer_max_length)
+    height, width = details["height"], details["width"]
+    multiple = vae_scale_factor * config.patch_size
+    if height % multiple or width % multiple:
+        raise ValueError(
+            f"height and width must be divisible by {multiple}, got {height}x{width}"
+        )
+    latent_height = height // vae_scale_factor
+    latent_width = width // vae_scale_factor
+    requested = details["requested_batch_size"]
+    effective = details["effective_batch_size"]
+    cfg = details["classifier_free_guidance"]
+
+    # Draw on the CPU so that input values do not depend on the device.
+    generator = torch.Generator().manual_seed(scenario.workload.seed)
+
+    def synthetic(*shape: int) -> Any:
+        return torch.randn(shape, generator=generator).to(device=device, dtype=dtype)
+
+    latents = synthetic(requested, config.in_channels, latent_height, latent_width)
+    inputs = {
+        "hidden_states": torch.cat([latents] * 2) if cfg else latents,
+        "encoder_hidden_states": synthetic(
+            effective, details["conditioning_length"], config.joint_attention_dim
+        ),
+        "pooled_projections": synthetic(effective, config.pooled_projection_dim),
+    }
+    scheduler_kwargs = {}
+    if scheduler.config.get("use_dynamic_shifting", None):
+        patches = latent_height * latent_width // config.patch_size**2
+        scheduler_kwargs["mu"] = calculate_shift(
+            patches,
+            scheduler.config.get("base_image_seq_len", 256),
+            scheduler.config.get("max_image_seq_len", 4096),
+            scheduler.config.get("base_shift", 0.5),
+            scheduler.config.get("max_shift", 1.16),
+        )
+    timesteps, _ = retrieve_timesteps(
+        scheduler, parameters["num_inference_steps"], device, **scheduler_kwargs
+    )
+    # Requests cycle through the schedule using the pipeline's expanded layout,
+    # so values change while shapes and strides stay fixed.
+    schedule = [timestep.expand(effective) for timestep in timesteps]
+    requests = itertools.cycle(schedule)
+    latest: dict[str, Any] = {}
+
+    def make_request() -> tuple[tuple[Any, ...], dict[str, Any]]:
+        latest.update(inputs, timestep=next(requests))
+        return (), dict(latest)
+
+    def forward(**kwargs: Any) -> Any:
+        return transformer(**kwargs, return_dict=False)[0]
+
+    def high_precision_reference() -> Any:
+        high = torch.float64 if dtype == torch.float32 else torch.float32
+        transformer.to(high)
+        return forward(**{name: value.to(high) for name, value in latest.items()})
+
+    transformer.to(device).eval()
+    details.update(
+        inputs={
+            name: {"shape": list(value.shape), "dtype": str(value.dtype)}
+            for name, value in dict(inputs, timestep=schedule[0]).items()
+        },
+        timesteps=timesteps.tolist(),
+        conditioning="seeded standard-normal tensors with text-encoder output "
+        "shapes; text encoders are not run",
+    )
+    return LoadedPipeline(
+        forward, transformer, make_request, (), details, high_precision_reference
+    )
+
+
+def _load_sd35_medium_denoise_step(
+    scenario: Scenario, paths: dict[str, str], device: str, dtype: Any
+) -> LoadedPipeline:
+    from diffusers import (
+        AutoencoderKL,
+        FlowMatchEulerDiscreteScheduler,
+        SD3Transformer2DModel,
+    )
+    from transformers import CLIPTokenizer
+
+    root = paths[scenario.model.artifacts[0].key]
+    transformer = SD3Transformer2DModel.from_pretrained(
+        root, subfolder="transformer", torch_dtype=dtype
+    )
+    scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
+        root, subfolder="scheduler"
+    )
+    # Derived as in StableDiffusion3Pipeline.__init__, without loading the VAE
+    # or text encoder weights.
+    vae_config = AutoencoderKL.load_config(root, subfolder="vae")
+    tokenizer = CLIPTokenizer.from_pretrained(root, subfolder="tokenizer")
+    return _sd3_denoise_step(
+        transformer,
+        scheduler,
+        scenario,
+        device,
+        dtype,
+        vae_scale_factor=2 ** (len(vae_config["block_out_channels"]) - 1),
+        tokenizer_max_length=tokenizer.model_max_length,
+    )
+
+
+def _load_tiny_sd3_denoise_step(
+    scenario: Scenario, paths: dict[str, str], device: str, dtype: Any
+) -> LoadedPipeline:
+    from diffusers import FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel
+
+    import torch
+
+    torch.manual_seed(scenario.workload.seed)
+    # Covers SD3.5's three JointTransformerBlock variants (dual attention, plain,
+    # and the context_pre_only final block) with RMS QK norm. pos_embed_max_size
+    # allows images up to 2048 pixels.
+    transformer = SD3Transformer2DModel(
+        sample_size=8,
+        patch_size=2,
+        in_channels=4,
+        num_layers=3,
+        attention_head_dim=8,
+        num_attention_heads=2,
+        joint_attention_dim=16,
+        caption_projection_dim=16,
+        pooled_projection_dim=8,
+        out_channels=4,
+        pos_embed_max_size=128,
+        dual_attention_layers=(0,),
+        qk_norm="rms_norm",
+    ).to(dtype)
+    return _sd3_denoise_step(
+        transformer,
+        FlowMatchEulerDiscreteScheduler(shift=3.0),
+        scenario,
+        device,
+        dtype,
+        vae_scale_factor=8,
+        tokenizer_max_length=4,
+    )
 
 
 def _load_toy(
@@ -914,6 +1260,8 @@ def _relevant_environment() -> dict[str, str]:
 def _validate_worker_scenario(scenario: Scenario, device: str) -> None:
     if scenario.mode not in MODES:
         raise ValueError(f"invalid compilation mode: {scenario.mode}")
+    if scenario.workload.name not in WORKLOADS:
+        raise ValueError(f"invalid workload: {scenario.workload.name}")
     if scenario.workload.output_boundary not in OUTPUT_BOUNDARIES:
         raise ValueError(
             f"invalid output boundary: {scenario.workload.output_boundary}"
@@ -1015,8 +1363,21 @@ def execute_scenario(
 
     tensor = _extract_tensor(output, loaded.output_fields)
     output_summary = _tensor_summary(tensor)
+    reference_error = None
     if sample_path is not None:
         torch.save(tensor, sample_path)
+        if scenario.mode == "eager" and loaded.high_precision_reference is not None:
+            del output
+            # The reference only serves the output check (and can exhaust memory
+            # at twice the weight size), so its failure must not discard timings.
+            try:
+                with torch.inference_mode():
+                    reference = loaded.high_precision_reference().detach().cpu()
+            except Exception as error:
+                reference_error = f"{type(error).__name__}: {error}"
+                traceback.print_exc()
+            else:
+                torch.save(reference, _reference_path(sample_path))
     median_s = statistics.median(samples)
     mad_s = statistics.median(abs(sample - median_s) for sample in samples)
     compile_options = (
@@ -1030,6 +1391,7 @@ def execute_scenario(
         "error": None,
         "model": dataclasses.asdict(scenario.model),
         "workload": dataclasses.asdict(scenario.workload),
+        "workload_details": loaded.workload_details,
         "execution": dataclasses.asdict(scenario.execution),
         "mode": scenario.mode,
         "pid": os.getpid(),
@@ -1060,6 +1422,7 @@ def execute_scenario(
         "compiler_diagnostics": diagnostics,
         "output_summary": output_summary,
         "output_check": "not requested",
+        "reference_error": reference_error,
         "dependencies": _dependency_versions(scenario.model.dependencies),
         "torch": {
             "version": torch.__version__,
@@ -1089,7 +1452,11 @@ def _scenario_from_dict(value: dict[str, Any]) -> Scenario:
     model_value["dependencies"] = tuple(model_value["dependencies"])
     model_value["artifacts"] = tuple(
         ModelArtifact(
-            **dict(artifact, ignore_patterns=tuple(artifact.get("ignore_patterns", ())))
+            **dict(
+                artifact,
+                ignore_patterns=tuple(artifact.get("ignore_patterns", ())),
+                allow_patterns=tuple(artifact.get("allow_patterns", ())),
+            )
         )
         for artifact in model_value["artifacts"]
     )
@@ -1153,6 +1520,7 @@ def _validate_worker_result(
     for name in (
         "model",
         "workload",
+        "workload_details",
         "execution",
         "compiler_diagnostics",
         "setup_device_peak",
@@ -1170,6 +1538,8 @@ def _validate_worker_result(
 
     if result.get("mode") not in MODES:
         raise ValueError(f"malformed mode: {result.get('mode')!r}")
+    if result["workload"].get("name") not in WORKLOADS:
+        raise ValueError(f"malformed workload: {result['workload'].get('name')!r}")
     for name, value in (
         ("model.name", result["model"].get("name")),
         ("execution.backend", result["execution"].get("backend")),
@@ -1376,6 +1746,52 @@ def validate_scenario_results(
     return errors
 
 
+def _reference_path(sample_path: str | Path) -> Path:
+    return Path(sample_path).with_suffix(".reference.pt")
+
+
+# dtype -> (multiplier on eager's error, floor). Multipliers follow
+# torch._dynamo.utils.same; floors are its tol / 10 with torch.testing's default
+# rtol as tol.
+PREDICTION_TOLERANCES = {
+    "torch.bfloat16": (3.0, 1.6e-3),
+    "torch.float16": (3.0, 1e-4),
+    "torch.float32": (2.0, 1.3e-7),
+}
+
+
+def _check_prediction(actual: Any, eager: Any, high_precision: Any) -> str:
+    if actual.shape != eager.shape or actual.dtype != eager.dtype:
+        raise AssertionError(
+            f"prediction {actual.dtype}{list(actual.shape)} does not match "
+            f"eager {eager.dtype}{list(eager.shape)}"
+        )
+    if not (actual.isfinite().all() and eager.isfinite().all()):
+        raise AssertionError("prediction contains non-finite values")
+    # Low-precision eager and compiled predictions each carry rounding error that
+    # grows with depth, so a fixed bound on their difference either misses bugs
+    # or rejects correct programs. Instead, the compiled error against a
+    # higher-precision forward is bounded by a multiple of eager's error.
+    high = high_precision.double()
+
+    def error(value: Any) -> float:
+        return ((value.double() - high).norm() / high.norm()).item()
+
+    compiled_error, eager_error = error(actual), error(eager)
+    multiplier, floor = PREDICTION_TOLERANCES[str(actual.dtype)]
+    # As in same(), noise dominates the error of small tensors.
+    if actual.numel() < 1000:
+        multiplier = 3.0
+    bound = multiplier * eager_error + floor
+    summary = (
+        f"relative RMS error vs {high_precision.dtype} {compiled_error:.3g}, "
+        f"bound {multiplier:g} x eager {eager_error:.3g} + {floor:g}"
+    )
+    if not compiled_error <= bound:
+        raise AssertionError(summary)
+    return f"passed: {summary}"
+
+
 def _compare_outputs(
     scenarios: list[Scenario],
     results: list[dict[str, Any]],
@@ -1389,10 +1805,17 @@ def _compare_outputs(
     eager_result = next(
         result for result in results if result["scenario_id"] == eager.scenario_id
     )
-    reference = None
+    reference = high_precision = None
+    reference_error = eager_result.get("reference_error")
     if eager_result.get("status") == "success":
         try:
-            reference = torch.load(sample_paths[eager.scenario_id], weights_only=True)
+            eager_path = sample_paths[eager.scenario_id]
+            reference = torch.load(eager_path, weights_only=True)
+            denoiser = eager.workload.output_boundary == "denoiser_prediction"
+            if denoiser and reference_error is None:
+                high_precision = torch.load(
+                    _reference_path(eager_path), weights_only=True
+                )
         except (OSError, RuntimeError) as error:
             eager_result["status"] = "failed"
             eager_result["error"] = (
@@ -1400,7 +1823,14 @@ def _compare_outputs(
             )
             eager_result["output_check"] = "failed"
         else:
-            eager_result["output_check"] = "reference"
+            eager_result["output_check"] = (
+                "reference" if reference_error is None else "reference failed"
+            )
+    unavailable = None
+    if eager_result.get("status") != "success":
+        unavailable = "output comparison requires a successful eager reference"
+    elif reference_error is not None:
+        unavailable = f"eager high-precision reference failed: {reference_error}"
     for scenario in scenarios:
         if scenario.mode == "eager":
             continue
@@ -1411,22 +1841,24 @@ def _compare_outputs(
         )
         if result.get("status") != "success":
             continue
-        if eager_result.get("status") != "success":
+        if unavailable is not None:
             result.update(
-                status="failed",
-                error="output comparison requires a successful eager reference",
-                output_check="reference unavailable",
+                status="failed", error=unavailable, output_check="reference unavailable"
             )
             continue
         try:
             actual = torch.load(sample_paths[scenario.scenario_id], weights_only=True)
-            torch.testing.assert_close(actual, reference)
+            if scenario.workload.output_boundary == "denoiser_prediction":
+                check = _check_prediction(actual, reference, high_precision)
+            else:
+                torch.testing.assert_close(actual, reference)
+                check = "passed with torch.testing.assert_close defaults"
         except (AssertionError, OSError, RuntimeError) as error:
             result["status"] = "failed"
             result["error"] = f"output sanity check failed: {error}"
             result["output_check"] = "failed"
         else:
-            result["output_check"] = "passed with torch.testing.assert_close defaults"
+            result["output_check"] = check
 
 
 def _record_extra_info(result: dict[str, Any]) -> dict[str, Any]:
@@ -1461,11 +1893,18 @@ def dashboard_records(result: dict[str, Any]) -> list[dict[str, Any]]:
         "dtype": result.get("dtype", execution.get("dtype", "unknown")),
         "extra_info": _record_extra_info(result),
     }
+    name = model.get("name", result["scenario_id"].split(":", 1)[0])
+    workload = result.get("workload", {})
+    overrides = workload.get("overrides", {})
+    label = _workload_label(workload.get("name", "unknown"), overrides)
+    builtin = model.get("checkpoint", "").startswith("builtin://")
     model_record = {
-        "name": model.get("name", result["scenario_id"].split(":", 1)[0]),
-        "type": "micro-benchmark" if model.get("name") == "toy" else "OSS model",
+        # Dashboards key on the model name, so it carries the workload and any
+        # overridden parameters.
+        "name": f"{name}:{label}",
+        "type": "micro-benchmark" if builtin else "OSS model",
         "backend": backend,
-        "origins": ["pytorch"] if model.get("name") == "toy" else ["huggingface"],
+        "origins": ["pytorch"] if builtin else ["huggingface"],
     }
     if result.get("status") != "success":
         return [
@@ -1527,11 +1966,20 @@ def write_outputs(csv_path: str | Path, results: list[dict[str, Any]]) -> Path:
         "status",
         "error",
         "model",
+        "workload",
         "mode",
         "backend",
+        "cudagraphs",
         "device",
         "dtype",
         "output_boundary",
+        "checkpoint_revision",
+        "height",
+        "width",
+        "requested_batch_size",
+        "effective_batch_size",
+        "conditioning_length",
+        "guidance_scale",
         "compiled_component",
         "compiled_targets",
         "model_setup_s",
@@ -1557,17 +2005,33 @@ def write_outputs(csv_path: str | Path, results: list[dict[str, Any]]) -> Path:
             setup_memory = result.get("setup_device_peak", {})
             request_memory = result.get("request_device_peak", {})
             compiler = result.get("compiler_diagnostics", {})
+            details = result.get("workload_details", {})
+            parameters = workload.get("parameters", {})
             writer.writerow(
                 {
                     "scenario_id": result.get("scenario_id"),
                     "status": result.get("status"),
                     "error": result.get("error"),
                     "model": model.get("name"),
+                    "workload": workload.get("name"),
                     "mode": result.get("mode"),
                     "backend": execution.get("backend"),
+                    "cudagraphs": execution.get("cudagraphs"),
                     "device": result.get("device"),
                     "dtype": result.get("dtype"),
                     "output_boundary": workload.get("output_boundary"),
+                    "checkpoint_revision": model.get("revision"),
+                    **{
+                        name: details.get(name, parameters.get(name))
+                        for name in (
+                            "height",
+                            "width",
+                            "requested_batch_size",
+                            "effective_batch_size",
+                            "conditioning_length",
+                            "guidance_scale",
+                        )
+                    },
                     "compiled_component": result.get("compiled_component"),
                     "compiled_targets": json.dumps(result.get("compiled_targets")),
                     "model_setup_s": _csv_value(result.get("model_setup_s")),
@@ -1620,6 +2084,30 @@ def _execution_from_args(
         device=args.device,
         dtype=args.dtype,
         num_threads=args.num_threads,
+    )
+
+
+def _workload_from_args(args: argparse.Namespace, recipe: Recipe) -> WorkloadConfig:
+    overrides = {}
+    for dest, parameter in WORKLOAD_OVERRIDES.items():
+        value = getattr(args, dest)
+        if value is None:
+            continue
+        flag = "--" + dest.replace("_", "-")
+        if parameter not in recipe.tunable_parameters:
+            raise ValueError(
+                f"{flag} is not supported for {recipe.model.name} {recipe.workload.name}"
+            )
+        if isinstance(value, float):
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{flag} must be finite and non-negative")
+        elif value < 1:
+            raise ValueError(f"{flag} must be positive")
+        if value != recipe.workload.parameters[parameter]:
+            overrides[parameter] = value
+    parameters = {**recipe.workload.parameters, **overrides}
+    return dataclasses.replace(
+        recipe.workload, parameters=parameters, overrides=overrides
     )
 
 
@@ -1704,7 +2192,14 @@ def _run_scenarios(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=BENCHMARKS)
+    models = sorted({name for recipes in RECIPES.values() for name in recipes})
+    parser.add_argument("--model", choices=models)
+    parser.add_argument(
+        "--workload",
+        choices=WORKLOADS,
+        default="pipeline",
+        help="pipeline times complete requests; denoise_step times one transformer forward",
+    )
     parser.add_argument("--mode", choices=(*MODES, "all"), action="append")
     parser.add_argument("--backend", default="inductor")
     parser.add_argument("--cudagraphs", action="store_true")
@@ -1716,6 +2211,14 @@ def _parser() -> argparse.ArgumentParser:
         "--dtype", choices=("auto", "float32", "float16", "bfloat16"), default="auto"
     )
     parser.add_argument("--num-threads", type=int)
+    parser.add_argument("--height", type=int)
+    parser.add_argument("--width", type=int)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="images per prompt; CFG doubles the transformer batch",
+    )
+    parser.add_argument("--guidance-scale", type=float)
     parser.add_argument("--check-outputs", action="store_true")
     parser.add_argument(
         "--output",
@@ -1740,13 +2243,20 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--check-outputs requires --mode eager or --mode all")
         if args.cudagraphs and modes == ("eager",):
             raise ValueError("CUDA graphs require at least one compiled mode")
-        recipe = BENCHMARKS[args.model]
+        recipes = RECIPES[args.workload]
+        if args.model not in recipes:
+            raise ValueError(
+                f"--model {args.model} does not support --workload {args.workload}; "
+                f"choose from {sorted(recipes)}"
+            )
+        recipe = recipes[args.model]
+        workload = _workload_from_args(args, recipe)
         execution = _execution_from_args(args, modes)
         eager_execution = dataclasses.replace(execution, cudagraphs=False)
         scenarios = [
             Scenario(
                 recipe.model,
-                recipe.workload,
+                workload,
                 eager_execution if mode == "eager" else execution,
                 mode,
                 recipe.loader,
