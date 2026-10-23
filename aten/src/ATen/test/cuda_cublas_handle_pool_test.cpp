@@ -421,6 +421,13 @@ TEST(CUDABlasHandlePoolTest, CaptureHandleKeepsPointerModePerStream) {
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
-  c10::cuda::CUDACachingAllocator::init(1);
+  // Every TEST() below already guards on at::cuda::is_available() and returns
+  // early when there's no GPU. init() below is not: it unconditionally touches
+  // the CUDA driver (DeviceCachingAllocator's ctor calls cudaGetDeviceProperties),
+  // which aborts the whole process on a GPU-less machine before any TEST() body
+  // gets a chance to self-skip.
+  if (at::cuda::is_available()) {
+    c10::cuda::CUDACachingAllocator::init(1);
+  }
   return RUN_ALL_TESTS();
 }
