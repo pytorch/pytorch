@@ -236,6 +236,12 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
     @requires_nccl()
     @parametrize("high_priority_stream", [False, True])
     def test_cudagraph_stream_outlives_process_group(self, high_priority_stream):
+        # Identify the dedicated NCCL stream through its dependency-event wait.
+        waited_streams = set()
+        torch._C._activate_gpu_trace()
+        gpu_trace.register_callback_for_event_wait(
+            lambda event, stream: waited_streams.add(stream)
+        )
         store = dist.FileStore(self.file_name, self.world_size)
         for generation in range(2):
             self._init_process_group(
@@ -266,7 +272,14 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
                     dist.all_reduce(parent_input, async_op=True).wait()
                     graph.begin_capture_to_if_node(pred)
                     try:
+                        child_stream = torch.cuda.current_stream().cuda_stream
+                        waited_streams.clear()
                         exchange(send, recv)
+                        nccl_streams = waited_streams - {child_stream}
+                        self.assertEqual(len(nccl_streams), 1)
+                        pooled_stream = torch.cuda.ExternalStream(
+                            nccl_streams.pop(), device=self.rank
+                        )
                     finally:
                         graph.end_capture_to_conditional_node()
                 graph.instantiate()
@@ -276,10 +289,17 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
                     torch.cuda.synchronize()
                     expected = torch.full_like(recv, 2 - self.rank + offset)
                     self.assertEqual(recv, expected)
+                # NCCL2's same-device P2P path does not call record_stream.
+                # Explicitly leave an allocator reference to the pool stream.
+                send.record_stream(pooled_stream)
             finally:
                 graph.reset()
                 dist.destroy_process_group()
-            # Tensor deallocation must remain safe after process group destruction.
+            # Check the raw stream remains valid before allocator deallocation
+            # attempts to record its own event on that same stream.
+            event = torch.cuda.Event()
+            event.record(pooled_stream)
+            event.synchronize()
             del send, recv
             torch.cuda.synchronize()
 

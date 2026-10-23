@@ -121,9 +121,9 @@ void createPreMulSum(
 // of 32 streams. This will return the currently capturing internal
 // stream for current_stream's capture if one already exists.
 //
-// We maintain a process-lifetime stream pool because destruction
-// allocator recordStream() calls can make a cudaStream_t outlive the
-// ProcessGroupNCCL instance.
+// We maintain a process-lifetime stream pool
+// CUDACachingAllocator::recordStream() calls can make a cudaStream_t
+// outlive the ProcessGroupNCCL instance.
 cudaStream_t getStreamForThisCapture(
     const at::cuda::CUDAStream& current_stream,
     int priority,
@@ -150,7 +150,6 @@ cudaStream_t getStreamForThisCapture(
   auto& streams = pools[{device, priority}];
   std::optional<at::cuda::CUDAStream> idle_stream;
   // Scanning the pool makes N nested captures take O(N^2) queries.
-
   // We cannot use a hash table keyed on capture id because we have no
   // way to know when a stream exits stream capture. If we could
   // register a callback here that runs when cudaStreamEndCapture()
@@ -613,10 +612,7 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
     return stream.stream();
   };
 
-  // If there is no capturing going on whatsoever (happy path we want
-  // to keep fast), don't bother checking any stream capture states.
-  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device)) ||
-      !c10::cuda::isStreamCapturingMayInitCtx(current_stream.stream())) {
+  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device))) {
     return sync_stream(internal_stream);
   }
 
