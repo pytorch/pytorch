@@ -1123,6 +1123,15 @@ TORCH_IMPL_FUNC(index_copy_out)
       (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
   auto index_restrided = index.as_strided(index_sizes, index_strides);
 
+  // Like index_add, delegate CUDA row copies to scatter's fast-path dispatch.
+  if (result.is_cuda() && dim == 0 && index.is_contiguous() &&
+      index.numel() > 1 &&
+      source.nbytes() / index.numel() >= kFastScatterMinSliceBytes) {
+    result_nonzero.scatter_(
+        dim, index_restrided.expand_as(source_nonzero), source_nonzero);
+    return;
+  }
+
   // Prepare `result` for TensorIterator.
   // Restride `result` to not advance in dimension `dim`.
   // We do not use squash_dim here because `index` will

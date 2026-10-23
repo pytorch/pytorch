@@ -1,11 +1,13 @@
 
 #include <cstdint>
+#include <ATen/native/IndexKernel.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 namespace at::native {
 
 struct ScatterAddOp;
+struct ScatterCopyOp;
 struct ScatterMinOp;
 struct ScatterMaxOp;
 
@@ -34,11 +36,6 @@ inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const
          get_alignment(static_cast<size_t>(index_stride_bytes)) == alignment &&
          get_alignment(static_cast<size_t>(iter.strides(0)[1])) == alignment;
 }
-
-// Minimum slice size for the vectorized/TMA scatter fast paths. They launch
-// at least a warp per entry, so below 256-byte slices the per-entry overhead
-// dominates and the elementwise kernel is faster (pre-#182675 routing).
-inline constexpr size_t kFastScatterMinSliceBytes = 256;
 
 // For scatter on dim=0: self is restrided (stride[dim]=0), src and index keep original strides.
 // In TensorIterator ordering (fast to slow):
