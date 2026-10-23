@@ -120,6 +120,7 @@ class DispatchKey(Enum):
     PreDispatch = auto()
     PythonDispatcher = auto()
     Python = auto()
+    Fake = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     Conjugate = auto()
