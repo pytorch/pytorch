@@ -2356,6 +2356,22 @@ Dynamic shape operator
             self.assertEqual(result.shape, x.shape)
             self.assertEqual(result.stride(), x.stride())
 
+    def test_register_fake_before_define(self):
+        qualname = f"{self.test_ns}::foo"
+        # An impl without a schema makes the op known to the dispatcher but not
+        # to torch.ops (e.g. a C++ TORCH_LIBRARY_IMPL whose def loads later).
+        self.lib().impl("foo", lambda x: x.sin(), "CPU")
+
+        @torch.library.register_fake(qualname, lib=self.lib())
+        def foo_impl(x):
+            return x.sin()
+
+        self.lib().define("foo(Tensor x) -> Tensor")
+        op = self.get_op(qualname)
+        with torch._subclasses.FakeTensorMode():
+            x = torch.randn(3)
+            self.assertEqual(op(x).shape, x.shape)
+
     def test_abstract_impl_on_existing_op_with_meta(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
