@@ -116,12 +116,6 @@ if(WIN32 AND BUILD_PYTHON)
     if(EXISTS "${_nvtoolsext}")
       install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     endif()
-
-    # zlibwapi (needed by some CUDA libraries).
-    if(EXISTS "C:/Windows/System32/zlibwapi.dll")
-      install(FILES "C:/Windows/System32/zlibwapi.dll"
-              DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
   endif()
 endif()
 
