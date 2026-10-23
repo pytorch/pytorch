@@ -6,6 +6,7 @@ import operator
 import struct
 import sys
 from collections.abc import Callable
+from types import NotImplementedType
 from typing import Any, cast, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
@@ -216,7 +217,9 @@ def adaptive_max_pool3d(input, output_size):
 
 
 @register_decomposition([aten.special_log_ndtr])
-def special_log_ndtr(a: torch.Tensor) -> torch.Tensor:
+def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
+    if is_strict_cuda_triton(a.device) and a.dtype == torch.float32:
+        return NotImplemented
     # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
     # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
     # We wrap the base decomposition result with copysign to force the sign bit,
