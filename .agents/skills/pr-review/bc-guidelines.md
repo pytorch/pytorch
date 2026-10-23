@@ -55,7 +55,7 @@ PyTorch also supports free threaded CPython, so any C++ code must be compatible 
 
 BC-breaking changes are acceptable when:
 
-1. **Deprecation warning added** - At least one release with deprecation warning
+1. **Deprecation warning added** - At least two releases with deprecation warning (see the [BC policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) and the `deprecate-feature` skill)
 2. **Migration path documented** - Users know how to update their code
 3. **Release notes updated** - Change is clearly documented
 4. **Justified benefit** - The breaking change provides significant improvement

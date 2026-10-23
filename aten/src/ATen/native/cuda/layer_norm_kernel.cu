@@ -188,10 +188,9 @@ WelfordDataLN cuWelfordCombine(
 #else
       auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
+      auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
-      // Welford increment, not a weighted average of the two means: the rounding
-      // of nA and nB does not guarantee nA+nB == 1, even with an exact reciprocal.
-      mean = (dataA.count == U(0)) ? dataB.mean : dataA.mean + delta * nB;
+      mean = nA*dataA.mean + nB*dataB.mean;
       sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
     } else {
       mean = U(0);
@@ -1102,7 +1101,14 @@ void launch_vectorized_layer_norm_kernel(
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
-    const dim3 threads(warp_size, num_threads() / warp_size, 1);
+    // Only N / vec_size threads have a vector to read. For narrow rows (e.g. per-head
+    // q/k norms) launch just enough warps to cover them, instead of idle warps that
+    // still take part in the cross-warp reduction.
+    int threads_y = num_threads() / warp_size;
+    while (threads_y > 1 && (threads_y / 2) * warp_size >= N / vec_size) {
+      threads_y /= 2;
+    }
+    const dim3 threads(warp_size, threads_y, 1);
     dim3 blocks(M);
 
 #ifdef USE_ROCM

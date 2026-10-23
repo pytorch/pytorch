@@ -2,7 +2,7 @@
 """Stream chrome trace JSON directly from ITraceActivity objects.
 
 Bypasses Kineto's C++ ChromeTraceLogger, writing events one-at-a-time
-through a (possibly gzip-compressed) text writer so we never materialize
+through a (possibly compressed) text writer so we never materialize
 the full JSON string in memory.
 
 Optionally bakes CUDA-graph kernel annotations into the trace during that
@@ -13,7 +13,6 @@ to splice them in would pay the dominant gzip cost twice.
 
 from __future__ import annotations
 
-import gzip
 import json
 import os
 import re
@@ -25,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 import torch
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 _TRIMONTH_SECONDS = 7889238
@@ -136,7 +136,7 @@ def _device_properties() -> list[dict[str, Any]]:
     Every field kineto emits except ``regsPerBlock``, which torch's properties object
     does not carry; it is left out rather than guessed from ``regsPerMultiprocessor``,
     which only happens to match on current parts. ``sharedMemPerBlockOptin`` is
-    NVIDIA-only in that binding, so it is omitted on ROCm rather than raising.
+    bound on CUDA and, since ROCm 6.0, on HIP as well.
     """
     props: list[dict[str, Any]] = []
     for i in range(torch.cuda.device_count()):
@@ -155,7 +155,7 @@ def _device_properties() -> list[dict[str, Any]]:
             "regsPerMultiprocessor": p.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
             "sharedMemPerMultiprocessor": p.shared_memory_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
         }
-        # NVIDIA-only in torch's binding, hence the guard rather than a plain read.
+        # Absent from the binding only on HIP predating ROCm 6.0.
         if hasattr(p, "shared_memory_per_block_optin"):
             entry["sharedMemPerBlockOptin"] = (
                 p.shared_memory_per_block_optin
@@ -229,7 +229,8 @@ def export_chrome_trace(
     ``"all"`` requires ``annotations``; on its own it would only collapse every graphed
     event onto one lane, so it raises instead.
 
-    Writes ``.json`` or ``.json.gz`` depending on the file extension.
+    Writes plain JSON, gzip (``.gz``), or zstd (``.zst``) depending on the
+    file extension. Zstd requires the optional ``zstandard`` or ``pyzstd`` package.
     """
     if graph_lanes not in ("all", "none"):
         raise ValueError(f"graph_lanes must be 'all' or 'none', got {graph_lanes!r}")
@@ -239,6 +240,7 @@ def export_chrome_trace(
             "event would land on default_stream, which loses the stream layout and names "
             "nothing in return"
         )
+    trace_file_opener = _get_trace_file_opener(path)
     activities = kineto_results.trace_activities()
     base_ns = _trimester_base_ns()
     # No annotations to inject means no graph-lane pass at all: an empty mapping reads the
@@ -285,7 +287,8 @@ def export_chrome_trace(
     def _rel(ns: int) -> str:
         return _ns_to_us(max(ns - base_ns, 0))
 
-    with gzip.open(path, "wt") if path.endswith(".gz") else open(path, "w") as f:
+    encoding = "utf-8" if path.endswith(".zst") else None
+    with trace_file_opener(path, "wt", encoding=encoding) as f:
         f.write("{\n")
         f.write('"schemaVersion": 1,\n')
         f.write(f'"deviceProperties": {json.dumps(_device_properties())},\n')

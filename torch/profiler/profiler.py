@@ -27,7 +27,9 @@ from torch._C._profiler import (
 from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
+from torch.monitor import _WaitCounter
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 if TYPE_CHECKING:
@@ -642,9 +644,14 @@ class _KinetoProfile:
         graph_lanes: str = "none",
         default_stream: int = 7,
     ):
-        """
+        r"""
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        Paths ending in ``.gz`` use gzip compression; paths ending in ``.zst``
+        use zstd compression and require the optional ``zstandard`` or ``pyzstd``
+        package. Other paths are uncompressed (the ``cuspy`` backend defaults to
+        gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
 
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass
@@ -670,6 +677,14 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
+        path = os.fspath(path)
+        if self._use_cuspy and path.endswith(".zst") and ".pftrace" in path:
+            raise ValueError(
+                "Zstd compression is only supported for Chrome JSON traces"
+            )
+        # Validate compression before Kineto saves and consumes the trace, so a
+        # missing zstd dependency leaves it available for a later export.
+        trace_file_opener = _get_trace_file_opener(path)
         if self._use_cuspy:
             obs = self._cuspy_profiler_observer
             if obs is None or not obs.available or self._cuspy_window_id is None:
@@ -715,11 +730,15 @@ class _KinetoProfile:
                 graph_lanes=graph_lanes,
                 default_stream=default_stream,
             )
-        elif path.endswith(".gz"):
-            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
-                with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
-                    fout.writelines(fin)
+        elif path.endswith((".gz", ".zst")):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                trace_path = os.path.join(tmpdir, "trace.json")
+                self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+                with (
+                    open(trace_path, "rb") as fin,
+                    trace_file_opener(path, "wb") as fout,
+                ):
+                    shutil.copyfileobj(fin, fout)
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 
@@ -1325,23 +1344,19 @@ class profile(_KinetoProfile):
             (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
                 self.start_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
                 self.start_trace,
             ],
@@ -1359,12 +1374,10 @@ class profile(_KinetoProfile):
             # completed.
             (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
                 self.start_trace,
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
@@ -1396,10 +1409,9 @@ class profile(_KinetoProfile):
             ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
-            (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD, None): [self._finalize_trace],
             (ProfilerAction.RECORD_AND_SAVE, None): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, None): [],
         }
@@ -1543,6 +1555,11 @@ class profile(_KinetoProfile):
         if self.profiler is None:
             return None
         return self.profiler.trace_id
+
+    def _finalize_trace(self) -> None:
+        with _WaitCounter("pytorch.wait_counter.profiler.trace_finalization").guard():
+            self.stop_trace()
+            self._trace_ready()
 
     def _trace_ready(self) -> None:
         if self.on_trace_ready:

@@ -5118,6 +5118,7 @@ class CppScheduling(BaseScheduling):
     MAX_FUSED_KERNEL_ARGS_NUM = 500
     backend_features = OrderedSet(
         [
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
@@ -5728,13 +5729,16 @@ class CppScheduling(BaseScheduling):
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
 
+                            # Users of a mutation output load the mutated buffer's
+                            # name, so they may have no read of this buffer.
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
-                                and is_contiguous_index(
-                                    user.node._body.get_read_expr(
+                                and (
+                                    read_exprs := user.node._body.get_all_read_expr(
                                         scheduler_buffer.get_name()
-                                    ),
+                                    )
                                 )
+                                and is_contiguous_index(read_exprs[0])
                                 for user in scheduler_buffer.users
                             )
 
@@ -5897,8 +5901,10 @@ class CppScheduling(BaseScheduling):
             cpp_kernel_proxy.codegen_nodes(nodes)
             kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
-        args_num = self._get_scheduled_num_args()
-        if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
+        if (
+            self._may_exceed_max_args()
+            and self._get_scheduled_num_args() > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM
+        ):
             self._set_flush_status(True)
 
     def is_cpp_template(self, node: BaseSchedulerNode) -> bool:
@@ -6005,6 +6011,19 @@ class CppScheduling(BaseScheduling):
 
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
+
+    def _may_exceed_max_args(self) -> bool:
+        # Counting the exact arguments formats every one of them, and this runs
+        # after each node, so check a cheap upper bound first: the buffers and
+        # size variables before removing duplicates and removed buffers.
+        args = self.kernel_group.args
+        upper_bound = (
+            len(args.inplace_buffers)
+            + len(args.input_buffers)
+            + len(args.output_buffers)
+            + len(args.sizevars)
+        )
+        return upper_bound > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM
 
     def ready_to_flush(self):
         return self._ready_to_flush
