@@ -30,98 +30,191 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 using namespace std::literals;
 
-// out[rows, Dv] = merge of partials[rows, blocks, width] with their row max / sum.
-static void merge_partials(id<MTLComputeCommandEncoder> encoder,
-                           const Tensor& partials,
-                           const Tensor& sums,
-                           const Tensor& maxs,
-                           const Tensor& out) {
-  using namespace mps;
-  const auto dv = out.size(-1);
-  const auto pso = lib.getPipelineStateForFunc("sdpa_merge_partials_" + scalarToMetalTypeString(out));
-  [encoder setComputePipelineState:pso];
-  const std::array<uint32_t, 4> dims{c10::safe_conv<uint32_t>(dv),
-                                     c10::safe_conv<uint32_t>(partials.size(-2)),
-                                     c10::safe_conv<uint32_t>(out.stride(-2)),
-                                     c10::safe_conv<uint32_t>(partials.size(-1))};
-  mtl_setArgs(encoder, partials, sums, maxs, out, dims);
-  // Threadgroups of kMergeLanes x columns: a decode merge has few rows and
-  // should still spread across the GPU cores.
-  const auto cols = std::min<NSUInteger>(dv, [pso maxTotalThreadsPerThreadgroup] / kMergeLanes);
-  [encoder dispatchThreads:MTLSizeMake(kMergeLanes, dv, out.numel() / dv)
-      threadsPerThreadgroup:MTLSizeMake(kMergeLanes, cols, 1)];
-}
+static constexpr int SIMD_SIZE = 32;
 
-// Decode tile (padded head dim) for qL == 1, or 0 when the head dims do not
-// fit the decode kernel: a lane's window of tile / 32 columns must fit inside
-// both dims. Keep the tiles in sync with the instantiations in DecodeAttention.h.
+// Decode tile (padded head dim), or 0 when the head dims do not fit the decode
+// kernels: a lane's window of tile / 32 columns must fit inside both dims.
+// Keep the tiles in sync with the instantiations in DecodeAttention.h.
 static int64_t decode_bucket(int64_t d, int64_t dv) {
   static constexpr std::array<int64_t, 6> tiles{32, 64, 96, 128, 256, 512};
   const auto it = std::lower_bound(tiles.begin(), tiles.end(), std::max(d, dv));
-  return it != tiles.end() && std::min(d, dv) >= *it / c10::metal::simdgroup_size ? *it : 0;
+  return it != tiles.end() && std::min(d, dv) >= *it / SIMD_SIZE ? *it : 0;
 }
 
-// Two-pass decode trades a merge for a kDecodeBlocks times larger grid; it
-// pays off from this many keys.
-static constexpr uint32_t kTwoPassMinKeys = 1024;
+// The decode kernels run one threadgroup per query row (split over 32 key
+// blocks from kTwoPassMinKeys on); past kDecodeMaxQueries rows the prefill
+// kernel's 32-row Q blocks fill up and win.
+static constexpr int64_t kDecodeMaxQueries = 8;
+static constexpr int64_t kTwoPassMinKeys = 1024;
 
-// Decode (qL == 1): DecodeAttention.h, one simdgroup per key.
-static void sdpa_vector_mps(const Tensor& q,
-                            const Tensor& k,
-                            const Tensor& v,
-                            const Tensor& out,
-                            const std::optional<Tensor>& mask,
-                            bool is_causal,
-                            float scale,
-                            int64_t bd) {
+// Head dims narrower than the tile run the kernels with clamped lane windows.
+static std::string_view padded_suffix(const Tensor& q, const Tensor& v, int64_t bd) {
+  return q.size(3) == bd && v.size(3) == bd ? ""sv : "_padded"sv;
+}
+
+static std::string sdpa_vector_mask_suffix(const std::optional<Tensor>& mask) {
+  return mask.has_value() ? mps::scalarToMetalTypeString(mask.value()) : "none";
+}
+
+// Vector mode (One–pass variant)
+static void sdpa_vector_fast_mps(const Tensor& q_,
+                                 const Tensor& k_,
+                                 const Tensor& v_,
+                                 const Tensor& out,
+                                 const std::optional<Tensor>& mask_,
+                                 bool is_causal,
+                                 float scale_factor,
+                                 int64_t bd) {
   using namespace mps;
-  const uint32_t rows = c10::safe_conv<uint32_t>(q.size(0) * q.size(1)), n = c10::safe_conv<uint32_t>(k.size(2));
-  const bool two_pass = n >= kTwoPassMinKeys;
-  auto stride = [](const Tensor& t, int d) { return c10::safe_conv<uint32_t>(t.stride(d)); };
-  auto mask_stride = [&](int d) { return mask && mask->size(d) > 1 ? stride(*mask, d) : 0u; };
-  const DecodeAttnParams params{
-      .N = n,
-      .D = c10::safe_conv<uint32_t>(q.size(3)),
-      .Dv = c10::safe_conv<uint32_t>(v.size(3)),
-      .gqa_factor = c10::safe_conv<uint32_t>(q.size(1) / k.size(1)),
-      .num_heads = c10::safe_conv<uint32_t>(q.size(1)),
-      .scale = scale,
-      .Q_strides = {stride(q, 0), stride(q, 1)},
-      .K_strides = {stride(k, 0), stride(k, 1), stride(k, 2)},
-      .V_strides = {stride(v, 0), stride(v, 1), stride(v, 2)},
-      .M_strides = {mask_stride(0), mask_stride(1), mask_stride(3)},
-  };
-  Tensor partials, sums, maxs;
-  if (two_pass) {
-    partials = at::empty({rows, kDecodeBlocks, bd}, q.options().dtype(kFloat));
-    sums = at::empty({rows, kDecodeBlocks}, q.options().dtype(kFloat));
-    maxs = at::empty_like(sums);
-  }
-  const auto kname = fmt::format("sdpa_vector{}_{}_{}_mask{}{}",
-                                 two_pass ? "_2pass"sv : ""sv,
-                                 scalarToMetalTypeString(q),
-                                 bd,
-                                 mask ? scalarToMetalTypeString(*mask) : "none"s,
-                                 is_causal ? "_causal"sv : ""sv);
+  uint batchSize = q_.size(0);
+  uint num_head = q_.size(1);
+  uint headSize = q_.size(3);
+  uint N = k_.size(2);
+  uint B = q_.size(0) * q_.size(1);
+  uint gqa_factor = q_.size(1) / k_.size(1);
+  uint q_batch_stride = q_.stride(0);
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
+  uint k_batch_stride = k_.stride(0);
+  uint k_head_stride = k_.stride(1);
+  uint k_seq_stride = k_.stride(2);
+  uint v_batch_stride = v_.stride(0);
+  uint v_head_stride = v_.stride(1);
+  uint v_seq_stride = v_.stride(2);
+
+  const std::array<uint32_t, 2> head_dims{headSize, uint32_t(v_.size(3))};
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      [computeEncoder setComputePipelineState:lib.getPipelineStateForFunc(kname)];
-      // Two-pass blocks write their partial rows in place of the output.
-      mtl_setArgs(computeEncoder, q, k, v, two_pass ? partials : out, params);
-      if (mask) {
-        mtl_setArgs<5>(computeEncoder, *mask);
+      auto group_dims = MTLSizeMake(1024, 1, 1);
+      auto grid_dims = MTLSizeMake(batchSize * num_head, q_.size(2), 1);
+      const bool has_mask = mask_.has_value();
+
+      const std::string kname = fmt::format("sdpa_vector{}_{}_{}_{}_mask{}{}",
+                                            padded_suffix(q_, v_, bd),
+                                            scalarToMetalTypeString(q_),
+                                            bd,
+                                            bd,
+                                            sdpa_vector_mask_suffix(mask_),
+                                            is_causal ? "_causal" : "");
+      auto attentionPSO = lib.getPipelineStateForFunc(kname);
+      [computeEncoder setComputePipelineState:attentionPSO];
+      mtl_setArgs(computeEncoder,
+                  q_,
+                  k_,
+                  v_,
+                  out,
+                  gqa_factor,
+                  N,
+                  c10::metal::vec3<uint32_t>{q_head_stride, k_head_stride, v_head_stride},
+                  c10::metal::vec3<uint32_t>{q_seq_stride, k_seq_stride, v_seq_stride},
+                  scale_factor);
+
+      if (has_mask) {
+        auto mask = mask_.value();
+        int nd = mask.dim();
+        uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
+        uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
+        uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
+        uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
+        mtl_setArgs<9>(
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
-      if (two_pass) {
-        mtl_setArgs<6>(computeEncoder, sums, maxs);
+      mtl_setArgs<11>(
+          computeEncoder, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head}, head_dims);
+      [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
+    }
+  });
+}
+
+// Vector mode (Two–pass variant)
+static void sdpa_vector_2pass_mps(const Tensor& q_,
+                                  const Tensor& k_,
+                                  const Tensor& v_,
+                                  const Tensor& out,
+                                  const std::optional<Tensor>& mask_,
+                                  bool is_causal,
+                                  float scale_factor,
+                                  int64_t bd) {
+  using namespace mps;
+  uint batchSize = q_.size(0);
+  uint num_heads = q_.size(1);
+  uint seq_len_q = q_.size(2);
+  uint headSize = q_.size(3);
+  uint N = k_.size(2);
+  const uint blocks = 32;
+  uint B = batchSize * num_heads;
+  uint gqa_factor = q_.size(1) / k_.size(1);
+
+  uint q_batch_stride = q_.stride(0);
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
+  uint k_batch_stride = k_.stride(0);
+  uint k_head_stride = k_.stride(1);
+  uint k_seq_stride = k_.stride(2);
+  uint v_batch_stride = v_.stride(0);
+  uint v_head_stride = v_.stride(1);
+  uint v_seq_stride = v_.stride(2);
+
+  // Partial rows span the padded tile, with the real columns at their positions.
+  auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, uint32_t(bd)}, q_.options());
+  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
+  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
+
+  const std::array<uint32_t, 2> head_dims{headSize, uint32_t(v_.size(3))};
+  const bool has_mask = mask_.has_value();
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      const std::string kname_pass1 = fmt::format("sdpa_vector_2pass_1{}_{}_{}_{}_mask{}{}",
+                                                  padded_suffix(q_, v_, bd),
+                                                  scalarToMetalTypeString(q_),
+                                                  bd,
+                                                  bd,
+                                                  sdpa_vector_mask_suffix(mask_),
+                                                  is_causal ? "_causal" : "");
+      const std::string kname_pass2 = fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), bd);
+      auto sdpa_vector_pass1PSO = lib.getPipelineStateForFunc(kname_pass1);
+      auto sdpa_vector_pass2PSO = lib.getPipelineStateForFunc(kname_pass2);
+      MTLSize group_dims = MTLSizeMake(8 * SIMD_SIZE, 1, 1);
+      MTLSize grid_dims = MTLSizeMake(B, seq_len_q, blocks);
+      auto computeEncoder = mpsStream->commandEncoder();
+
+      [computeEncoder setComputePipelineState:sdpa_vector_pass1PSO];
+      mtl_setArgs(computeEncoder,
+                  q_,
+                  k_,
+                  v_,
+                  intermediate,
+                  sums,
+                  maxs,
+                  gqa_factor,
+                  N,
+                  c10::metal::vec3<uint32_t>{q_head_stride, k_head_stride, v_head_stride},
+                  c10::metal::vec3<uint32_t>{q_seq_stride, k_seq_stride, v_seq_stride},
+                  scale_factor);
+
+      if (has_mask) {
+        auto mask = mask_.value();
+        int nd = mask.dim();
+        uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
+        uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
+        uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
+        uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
+        mtl_setArgs<11>(
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
-      const auto simdgroups = two_pass ? kDecodeBlockSimdgroups : kDecodeSimdgroups;
-      [computeEncoder dispatchThreadgroups:MTLSizeMake(rows, two_pass ? kDecodeBlocks : 1, 1)
-                     threadsPerThreadgroup:MTLSizeMake(simdgroups * c10::metal::simdgroup_size, 1, 1)];
-      if (two_pass) {
-        merge_partials(computeEncoder, partials, sums, maxs, out);
-      }
+      mtl_setArgs<13>(computeEncoder,
+                      std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads},
+                      head_dims);
+      [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
+      // 2nd pass
+      [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
+      mtl_setArgs(computeEncoder, intermediate, sums, maxs, out, head_dims[1]);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B, seq_len_q, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
     }
   });
 }
@@ -130,7 +223,7 @@ static void sdpa_vector_mps(const Tensor& q,
 // PrefillAttention.h and MppAttention.h. Head dims above the widest simdgroup
 // tile run on kChunkTile: the QK dim in tile-wide chunks, V/O in tile-wide
 // column slabs, one launch per slab.
-static constexpr std::array<int64_t, 8> kPrefillTiles{32, 64, 72, 80, 96, 128, 160, 192};
+static constexpr std::array<int64_t, 9> kPrefillTiles{32, 64, 72, 80, 96, 128, 160, 192, 256};
 static constexpr std::array<int64_t, 4> kMppTiles{64, 96, 128, 256};
 static constexpr int64_t kChunkTile = 128;
 
@@ -156,7 +249,8 @@ static void sdpa_prefill_mps(const Tensor& q,
   const int64_t bd = use_mpp          ? d
       : widest > kPrefillTiles.back() ? kChunkTile
                                       : *std::lower_bound(kPrefillTiles.begin(), kPrefillTiles.end(), widest);
-  const int64_t bq = use_mpp ? kMppBQ : kPrefillBQ;
+  const int64_t simdgroups = use_mpp ? kPrefillSimdgroups : prefill_simdgroups(bd);
+  const int64_t bq = use_mpp ? kMppBQ : simdgroups * 8;
 
   std::optional<Tensor> mask = mask_;
   PrefillAttnMaskParams mask_params{};
@@ -185,17 +279,18 @@ static void sdpa_prefill_mps(const Tensor& q,
                         mpp_mask_dtype);
   } else {
     const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
-    kname = fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_mask{}",
+    kname = fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_pd{:d}_mask{}",
                         dtype,
                         bd,
                         mask.has_value(),
                         is_causal,
                         d > bd,
+                        d != bd || dv != bd,
                         mask_dtype);
   }
   const auto pso = lib.getPipelineStateForFunc(kname);
   const MTLSize grid = MTLSizeMake(c10::metal::ceil_div(q.size(2), bq), q.size(1), q.size(0));
-  const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, kPrefillSimdgroups, 1);
+  const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, simdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
   for (int64_t v0 = 0; v0 < dv; v0 += bd) {
     const auto vs = v.narrow(3, v0, std::min(bd, dv - v0));
@@ -312,9 +407,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   const int64_t q_len = q_.size(2), d = q_.size(3), dv = v_.size(3);
   const float scale_factor = sdp::calculate_scale(q_, scale).expect_float();
   auto out = at::empty({q_.size(0), q_.size(1), q_len, dv}, q_.options());
-  const int64_t bd = q_len == 1 ? decode_bucket(d, dv) : 0;
-  if (out.numel() > 0 && bd > 0) {
-    sdpa_vector_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
+  const int64_t bd = q_len <= kDecodeMaxQueries ? decode_bucket(d, dv) : 0;
+  if (out.numel() > 0 && bd > 0 && k_.size(2) >= kTwoPassMinKeys) {
+    sdpa_vector_2pass_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
+  } else if (out.numel() > 0 && bd > 0) {
+    sdpa_vector_fast_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
   } else if (out.numel() > 0) {
     sdpa_prefill_mps(q_, k_, v_, out, mask, is_causal, scale_factor);
   }

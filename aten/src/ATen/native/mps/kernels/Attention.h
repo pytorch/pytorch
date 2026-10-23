@@ -2,14 +2,6 @@
 #pragma once
 #include <c10/metal/common.h>
 
-// Two-pass decode splits the keys of a (batch, head) row across kDecodeBlocks
-// threadgroups of kDecodeBlockSimdgroups simdgroups (one key per simdgroup per
-// step); one-pass decode uses a single threadgroup of kDecodeSimdgroups.
-C10_METAL_CONSTEXPR int kDecodeBlocks = 32;
-C10_METAL_CONSTEXPR int kDecodeSimdgroups = 32;
-C10_METAL_CONSTEXPR int kDecodeBlockSimdgroups = 8;
-// Threads sharing the partial blocks of one merged output element.
-C10_METAL_CONSTEXPR int kMergeLanes = 8;
 // Simdgroups per prefill threadgroup, stacked along the Q block: one 8-row
 // simdgroup-matrix fragment or one 16-row MPP fragment each.
 C10_METAL_CONSTEXPR int kPrefillSimdgroups = 4;
@@ -22,21 +14,10 @@ C10_METAL_CONSTEXPR int kMppBK = 32;
 constexpr int prefill_bk(int bd) {
   return bd < 128 ? 32 : bd == 128 ? 16 : 8;
 }
-
-struct DecodeAttnParams {
-  uint32_t N; // key sequence length
-  uint32_t D; // QK head dim
-  uint32_t Dv; // V head dim
-  uint32_t gqa_factor; // num_q_heads / num_kv_heads
-  uint32_t num_heads;
-  float scale;
-  // Element strides; the head-dim stride is 1 and the single query row has no
-  // sequence stride. Mask strides are 0 along broadcast dims.
-  ::c10::metal::array<uint32_t, 2> Q_strides; // (B, H)
-  ::c10::metal::array<uint32_t, 3> K_strides; // (B, H, L)
-  ::c10::metal::array<uint32_t, 3> V_strides; // (B, H, L)
-  ::c10::metal::array<uint32_t, 3> M_strides; // (B, H, L)
-};
+// The 256 tile only fits two simdgroups' Q rows in fp32's 32 KB.
+constexpr int prefill_simdgroups(int bd) {
+  return bd == 256 ? 2 : kPrefillSimdgroups;
+}
 
 struct PrefillAttnParams {
   int B; // batch size
@@ -62,11 +43,6 @@ struct PrefillAttnMaskParams {
 };
 
 #ifdef __METAL__
-// Output element type: the input dtype, or fp32 partial rows when the keys
-// are split across threadgroups (two-pass decode), written in place of the
-// output and merged by sdpa_merge_partials.
-template <typename T, bool SPLIT>
-using SplitOutT = metal::conditional_t<SPLIT, float, T>;
 // An additive mask enters the exp2 softmax as mask * log2(e). The product
 // overflows finite sentinels such as finfo(float32).min to -inf, which would
 // zero a fully masked row where the CPU math path (fp32) averages it:
