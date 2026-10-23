@@ -17531,6 +17531,40 @@ if __name__ == '__main__':
             self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize_test("op", ["layer_norm", "rms_norm"])
+    def test_layer_norm_gamma_beta_backward_huge_M_cancellation(self, device, dtype, op):
+        # Two 32-row tiles contribute ~3.6e5 each to weight.grad[0] with opposite signs,
+        # leaving a small exact total. Partial sums rounded to dtype overflow fp16 (inf - inf)
+        # and swallow the remainder in bf16; fp32 accumulation must recover it.
+        M, N = 131072, 128
+        x = torch.zeros(M, N, dtype=dtype)
+        x[:, 0] = 1
+        grad_out = torch.zeros(M, N, dtype=dtype)
+        grad_out[:32, 0] = 1000
+        grad_out[32:64, 0] = -1000
+        grad_out[0, 0] = 1008
+        weight = torch.ones(N, dtype=dtype)
+        bias = torch.zeros(N, dtype=dtype) if op == "layer_norm" else None
+
+        grads = []
+        for dev, dt in ((device, dtype), ("cpu", torch.float64)):
+            w = weight.to(dev, dt).requires_grad_(True)
+            b = bias.to(dev, dt).requires_grad_(True) if bias is not None else None
+            # Keep rms_norm on the ATen kernels when a Python-native override is installed.
+            with torch.backends.python_native.operations_disabled("_fused_rms_norm", "_fused_rms_norm_backward"):
+                if op == "layer_norm":
+                    out = torch.nn.functional.layer_norm(x.to(dev, dt), [N], w, b, 1e-5)
+                else:
+                    out = torch.nn.functional.rms_norm(x.to(dev, dt), [N], w, 1e-5)
+                out.backward(grad_out.to(dev, dt))
+            grads.append((w.grad, b.grad if b is not None else None))
+        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
+        self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
+        if dbeta_ref is not None:
+            self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
+
 
 class TestFunctionalPickle(TestCase):
     hw_classification = HardwareClassification.GENERIC
