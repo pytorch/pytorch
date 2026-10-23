@@ -425,6 +425,36 @@ kernel void max_pool2d_dense(
   }
 }
 
+// Computes out[v] = max(row[c0 + v], ..., row[c0 + v + kw - 1]) for v < G,
+// assuming kw >= G. All G windows share [c0 + G - 1, c0 + kw), and each one
+// adds a suffix of the G - 1 columns before it and a prefix of the G - 1
+// columns after it, so only kw + G - 1 elements are loaded. Columns are clamped
+// to [0, IW), see max_pool2d_s1_nchw.
+template <int G, typename T>
+inline void max_pool_windows(
+    device const T* row,
+    int32_t c0,
+    int32_t kw,
+    int32_t IW,
+    thread T* out) {
+  T shared = row[clamp(c0 + G - 1, 0, IW - 1)];
+  for (int32_t j = G; j < kw; ++j) {
+    update_max(shared, row[clamp(c0 + j, 0, IW - 1)]);
+  }
+  out[G - 1] = shared;
+  for (int v = G - 2; v >= 0; --v) {
+    out[v] = out[v + 1];
+    update_max(out[v], row[clamp(c0 + v, 0, IW - 1)]);
+  }
+  T suffix = row[clamp(c0 + kw, 0, IW - 1)];
+  for (int v = 1; v < G; ++v) {
+    update_max(out[v], suffix);
+    if (v + 1 < G) {
+      update_max(suffix, row[clamp(c0 + kw + v, 0, IW - 1)]);
+    }
+  }
+}
+
 // Stride-1 2D max pooling of a dense NCHW tensor without dilation along W.
 // Each thread computes a tile of kCols x kRows outputs, so each input row is
 // loaded once per tile and reduced along W before being combined into all
@@ -479,6 +509,12 @@ kernel void max_pool2d_s1_nchw(
           update_max(row_max[v], vals[v + j]);
         }
       }
+    } else if (kw >= kCols) {
+      max_pool_windows<kCols>(row, c0, kw, IW, row_max.data());
+    } else if (kw >= kCols / 2) {
+      max_pool_windows<kCols / 2>(row, c0, kw, IW, row_max.data());
+      max_pool_windows<kCols / 2>(
+          row, c0 + kCols / 2, kw, IW, row_max.data() + kCols / 2);
     } else {
       for (int v = 0; v < kCols; ++v) {
         row_max[v] = row[clamp(c0 + v, 0, IW - 1)];
