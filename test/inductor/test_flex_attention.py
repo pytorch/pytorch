@@ -1586,6 +1586,7 @@ class TestFlexAttention(InductorTestCase):
         # splits that into one full BLOCK_N step plus a tail that is a multiple of
         # the vector length
         self.run_test(_identity, dtype, device, B, H, S, D, B, H, 1120, D)
+        self.run_test(_identity, dtype, device, B, H, 255, D, B, H, 1120, D)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
