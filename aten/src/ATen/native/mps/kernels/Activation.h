@@ -26,3 +26,9 @@ struct HardtanhParams {
   float min_val;
   float max_val;
 };
+
+template <typename T>
+struct ThresholdParams {
+  T threshold;
+  T value;
+};
