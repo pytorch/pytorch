@@ -1665,14 +1665,17 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       return out;
     }
   }
-  // refs.add scales other by alpha with a separate prims.mul, which makes other's
-  // broadcast strides dense and can change the output layout. Like TensorIterator,
-  // only check alpha's type and leave the layout to the operands.
-  const auto compute_dtype = elementwise_dtypes(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT).first;
-  if (compute_dtype != kBool) {
-    check_alpha_type(alpha, compute_dtype);
+  // Python fake's ref gets no alpha when it equals the schema default (the int 1,
+  // compared by type and value), and otherwise checks and applies it.
+  if (!alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1) {
+    return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
   }
-  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, [&](ScalarType compute_dtype) {
+    if (compute_dtype != kBool) {
+      check_alpha_type(alpha, compute_dtype);
+    }
+    return std::optional<Scalar>(alpha);
+  });
 }
 
 } // namespace at::native
