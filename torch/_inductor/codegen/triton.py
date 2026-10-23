@@ -1473,7 +1473,14 @@ class TritonOverrides(OpOverrides):
                     f"tl.full((), {nan_bits}, {int_type})"
                     f".to({triton_type(dtype)}, bitcast=True).to({out_dtype})"
                 )
-                return f"tl.where({x} != {x}, {nan}, {x}.to({out_dtype}))"
+                finite = f"{x}.to({out_dtype})"
+                if src_dtype == torch.float64 and dtype in (
+                    torch.float16,
+                    torch.bfloat16,
+                ):
+                    # c10's low-precision constructors convert double through float.
+                    finite = f"{x}.to(tl.float32).to({out_dtype})"
+                return f"tl.where({x} != {x}, {nan}, {finite})"
 
         return f"{x}.to({out_dtype})"
 
