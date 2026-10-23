@@ -1983,15 +1983,6 @@ POINTWISE_XFAIL = frozenset(
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
-        ("mvlgamma_mvlgamma_p_1", "bfloat16"),
-        ("mvlgamma_mvlgamma_p_1", "float16"),
-        ("mvlgamma_mvlgamma_p_1", "float32"),
-        ("mvlgamma_mvlgamma_p_3", "bfloat16"),
-        ("mvlgamma_mvlgamma_p_3", "float16"),
-        ("mvlgamma_mvlgamma_p_3", "float32"),
-        ("mvlgamma_mvlgamma_p_5", "bfloat16"),
-        ("mvlgamma_mvlgamma_p_5", "float16"),
-        ("mvlgamma_mvlgamma_p_5", "float32"),
         ("special_erfcx", "float32"),
     }
 )
@@ -1999,9 +1990,6 @@ POINTWISE_XFAIL = frozenset(
 BACKWARD_XFAIL = frozenset(
     {
         ("float_power", "float32"),
-        ("mvlgamma_mvlgamma_p_1", "float32"),
-        ("mvlgamma_mvlgamma_p_3", "float32"),
-        ("mvlgamma_mvlgamma_p_5", "float32"),
         ("special_erfcx", "float32"),
     }
 )
@@ -2016,6 +2004,9 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "mvlgamma_mvlgamma_p_1",
+        "mvlgamma_mvlgamma_p_3",
+        "mvlgamma_mvlgamma_p_5",
         "hypot",
         "special_log_ndtr",
         "i0",

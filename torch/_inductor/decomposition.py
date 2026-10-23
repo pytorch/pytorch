@@ -48,6 +48,7 @@ from torch._prims_common import (
     suggest_memory_format,
     type_to_dtype,
 )
+from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
@@ -58,7 +59,10 @@ from torch._refs.nn.functional import (
     gelu as decomp_gelu,
     softplus as decomp_softplus,
 )
-from torch._refs.special import xlog1py as decomp_xlog1py
+from torch._refs.special import (
+    multigammaln as decomp_multigammaln,
+    xlog1py as decomp_xlog1py,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -165,6 +169,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.tanh_backward.default,
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
+    aten.mvlgamma,  # preserve eager rounding and reduction order
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -232,6 +237,75 @@ def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
         torch.log1p(-torch.erfc(t) / 2),
     )
     return torch.copysign(res, -1.0)
+
+
+def _cuda_trailing_sum(terms: list[torch.Tensor]) -> torch.Tensor:
+    """Add `terms` in the order ATen's CUDA reduction walks a short trailing dim.
+
+    gpu_reduce_kernel (Reduce.cuh) gives the reduction dim last_pow2(n) lanes, capped
+    at the warp size. Lane t visits elements t, t+width, ... into vt0 rotating
+    accumulators and folds those left to right, then block_x_reduce halves the lanes.
+    tl.sum instead pairs adjacent elements, a different association and so a different
+    sum once the terms stop being exactly addable.
+    """
+    vt0 = 4
+    n = len(terms)
+    width = min(1 << (n.bit_length() - 1), 32)
+    lanes = []
+    for lane in range(width):
+        slots: list[torch.Tensor | None] = [None] * vt0
+        for visit, i in enumerate(range(lane, n, width)):
+            held = slots[visit % vt0]
+            slots[visit % vt0] = (
+                torch.zeros_like(terms[i]) + terms[i]
+                if held is None
+                else held + terms[i]
+            )
+        total = cast(torch.Tensor, slots[0])
+        for extra in slots[1:]:
+            if extra is not None:
+                total = total + extra
+        lanes.append(total)
+    while len(lanes) > 1:
+        half = len(lanes) // 2
+        lanes = [lanes[i] + lanes[i + half] for i in range(half)]
+    return lanes[0]
+
+
+@register_decomposition([aten.mvlgamma])
+@out_wrapper()
+def mvlgamma(self: torch.Tensor, p: int) -> torch.Tensor:
+    if (
+        not is_strict_cuda_triton(self.device)
+        or self.is_complex()
+        or not isinstance(p, int)
+        or not 1 <= p <= 16
+    ):
+        return decomp_multigammaln(self, p)
+    if not self.dtype.is_floating_point:
+        # Eager builds the offsets in the default dtype for integral input.
+        self = self.to(torch.get_default_dtype())
+    dtype = self.dtype
+    # Eager (UnaryOps.cpp) materialises a scalar_t tensor after the offset add, after
+    # lgamma and after the sum, which itself accumulates in acc_type. The base
+    # decomposition leaves every stage in inductor's fp32 opmath instead, so an fp16
+    # or bf16 offset add that eager rounds onto a non-positive integer -- an lgamma
+    # pole, +inf -- stays just off it and finite. Round at each stage.
+    acc = torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+    narrow = acc != dtype
+
+    def materialize(t: torch.Tensor) -> torch.Tensor:
+        return t.to(dtype).to(acc) if narrow else t
+
+    x = self.to(acc) if narrow else self
+    offsets = 0.5 * torch.arange(1 - p, 1, 1, dtype=dtype, device=self.device)
+    terms = [
+        materialize(torch.lgamma(materialize(x + offset)))
+        for offset in offsets.unbind(0)
+    ]
+    total = materialize(_cuda_trailing_sum(terms))
+    out = total + p * (p - 1) * math.log(math.pi) * 0.25
+    return out.to(dtype) if narrow else out
 
 
 if torch.distributed.is_available():
