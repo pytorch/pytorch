@@ -309,14 +309,18 @@ class TORCH_CUDA_CPP_API TuningContext {
     std::ostream& GetLog() const;
 
     bool enable_;
-    bool tuning_enable_;
-    bool record_untuned_enable_;
     // Atomic: the reuse pass flips these while other threads may run GEMMs.
-    // Single-flight contract: the reuse pass must not overlap execution — the
-    // atomic only makes concurrent reads well-defined, it does not make a
-    // borrow decision taken under a transient flag value meaningful. (Per-call
+    // Single-flight contract: the reuse pass must not overlap execution -- the
+    // atomics only make concurrent reads well-defined, they do not make a
+    // decision taken under transient flag values meaningful. LookupNearest's
+    // gate reads nearest_match_enable_ together with tuning_enable_, and
+    // Add()'s persist gate reads record_borrowed_enable_ with
+    // record_untuned_enable_, so every flag the reuse pass toggles is atomic;
+    // a split read can still observe a transitional combination. (Per-call
     // dynamic-dims state instead goes through the thread-local push/pop stack;
     // see TunableDynamicDimsGuard below.)
+    std::atomic<bool> tuning_enable_;
+    std::atomic<bool> record_untuned_enable_;
     std::atomic<bool> nearest_match_enable_;
     std::atomic<bool> record_borrowed_enable_;
     bool manager_initialized_;

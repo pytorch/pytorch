@@ -50,7 +50,6 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.functions import FloorDiv, Identity
-from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -106,6 +105,7 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
 
 def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     """Names of real reads/writes, excluding WeakDep (ordering-only deps that
@@ -7224,7 +7224,6 @@ class Scheduler:
                 return True
 
         return False
-
 
     def finalize_multi_template_buffers(self) -> None:
         """

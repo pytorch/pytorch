@@ -86,12 +86,10 @@ class _FakeWinner(sa.ExternKernelCaller):
         from types import SimpleNamespace
 
         self.name = name
-        # The ladder matches on winner.choice.name (the ExternKernelChoice),
-        # falling back to the caller name. Pass choice_name to exercise the
-        # _dtype / v2 / bias variants whose caller and choice names agree but
-        # differ from the classic five.
-        if choice_name is not None:
-            self.choice = SimpleNamespace(name=choice_name)
+        # The ladder matches on winner.choice.name (the ExternKernelChoice,
+        # always set by the base __init__ in production). Pass choice_name to
+        # exercise the _dtype / v2 / bias variants.
+        self.choice = SimpleNamespace(name=choice_name or name)
         self.input_nodes = input_nodes
         self.layout = ir.FixedLayout(
             DEVICE, DTYPE, out_sizes, _contiguous_strides(out_sizes)
@@ -132,7 +130,7 @@ class _Job:
 
 
 def _run(winner, **kwargs):
-    """Drive the ladder; `self` is unused by the method so None suffices."""
+    """Drive the module-level ladder, returning the submitted bmreqs."""
     sym = kwargs.pop("sym")
     with _ladder(sym, **kwargs) as submitted:
         tunableop.maybe_range_pretune(winner)
@@ -141,6 +139,17 @@ def _run(winner, **kwargs):
 
 class TestTunableOpPretune(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        # The memo is process-global: without this, tests sharing the same
+        # traced shapes (most build _mm_winner("mm", s) at hint 512) pollute
+        # each other depending on run order.
+        tunableop._pretuned_gemms.cache_clear()
+
+    def tearDown(self):
+        tunableop._pretuned_gemms.cache_clear()
+        super().tearDown()
 
     def _mm_winner(self, name, s):
         """A GEMM whose M is the dynamic dim. Bias-first ops get a third operand."""
@@ -294,24 +303,23 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(padded, sym=s), [])
 
     def test_choice_variants_produce_buckets(self):
-        # The old op-name allowlist missed the _dtype out-variants, bias_addmm
-        # and _scaled_mm_v2. Matching runs on winner.choice.name.
+        # The old op-name allowlist missed the _dtype out-variants and
+        # _scaled_mm_v2. Matching runs on winner.choice.name.
         from types import SimpleNamespace
 
         for choice_name in (
             "mm_dtype",
             "addmm_dtype",
             "bmm_dtype",
-            "bias_addmm",
             "_scaled_mm_v2",
         ):
             # Clear the cross-GEMM memo: every variant below reuses the same
             # traced shapes by design (the point is the choice gate, not the
             # sizes), so without this only the first variant would submit.
-            tunableop._pretuned_gemms.clear()
+            tunableop._pretuned_gemms.cache_clear()
             s = sympy.Symbol(f"s_{choice_name}", positive=True, integer=True)
             m, k, n = s, 256, 512
-            if choice_name in ("addmm_dtype", "bias_addmm"):
+            if choice_name == "addmm_dtype":
                 # Bias-first like addmm: [bias, mat1, mat2].
                 winner = _FakeWinner(
                     choice_name,
@@ -409,7 +417,7 @@ class TestTunableOpPretune(TestCase):
         self.assertGreater(len(submitted), 1)
 
     def test_repeat_gemm_is_skipped(self):
-        tunableop._pretuned_gemms.clear()
+        tunableop._pretuned_gemms.cache_clear()
         try:
             s = sympy.Symbol("s_memo", positive=True, integer=True)
             first = _run(self._mm_winner("mm", s), sym=s)
@@ -417,17 +425,77 @@ class TestTunableOpPretune(TestCase):
             second = _run(self._mm_winner("mm", s), sym=s)
             self.assertEqual(second, [])
         finally:
-            tunableop._pretuned_gemms.clear()
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_memo_distinguishes_stride_order(self):
+        # Same sizes, different stride order (plain vs transposed B): the
+        # TunableOp signatures differ (NN vs NT), so the second GEMM must
+        # still ladder. Guards the memo key carrying strides.
+        tunableop._pretuned_gemms.cache_clear()
+        try:
+            s = sympy.Symbol("s_stride", positive=True, integer=True)
+            first = _run(self._mm_winner("mm", s), sym=s)
+            self.assertTrue(first)
+            mat1 = _buffer("mat1", [s, 256], [256, 1])
+            mat2 = _buffer("mat2", [256, 512], [1, 256])  # .t() view
+            winner = _FakeWinner("mm", [mat1, mat2], [s, 512])
+            second = _run(winner, sym=s)
+            self.assertTrue(second)
+        finally:
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_memo_distinguishes_dynamic_axis(self):
+        # Same hinted sizes but a different dynamic axis (M vs N): the ladders
+        # cover different dims, so the second GEMM must still run. Guards the
+        # memo key carrying the symbolic expressions, not just hints.
+        tunableop._pretuned_gemms.cache_clear()
+        try:
+            s = sympy.Symbol("s_axis", positive=True, integer=True)
+            first = _run(self._mm_winner("mm", s), sym=s)
+            self.assertTrue(first)
+            # Same hint 512 on N instead of M.
+            mat1 = _buffer("mat1", [512, 256], [256, 1])
+            mat2 = _buffer("mat2", [256, s], [s, 1])
+            winner = _FakeWinner("mm", [mat1, mat2], [512, s])
+            # _contiguous_strides cannot build the N-dynamic output (it would
+            # yield [1, 1]): give it the real dense strides like the
+            # symbol-spanning test does.
+            winner.layout = ir.FixedLayout(DEVICE, DTYPE, [512, s], [s, 1])
+            second = _run(winner, sym=s)
+            self.assertTrue(second)
+        finally:
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_bias_addmm_is_skipped(self):
+        # bias_addmm is only chosen for broadcast (stride-0) bias, which the
+        # density guard rejects: rebuilding its metas densely would tune a
+        # layout runtime never asks for. Excluded from _TUNABLEOP_GEMM_CHOICES.
+        from types import SimpleNamespace
+
+        s = sympy.Symbol("s_biasaddmm", positive=True, integer=True)
+        m, k, n = s, 256, 512
+        winner = _FakeWinner(
+            "bias_addmm",
+            [
+                _buffer("bias", [m, n], [n, 1]),
+                _buffer("mat1", [m, k], [k, 1]),
+                _buffer("mat2", [k, n], [n, 1]),
+            ],
+            [m, n],
+            choice_name="bias_addmm",
+        )
+        self.assertEqual(_run(winner, sym=s), [])
 
     def test_oversize_bucket_is_dropped(self):
-        # Batch 16384 of 4096x4096 fp16 is 512 GiB per operand -- over the cap.
+        # Batch s declared at exactly 16384 of 4096x4096 fp16 is 512 GiB per
+        # operand -- over the cap -- while smaller rungs must still submit.
         s = sympy.Symbol("s_oom", positive=True, integer=True)
-        b, m, k, n = 16384, 32, 4096, 4096
-        mat1 = _buffer("mat1", [b, m, k], _contiguous_strides([b, m, k]))
-        mat2 = _buffer("mat2", [b, k, n], _contiguous_strides([b, k, n]))
-        winner = _FakeWinner("bmm", [mat1, mat2], [b, m, n])
-        # Declared range forces the huge batch into the walk.
-        submitted = _run(winner, sym=s, hint=16384, declared=(16384, 16384))
+        m, k, n = 32, 4096, 4096
+        mat1 = _buffer("mat1", [s, m, k], _contiguous_strides([s, m, k]))
+        mat2 = _buffer("mat2", [s, k, n], _contiguous_strides([s, k, n]))
+        winner = _FakeWinner("bmm", [mat1, mat2], [s, m, n])
+        submitted = _run(winner, sym=s, hint=16384, declared=(2, 16384))
+        self.assertTrue(submitted, "smaller rungs must still submit")
         for bmreq in submitted:
             for meta in [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]:
                 numel = 1
@@ -436,6 +504,11 @@ class TestTunableOpPretune(TestCase):
                 self.assertLessEqual(
                     numel * meta.dtype.itemsize, tunableop._TUNABLEOP_MAX_LADDER_BYTES
                 )
+        # And the 16384 rung itself is absent.
+        batches = set()
+        for bmreq in submitted:
+            batches.add(bmreq.input_tensor_meta[0].sizes[0])
+        self.assertNotIn(16384, batches)
 
     def test_select_algorithm_hook_fires_on_extern(self):
         # The select_algorithm hook covers concrete extern winners; triton
@@ -489,40 +562,3 @@ class TestTunableOpPretune(TestCase):
 
 if __name__ == "__main__":
     run_tests()
-
-if __name__ == "__main__":
-    run_tests()
-
-    def test_zz_debug_gate(self):
-        from types import SimpleNamespace
-
-        s = sympy.Symbol("s_zz", positive=True, integer=True)
-        winner = self._mm_winner("mm", s)
-        winner.choice = SimpleNamespace(name="bmm_dtype")
-        cn = getattr(getattr(winner, "choice", None), "name", winner.name)
-        submitted = _run(winner, sym=s)
-        self.fail(
-            f"GATE name={cn!r} in_set={cn in tunableop._TUNABLEOP_GEMM_CHOICES} "
-            f"memosize={len(tunableop._pretuned_gemms)} submitted={len(submitted)}"
-        )
-
-
-
-if __name__ == "__main__":
-    run_tests()
-
-    def test_zz_debug_gate(self):
-        from types import SimpleNamespace
-
-        s = sympy.Symbol("s_zz", positive=True, integer=True)
-        winner = self._mm_winner("mm", s)
-        winner.choice = SimpleNamespace(name="bmm_dtype")
-        cn = getattr(getattr(winner, "choice", None), "name", winner.name)
-        with open("/tmp/zz_gate.txt", "w") as f:
-            f.write(f"GATE name={cn!r} in_set={cn in tunableop._TUNABLEOP_GEMM_CHOICES}\n")
-            f.write(f"MEMO size={len(tunableop._pretuned_gemms)}\n")
-            for k in tunableop._pretuned_gemms:
-                f.write(f"KEY {k}\n")
-        submitted = _run(winner, sym=s)
-        with open("/tmp/zz_gate.txt", "a") as f:
-            f.write(f"SUBMITTED={len(submitted)}\n")

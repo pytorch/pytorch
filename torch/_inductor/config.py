@@ -309,13 +309,13 @@ memory_pool: Literal["none", "intermediates", "outputs", "combined"] = os.enviro
 # "tune" builds the results file, "reuse" consumes it.
 # pyrefly: ignore [bad-assignment]
 aten_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
-    "INDUCTOR_ATEN_TUNABLEOP_MODE", "off"
+    "TORCHINDUCTOR_ATEN_TUNABLEOP_MODE", "off"
 )  # type: ignore[assignment]
 
 # Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning can
 # hang, which subprocess isolation alone does not fix, so the wait is bounded.
 aten_tunableop_timeout: float = float(
-    os.environ.get("INDUCTOR_ATEN_TUNABLEOP_TIMEOUT", "900")
+    os.environ.get("TORCHINDUCTOR_ATEN_TUNABLEOP_TIMEOUT", "900")
 )
 
 # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim, or
