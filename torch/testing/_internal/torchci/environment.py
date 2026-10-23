@@ -9,7 +9,6 @@ import contextlib
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
 import sysconfig
@@ -49,7 +48,7 @@ def capture() -> Environment:
     from torch.testing._internal.common_utils import TestEnvironment
 
     os_name, os_version, os_release = _os()
-    cc_compiler, cc_version = _compiler(torch.__config__.show())
+    cc_compiler, cc_version = _compiler()
     accelerator, acc_version = _accelerator()
     device_count = _device_count(accelerator)
     device_name, memory, driver = _device(accelerator) if device_count else ("", "", "")
@@ -111,17 +110,13 @@ def _python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}{free_threaded}"
 
 
-def _compiler(config: str) -> tuple[str, str]:
-    # clang builds also print a GCC line (clang defines __GNUC__), so check clang
-    # and MSVC first.
-    for name, pattern in (("clang", r"clang"), ("msvc", r"MSVC"), ("gcc", r"GCC")):
-        match = re.search(rf"^  - {pattern} (\S+)", config, re.MULTILINE)
-        if match:
-            version = match.group(1)
-            # MSVC prints _MSC_FULL_VER, e.g. 194134120 for 19.41.
-            major = version[:2] if name == "msvc" else version.split(".")[0]
-            return name, major
-    return "", ""
+def _compiler() -> tuple[str, str]:
+    # Not torch.__config__.show(), whose device checks initialize the device runtime
+    # and so poison fork. A torch that predates _cxx_compiler records no compiler.
+    cxx_compiler = getattr(torch.__config__, "_cxx_compiler", None)
+    if cxx_compiler is None:
+        return "", ""
+    return cxx_compiler()
 
 
 def _accelerator() -> tuple[str, str]:
