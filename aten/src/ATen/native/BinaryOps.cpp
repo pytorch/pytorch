@@ -1665,7 +1665,14 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       return out;
     }
   }
-  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, alpha);
+  // refs.add scales other by alpha with a separate prims.mul, which makes other's
+  // broadcast strides dense and can change the output layout. Like TensorIterator,
+  // only check alpha's type and leave the layout to the operands.
+  const auto compute_dtype = elementwise_dtypes(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT).first;
+  if (compute_dtype != kBool) {
+    check_alpha_type(alpha, compute_dtype);
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
 }
 
 // sub.Tensor meta kernel
