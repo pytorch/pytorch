@@ -300,9 +300,11 @@ def _nearest_match_enable(val: bool = True) -> None:
 
     When enabled (and tuning is off), TuningResultsManager::LookupNearest may
     return the tuned solution identical except in one free dimension (M, N or
-    batch count), rounded up. This is an explicit manager API for the reuse
-    pass, which benchmarks the borrow and records the winner -- it is not
-    consulted by TunableOp dispatch, so execution only needs exact matches.
+    batch count), rounded up. Reached via torch._inductor: the reuse-mode
+    ExternKernelCaller.benchmark submits to the TunableOp worker, which calls
+    LookupNearest, benchmarks the borrow against Default and records the
+    winner -- it is not consulted by TunableOp dispatch, so execution only
+    needs exact matches.
     """
     torch._C._cuda_tunableop_nearest_match_enable(val)  # type: ignore[attr-defined]
 
