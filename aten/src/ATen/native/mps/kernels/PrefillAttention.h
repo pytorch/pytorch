@@ -535,7 +535,9 @@ template <
     bool CHUNKED, // QK dim wider than BD, accumulated in BD-wide chunks
     bool PADDED, // head dims narrower than BD: bounds-checked columns
     typename MaskType>
-[[kernel, max_total_threads_per_threadgroup(prefill_simdgroups(BD) * 32)]] void
+[[kernel,
+  max_total_threads_per_threadgroup(
+      prefill_simdgroups(BD) * c10::metal::simdgroup_size)]] void
 prefill_attention(
     const device T* Q [[buffer(0)]],
     const device T* K [[buffer(1)]],
@@ -550,7 +552,7 @@ prefill_attention(
   using AccumType = c10::metal::accum_t<T>;
   constexpr bool has_mask = HAS_MASK;
   constexpr bool do_causal = DO_CAUSAL;
-  constexpr int kThreads = prefill_simdgroups(BD) * 32;
+  constexpr int kThreads = prefill_simdgroups(BD) * c10::metal::simdgroup_size;
   constexpr int BQ = prefill_bq(BD);
   constexpr int BK = prefill_bk(BD);
 

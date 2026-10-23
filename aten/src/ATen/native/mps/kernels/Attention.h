@@ -17,6 +17,12 @@ C10_METAL_CONSTEXPR int kDecodeBlocks = 32;
 C10_METAL_CONSTEXPR int kDecode2PassSimdgroups = 8;
 C10_METAL_CONSTEXPR ::c10::metal::array<int, 6> kDecodeTiles =
     {32, 64, 96, 128, 256, 512};
+static_assert(
+    kDecodeSimdgroups * ::c10::metal::simdgroup_size <=
+            ::c10::metal::max_threadgroup_size &&
+        kDecodeBlocks * ::c10::metal::simdgroup_size <=
+            ::c10::metal::max_threadgroup_size,
+    "exceeds the Metal threadgroup size limit");
 
 // Prefill tiles (padded head dims); PrefillAttention.h and MppAttention.h
 // instantiate the kernels for each. Head dims above 256 (the widest tile) run
