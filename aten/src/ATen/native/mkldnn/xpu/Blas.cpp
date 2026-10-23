@@ -531,7 +531,8 @@ Tensor _weight_int4pack_mm_xpu(
           A_contiguous.dtype() == kFloat,
       __func__,
       " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A_contiguous.dim() == 2, __func__, " : expect A to be 2D tensor.");
+  TORCH_CHECK(
+      A_contiguous.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
   TORCH_CHECK(
