@@ -462,32 +462,26 @@ def normalize_function(
         if not callable(target):
             raise AssertionError(f"target must be callable, got {type(target)}")
         torch_op_schemas = get_signature_for_torch_op(target)
-        matched_schemas: list[inspect.Signature] = []
-        matched_bound_args: list[inspect.BoundArguments] = []
+        matched: list[tuple[inspect.Signature, inspect.BoundArguments]] = []
         if torch_op_schemas:
             # Iterate through all of the schema until we find one that matches
             # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    matched_bound_args.append(
-                        _fast_bind(candidate_signature, *args, **kwargs)
-                    )
-                    matched_schemas.append(candidate_signature)
+                    bound = _fast_bind(candidate_signature, *args, **kwargs)
+                    matched.append((candidate_signature, bound))
                 except TypeError:
                     continue
 
-            if len(matched_schemas) == 0:
+            if len(matched) == 0:
                 # Did not match any schema. Cannot normalize
                 pass
-            elif len(matched_schemas) == 1:
+            elif len(matched) == 1:
                 # Matched exactly one schema, unambiguous
+                sig, bound = matched[0]
                 new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
-                    matched_schemas[0],
-                    args,
-                    kwargs,
-                    normalize_to_only_use_kwargs,
-                    matched_bound_args[0],
+                    sig, args, kwargs, normalize_to_only_use_kwargs, bound
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
@@ -519,9 +513,7 @@ def normalize_function(
                 else:
                     # Matched more than one schema. In this situation, the caller must provide the types of
                     # the arguments of the overload they expect.
-                    schema_printouts = "\n".join(
-                        str(schema) for schema in matched_schemas
-                    )
+                    schema_printouts = "\n".join(str(sig) for sig, _ in matched)
                     raise RuntimeError(
                         f"Tried to normalize arguments to {torch.typename(target)} but "
                         f"the schema match was ambiguous! Please provide argument types to "
