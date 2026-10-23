@@ -248,6 +248,11 @@ def _cuda_trailing_sum(terms: list[torch.Tensor]) -> torch.Tensor:
     tl.sum instead pairs adjacent elements, a different association and so a different
     sum once the terms stop being exactly addable.
     """
+    from torch._native.registry import native_decomp_table
+
+    # Active native inner-tree sums use the adjacent order supplied by tl.sum.
+    if aten.sum.dim_IntList in native_decomp_table(overrides_only=True):
+        return torch.stack(terms, dim=-1).sum(-1)
     vt0 = 4
     n = len(terms)
     width = min(1 << (n.bit_length() - 1), 32)
