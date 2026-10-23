@@ -6,6 +6,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -24,6 +25,8 @@
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <c10/util/env.h>
 
 #ifdef USE_ROCM
@@ -678,8 +681,6 @@ blockReduceGammaBetaBackwardsHelper(
     const T* __restrict__ X,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db,
     T_ACC &dg_sum,
     T_ACC &db_sum
 ) {
@@ -747,8 +748,6 @@ blockReduceGammaBetaBackwardsWithChecks(
     const T* __restrict__ X,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db,
     T_ACC &dg_sum,
     T_ACC &db_sum
 ) {
@@ -758,10 +757,10 @@ blockReduceGammaBetaBackwardsWithChecks(
     int64_t M_end = M_start + rows_per_block_y - 1;
     if (!check_y || M_end < M) {
       blockReduceGammaBetaBackwardsHelper<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, check_x, false, rms_norm>
-      (M_start, M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+      (M_start, M, N, dY, X, mean, rstd, dg_sum, db_sum);
     } else {
       blockReduceGammaBetaBackwardsHelper<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, check_x, true, rms_norm>
-      (M_start, M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+      (M_start, M, N, dY, X, mean, rstd, dg_sum, db_sum);
     }
   }
 }
@@ -784,7 +783,9 @@ blockReduceGammaBetaBackwardsWithChecks(
 // case we don't need to check for boundary conditions which can provide
 // a further speedup by not needing instructions to check for edge cases
 // and not needing predicate registers.
-template <typename T, typename T_ACC,
+// T_OUT is the type of dg/db: T for final gradients, T_ACC for the per-block
+// partial sums of the huge-M path so they are not rounded before the final sum.
+template <typename T, typename T_ACC, typename T_OUT,
 unsigned int block_dim_x, unsigned int block_dim_y,
 unsigned int rows_per_block_y,
 bool skip_block_reduction,
@@ -801,8 +802,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
     const T* __restrict__ X,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db) {
+    T_OUT* __restrict__ dg,
+    T_OUT* __restrict__ db) {
 
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
@@ -821,7 +822,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // can skip boundary condition checks that waste instruction issue slots.
     blockReduceGammaBetaBackwardsWithChecks
           <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, false, rms_norm>
-          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+          (M, N, dY, X, mean, rstd, dg_sum, db_sum);
   } else {
     // In the general case we need to check boundary conditions in the M
     // dimension. However, we can still avoid boundary checks in the N dimension
@@ -829,11 +830,11 @@ __launch_bounds__(block_dim_x * block_dim_y)
     if (blockIdx.x * block_dim_x + block_dim_x - 1 < N) {
       blockReduceGammaBetaBackwardsWithChecks
           <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, true, rms_norm>
-          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+          (M, N, dY, X, mean, rstd, dg_sum, db_sum);
     } else {
       blockReduceGammaBetaBackwardsWithChecks
           <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, true, rms_norm>
-          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+          (M, N, dY, X, mean, rstd, dg_sum, db_sum);
     }
   }
 
@@ -905,7 +906,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
   }
 }
 
-template<typename T, typename T_ACC,
+template<typename T, typename T_ACC, typename T_OUT,
 int block_dim_x, int block_dim_y,
 int rows_per_block_y,
 bool skip_block_reduction,
@@ -922,10 +923,10 @@ void LaunchAndCheckGammaBetaBackwardKernel(
   const T_ACC* rstd_data,
   int64_t M,
   int64_t N,
-  T* dgamma_data,
-  T* dbeta_data) {
+  T_OUT* dgamma_data,
+  T_OUT* dbeta_data) {
 if (aligned_grid) {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, true, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, T_OUT, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, true, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -936,7 +937,7 @@ if (aligned_grid) {
             dgamma_data,
             dbeta_data);
   } else {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, false, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, T_OUT, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, false, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -977,12 +978,12 @@ void ConfigureAndLaunchGammaBetaBackwardKernel(
   if constexpr (block_dim_y == 1) {
     // There is only 1 y-thread per column.
     // The accumulated result is the full per column sum; skip the block reduction.
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, T, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   } else {
     // block_dim_y > 1: multiple y-threads working on each column.
     // Need to perform block reduction to get the final result.
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, T, block_dim_x, block_dim_y, rows_per_block_y, false, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   }
 
@@ -1016,7 +1017,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
     // We launch multiple blocks in the y-dimension, and compute partial sums for the
     // gradient in the first pass (skip_block_reduction=true). Then we do a .sum(0) to
     // do a final reduction.
-    // Although we launch 2 kernels, we can get up to a 10x speedup for large M.
+    // Although we launch extra kernels, we can get up to a 10x speedup for large M.
     constexpr int block_dim_y = 1;
     constexpr int rows_per_block_y = 32;
     bool aligned_grid = (M % rows_per_block_y == 0) && (N % block_dim_x == 0);
@@ -1029,29 +1030,31 @@ void LaunchGammaBetaBackwardCUDAKernel(
     blocks.y = std::min<unsigned int>(max_grid_size / blocks.x, blocks.y);
     Tensor dgamma_blocks;
     Tensor dbeta_blocks;
-    T * dgamma_blocks_ptr = nullptr;
-    T * dbeta_blocks_ptr = nullptr;
+    T_ACC * dgamma_blocks_ptr = nullptr;
+    T_ACC * dbeta_blocks_ptr = nullptr;
     // The kernel writes N columns per row via dg[thread_y * N + thread_x];
     // dgamma->size(-1) is only the last normalized dim, and is 0 for an
-    // undefined tensor.
+    // undefined tensor. Partials stay in T_ACC: rounding them to a reduced
+    // precision T loses cancellation between blocks and can overflow fp16.
+    constexpr auto acc_dtype = c10::CppTypeToScalarType<T_ACC>::value;
     if (dgamma->defined()) {
-      dgamma_blocks = at::empty({blocks.y * threads.y, N}, dgamma->options());
-      dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
+      dgamma_blocks = at::empty({blocks.y * threads.y, N}, dgamma->options().dtype(acc_dtype));
+      dgamma_blocks_ptr = dgamma_blocks.data_ptr<T_ACC>();
     }
     if (dbeta->defined() && !rms_norm) {
-      dbeta_blocks = at::empty({blocks.y * threads.y, N}, dbeta->options());
-      dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
+      dbeta_blocks = at::empty({blocks.y * threads.y, N}, dbeta->options().dtype(acc_dtype));
+      dbeta_blocks_ptr = dbeta_blocks.data_ptr<T_ACC>();
     }
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
     // sum(0) is flat {N}; the gradient itself may be multi-dim.
     if (dgamma_blocks.defined()) {
-      *dgamma = dgamma_blocks.sum(0).view_as(*dgamma);
+      dgamma->copy_(dgamma_blocks.sum(0).view_as(*dgamma));
     }
     if constexpr (!rms_norm){
       if (dbeta_blocks.defined()) {
-        *dbeta = dbeta_blocks.sum(0).view_as(*dbeta);
+        dbeta->copy_(dbeta_blocks.sum(0).view_as(*dbeta));
       }
     }
   } else {
@@ -1238,6 +1241,253 @@ void LayerNormKernelImpl(
       });
 }
 
+#ifndef USE_ROCM
+// Row-tiled RMSNorm kernels, modeled on quack's RMSNorm (torch/_vendor/quack/rmsnorm.py).
+// A group of `tpr` threads (a power of two) owns one row and keeps it in registers as
+// kVecs 16-byte vectors per thread, so X is read once; a block holds blockDim.x / tpr rows.
+namespace rms_rows {
+
+constexpr int kMinThreads = 128;
+constexpr int kMaxThreads = 256;
+
+template <typename T>
+constexpr int kVecElems = 16 / sizeof(T);
+
+template <typename T>
+using vec_t = aligned_vector<T, kVecElems<T>>;
+
+struct Config {
+  int tpr = 0;
+  int vecs = 0;
+  int threads = 0;
+  int rows_per_block() const {
+    return threads / tpr;
+  }
+};
+
+// Each thread of a row owns `vecs` 16-byte vectors; tpr is the power of two that spreads the
+// row over threads with about target_vecs vectors each, capped at kMaxThreads. tpr == 0 means
+// N is not a whole number of vectors or the row is too wide for max_vecs vectors per thread.
+template <typename T>
+Config pick_config(int64_t N, int target_vecs, int max_vecs) {
+  if (N % kVecElems<T> != 0) {
+    return {};
+  }
+  const int64_t nvec = N / kVecElems<T>;
+  int tpr = 1;
+  while (tpr < kMaxThreads && static_cast<int64_t>(tpr) * target_vecs < nvec) {
+    tpr *= 2;
+  }
+  int vecs = 1;
+  while (static_cast<int64_t>(tpr) * vecs < nvec) {
+    vecs *= 2;
+  }
+  if (vecs > max_vecs) {
+    return {};
+  }
+  return {tpr, vecs, std::max(kMinThreads, tpr)};
+}
+
+// Calls f with vecs (a power of two <= kMaxVecs) as a compile-time constant.
+template <int kMaxVecs, typename F>
+void dispatch_vecs(int vecs, F&& f) {
+  if constexpr (kMaxVecs > 1) {
+    if (vecs < kMaxVecs) {
+      dispatch_vecs<kMaxVecs / 2>(vecs, f);
+      return;
+    }
+  }
+  f(std::integral_constant<int, kMaxVecs>{});
+}
+
+template <typename T>
+bool aligned(const T* ptr) {
+  return ptr == nullptr || can_vectorize(ptr, 16);
+}
+
+// Sums v over the tpr threads of each row. Every thread of the block must call it.
+__device__ __forceinline__ float row_sum(float v, int tpr, float* buf) {
+  for (int offset = (tpr < C10_WARP_SIZE ? tpr : C10_WARP_SIZE) / 2; offset > 0; offset /= 2) {
+    v += WARP_SHFL_XOR(v, offset);
+  }
+  if (tpr > C10_WARP_SIZE) {
+    const int warp = threadIdx.x / C10_WARP_SIZE;
+    const int warps_per_row = tpr / C10_WARP_SIZE;
+    __syncthreads(); // buf may still be read by the previous call
+    if (threadIdx.x % C10_WARP_SIZE == 0) {
+      buf[warp] = v;
+    }
+    __syncthreads();
+    const int first = warp / warps_per_row * warps_per_row;
+    v = 0;
+    for (int i = 0; i < warps_per_row; ++i) {
+      v += buf[first + i];
+    }
+  }
+  return v;
+}
+
+template <typename T>
+__device__ __forceinline__ void to_float(const vec_t<T>& v, float (&f)[kVecElems<T>]) {
+  if constexpr (std::is_same_v<T, float>) {
+#pragma unroll
+    for (int k = 0; k < kVecElems<T>; ++k) {
+      f[k] = v.val[k];
+    }
+  } else if constexpr (std::is_same_v<T, at::BFloat16>) {
+    // Each 32-bit word holds two bf16 values; widening is a shift or a mask.
+    const auto* u = reinterpret_cast<const uint32_t*>(&v);
+#pragma unroll
+    for (int k = 0; k < kVecElems<T> / 2; ++k) {
+      f[2 * k] = __uint_as_float(u[k] << 16);
+      f[2 * k + 1] = __uint_as_float(u[k] & 0xffff0000u);
+    }
+  } else {
+    const auto* h = reinterpret_cast<const __half2*>(&v);
+#pragma unroll
+    for (int k = 0; k < kVecElems<T> / 2; ++k) {
+      const float2 f2 = __half22float2(h[k]);
+      f[2 * k] = f2.x;
+      f[2 * k + 1] = f2.y;
+    }
+  }
+}
+
+template <typename T>
+__device__ __forceinline__ vec_t<T> from_float(const float (&f)[kVecElems<T>]) {
+  vec_t<T> v;
+  if constexpr (std::is_same_v<T, float>) {
+#pragma unroll
+    for (int k = 0; k < kVecElems<T>; ++k) {
+      v.val[k] = f[k];
+    }
+  } else if constexpr (std::is_same_v<T, at::BFloat16>) {
+    auto* b = reinterpret_cast<__nv_bfloat162*>(&v);
+#pragma unroll
+    for (int k = 0; k < kVecElems<T> / 2; ++k) {
+      b[k] = __floats2bfloat162_rn(f[2 * k], f[2 * k + 1]);
+    }
+  } else {
+    auto* h = reinterpret_cast<__half2*>(&v);
+#pragma unroll
+    for (int k = 0; k < kVecElems<T> / 2; ++k) {
+      h[k] = __floats2half2_rn(f[2 * k], f[2 * k + 1]);
+    }
+  }
+  return v;
+}
+
+// Loads this thread's kVecs raw vectors of a row; vectors at or past nvec read as zero.
+template <typename T, int kVecs>
+__device__ __forceinline__ void load_vecs(const T* row_ptr, int lane, int tpr, int nvec, vec_t<T> (&v)[kVecs]) {
+#pragma unroll
+  for (int i = 0; i < kVecs; ++i) {
+    const int c = lane + i * tpr;
+    v[i] = {};
+    if (c < nvec) {
+      v[i] = reinterpret_cast<const vec_t<T>*>(row_ptr)[c];
+    }
+  }
+}
+
+// Same as load_vecs, converted to float.
+template <typename T, int kVecs>
+__device__ __forceinline__ void load_row(const T* row_ptr, int lane, int tpr, int nvec, float (&f)[kVecs][kVecElems<T>]) {
+  vec_t<T> v[kVecs];
+  load_vecs<T, kVecs>(row_ptr, lane, tpr, nvec, v);
+#pragma unroll
+  for (int i = 0; i < kVecs; ++i) {
+    to_float<T>(v[i], f[i]);
+  }
+}
+
+template <typename T, int kVecs>
+__global__ void __launch_bounds__(kMaxThreads) fwd_kernel(
+    const T* __restrict__ X,
+    const T* __restrict__ gamma,
+    T* __restrict__ Y,
+    float* __restrict__ rstd,
+    int64_t M,
+    int N,
+    int tpr,
+    float eps) {
+  constexpr int V = kVecElems<T>;
+  __shared__ float buf[kMaxThreads / C10_WARP_SIZE];
+  const int lane = threadIdx.x % tpr;
+  const int64_t row = static_cast<int64_t>(blockIdx.x) * (blockDim.x / tpr) + threadIdx.x / tpr;
+  const int nvec = N / V;
+  const bool active = row < M;
+  float x[kVecs][V];
+  // Rows past M (last block) only take part in the reduction; keep their pointer in bounds.
+  load_row<T, kVecs>(X + (active ? row : 0) * N, lane, tpr, active ? nvec : 0, x);
+  float sum_sq = 0;
+#pragma unroll
+  for (int i = 0; i < kVecs; ++i) {
+    float s0 = 0, s1 = 0;
+#pragma unroll
+    for (int k = 0; k < V; k += 2) {
+      s0 += x[i][k] * x[i][k];
+      s1 += x[i][k + 1] * x[i][k + 1];
+    }
+    sum_sq += s0 + s1;
+  }
+  const float r = c10::cuda::compat::rsqrt(row_sum(sum_sq, tpr, buf) / N + eps);
+  if (!active) {
+    return;
+  }
+  if (lane == 0) {
+    rstd[row] = r;
+  }
+  // gamma is loaded after the reduction (it stays cache resident) to keep register use down.
+  float w[kVecs][V];
+  if (gamma != nullptr) {
+    load_row<T, kVecs>(gamma, lane, tpr, nvec, w);
+  }
+  auto* y_row = reinterpret_cast<vec_t<T>*>(Y + row * N);
+#pragma unroll
+  for (int i = 0; i < kVecs; ++i) {
+    const int c = lane + i * tpr;
+    if (c < nvec) {
+      float y[V];
+#pragma unroll
+      for (int k = 0; k < V; ++k) {
+        y[k] = r * x[i][k];
+        if (gamma != nullptr) {
+          y[k] *= w[i][k];
+        }
+      }
+      y_row[c] = from_float<T>(y);
+    }
+  }
+}
+
+// Returns false when the shape or alignment needs the generic LayerNorm-based kernels.
+template <typename T>
+bool launch_fwd(const Tensor& X, const Tensor& gamma, int64_t M, int64_t N, float eps, Tensor* Y, Tensor* rstd) {
+  const T* X_data = X.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  T* Y_data = Y->data_ptr<T>();
+  // 16-bit rows wider than 2048 measured slower here than in the generic kernel on GB300, so
+  // 16-bit rows never need more than 4 vectors per thread.
+  constexpr int kMaxVecs = sizeof(T) == 4 ? 8 : 4;
+  const Config cfg = pick_config<T>(N, /*target_vecs=*/4, kMaxVecs);
+  const bool wide_16bit = sizeof(T) < 4 && N > 2048;
+  if (cfg.tpr == 0 || wide_16bit || !aligned(X_data) || !aligned(gamma_data) || !aligned(Y_data)) {
+    return false;
+  }
+  const int64_t blocks = ceil_div<int64_t>(M, cfg.rows_per_block());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  dispatch_vecs<kMaxVecs>(cfg.vecs, [&](auto vecs) {
+    fwd_kernel<T, decltype(vecs)::value><<<blocks, cfg.threads, 0, stream>>>(
+        X_data, gamma_data, Y_data, rstd->data_ptr<float>(), M, static_cast<int>(N), cfg.tpr, eps);
+  });
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return true;
+}
+
+} // namespace rms_rows
+#endif
+
 void RmsNormKernelImpl(
   const Tensor& X,
   const Tensor& gamma,
@@ -1253,6 +1503,13 @@ AT_DISPATCH_FLOATING_TYPES_AND2(
     "LayerNormKernelImpl",
     [&]() {
       using acc_t = acc_type<scalar_t, true>;
+#ifndef USE_ROCM
+      if constexpr (!std::is_same_v<scalar_t, double>) {
+        if (rms_rows::launch_fwd<scalar_t>(X, gamma, M, N, static_cast<float>(eps), Y, rstd)) {
+          return;
+        }
+      }
+#endif
       // rms_norm = true
       LayerNormKernelImplInternal<scalar_t, acc_t, true>(
         // pass in at::Tensor() for gamma and nullptr for mean, it won't be accessed with rms_norm = True
@@ -1999,7 +2256,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-/* RMSNorm is implemented by reusing layer_norm's kernels */
+/* RMSNorm uses the rms_rows kernels where they apply and otherwise reuses layer_norm's kernels */
 std::tuple<Tensor, Tensor> _fused_rms_norm_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,

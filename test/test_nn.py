@@ -6451,6 +6451,19 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 # end TestNN.test_affine_* helpers
 
 
+# Tests of the ATen RMSNorm kernels disable Python-native (e.g. CuTeDSL) overrides of these ops.
+_FUSED_RMS_NORM_OPS = ("_fused_rms_norm", "_fused_rms_norm_backward")
+
+
+def _rms_norm_ref(x, normalized_shape, weight, eps):
+    """float64 reference for aten._fused_rms_norm, returning (y, rstd)."""
+    dims = tuple(range(-len(normalized_shape), 0))
+    x64 = x.double()
+    rstd = torch.rsqrt(x64.pow(2).mean(dims, keepdim=True) + eps)
+    y = x64 * rstd if weight is None else x64 * rstd * weight.double()
+    return y, rstd
+
+
 class TestNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -7827,6 +7840,52 @@ class TestNNDeviceType(NNTestCase):
         Y_ref = rms_norm_reference_fn(X, shape)
 
         self.assertEqual(Y_ref, Y)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_fused_rms_norm_edge_shapes(self, device, dtype):
+        # Tiny M (most rows of a block past the end), no weight, a multi-dim normalized shape, and
+        # misaligned input and weight views that must fall back to the generic kernels.
+        def rand(*shape):
+            return torch.randn(shape, dtype=dtype, device=device)
+
+        def misaligned(*shape):
+            return rand(math.prod(shape) + 1)[1:].view(shape)
+
+        eps = 1e-6
+        tol = {torch.float32: 1e-5, torch.bfloat16: 1e-2}[dtype]
+        cases = [  # (x, normalized_shape, weight)
+            (rand(1, 128), [128], rand(128)),
+            (rand(7, 128), [128], None),
+            (rand(33, 8, 16), [8, 16], rand(8, 16)),
+            (misaligned(7, 128), [128], rand(128)),
+            (rand(7, 128), [128], misaligned(128)),
+        ]
+        for x, shape, w in cases:
+            with torch.backends.python_native.operations_disabled(*_FUSED_RMS_NORM_OPS):
+                y, rstd = torch.ops.aten._fused_rms_norm(x, shape, w, eps)
+            y_ref, rstd_ref = _rms_norm_ref(x, shape, w, eps)
+            self.assertEqual(rstd.double(), rstd_ref, atol=tol, rtol=tol)
+            self.assertEqual(y.double(), y_ref, atol=tol, rtol=tol)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("N", [8, 16, 128, 130, 200, 1024, 2048, 3000, 8192, 12288])
+    def test_fused_rms_norm_widths(self, device, dtype, N):
+        # Widths span the row kernels' threads per row and vectors per thread, the 16-bit forward
+        # width limit (2048), and the non-vectorizable (130) and too-wide (12288) fallbacks. M is
+        # odd, so it is never a multiple of the rows per block.
+        M = (1 << 24) // N | 1
+        eps = 1e-6
+        x = torch.randn(M, N, dtype=dtype, device=device)
+        w = torch.randn(N, dtype=dtype, device=device)
+        tol = {torch.float32: 1e-5, torch.float16: 2e-3, torch.bfloat16: 1e-2}[dtype]
+
+        with torch.backends.python_native.operations_disabled(*_FUSED_RMS_NORM_OPS):
+            y, rstd = torch.ops.aten._fused_rms_norm(x, [N], w, eps)
+        y_ref, rstd_ref = _rms_norm_ref(x, [N], w, eps)
+        self.assertEqual(rstd.double(), rstd_ref, atol=tol, rtol=tol)
+        self.assertEqual(y.double(), y_ref, atol=tol, rtol=tol)
 
     @skipMPS  # backward mismatches CPU reference at this size on MPS
     @onlyAccelerator
@@ -17513,6 +17572,40 @@ if __name__ == '__main__':
                 continue
             self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize_test("op", ["layer_norm", "rms_norm"])
+    def test_layer_norm_gamma_beta_backward_huge_M_cancellation(self, device, dtype, op):
+        # Two 32-row tiles contribute ~3.6e5 each to weight.grad[0] with opposite signs,
+        # leaving a small exact total. Partial sums rounded to dtype overflow fp16 (inf - inf)
+        # and swallow the remainder in bf16; fp32 accumulation must recover it.
+        M, N = 131072, 128
+        x = torch.zeros(M, N, dtype=dtype)
+        x[:, 0] = 1
+        grad_out = torch.zeros(M, N, dtype=dtype)
+        grad_out[:32, 0] = 1000
+        grad_out[32:64, 0] = -1000
+        grad_out[0, 0] = 1008
+        weight = torch.ones(N, dtype=dtype)
+        bias = torch.zeros(N, dtype=dtype) if op == "layer_norm" else None
+
+        grads = []
+        for dev, dt in ((device, dtype), ("cpu", torch.float64)):
+            w = weight.to(dev, dt).requires_grad_(True)
+            b = bias.to(dev, dt).requires_grad_(True) if bias is not None else None
+            # Keep rms_norm on the ATen kernels when a Python-native override is installed.
+            with torch.backends.python_native.operations_disabled("_fused_rms_norm", "_fused_rms_norm_backward"):
+                if op == "layer_norm":
+                    out = torch.nn.functional.layer_norm(x.to(dev, dt), [N], w, b, 1e-5)
+                else:
+                    out = torch.nn.functional.rms_norm(x.to(dev, dt), [N], w, 1e-5)
+                out.backward(grad_out.to(dev, dt))
+            grads.append((w.grad, b.grad if b is not None else None))
+        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
+        self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
+        if dbeta_ref is not None:
+            self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
 
 
 class TestFunctionalPickle(TestCase):
