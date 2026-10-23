@@ -223,6 +223,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     Max,
+    Mod,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -2365,8 +2366,8 @@ def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool
 def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
     """Index of the single stride-1 ("inner") dim, or None if there is not
     exactly one. TMA requires exactly one contiguous dim, so None means the
-    tensor is not TMA-compatible. `strides` must already be resolved to ints or
-    hinted symbols by the caller.
+    tensor is not TMA-compatible. A symbolic stride only counts as inner when
+    it is statically 1.
     """
     from .virtualized import V
 
@@ -2394,12 +2395,35 @@ def can_use_tma(
       * All "outer" dims have 16-byte aligned strides
       * Inner dim size × itemsize is a multiple of 16
       * For 1-byte dtypes (e.g. FP8), inner dim ≥ 32
+
+    Sizes are never specialized; only these requirements are checked. With
+    ``add_guards=True``, a requirement that depends on a dynamic size is decided
+    from the example inputs and guarded either way, so an input on the other
+    side of the decision recompiles (an aligned size after an unaligned one gets
+    TMA on the recompile). Under AOTI, where those guards are not checked at
+    runtime, a requirement must instead be statically provable. With
+    ``add_guards=False``, requirements are decided from size hints and nothing
+    is guarded.
     """
     from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
-    _aligned = _bytes_aligned
+    def _holds(requirement: sympy.Basic, add_guards: bool) -> bool:
+        sizevars = V.graph.sizevars
+        if not add_guards:
+            hints = {
+                s: sizevars.replace_backed_symbols_with_hints(s)
+                for s in requirement.free_symbols
+            }
+            return sizevars.statically_known_true(requirement.xreplace(hints))
+        # AOTI does not check Inductor's guards at runtime.
+        if V.graph.aot_mode:
+            return sizevars.statically_known_true(requirement)
+        return sizevars.guard_or_false(requirement)
+
+    def _aligned(expr_bytes: _IntLike, add_guards: bool) -> bool:
+        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0), add_guards)
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2409,7 +2433,7 @@ def can_use_tma(
         dtype = layout.dtype
 
         # Verify the output is 16-byte aligned
-        if not _aligned(layout.offset):
+        if not _aligned(layout.offset, add_guards):
             return False
 
         return _is_tma_compatible(sizes, strides, dtype)
@@ -2442,35 +2466,24 @@ def can_use_tma(
         if dtype not in _TMA_SUPPORTED_DTYPES:
             return False
 
-        if add_guards:
-            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-            strides_i = V.graph.sizevars.guard_int_seq(strides)
-        else:
-            sizes_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
-            ]
-            strides_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
-            ]
-
-        inner_idx = tma_inner_dim(strides_i)
+        inner_idx = tma_inner_dim(strides)
         if inner_idx is None:
             return False
 
         # All "outer" dims must have 16-byte aligned strides
-        for i, st in enumerate(strides_i):
+        for i, st in enumerate(strides):
             if i == inner_idx:
                 continue
-            if not _aligned(st * itemsize):
+            if not _aligned(st * itemsize, add_guards):
                 return False
 
         # Inner dim byte width must be a multiple of 16 B
-        inner_dim = sizes_i[inner_idx]
-        if not _aligned(inner_dim * itemsize):
+        inner_dim = sizes[inner_idx]
+        if not _aligned(inner_dim * itemsize, add_guards):
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
+        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32), add_guards):
             return False
 
         return True
@@ -3612,34 +3625,19 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
-    from .codecache import PyCodeCache
-
     remove_quote = kwargs.pop("remove_quote", False)
-    # A module-level kernel's def is renamed and its benchmark harness cut, so take the
-    # source it is compiled from, which every load of a wrapper passes, cache hits too.
-    # Keyed by wrapper: one wrapper can be loaded more than once.
-    module_level: dict[str, list[str]] = {}
-    orig_load = PyCodeCache.load_by_key_path
-
-    def load(key: str, *load_args: Any, **load_kwargs: Any) -> Any:
-        if kernel_sources := load_kwargs.get("kernel_sources"):
-            module_level[key] = [src.strip() for _, src in kernel_sources.values()]
-        return orig_load(key, *load_args, **load_kwargs)
-
-    with mock.patch.object(PyCodeCache, "load_by_key_path", load):
-        # pyrefly: ignore [bad-argument-type]
-        result, source_codes = run_and_get_code(fn, *args, **kwargs)
-    kernels: list[str] = []
+    # pyrefly: ignore [bad-argument-type]
+    result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels = []
     for code in source_codes:
         if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
         else:
-            scraped = re.findall(r"'''.*?'''", code, re.DOTALL)
-            kernels.extend(k[3:-3] if remove_quote else k for k in scraped)
-    for sources in module_level.values():
-        kernels.extend(sources)
+            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if remove_quote:
+            kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
 
 
