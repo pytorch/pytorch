@@ -63,15 +63,6 @@ if not test_dir:
         "test/dynamo_expected_failures directory not found - known dynamo errors won't be skipped."
     )
 
-# Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
-# Please don't add anything to this list.
-FIXME_inductor_non_strict = {
-    "test_modules",
-    "test_ops",
-    "test_ops_gradients",
-    "test_torch",
-}
-
 # We generate unittest.expectedFailure for all of the following tests
 # when run under PYTORCH_TEST_WITH_DYNAMO=1.
 # see NOTE [dynamo_test_failures.py] for more details

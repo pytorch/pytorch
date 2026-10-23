@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM, HardwareClassification)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM, HardwareClassification, skipIfTorchInductor)
 from unittest.mock import patch, call
 
 
@@ -24,6 +24,7 @@ if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
+@skipIfTorchInductor("Dynamo falls back to eager here, so Inductor never compiles the module")
 class TestModule(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     _do_cuda_memory_leak_check = True
@@ -983,6 +984,7 @@ class TestModule(TestCase):
                 self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
+@skipIfTorchInductor("Dynamo falls back to eager here, so Inductor never compiles the module")
 class TestModuleCPUOnly(TestCase):
     hw_classification = HardwareClassification.CPU
 

@@ -436,6 +436,10 @@ manual_torch_name_rule_map: dict[
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    # In compiled test configs, compile the op under test even when the OpInfo
+    # test body runs eagerly. Matches every __call__ in opinfo/core.py.
+    "torch/testing/_internal/opinfo/core.py#__call__": UserFunctionVariable,
+    "torch/testing/_internal/common_utils.py#_safe_inplace_variant": UserFunctionVariable,
     "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
     "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
     # torch.utils._python_dispatch is in MOD_INLINELIST; override so the handler
