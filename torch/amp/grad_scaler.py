@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import inspect
 import warnings
 from collections import abc, defaultdict
 from enum import Enum
@@ -433,9 +432,9 @@ class GradScaler:
             # In this behavior, `GradScaler._check_inf_per_device` is called if `OptState.READY`,
             # while the method is expected to be called by users side, i.e. their optimizers.
             kwargs_ = kwargs
-            has_grad_scaler_kwarg = (
-                "grad_scaler" in inspect.signature(optimizer.step).parameters
-            )
+            from torch.utils._inspect import _cached_parameters
+
+            has_grad_scaler_kwarg = "grad_scaler" in _cached_parameters(optimizer.step)
             if has_grad_scaler_kwarg:
                 warnings.warn(
                     "GradScaler is going to stop passing itself as a keyword argument to the passed "
