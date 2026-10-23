@@ -3889,7 +3889,7 @@ class VariableBuilder:
         if fake_tensor_value.fake_mode is not self.tx.fake_mode:
             raise AssertionError(
                 f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-                "({self.tx.fake_mode}) from InstructionTranslator"
+                f"({self.tx.fake_mode}) from InstructionTranslator"
             )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
@@ -3994,7 +3994,7 @@ class VariableBuilder:
             if fake_tensor_value.fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
                     f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-                    "({self.tx.fake_mode}) from InstructionTranslator"
+                    f"({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
             proxy.node.meta["grapharg"] = GraphArg(
