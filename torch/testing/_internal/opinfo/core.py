@@ -3285,7 +3285,9 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     output = op(input, *args, **kwargs)
     mask = kwargs.get("mask")
     if mask is not None:
-        output_mask = torch.masked._output_mask(op, input, *args, **kwargs)
+        # _output_mask identifies the operation by its function's name.
+        fn = op.get_op() if isinstance(op, OpInfo) else op
+        output_mask = torch.masked._output_mask(fn, input, *args, **kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
