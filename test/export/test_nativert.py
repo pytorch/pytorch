@@ -413,9 +413,9 @@ if is_fbcode():
     del test
 
 
-instantiate_device_type_tests(
-    TestNativeRTDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+# Default bases also instantiate privateuse1. allow_xpu keeps the XPU class
+# from #196970; skipXPUIf still skips it until nativert has an XPU runner.
+instantiate_device_type_tests(TestNativeRTDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
