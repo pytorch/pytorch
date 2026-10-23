@@ -32,6 +32,9 @@ class SymT(Enum):
     # which is computed host side, and then directly reused in the kernel, so
     # we don't repeatedly recompute it on device.
     PRECOMPUTED_SIZE = auto()
+    # Inductor: Like PRECOMPUTED_SIZE, but for a float expression of sizes pf0,
+    # e.g. a softmax scale 1/sqrt(head_dim) passed to a kernel as a scalar.
+    PRECOMPUTED_FLOAT = auto()
     # Inductor: An indexing variable i0 in loops IR which ranges over non-reduced
     # dim in the loop
     INDEX = auto()
@@ -67,6 +70,7 @@ prefix_str = {
     SymT.UNBACKED_FLOAT: "zuf",
     SymT.TMP: "tmp",
     SymT.PRECOMPUTED_SIZE: "ps",
+    SymT.PRECOMPUTED_FLOAT: "pf",
     SymT.INDEX: "i",
     SymT.R0_INDEX: "r0_",
     SymT.R1_INDEX: "r1_",

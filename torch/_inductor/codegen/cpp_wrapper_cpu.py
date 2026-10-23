@@ -2354,12 +2354,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return f"{{{', '.join(parts)}}}"
 
     def ensure_size_computed(self, sym: sympy.Symbol):
-        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
+        precomputed = (SymT.PRECOMPUTED_SIZE, SymT.PRECOMPUTED_FLOAT)
+        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, precomputed):
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
-            self.writeline(f"int64_t {sym} = {cexpr(expr)};")
+            decl = (
+                "double" if symbol_is_type(sym, SymT.PRECOMPUTED_FLOAT) else "int64_t"
+            )
+            self.writeline(f"{decl} {sym} = {cexpr(expr)};")
 
     def _generate_symbolic_call_arg_helper(
         self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False

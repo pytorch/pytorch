@@ -7661,7 +7661,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f"{var_name} = rand_strided({size}, {stride}, device='{coor_device_str(const_tensor.device)}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.optimization_hint_with_override(
+                    symval_hint = V.graph.sizevars.size_arg_hint(
                         arg_sig.expr,
                         hint_override=self.hint_override,
                     )
