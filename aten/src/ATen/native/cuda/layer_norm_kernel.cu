@@ -1047,11 +1047,11 @@ void LaunchGammaBetaBackwardCUDAKernel(
 
     // sum(0) is flat {N}; the gradient itself may be multi-dim.
     if (dgamma_blocks.defined()) {
-      dgamma->copy_(dgamma_blocks.sum(0).view_as(*dgamma));
+      *dgamma = dgamma_blocks.sum(0).view_as(*dgamma).to(dgamma->scalar_type());
     }
     if constexpr (!rms_norm){
       if (dbeta_blocks.defined()) {
-        dbeta->copy_(dbeta_blocks.sum(0).view_as(*dbeta));
+        *dbeta = dbeta_blocks.sum(0).view_as(*dbeta).to(dbeta->scalar_type());
       }
     }
   } else {
