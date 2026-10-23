@@ -83,6 +83,26 @@ def _no_grad_normal_(
         return tensor.normal_(mean, std, generator=generator)
 
 
+def _any(mask: Tensor) -> bool:
+    # A full reduction of a sharded DTensor would all-gather the mask;
+    # reduce locally and all-reduce a single flag instead.
+    if type(mask) is not Tensor and torch.distributed.is_available():
+        import torch.distributed as dist
+        from torch.distributed.tensor import DTensor
+
+        if isinstance(mask, DTensor):
+            flag = mask.to_local().any().to(torch.int32)
+            for mesh_dim, placement in enumerate(mask.placements):
+                if placement.is_shard():
+                    dist.all_reduce(
+                        flag,
+                        op=dist.ReduceOp.MAX,
+                        group=mask.device_mesh.get_group(mesh_dim),
+                    )
+            return bool(flag.item())
+    return bool(mask.any())
+
+
 def _no_grad_trunc_normal_(
     tensor: Tensor,
     mean: float,
@@ -116,7 +136,7 @@ def _no_grad_trunc_normal_(
             result = tensor.normal_(mean, std, generator=generator)
             while True:
                 mask = (result < lo) | (result > hi)
-                if not mask.any():
+                if not _any(mask):
                     break
                 result = torch.where(
                     mask,
@@ -139,7 +159,7 @@ def _no_grad_trunc_normal_(
             # log_pdf = -0.5 * ((candidates - mean) / std) ** 2
             candidates.sub_(mean).div_(std).pow_(2).mul_(-0.5).sub_(log_peak)
             pending = accept_buf.uniform_(generator=generator).log_().gt(candidates)
-            if not pending.any():
+            if not _any(pending):
                 pass
             else:
                 result = tensor
@@ -153,7 +173,7 @@ def _no_grad_trunc_normal_(
                         accept_buf.uniform_(generator=generator).log_().gt(candidates),
                         pending,
                     )
-                    if not pending.any():
+                    if not _any(pending):
                         break
                 tensor.copy_(result)
 
