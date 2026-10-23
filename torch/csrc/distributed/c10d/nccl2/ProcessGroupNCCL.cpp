@@ -6,8 +6,11 @@
 
 #include <algorithm>
 #include <array>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -16,6 +19,7 @@
 
 #include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
 #include <fmt/core.h>
@@ -50,6 +54,40 @@ void checkSameDtype(
     const std::string& name) {
   return desc.empty() ? name : c10::str(desc, ':', name);
 }
+
+// Calls `onHang` from a helper thread if still alive after `timeout`.
+class HangWatcher {
+ public:
+  HangWatcher(std::chrono::milliseconds timeout, std::function<void()> onHang)
+      : thread_([this, timeout, onHang = std::move(onHang)] {
+          {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (cv_.wait_for(lock, timeout, [this] { return done_; })) {
+              return;
+            }
+          }
+          onHang();
+        }) {}
+
+  HangWatcher(const HangWatcher&) = delete;
+  HangWatcher& operator=(const HangWatcher&) = delete;
+
+  ~HangWatcher() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      done_ = true;
+    }
+    cv_.notify_all();
+    thread_.join();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool done_{false};
+  // Last, so it starts after the state it reads.
+  std::thread thread_;
+};
 
 } // namespace
 
@@ -641,7 +679,30 @@ void ProcessGroupNCCL::finalize() {
   if (nccl_comm_) {
     detachMemoryHook();
     retireComm();
-    // Deregister comm from the CachingAllocator
+    // The watchdog is stopped, but commDestroy can hang: proxy shutdown waits
+    // for connected host-local peers (NCCL >= 2.31 also runs an intranode
+    // barrier), so a peer that never tears down blocks this rank. It also
+    // waits for live CUDA graphs that captured NCCL kernels. commAbort
+    // cannot interrupt it (the unblocked destroy frees the comm under it), so
+    // abort the process.
+    HangWatcher destroyWatcher(options_c10d_->timeout, [this] {
+      try {
+        // Hooks may touch CUDA; bind the device like the watchdog does.
+        c10::cuda::CUDAGuard device_guard(device_);
+        c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
+            cudaStreamCaptureModeThreadLocal);
+        TC_LOG(ERROR, this) << "NCCL Destroy did not complete within "
+                            << options_c10d_->timeout.count() << " ms";
+        abortProcess("timeout - NCCL Destroy hung during finalize");
+        // abortProcess returned: the process survives, so dump here.
+        runAbortHooks();
+        TC_LOG(ERROR, this) << "Still waiting for NCCL Destroy";
+      } catch (const std::exception& e) {
+        TC_LOG(ERROR, this) << "NCCL Destroy hang handler failed: " << e.what();
+      } catch (...) {
+        TC_LOG(ERROR, this) << "NCCL Destroy hang handler failed";
+      }
+    });
     waitForNcclCompletion(
         *nccl_api_,
         nccl_comm_,

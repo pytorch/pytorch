@@ -484,6 +484,15 @@ by python's GC is not deterministic. Calling {func}`destroy_process_group` helps
 communicators are torn down in a consistent order across ranks, and avoids calling ncclCommAbort
 during the destructor.
 
+With the `nccl` and `nccl-lazy` backends (not `nccl-legacy`, nor `nccl` when `TORCH_DIST_USE_NCCL2=0`),
+NCCL communicator destruction waits for host-local peers and for live CUDA graphs that captured NCCL
+kernels. If it takes longer than the group's timeout, the backend runs its abort hooks and then, if
+`TORCH_NCCL_ASYNC_ERROR_HANDLING` is 1 or 3 (the default) and the group was not created with
+`enable_reconfigure`, aborts the process; otherwise it keeps waiting. A rank that calls
+{func}`destroy_process_group` more than the timeout after its host-local peers can therefore cause
+them to abort. If ranks may finish far apart, raise the timeout with {func}`set_timeout` before
+destroying, or synchronize first with `dist.barrier(timeout=...)` longer than the expected skew.
+
 ### Reinitialization
 
 `destroy_process_group` can also be used to destroy individual process groups. One use
@@ -985,7 +994,8 @@ pg.unregister_pre_hook(0)
 
 {meth}`ProcessGroup.register_abort_hook <torch.distributed.ProcessGroup.register_abort_hook>`
 registers a hook that runs when the backend detects a timeout or error, before it
-aborts; it does not run on a user-requested abort or shutdown. Check
+aborts; it does not run on a user-requested abort or shutdown, except when NCCL
+communicator destruction during shutdown times out. Check
 {attr}`~torch.distributed.ProcessGroup.supports_abort_hooks` first.
 
 PyTorch attaches these built-in hooks to new process groups:
