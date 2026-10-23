@@ -21,9 +21,10 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_models_optimizers,
     TEST_MULTIGPU,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_JETSON,
     IS_LINUX,
     IS_REMOTE_GPU,
@@ -48,852 +49,8 @@ if not TEST_CUDA:
 
 
 class TestCudaMultiGPU(TestCase):
+    hw_classification = HardwareClassification.CUDA
     FIFTY_MIL_CYCLES = 50000000
-
-    def test_cuda_synchronize(self):
-        torch.cuda.synchronize()
-        torch.cuda.synchronize("cuda")
-        torch.cuda.synchronize("cuda:0")
-        torch.cuda.synchronize(0)
-        torch.cuda.synchronize(torch.device("cuda:0"))
-
-        if TEST_MULTIGPU:
-            torch.cuda.synchronize("cuda:1")
-            torch.cuda.synchronize(1)
-            torch.cuda.synchronize(torch.device("cuda:1"))
-
-        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
-            torch.cuda.synchronize(torch.device("cpu"))
-
-        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
-            torch.cuda.synchronize("cpu")
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_autogpu(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.randn(5, 5).cuda()
-        self.assertEqual(x.get_device(), 0)
-        self.assertEqual(x.get_device(), 0)
-        with torch.cuda.device(1):
-            z = torch.randn(5, 5).cuda()
-            self.assertEqual(z.get_device(), 1)
-            q = x.add(y)
-            self.assertEqual(q.get_device(), 0)
-            w = torch.randn(5, 5).cuda()
-            self.assertEqual(w.get_device(), 1)
-            self.assertEqual(y.cuda().get_device(), 1)
-        z = z.cuda()
-        self.assertEqual(z.get_device(), 0)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_new(self):
-        x = torch.randn(3, 3).cuda()
-        self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
-        self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
-
-        with torch.cuda.device(1):
-            self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
-            self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_copy_device(self):
-        x = torch.randn(5, 5).cuda()
-        with torch.cuda.device(1):
-            y = x.cuda()
-            self.assertEqual(y.get_device(), 1)
-            self.assertIs(y.cuda(), y)
-            z = y.cuda(0)
-            self.assertEqual(z.get_device(), 0)
-            self.assertIs(z.cuda(0), z)
-
-        x = torch.randn(5, 5)
-        with torch.cuda.device(1):
-            y = x.cuda()
-            self.assertEqual(y.get_device(), 1)
-            self.assertIs(y.cuda(), y)
-            z = y.cuda(0)
-
-            self.assertEqual(z.get_device(), 0)
-            self.assertIs(z.cuda(0), z)
-
-    def _test_copy_sync_current_stream(self, x, y):
-        x_plus_one = x + 1
-        s0 = torch.cuda.Stream(device=x.device)
-        s1 = torch.cuda.Stream(device=y.device)
-        s2 = torch.cuda.Stream(device=x.device)
-        s3 = torch.cuda.Stream(device=y.device)
-
-        # same dst stream different src streams
-        with torch.cuda.stream(s0):
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
-            with torch.cuda.stream(s1):
-                y.copy_(x_plus_one)
-
-        with torch.cuda.stream(s2), torch.cuda.stream(s1):
-            y.copy_(x)
-
-        s1.synchronize()
-        # The copy() is synchronized on the current streams of both src and dst.
-        # In the above test, the _sleep() op on s0 will not block the copy() on
-        # s2, but both copies are synchronized on s1 in the dst device. Hence,
-        # x is copied to y after x_plus_one is copied to y. If x and y are on
-        # the same device, both copy() ops are synchronized on s1.
-        self.assertEqual(y, x)
-
-        # same src stream different dst streams
-        with torch.cuda.stream(s1):
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
-            with torch.cuda.stream(s0):
-                y.copy_(x_plus_one)
-
-        with torch.cuda.stream(s3), torch.cuda.stream(s0):
-            y.copy_(x)
-
-        s0.synchronize()
-        # Similarly, both copy() ops are synchronized on s0.
-        self.assertEqual(y, x)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_copy_streams(self):
-        d0 = torch.device("cuda:0")
-        x0 = torch.zeros(5, 5, device=d0)
-
-        d1 = torch.device("cuda:1")
-        x1 = torch.zeros(5, 5, device=d1)
-        self._test_copy_sync_current_stream(x0, x1)
-
-        x2 = torch.zeros(5, 5, device=d0)
-        self._test_copy_sync_current_stream(x0, x2)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_cat_autogpu(self):
-        x = torch.randn(4, 4).cuda(1)
-        y = torch.randn(4, 4).cuda(1)
-        z = torch.cat([x, y], 0)
-        self.assertEqual(z.get_device(), x.get_device())
-
-    @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
-    def test_load_nonexistent_device(self):
-        # Setup: create a serialized file object with a 'cuda:9' restore location
-        tensor = torch.randn(2, device="cuda")
-        buf = io.BytesIO()
-        torch.save(tensor, buf)
-        # NB: this might not work in the future if serialization changes
-        buf = io.BytesIO(buf.getvalue().replace(b"cuda:0", b"cuda:9"))
-
-        msg = r"Attempting to deserialize object on CUDA device 9"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            _ = torch.load(buf)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_multigpu_serialization_remap(self):
-        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
-
-        def gpu_remap(storage, location):
-            if location == "cuda:1":
-                return storage.cuda(0)
-
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(x, f)
-            f.seek(0)
-            x_copy = torch.load(f, map_location=gpu_remap)
-
-        for original, copy in zip(x, x_copy):
-            self.assertEqual(copy, original)
-            self.assertIs(type(copy), type(original))
-            self.assertEqual(copy.get_device(), 0)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_multigpu_serialization_remap_dict(self):
-        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(x, f)
-            f.seek(0)
-            x_copy = torch.load(f, map_location={"cuda:1": "cuda:0"})
-        for original, copy in zip(x, x_copy):
-            self.assertEqual(copy, original)
-            self.assertIs(type(copy), type(original))
-            self.assertEqual(copy.get_device(), 0)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_multigpu_storage_clone(self):
-        x = torch.randn(4, 4, device="cuda:1").storage()
-        y = x.clone()
-        self.assertEqual(x.get_device(), y.get_device())
-        for t in ["byte", "char", "short", "int", "long", "half", "double"]:
-            self.assertEqual(getattr(x, t)().get_device(), x.get_device())
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_cuda_set_device(self):
-        x = torch.randn(5, 5)
-        with torch.cuda.device(1):
-            self.assertEqual(x.cuda().get_device(), 1)
-            torch.cuda.set_device(0)
-            self.assertEqual(x.cuda().get_device(), 0)
-            with torch.cuda.device(1):
-                self.assertEqual(x.cuda().get_device(), 1)
-            self.assertEqual(x.cuda().get_device(), 0)
-            torch.cuda.set_device(1)
-        self.assertEqual(x.cuda().get_device(), 0)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_current_stream(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-
-        s0 = torch.cuda.current_stream()
-        s1 = torch.cuda.current_stream(device=1)
-        s2 = torch.cuda.current_stream(device=0)
-
-        self.assertEqual(d0, s0.device)
-        self.assertEqual(d1, s1.device)
-        self.assertEqual(d0, s2.device)
-        self.assertEqual(s0, s2)
-
-        with torch.cuda.device(d1):
-            s0 = torch.cuda.current_stream()
-            s1 = torch.cuda.current_stream(1)
-            s2 = torch.cuda.current_stream(d0)
-
-        self.assertEqual(d1, s0.device)
-        self.assertEqual(d1, s1.device)
-        self.assertEqual(d0, s2.device)
-        self.assertEqual(s0, s1)
-
-        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but got: cpu"):
-            torch.cuda.current_stream(torch.device("cpu"))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_stream_event_device(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-        e0 = torch.cuda.Event()
-
-        self.assertEqual(None, e0.device)
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-            s0.record_event(e0)
-
-        with torch.cuda.device(d1):
-            s1 = torch.cuda.Stream()
-            e1 = s1.record_event()
-
-        self.assertEqual(s0.device, torch.device("cuda:0"))
-        self.assertEqual(e0.device, torch.device("cuda:0"))
-        self.assertEqual(s1.device, torch.device("cuda:1"))
-        self.assertEqual(e1.device, torch.device("cuda:1"))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_stream_context(self):
-        s0 = torch.cuda.current_stream()
-        s1 = torch.cuda.Stream(device=1)
-        s2 = torch.cuda.Stream(device=0)
-
-        with torch.cuda.device(s1.device):
-            prev_stream_on_cuda1 = torch.cuda.current_stream()
-
-        self.assertEqual(torch.cuda.current_stream(), s0)
-        self.assertEqual(0, torch.cuda.current_device())
-        with torch.cuda.stream(s1):
-            self.assertEqual(torch.cuda.current_stream(), s1)
-            self.assertEqual(1, torch.cuda.current_device())
-            with torch.cuda.stream(s2):
-                self.assertEqual(torch.cuda.current_stream(), s2)
-                self.assertEqual(0, torch.cuda.current_device())
-                with torch.cuda.stream(s0):
-                    self.assertEqual(torch.cuda.current_stream(), s0)
-                    self.assertEqual(0, torch.cuda.current_device())
-                self.assertEqual(torch.cuda.current_stream(), s2)
-                self.assertEqual(0, torch.cuda.current_device())
-            self.assertEqual(torch.cuda.current_stream(), s1)
-            self.assertEqual(1, torch.cuda.current_device())
-
-        with torch.cuda.device(s1.device):
-            self.assertEqual(prev_stream_on_cuda1, torch.cuda.current_stream())
-
-        self.assertEqual(torch.cuda.current_stream(), s0)
-        self.assertEqual(0, torch.cuda.current_device())
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_streams_multi_gpu(self):
-        default_stream = torch.cuda.current_stream()
-        self.assertEqual(default_stream.device, torch.device("cuda:0"))
-        stream = torch.cuda.Stream(device=1)
-        self.assertEqual(stream.device, torch.device("cuda:1"))
-        with torch.cuda.device(1):
-            self.assertEqual(torch.cuda.current_stream().device, torch.device("cuda:1"))
-            self.assertNotEqual(torch.cuda.current_stream(), default_stream)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_streams_multi_gpu_query(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-        torch.cuda.synchronize(d0)
-        torch.cuda.synchronize(d1)
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-
-        with torch.cuda.device(d1):
-            s1 = torch.cuda.current_stream()
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
-
-        self.assertTrue(s0.query())
-        self.assertFalse(s1.query())
-
-        with torch.cuda.device(d0):
-            self.assertTrue(s0.query())
-            self.assertFalse(s1.query())
-
-        with torch.cuda.device(d1):
-            self.assertTrue(s0.query())
-            self.assertFalse(s1.query())
-
-        # deliberately using a different device
-        with torch.cuda.device(d0):
-            s1.synchronize()
-
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-
-        with torch.cuda.device(d0):
-            self.assertTrue(s0.query())
-            self.assertTrue(s1.query())
-
-        with torch.cuda.device(d1):
-            self.assertTrue(s0.query())
-            self.assertTrue(s1.query())
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_streams_multi_gpu_eq(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-            s1 = torch.cuda.current_stream()
-
-        with torch.cuda.device(d1):
-            s2 = torch.cuda.current_stream()
-            s3 = torch.cuda.current_stream()
-
-        self.assertTrue(s0 == s0)
-        self.assertTrue(s0 == s1)
-        self.assertTrue(s2 == s2)
-        self.assertTrue(s2 == s3)
-        self.assertFalse(s0 == s2)
-        self.assertFalse(s1 == s3)
-
-        self.assertEqual(s0.device, s1.device)
-        self.assertEqual(s0.cuda_stream, s1.cuda_stream)
-        self.assertEqual(s2.device, s3.device)
-        self.assertEqual(s2.cuda_stream, s3.cuda_stream)
-        self.assertNotEqual(s0.device, s3.device)
-
-        self.assertEqual(hash(s0), hash(s1))
-        self.assertEqual(hash(s2), hash(s3))
-        self.assertNotEqual(hash(s0), hash(s3))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_streams_priority(self):
-        low, high = torch.cuda.Stream.priority_range()
-        s0 = torch.cuda.Stream(device=0, priority=low)
-
-        self.assertEqual(low, s0.priority)
-        self.assertEqual(torch.device("cuda:0"), s0.device)
-
-        s1 = torch.cuda.Stream(device=1, priority=high)
-
-        self.assertEqual(high, s1.priority)
-        self.assertEqual(torch.device("cuda:1"), s1.device)
-
-    @staticmethod
-    def _stream_synchronize(self, spin_time_cycles):
-        s = torch.cuda.current_stream()
-        e_tik = torch.cuda.Event(enable_timing=True)
-        e_tok = torch.cuda.Event(enable_timing=True)
-
-        e_tik.record(s)
-        torch.cuda._sleep(spin_time_cycles)
-        e_tok.record(s)
-        s.synchronize()
-
-        self.assertTrue(s.query())
-
-        # not necessary to check e_tik and e_tok, as elapsed_time would throw
-        # exception if otherwise.
-        return e_tik.elapsed_time(e_tok)
-
-    @staticmethod
-    def _event_synchronize(self, spin_time_cycles):
-        s = torch.cuda.current_stream()
-        e_tik = torch.cuda.Event(enable_timing=True)
-        e_tok = torch.cuda.Event(enable_timing=True)
-
-        e_tik.record(s)
-        torch.cuda._sleep(spin_time_cycles)
-        s.record_event(e_tok)
-        e_tok.synchronize()
-
-        self.assertTrue(s.query())
-
-        # not necessary to check e_tik and e_tok, as elapsed_time would throw
-        # exception if otherwise.
-        return e_tik.elapsed_time(e_tok)
-
-    @staticmethod
-    def _event_wait(self, spin_time_cycles):
-        s0 = torch.cuda.current_stream()
-        s1 = torch.cuda.Stream()
-        e_tik = torch.cuda.Event(blocking=True, enable_timing=True)
-        e_tok = torch.cuda.Event(blocking=True, enable_timing=True)
-
-        e_tik.record(s0)
-        torch.cuda._sleep(spin_time_cycles - 10)
-        e_sync = torch.cuda.Event(blocking=True)
-        e_sync.record()
-        e_sync.wait(s1)
-        with torch.cuda.stream(s1):
-            torch.cuda._sleep(10)
-        s1.synchronize()
-        e_tok.record()
-        e_tok.synchronize()
-
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-        self.assertTrue(e_sync.query())
-
-        # not necessary to check e_tik and e_tok, as elapsed_time would throw
-        # exception if otherwise.
-        return e_tik.elapsed_time(e_tok)
-
-    @staticmethod
-    def _test_stream_event_nogil(self, sync_func, p2c, c2p):
-        with torch.cuda.device("cuda:1"):
-            c2p.put(0)
-            p2c.get()
-            c2p.put(sync_func(self, TestCudaMultiGPU.FIFTY_MIL_CYCLES))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_stream_event_nogil(self):
-        for sync_func in [
-            TestCudaMultiGPU._stream_synchronize,
-            TestCudaMultiGPU._event_synchronize,
-            TestCudaMultiGPU._event_wait,
-        ]:
-            p2c = queue.Queue()
-            c2p = queue.Queue()
-            e_tik = torch.cuda.Event(enable_timing=True)
-            e_tok = torch.cuda.Event(enable_timing=True)
-
-            t = threading.Thread(
-                target=TestCudaMultiGPU._test_stream_event_nogil,
-                args=(self, sync_func, p2c, c2p),
-            )
-            t.daemon = True
-            t.start()
-
-            c2p.get()
-            with torch.cuda.device("cuda:0"):
-                e_tik.record()
-                p2c.put(0)
-                parent_time = sync_func(self, TestCudaMultiGPU.FIFTY_MIL_CYCLES)
-                child_time = c2p.get()
-                e_tok.record()
-                e_tok.synchronize()
-                total_time = e_tik.elapsed_time(e_tok)
-
-            # Without GIL, synchronizations in parent and child threads can
-            # overlap. The total execution time should be a little bit longer
-            # than spinning fifty million cycles and much shorter than twice of
-            # that. However, testing absolute execution time is not reliable as
-            # it may vary on different hardware in different environments.
-            # Therefore, this test uses relative comparisons, checking if the
-            # sum of parent and child threads execution time is greater than the
-            # real execution time by least 30%.
-            self.assertGreater(parent_time + child_time, total_time * 1.3)
-
-    # This test is flaky for ROCm, see issue #62602
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_events_wait(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-        torch.cuda.synchronize(d0)
-        torch.cuda.synchronize(d1)
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
-            e0 = torch.cuda.Event()
-            s0.record_event(e0)
-
-        with torch.cuda.device(d1):
-            s1 = torch.cuda.current_stream()
-
-        self.assertFalse(s0.query())
-        self.assertTrue(s1.query())
-
-        s1.wait_event(e0)
-        s1.synchronize()
-
-        self.assertTrue(e0.query())
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_events_multi_gpu_query(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-            e0 = s0.record_event()
-            s0.synchronize()
-
-        with torch.cuda.device(d1):
-            s1 = torch.cuda.current_stream()
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
-            e1 = s1.record_event()
-
-        self.assertTrue(e0.query())
-        self.assertFalse(e1.query())
-
-        with torch.cuda.device(d0):
-            self.assertTrue(e0.query())
-            self.assertFalse(e1.query())
-
-        with torch.cuda.device(d1):
-            self.assertTrue(e0.query())
-            self.assertFalse(e1.query())
-
-        # deliberately using a different device
-        with torch.cuda.device(d0):
-            e1.synchronize()
-
-        self.assertTrue(e0.query())
-        self.assertTrue(e1.query())
-
-        with torch.cuda.device(d0):
-            self.assertTrue(e0.query())
-            self.assertTrue(e1.query())
-
-        with torch.cuda.device(d1):
-            self.assertTrue(e0.query())
-            self.assertTrue(e1.query())
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_caching_pinned_memory_multi_gpu(self):
-        # checks that the events preventing pinned memory from being reused
-        # too early are recorded on the correct GPU
-        cycles_per_ms = get_cycles_per_ms()
-
-        t = torch.FloatTensor([1]).pin_memory()
-        ptr = t.data_ptr()
-        gpu_tensor0 = torch.cuda.FloatTensor([0], device=0)
-        gpu_tensor1 = torch.cuda.FloatTensor([0], device=1)
-
-        with torch.cuda.device(1):
-            torch.cuda._sleep(int(1000 * cycles_per_ms))  # delay the copy by 1s
-            gpu_tensor1.copy_(t, non_blocking=True)
-
-        del t
-        t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
-
-        with torch.cuda.device(0):
-            gpu_tensor0.copy_(t, non_blocking=True)
-
-        self.assertEqual(gpu_tensor1[0], 1)
-        self.assertEqual(gpu_tensor0[0], 2)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_get_set_rng_state_all(self):
-        states = torch.cuda.get_rng_state_all()
-        before0 = torch.cuda.FloatTensor(100, device=0).normal_()
-        before1 = torch.cuda.FloatTensor(100, device=1).normal_()
-        torch.cuda.set_rng_state_all(states)
-        after0 = torch.cuda.FloatTensor(100, device=0).normal_()
-        after1 = torch.cuda.FloatTensor(100, device=1).normal_()
-        self.assertEqual(before0, after0, atol=0, rtol=0)
-        self.assertEqual(before1, after1, atol=0, rtol=0)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_rng_state_offset(self):
-        before = torch.cuda.get_rng_state()
-        torch.cuda._set_rng_state_offset(100)
-        offset = torch.cuda._get_rng_state_offset()
-        torch.cuda.set_rng_state(before)
-        self.assertEqual(offset, 100)
-
-    # Verifies that mem_get_info works, including when called for a different device
-    def test_mem_get_info(self):
-        def _test(device: str | int | torch.device):
-            # Prevent PyTorch from reusing the allocated memory
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
-            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
-
-            if IS_JETSON:
-                # w/o syncing, mem_get_info will run before memory allocated has actually increased.
-                # This race condition causes consistent failure
-                torch.cuda.synchronize()
-            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(device)
-
-            self.assertLess(after_free_bytes, before_free_bytes)
-            self.assertEqual(before_available_bytes, after_available_bytes)
-
-        # Test calls with different device representations
-        _test(0)
-        _test(torch.device("cuda"))
-        _test(torch.device("cuda:0"))
-        _test("cuda")
-        _test("cuda:0")
-        if TEST_MULTIGPU:
-            _test(1)
-            _test(torch.device("cuda:1"))
-            _test("cuda:1")
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_streaming_backwards_device_transfer(self):
-        # This function must run with non-default current streams on all devices, otherwise it's meaningless.
-        # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
-        # synchronization logic in torch/csrc/autograd/input_buffer.cpp.
-        dev0 = torch.device("cuda:0")
-        dev1 = torch.device("cuda:1")
-
-        # Unfortunately I need to make the tensors largeish.
-        # Bigger tensors = longer D2D transfers = more likely to expose races.
-        size = 2**26
-
-        a = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
-        b = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
-
-        # Here to_backward_recipient = a*b is used only once, so MulBackward's InputBuffer slot only expects 1 input.
-        # This tests the situation where we don't call InputBuffer::accumulate for MulBackward's InputBuffer.
-        to_backward_recipient = a * b
-        s = to_backward_recipient.to(device="cuda:0").sum()
-        torch.cuda.synchronize(device=dev0)
-        torch.cuda.synchronize(device=dev1)
-        s.backward()
-        self.assertTrue(a.grad.sum().item() == size)
-        self.assertTrue(b.grad.sum().item() == size)
-
-        # Here to_backward_recipient = a*b is used twice, so MulBackward's InputBuffer slot expects 2 inputs.
-        # This tests the situation where we do call InputBuffer::accumulate for MulBackward's InputBuffer.
-        a.grad = None
-        b.grad = None
-        to_backward_recipient = a * b
-        # Multiply by 2 here so to's backward creates gradient values that are different from the case above,
-        # to mitigate weirdness if the caching allocator happens to reuse memory regions that were populated
-        # with 1s by the case above
-        s0 = to_backward_recipient.to(device="cuda:0").sum() * 2.0
-        s1 = to_backward_recipient.to(device="cuda:0").sum() * 2.0
-        torch.cuda.synchronize(device=dev0)
-        torch.cuda.synchronize(device=dev1)
-        s0.backward(retain_graph=True)
-        s1.backward()
-        self.assertTrue(a.grad.sum().item() == 4 * size)
-        self.assertTrue(b.grad.sum().item() == 4 * size)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
-    def test_cuda_init_race(self):
-        # See https://github.com/pytorch/pytorch/issues/16559
-        import subprocess
-
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-c",
-                """\
-import torch
-import threading
-
-def worker(rank):
-    torch.tensor([1.]).cuda(rank)
-
-t1 = threading.Thread(target=worker, args=(0,))
-t2 = threading.Thread(target=worker, args=(1,))
-t1.start()
-t2.start()
-""",
-            ]
-        )
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_grad_scaling_device_as_key(self):
-        # Ensure that different instances of "device" objects that point to the same device
-        # are treated as identical keys by dicts.  GradScaler relies on this behavior, and may
-        # error otherwise in a way that's difficult to detect (a silent performance hit).
-        d = {}
-        t = torch.empty((1,), device="cuda:0")
-        dev0a = torch.device("cuda:0")
-        dev0b = torch.device("cuda:0")
-        dev1a = torch.device("cuda:1")
-        dev1b = torch.device("cuda:1")
-
-        self.assertTrue(hash(dev0a) == hash(dev0b))
-        self.assertTrue(hash(dev1a) == hash(dev1b))
-
-        d[dev0a] = "0a"
-        d[dev0b] = "0b"
-        self.assertTrue(len(d) == 1)
-        self.assertTrue(d[dev0a] == "0b")
-        d[t.device] = "t"
-        self.assertTrue(len(d) == 1)
-        self.assertTrue(d[dev0a] == "t")
-
-        d[dev1a] = "1a"
-        d[dev1b] = "1b"
-        self.assertTrue(len(d) == 2)
-        self.assertTrue(d[dev1a] == "1b")
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_grad_scaling_scale(self):
-        scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
-        t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:0")
-        t1 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:1")
-        # Create some nested iterables of tensors on different devices.
-        outputs = (
-            t1.clone(),
-            (t0.clone(), t1.clone()),
-            [t0.clone(), (t1.clone(), t0.clone())],
-        )
-        outputs = scaler.scale(outputs)
-        self.assertTrue(
-            outputs[0] == 8.0
-            and outputs[1][0] == 8.0
-            and outputs[1][1] == 8.0
-            and outputs[2][0] == 8.0
-            and outputs[2][1][0] == 8.0
-            and outputs[2][1][1] == 8.0
-        )
-        self.assertTrue(scaler._scale.device == t1.device)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_grad_scaling_multigpu(self):
-        # Same as above, but runs some of the models on device 1.
-        # GradScaler should transparently handle losses and gradients on multiple devices.
-        # This test could be combined with the test above, but I think it makes sense to treat
-        # multi-GPU operations separately.
-        dev0 = torch.device("cuda:0")
-        dev1 = torch.device("cuda:1")
-
-        for enabled in True, False:
-            (
-                mod_control0,
-                mod_scaling0,
-                opt_control0,
-                opt_scaling0,
-                data,
-                loss_fn,
-                skip_iter,
-            ) = _create_scaling_case()
-            (
-                mod_control1,
-                mod_scaling1,
-                opt_control1,
-                opt_scaling1,
-            ) = _create_scaling_models_optimizers(device=dev1)
-
-            scaler = torch.amp.GradScaler(
-                device="cuda",
-                init_scale=128.0,
-                growth_factor=2.0,
-                enabled=enabled,
-                growth_interval=1,
-            )
-
-            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
-                for i, (input, target) in enumerate(data):
-                    optimizer0.zero_grad()
-                    optimizer1.zero_grad()
-                    output0 = model0(input)
-                    output1 = model1(input.to(dev1))
-                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1.to(dev0), target)
-                    loss1 = loss_fn(
-                        0.6 * output0.to(dev1) - 0.4 * output1, target.to(dev1)
-                    )
-
-                    if try_scaling_api:
-                        scaler.scale(loss0).backward(retain_graph=True)
-                        scaler.scale(loss1).backward()
-                        if i == skip_iter and scaler.is_enabled():
-                            model1[1].weight.grad.data.fill_(float("inf"))
-
-                        # As an additional stress test, separately unscale for one of the optimizers.
-                        scaler.unscale_(optimizer0)
-
-                        scaler.step(optimizer0)
-                        scaler.step(optimizer1)
-
-                        # Make sure the found_infs were collected properly across optimizers and devices.
-                        if scaler.is_enabled():
-                            self.assertTrue(
-                                len(scaler._found_inf_per_device(optimizer0)) == 1
-                            )
-                            self.assertTrue(
-                                len(scaler._found_inf_per_device(optimizer1)) == 1
-                            )
-                            self.assertTrue(
-                                scaler._found_inf_per_device(optimizer0)[dev0].item()
-                                == 0.0
-                            )
-                            self.assertTrue(
-                                scaler._found_inf_per_device(optimizer1)[dev1].item()
-                                == float(i == skip_iter)
-                            )
-
-                        scaler.update()
-                    else:
-                        loss0.backward(retain_graph=True)
-                        loss1.backward()
-                        optimizer0.step()
-                        if (not scaler.is_enabled()) or (i != skip_iter):
-                            optimizer1.step()
-
-            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
-            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
-
-            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
-            self.assertTrue(
-                scaler.get_scale()
-                == (
-                    128.0
-                    * scaler.get_growth_factor() ** 3
-                    * scaler.get_backoff_factor() ** 1
-                )
-                if enabled
-                else 1.0
-            )
-
-            # Copy mod_control1 and mod_scaling1 back the device 0 for comparison
-            mod_control1.to(dev0)
-            mod_scaling1.to(dev0)
-
-            for c, s in zip(
-                chain(mod_control0.parameters(), mod_control1.parameters()),
-                chain(mod_scaling0.parameters(), mod_scaling1.parameters()),
-            ):
-                self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
-    def test_cuda_device_memory_allocated(self):
-        from torch.cuda import memory_allocated
-
-        device_count = torch.cuda.device_count()
-        current_alloc = [memory_allocated(idx) for idx in range(device_count)]
-        _x = torch.ones(10, device="cuda:0")
-        self.assertGreater(memory_allocated(0), current_alloc[0])
-        self.assertTrue(
-            all(
-                memory_allocated(torch.cuda.device(idx)) == current_alloc[idx]
-                for idx in range(1, device_count)
-            )
-        )
 
     def _check_memory_stat_consistency(self):
         snapshot = torch.cuda.memory_snapshot()
@@ -953,6 +110,24 @@ t2.start()
             stats = torch.cuda.memory_stats(device)
             for k, v in expected.items():
                 self.assertEqual(v, stats[k])
+
+    def test_cuda_synchronize(self, device):
+        torch.cuda.synchronize()
+        torch.cuda.synchronize("cuda")
+        torch.cuda.synchronize("cuda:0")
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(torch.device("cuda:0"))
+
+        if TEST_MULTIGPU:
+            torch.cuda.synchronize("cuda:1")
+            torch.cuda.synchronize(1)
+            torch.cuda.synchronize(torch.device("cuda:1"))
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
+            torch.cuda.synchronize(torch.device("cpu"))
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
+            torch.cuda.synchronize("cpu")
 
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
@@ -1110,7 +285,7 @@ t2.start()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @serialTest()
-    def test_memory_stats(self):
+    def test_memory_stats(self, device):
         gc.collect()
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
@@ -1119,7 +294,7 @@ t2.start()
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/129860")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_memory_stats_multigpu(self):
+    def test_memory_stats_multigpu(self, device):
         # advance a generator with a end flag
         def advance(gen, end):
             if not end:
@@ -1159,38 +334,204 @@ t2.start()
                 end1 = advance(gen1, end1)
                 t += 1
 
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_destroy_preserves_current_device(self):
-        # ~CUDAGraph runs when the last reference goes away, on whatever thread drops
-        # it, so it must leave that thread's current device alone. The invariant is
-        # device-generic; the regression it guards is ROCm-only, where the destructor
-        # synchronizes the capture device to let deferred frees finish.
-        torch.cuda.set_device(0)
-        g = torch.cuda.CUDAGraph()
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_autogpu(self, device):
+        x = torch.randn(5, 5).cuda()
+        y = torch.randn(5, 5).cuda()
+        self.assertEqual(x.get_device(), 0)
+        self.assertEqual(x.get_device(), 0)
         with torch.cuda.device(1):
-            # Capture on an explicit stream of this device. The default capture stream
-            # is a process-wide singleton that may already belong to device 0, which
-            # would move the capture (and so capture_dev_) off this device and leave
-            # the assert below testing nothing.
-            s = torch.cuda.Stream()
-            a = torch.full((8,), 1, device="cuda:1")
-            b = a + 1  # warm up before capture
-            with torch.cuda.graph(g, stream=s):
-                self.assertEqual(torch.cuda.current_device(), 1)
-                b = a + 1
-            g.replay()
-            torch.cuda.synchronize()
-        self.assertEqual(torch.cuda.current_device(), 0)
-        del a, b, g, s
-        gc.collect()
-        self.assertEqual(torch.cuda.current_device(), 0)
+            z = torch.randn(5, 5).cuda()
+            self.assertEqual(z.get_device(), 1)
+            q = x.add(y)
+            self.assertEqual(q.get_device(), 0)
+            w = torch.randn(5, 5).cuda()
+            self.assertEqual(w.get_device(), 1)
+            self.assertEqual(y.cuda().get_device(), 1)
+        z = z.cuda()
+        self.assertEqual(z.get_device(), 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_new(self, device):
+        x = torch.randn(3, 3).cuda()
+        self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
+        self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
+
+        with torch.cuda.device(1):
+            self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
+            self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_copy_device(self, device):
+        x = torch.randn(5, 5).cuda()
+        with torch.cuda.device(1):
+            y = x.cuda()
+            self.assertEqual(y.get_device(), 1)
+            self.assertIs(y.cuda(), y)
+            z = y.cuda(0)
+            self.assertEqual(z.get_device(), 0)
+            self.assertIs(z.cuda(0), z)
+
+        x = torch.randn(5, 5)
+        with torch.cuda.device(1):
+            y = x.cuda()
+            self.assertEqual(y.get_device(), 1)
+            self.assertIs(y.cuda(), y)
+            z = y.cuda(0)
+
+            self.assertEqual(z.get_device(), 0)
+            self.assertIs(z.cuda(0), z)
+
+    def _test_copy_sync_current_stream(self, x, y):
+        x_plus_one = x + 1
+        s0 = torch.cuda.Stream(device=x.device)
+        s1 = torch.cuda.Stream(device=y.device)
+        s2 = torch.cuda.Stream(device=x.device)
+        s3 = torch.cuda.Stream(device=y.device)
+
+        # same dst stream different src streams
+        with torch.cuda.stream(s0):
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
+            with torch.cuda.stream(s1):
+                y.copy_(x_plus_one)
+
+        with torch.cuda.stream(s2), torch.cuda.stream(s1):
+            y.copy_(x)
+
+        s1.synchronize()
+        # The copy() is synchronized on the current streams of both src and dst.
+        # In the above test, the _sleep() op on s0 will not block the copy() on
+        # s2, but both copies are synchronized on s1 in the dst device. Hence,
+        # x is copied to y after x_plus_one is copied to y. If x and y are on
+        # the same device, both copy() ops are synchronized on s1.
+        self.assertEqual(y, x)
+
+        # same src stream different dst streams
+        with torch.cuda.stream(s1):
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
+            with torch.cuda.stream(s0):
+                y.copy_(x_plus_one)
+
+        with torch.cuda.stream(s3), torch.cuda.stream(s0):
+            y.copy_(x)
+
+        s0.synchronize()
+        # Similarly, both copy() ops are synchronized on s0.
+        self.assertEqual(y, x)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_copy_streams(self, device):
+        d0 = torch.device("cuda:0")
+        x0 = torch.zeros(5, 5, device=d0)
+
+        d1 = torch.device("cuda:1")
+        x1 = torch.zeros(5, 5, device=d1)
+        self._test_copy_sync_current_stream(x0, x1)
+
+        x2 = torch.zeros(5, 5, device=d0)
+        self._test_copy_sync_current_stream(x0, x2)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_cat_autogpu(self, device):
+        x = torch.randn(4, 4).cuda(1)
+        y = torch.randn(4, 4).cuda(1)
+        z = torch.cat([x, y], 0)
+        self.assertEqual(z.get_device(), x.get_device())
+
+    @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
+    def test_load_nonexistent_device(self, device):
+        # Setup: create a serialized file object with a 'cuda:9' restore location
+        tensor = torch.randn(2, device=device)
+        buf = io.BytesIO()
+        torch.save(tensor, buf)
+        # NB: this might not work in the future if serialization changes
+        buf = io.BytesIO(buf.getvalue().replace(b"cuda:0", b"cuda:9"))
+
+        msg = r"Attempting to deserialize object on CUDA device 9"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            _ = torch.load(buf)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_multigpu_serialization_remap(self, device):
+        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
+
+        def gpu_remap(storage, location):
+            if location == "cuda:1":
+                return storage.cuda(0)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f, map_location=gpu_remap)
+
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_multigpu_serialization_remap_dict(self, device):
+        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f, map_location={"cuda:1": "cuda:0"})
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_multigpu_storage_clone(self, device):
+        x = torch.randn(4, 4, device="cuda:1").storage()
+        y = x.clone()
+        self.assertEqual(x.get_device(), y.get_device())
+        for t in ["byte", "char", "short", "int", "long", "half", "double"]:
+            self.assertEqual(getattr(x, t)().get_device(), x.get_device())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_set_device(self, device):
+        x = torch.randn(5, 5)
+        with torch.cuda.device(1):
+            self.assertEqual(x.cuda().get_device(), 1)
+            torch.cuda.set_device(0)
+            self.assertEqual(x.cuda().get_device(), 0)
+            with torch.cuda.device(1):
+                self.assertEqual(x.cuda().get_device(), 1)
+            self.assertEqual(x.cuda().get_device(), 0)
+            torch.cuda.set_device(1)
+        self.assertEqual(x.cuda().get_device(), 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_current_stream(self, device):
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
+
+        s0 = torch.cuda.current_stream()
+        s1 = torch.cuda.current_stream(device=1)
+        s2 = torch.cuda.current_stream(device=0)
+
+        self.assertEqual(d0, s0.device)
+        self.assertEqual(d1, s1.device)
+        self.assertEqual(d0, s2.device)
+        self.assertEqual(s0, s2)
+
+        with torch.cuda.device(d1):
+            s0 = torch.cuda.current_stream()
+            s1 = torch.cuda.current_stream(1)
+            s2 = torch.cuda.current_stream(d0)
+
+        self.assertEqual(d1, s0.device)
+        self.assertEqual(d1, s1.device)
+        self.assertEqual(d0, s2.device)
+        self.assertEqual(s0, s1)
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but got: cpu"):
+            torch.cuda.current_stream(torch.device("cpu"))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipCUDANonDefaultStreamIf(True)
-    def test_default_stream(self):
+    def test_default_stream(self, device):
         d0 = torch.device("cuda:0")
         d1 = torch.device("cuda:1")
 
@@ -1219,8 +560,153 @@ t2.start()
         with self.assertRaisesRegex(ValueError, "Expected a cuda device, but got: cpu"):
             torch.cuda.default_stream(torch.device("cpu"))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_stream_event_device(self, device):
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
+        e0 = torch.cuda.Event()
+
+        self.assertEqual(None, e0.device)
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+            s0.record_event(e0)
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.Stream()
+            e1 = s1.record_event()
+
+        self.assertEqual(s0.device, torch.device("cuda:0"))
+        self.assertEqual(e0.device, torch.device("cuda:0"))
+        self.assertEqual(s1.device, torch.device("cuda:1"))
+        self.assertEqual(e1.device, torch.device("cuda:1"))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_stream_context(self, device):
+        s0 = torch.cuda.current_stream()
+        s1 = torch.cuda.Stream(device=1)
+        s2 = torch.cuda.Stream(device=0)
+
+        with torch.cuda.device(s1.device):
+            prev_stream_on_cuda1 = torch.cuda.current_stream()
+
+        self.assertEqual(torch.cuda.current_stream(), s0)
+        self.assertEqual(0, torch.cuda.current_device())
+        with torch.cuda.stream(s1):
+            self.assertEqual(torch.cuda.current_stream(), s1)
+            self.assertEqual(1, torch.cuda.current_device())
+            with torch.cuda.stream(s2):
+                self.assertEqual(torch.cuda.current_stream(), s2)
+                self.assertEqual(0, torch.cuda.current_device())
+                with torch.cuda.stream(s0):
+                    self.assertEqual(torch.cuda.current_stream(), s0)
+                    self.assertEqual(0, torch.cuda.current_device())
+                self.assertEqual(torch.cuda.current_stream(), s2)
+                self.assertEqual(0, torch.cuda.current_device())
+            self.assertEqual(torch.cuda.current_stream(), s1)
+            self.assertEqual(1, torch.cuda.current_device())
+
+        with torch.cuda.device(s1.device):
+            self.assertEqual(prev_stream_on_cuda1, torch.cuda.current_stream())
+
+        self.assertEqual(torch.cuda.current_stream(), s0)
+        self.assertEqual(0, torch.cuda.current_device())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_streams_multi_gpu(self, device):
+        default_stream = torch.cuda.current_stream()
+        self.assertEqual(default_stream.device, torch.device("cuda:0"))
+        stream = torch.cuda.Stream(device=1)
+        self.assertEqual(stream.device, torch.device("cuda:1"))
+        with torch.cuda.device(1):
+            self.assertEqual(torch.cuda.current_stream().device, torch.device("cuda:1"))
+            self.assertNotEqual(torch.cuda.current_stream(), default_stream)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_streams_multi_gpu_query(self, device):
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
+        torch.cuda.synchronize(d0)
+        torch.cuda.synchronize(d1)
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.current_stream()
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
+
+        self.assertTrue(s0.query())
+        self.assertFalse(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        # deliberately using a different device
+        with torch.cuda.device(d0):
+            s1.synchronize()
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_streams_multi_gpu_eq(self, device):
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+            s1 = torch.cuda.current_stream()
+
+        with torch.cuda.device(d1):
+            s2 = torch.cuda.current_stream()
+            s3 = torch.cuda.current_stream()
+
+        self.assertTrue(s0 == s0)
+        self.assertTrue(s0 == s1)
+        self.assertTrue(s2 == s2)
+        self.assertTrue(s2 == s3)
+        self.assertFalse(s0 == s2)
+        self.assertFalse(s1 == s3)
+
+        self.assertEqual(s0.device, s1.device)
+        self.assertEqual(s0.cuda_stream, s1.cuda_stream)
+        self.assertEqual(s2.device, s3.device)
+        self.assertEqual(s2.cuda_stream, s3.cuda_stream)
+        self.assertNotEqual(s0.device, s3.device)
+
+        self.assertEqual(hash(s0), hash(s1))
+        self.assertEqual(hash(s2), hash(s3))
+        self.assertNotEqual(hash(s0), hash(s3))
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_tensor_device(self):
+    def test_streams_priority(self, device):
+        low, high = torch.cuda.Stream.priority_range()
+        s0 = torch.cuda.Stream(device=0, priority=low)
+
+        self.assertEqual(low, s0.priority)
+        self.assertEqual(torch.device("cuda:0"), s0.device)
+
+        s1 = torch.cuda.Stream(device=1, priority=high)
+
+        self.assertEqual(high, s1.priority)
+        self.assertEqual(torch.device("cuda:1"), s1.device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_tensor_device(self, device):
         self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
         self.assertEqual(torch.cuda.FloatTensor(1, device=1).get_device(), 1)
         with torch.cuda.device(1):
@@ -1228,8 +714,182 @@ t2.start()
             self.assertEqual(torch.cuda.FloatTensor(1, device=0).get_device(), 0)
             self.assertEqual(torch.cuda.FloatTensor(1, device=None).get_device(), 1)
 
+    @staticmethod
+    def _stream_synchronize(self, spin_time_cycles):
+        s = torch.cuda.current_stream()
+        e_tik = torch.cuda.Event(enable_timing=True)
+        e_tok = torch.cuda.Event(enable_timing=True)
+
+        e_tik.record(s)
+        torch.cuda._sleep(spin_time_cycles)
+        e_tok.record(s)
+        s.synchronize()
+
+        self.assertTrue(s.query())
+
+        # not necessary to check e_tik and e_tok, as elapsed_time would throw
+        # exception if otherwise.
+        return e_tik.elapsed_time(e_tok)
+
+    @staticmethod
+    def _event_synchronize(self, spin_time_cycles):
+        s = torch.cuda.current_stream()
+        e_tik = torch.cuda.Event(enable_timing=True)
+        e_tok = torch.cuda.Event(enable_timing=True)
+
+        e_tik.record(s)
+        torch.cuda._sleep(spin_time_cycles)
+        s.record_event(e_tok)
+        e_tok.synchronize()
+
+        self.assertTrue(s.query())
+
+        # not necessary to check e_tik and e_tok, as elapsed_time would throw
+        # exception if otherwise.
+        return e_tik.elapsed_time(e_tok)
+
+    @staticmethod
+    def _event_wait(self, spin_time_cycles):
+        s0 = torch.cuda.current_stream()
+        s1 = torch.cuda.Stream()
+        e_tik = torch.cuda.Event(blocking=True, enable_timing=True)
+        e_tok = torch.cuda.Event(blocking=True, enable_timing=True)
+
+        e_tik.record(s0)
+        torch.cuda._sleep(spin_time_cycles - 10)
+        e_sync = torch.cuda.Event(blocking=True)
+        e_sync.record()
+        e_sync.wait(s1)
+        with torch.cuda.stream(s1):
+            torch.cuda._sleep(10)
+        s1.synchronize()
+        e_tok.record()
+        e_tok.synchronize()
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+        self.assertTrue(e_sync.query())
+
+        # not necessary to check e_tik and e_tok, as elapsed_time would throw
+        # exception if otherwise.
+        return e_tik.elapsed_time(e_tok)
+
+    @staticmethod
+    def _test_stream_event_nogil(self, sync_func, p2c, c2p):
+        with torch.cuda.device("cuda:1"):
+            c2p.put(0)
+            p2c.get()
+            c2p.put(sync_func(self, self.FIFTY_MIL_CYCLES))
+
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_events_multi_gpu_elapsed_time(self):
+    def test_stream_event_nogil(self, device):
+        for sync_func in [
+            type(self)._stream_synchronize,
+            type(self)._event_synchronize,
+            type(self)._event_wait,
+        ]:
+            p2c = queue.Queue()
+            c2p = queue.Queue()
+            e_tik = torch.cuda.Event(enable_timing=True)
+            e_tok = torch.cuda.Event(enable_timing=True)
+
+            t = threading.Thread(
+                target=type(self)._test_stream_event_nogil,
+                args=(self, sync_func, p2c, c2p),
+            )
+            t.daemon = True
+            t.start()
+
+            c2p.get()
+            with torch.cuda.device("cuda:0"):
+                e_tik.record()
+                p2c.put(0)
+                parent_time = sync_func(self, self.FIFTY_MIL_CYCLES)
+                child_time = c2p.get()
+                e_tok.record()
+                e_tok.synchronize()
+                total_time = e_tik.elapsed_time(e_tok)
+
+            # Without GIL, synchronizations in parent and child threads can
+            # overlap. The total execution time should be a little bit longer
+            # than spinning fifty million cycles and much shorter than twice of
+            # that. However, testing absolute execution time is not reliable as
+            # it may vary on different hardware in different environments.
+            # Therefore, this test uses relative comparisons, checking if the
+            # sum of parent and child threads execution time is greater than the
+            # real execution time by least 30%.
+            self.assertGreater(parent_time + child_time, total_time * 1.3)
+
+    # This test is flaky for ROCm, see issue #62602
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_events_wait(self, device):
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
+        torch.cuda.synchronize(d0)
+        torch.cuda.synchronize(d1)
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
+            e0 = torch.cuda.Event()
+            s0.record_event(e0)
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.current_stream()
+
+        self.assertFalse(s0.query())
+        self.assertTrue(s1.query())
+
+        s1.wait_event(e0)
+        s1.synchronize()
+
+        self.assertTrue(e0.query())
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_events_multi_gpu_query(self, device):
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+            e0 = s0.record_event()
+            s0.synchronize()
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.current_stream()
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
+            e1 = s1.record_event()
+
+        self.assertTrue(e0.query())
+        self.assertFalse(e1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(e0.query())
+            self.assertFalse(e1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(e0.query())
+            self.assertFalse(e1.query())
+
+        # deliberately using a different device
+        with torch.cuda.device(d0):
+            e1.synchronize()
+
+        self.assertTrue(e0.query())
+        self.assertTrue(e1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(e0.query())
+            self.assertTrue(e1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(e0.query())
+            self.assertTrue(e1.query())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_events_multi_gpu_elapsed_time(self, device):
         d0 = torch.device("cuda:0")
         d1 = torch.device("cuda:1")
 
@@ -1242,7 +902,7 @@ t2.start()
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
             e1 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
             s1.record_event(e1)
 
         e0.synchronize()
@@ -1258,7 +918,7 @@ t2.start()
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e2 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(TestCudaMultiGPU.FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(self.FIFTY_MIL_CYCLES)
             s0.record_event(e2)
             s0.synchronize()
 
@@ -1284,7 +944,7 @@ t2.start()
                 out = cudart.cudaStreamDestroy(stream.value)
                 self.assertEqual(out, 0)
 
-    def test_external_streams(self):
+    def test_external_streams(self, device):
         device = torch.cuda.device(0)
         with self._get_external_stream(device) as stream_v:
             ext_stream = torch.cuda.ExternalStream(stream_v)
@@ -1295,7 +955,7 @@ t2.start()
             self.assertEqual(ext_stream.device.index, device.idx)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_external_streams_multi_device(self):
+    def test_external_streams_multi_device(self, device):
         device = torch.cuda.device(1)
         with self._get_external_stream(device) as stream_v:
             ext_stream = torch.cuda.ExternalStream(stream_v, device=device)
@@ -1305,8 +965,82 @@ t2.start()
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_caching_pinned_memory_multi_gpu(self, device):
+        # checks that the events preventing pinned memory from being reused
+        # too early are recorded on the correct GPU
+        cycles_per_ms = get_cycles_per_ms()
+
+        t = torch.FloatTensor([1]).pin_memory()
+        ptr = t.data_ptr()
+        gpu_tensor0 = torch.cuda.FloatTensor([0], device=0)
+        gpu_tensor1 = torch.cuda.FloatTensor([0], device=1)
+
+        with torch.cuda.device(1):
+            torch.cuda._sleep(int(1000 * cycles_per_ms))  # delay the copy by 1s
+            gpu_tensor1.copy_(t, non_blocking=True)
+
+        del t
+        t = torch.FloatTensor([2]).pin_memory()
+        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
+
+        with torch.cuda.device(0):
+            gpu_tensor0.copy_(t, non_blocking=True)
+
+        self.assertEqual(gpu_tensor1[0], 1)
+        self.assertEqual(gpu_tensor0[0], 2)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_get_set_rng_state_all(self, device):
+        states = torch.cuda.get_rng_state_all()
+        before0 = torch.cuda.FloatTensor(100, device=0).normal_()
+        before1 = torch.cuda.FloatTensor(100, device=1).normal_()
+        torch.cuda.set_rng_state_all(states)
+        after0 = torch.cuda.FloatTensor(100, device=0).normal_()
+        after1 = torch.cuda.FloatTensor(100, device=1).normal_()
+        self.assertEqual(before0, after0, atol=0, rtol=0)
+        self.assertEqual(before1, after1, atol=0, rtol=0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_rng_state_offset(self, device):
+        before = torch.cuda.get_rng_state()
+        torch.cuda._set_rng_state_offset(100)
+        offset = torch.cuda._get_rng_state_offset()
+        torch.cuda.set_rng_state(before)
+        self.assertEqual(offset, 100)
+
+    # Verifies that mem_get_info works, including when called for a different device
+    def test_mem_get_info(self, device):
+        def _test(device: str | int | torch.device):
+            # Prevent PyTorch from reusing the allocated memory
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
+
+            if IS_JETSON:
+                # w/o syncing, mem_get_info will run before memory allocated has actually increased.
+                # This race condition causes consistent failure
+                torch.cuda.synchronize()
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(device)
+
+            self.assertLess(after_free_bytes, before_free_bytes)
+            self.assertEqual(before_available_bytes, after_available_bytes)
+
+        # Test calls with different device representations
+        _test(0)
+        _test(torch.device("cuda"))
+        _test(torch.device("cuda:0"))
+        _test("cuda")
+        _test("cuda:0")
+        if TEST_MULTIGPU:
+            _test(1)
+            _test(torch.device("cuda:1"))
+            _test("cuda:1")
+
     # Test that wrap_with_cuda_memory_check successfully detects leak
-    def test_cuda_memory_leak_detection(self):
+    def test_cuda_memory_leak_detection(self, device):
         l = []
 
         @self.wrap_with_cuda_memory_check
@@ -1348,8 +1082,278 @@ t2.start()
             ):
                 leak_gpu1()
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_streaming_backwards_device_transfer(self, device):
+        # This function must run with non-default current streams on all devices, otherwise it's meaningless.
+        # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
+        # synchronization logic in torch/csrc/autograd/input_buffer.cpp.
+        dev0 = torch.device("cuda:0")
+        dev1 = torch.device("cuda:1")
+
+        # Unfortunately I need to make the tensors largeish.
+        # Bigger tensors = longer D2D transfers = more likely to expose races.
+        size = 2**26
+
+        a = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
+        b = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
+
+        # Here to_backward_recipient = a*b is used only once, so MulBackward's InputBuffer slot only expects 1 input.
+        # This tests the situation where we don't call InputBuffer::accumulate for MulBackward's InputBuffer.
+        to_backward_recipient = a * b
+        s = to_backward_recipient.to(device="cuda:0").sum()
+        torch.cuda.synchronize(device=dev0)
+        torch.cuda.synchronize(device=dev1)
+        s.backward()
+        self.assertTrue(a.grad.sum().item() == size)
+        self.assertTrue(b.grad.sum().item() == size)
+
+        # Here to_backward_recipient = a*b is used twice, so MulBackward's InputBuffer slot expects 2 inputs.
+        # This tests the situation where we do call InputBuffer::accumulate for MulBackward's InputBuffer.
+        a.grad = None
+        b.grad = None
+        to_backward_recipient = a * b
+        # Multiply by 2 here so to's backward creates gradient values that are different from the case above,
+        # to mitigate weirdness if the caching allocator happens to reuse memory regions that were populated
+        # with 1s by the case above
+        s0 = to_backward_recipient.to(device="cuda:0").sum() * 2.0
+        s1 = to_backward_recipient.to(device="cuda:0").sum() * 2.0
+        torch.cuda.synchronize(device=dev0)
+        torch.cuda.synchronize(device=dev1)
+        s0.backward(retain_graph=True)
+        s1.backward()
+        self.assertTrue(a.grad.sum().item() == 4 * size)
+        self.assertTrue(b.grad.sum().item() == 4 * size)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
+    def test_cuda_init_race(self, device):
+        # See https://github.com/pytorch/pytorch/issues/16559
+        import subprocess
+
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-c",
+                """\
+import torch
+import threading
+
+def worker(rank):
+    torch.tensor([1.]).cuda(rank)
+
+t1 = threading.Thread(target=worker, args=(0,))
+t2 = threading.Thread(target=worker, args=(1,))
+t1.start()
+t2.start()
+""",
+            ]
+        )
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_device_as_key(self, device):
+        # Ensure that different instances of "device" objects that point to the same device
+        # are treated as identical keys by dicts.  GradScaler relies on this behavior, and may
+        # error otherwise in a way that's difficult to detect (a silent performance hit).
+        d = {}
+        t = torch.empty((1,), device="cuda:0")
+        dev0a = torch.device("cuda:0")
+        dev0b = torch.device("cuda:0")
+        dev1a = torch.device("cuda:1")
+        dev1b = torch.device("cuda:1")
+
+        self.assertTrue(hash(dev0a) == hash(dev0b))
+        self.assertTrue(hash(dev1a) == hash(dev1b))
+
+        d[dev0a] = "0a"
+        d[dev0b] = "0b"
+        self.assertTrue(len(d) == 1)
+        self.assertTrue(d[dev0a] == "0b")
+        d[t.device] = "t"
+        self.assertTrue(len(d) == 1)
+        self.assertTrue(d[dev0a] == "t")
+
+        d[dev1a] = "1a"
+        d[dev1b] = "1b"
+        self.assertTrue(len(d) == 2)
+        self.assertTrue(d[dev1a] == "1b")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_scale(self, device):
+        scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
+        t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:0")
+        t1 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:1")
+        # Create some nested iterables of tensors on different devices.
+        outputs = (
+            t1.clone(),
+            (t0.clone(), t1.clone()),
+            [t0.clone(), (t1.clone(), t0.clone())],
+        )
+        outputs = scaler.scale(outputs)
+        self.assertTrue(
+            outputs[0] == 8.0
+            and outputs[1][0] == 8.0
+            and outputs[1][1] == 8.0
+            and outputs[2][0] == 8.0
+            and outputs[2][1][0] == 8.0
+            and outputs[2][1][1] == 8.0
+        )
+        self.assertTrue(scaler._scale.device == t1.device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_multigpu(self, device):
+        # Same as above, but runs some of the models on device 1.
+        # GradScaler should transparently handle losses and gradients on multiple devices.
+        # This test could be combined with the test above, but I think it makes sense to treat
+        # multi-GPU operations separately.
+        dev0 = torch.device("cuda:0")
+        dev1 = torch.device("cuda:1")
+
+        for enabled in True, False:
+            (
+                mod_control0,
+                mod_scaling0,
+                opt_control0,
+                opt_scaling0,
+                data,
+                loss_fn,
+                skip_iter,
+            ) = _create_scaling_case()
+            (
+                mod_control1,
+                mod_scaling1,
+                opt_control1,
+                opt_scaling1,
+            ) = _create_scaling_models_optimizers(device=dev1)
+
+            scaler = torch.amp.GradScaler(
+                device="cuda",
+                init_scale=128.0,
+                growth_factor=2.0,
+                enabled=enabled,
+                growth_interval=1,
+            )
+
+            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
+                for i, (input, target) in enumerate(data):
+                    optimizer0.zero_grad()
+                    optimizer1.zero_grad()
+                    output0 = model0(input)
+                    output1 = model1(input.to(dev1))
+                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1.to(dev0), target)
+                    loss1 = loss_fn(
+                        0.6 * output0.to(dev1) - 0.4 * output1, target.to(dev1)
+                    )
+
+                    if try_scaling_api:
+                        scaler.scale(loss0).backward(retain_graph=True)
+                        scaler.scale(loss1).backward()
+                        if i == skip_iter and scaler.is_enabled():
+                            model1[1].weight.grad.data.fill_(float("inf"))
+
+                        # As an additional stress test, separately unscale for one of the optimizers.
+                        scaler.unscale_(optimizer0)
+
+                        scaler.step(optimizer0)
+                        scaler.step(optimizer1)
+
+                        # Make sure the found_infs were collected properly across optimizers and devices.
+                        if scaler.is_enabled():
+                            self.assertTrue(
+                                len(scaler._found_inf_per_device(optimizer0)) == 1
+                            )
+                            self.assertTrue(
+                                len(scaler._found_inf_per_device(optimizer1)) == 1
+                            )
+                            self.assertTrue(
+                                scaler._found_inf_per_device(optimizer0)[dev0].item()
+                                == 0.0
+                            )
+                            self.assertTrue(
+                                scaler._found_inf_per_device(optimizer1)[dev1].item()
+                                == float(i == skip_iter)
+                            )
+
+                        scaler.update()
+                    else:
+                        loss0.backward(retain_graph=True)
+                        loss1.backward()
+                        optimizer0.step()
+                        if (not scaler.is_enabled()) or (i != skip_iter):
+                            optimizer1.step()
+
+            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
+            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
+
+            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
+            self.assertTrue(
+                scaler.get_scale()
+                == (
+                    128.0
+                    * scaler.get_growth_factor() ** 3
+                    * scaler.get_backoff_factor() ** 1
+                )
+                if enabled
+                else 1.0
+            )
+
+            # Copy mod_control1 and mod_scaling1 back the device 0 for comparison
+            mod_control1.to(dev0)
+            mod_scaling1.to(dev0)
+
+            for c, s in zip(
+                chain(mod_control0.parameters(), mod_control1.parameters()),
+                chain(mod_scaling0.parameters(), mod_scaling1.parameters()),
+            ):
+                self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_cuda_device_memory_allocated(self, device):
+        from torch.cuda import memory_allocated
+
+        device_count = torch.cuda.device_count()
+        current_alloc = [memory_allocated(idx) for idx in range(device_count)]
+        _x = torch.ones(10, device="cuda:0")
+        self.assertGreater(memory_allocated(0), current_alloc[0])
+        self.assertTrue(
+            all(
+                memory_allocated(torch.cuda.device(idx)) == current_alloc[idx]
+                for idx in range(1, device_count)
+            )
+        )
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_destroy_preserves_current_device(self, device):
+        # ~CUDAGraph runs when the last reference goes away, on whatever thread drops
+        # it, so it must leave that thread's current device alone. The invariant is
+        # device-generic; the regression it guards is ROCm-only, where the destructor
+        # synchronizes the capture device to let deferred frees finish.
+        torch.cuda.set_device(0)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.device(1):
+            # Capture on an explicit stream of this device. The default capture stream
+            # is a process-wide singleton that may already belong to device 0, which
+            # would move the capture (and so capture_dev_) off this device and leave
+            # the assert below testing nothing.
+            s = torch.cuda.Stream()
+            a = torch.full((8,), 1, device="cuda:1")
+            b = a + 1  # warm up before capture
+            with torch.cuda.graph(g, stream=s):
+                self.assertEqual(torch.cuda.current_device(), 1)
+                b = a + 1
+            g.replay()
+            torch.cuda.synchronize()
+        self.assertEqual(torch.cuda.current_device(), 0)
+        del a, b, g, s
+        gc.collect()
+        self.assertEqual(torch.cuda.current_device(), 0)
+
 
 class TestCudaComm(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
             raise unittest.SkipTest("only one GPU detected")
@@ -1393,10 +1397,10 @@ class TestCudaComm(TestCase):
         ):
             comm.broadcast(input, out=[input.cuda(0), input.cuda(1).unsqueeze(0)])
 
-    def test_broadcast_cpu(self):
+    def test_broadcast_cpu(self, device):
         self._test_broadcast(torch.randn(5, 5))
 
-    def test_broadcast_gpu(self):
+    def test_broadcast_gpu(self, device):
         self._test_broadcast(torch.randn(5, 5).cuda())
 
     def _test_broadcast_coalesced(self, tensors, buffer_size):
@@ -1428,7 +1432,7 @@ class TestCudaComm(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     # Note: fails sometimes on the CI, passes on dual gfx906
-    def test_broadcast_coalesced(self):
+    def test_broadcast_coalesced(self, device):
         numel = 5
         num_bytes = numel * 8
         tensors = [
@@ -1448,7 +1452,7 @@ class TestCudaComm(TestCase):
         self._test_broadcast_coalesced(tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_broadcast_coalesced_dense_only(self):
+    def test_broadcast_coalesced_dense_only(self, device):
         numel = 5
         num_bytes = numel * 8
         tensors = [
@@ -1462,7 +1466,7 @@ class TestCudaComm(TestCase):
         self._test_broadcast_coalesced(tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_broadcast_coalesced_empty_tensors(self):
+    def test_broadcast_coalesced_empty_tensors(self, device):
         tensors = [
             torch.tensor([]).byte().cuda(),
             torch.randn(5).cuda(),
@@ -1471,7 +1475,7 @@ class TestCudaComm(TestCase):
         self._test_broadcast_coalesced(tensors, 256)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_reduce_add(self):
+    def test_reduce_add(self, device):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5)
         x_cuda = x.cuda(0)
@@ -1503,7 +1507,7 @@ class TestCudaComm(TestCase):
             self.assertEqual(t._version, old_version + 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_reduce_add_coalesced(self):
+    def test_reduce_add_coalesced(self, device):
         numel = 5
         num_bytes = numel * 8
         tensors = [
@@ -1523,7 +1527,7 @@ class TestCudaComm(TestCase):
         self._test_reduce_add_coalesced(tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_reduce_add_coalesced_dense_only(self):
+    def test_reduce_add_coalesced_dense_only(self, device):
         numel = 5
         num_bytes = numel * 8
         tensors = [
@@ -1610,28 +1614,28 @@ class TestCudaComm(TestCase):
             index[dim] = slice(1, None)
             comm.scatter(input, dim=dim, out=([out[0][tuple(index)]] + out[1:]))
 
-    def test_scatter_cpu(self):
+    def test_scatter_cpu(self, device):
         self._test_scatter(torch.randn(4, 4), dim=0)
 
-    def test_scatter_cpu_dim(self):
+    def test_scatter_cpu_dim(self, device):
         self._test_scatter(torch.randn(4, 4), dim=1)
 
-    def test_scatter_cpu_neg_dim(self):
+    def test_scatter_cpu_neg_dim(self, device):
         self._test_scatter(torch.randn(4, 4), dim=-2)
 
-    def test_scatter_cpu_sizes(self):
+    def test_scatter_cpu_sizes(self, device):
         self._test_scatter(torch.randn(6, 4), chunk_sizes=(2, 4))
 
-    def test_scatter_gpu(self):
+    def test_scatter_gpu(self, device):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=0)
 
-    def test_scatter_gpu_dim(self):
+    def test_scatter_gpu_dim(self, device):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=1)
 
-    def test_scatter_gpu_neg_dim(self):
+    def test_scatter_gpu_neg_dim(self, device):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=-2)
 
-    def test_scatter_gpu_sizes(self):
+    def test_scatter_gpu_sizes(self, device):
         self._test_scatter(torch.randn(6, 4).cuda(), chunk_sizes=(2, 4))
 
     def _test_gather(self, dim):
@@ -1700,17 +1704,17 @@ class TestCudaComm(TestCase):
             elif dim in [1, -1]:
                 comm.gather((x, y[1:, :]), dim=dim)
 
-    def test_gather(self):
+    def test_gather(self, device):
         self._test_gather(0)
 
-    def test_gather_dim(self):
+    def test_gather_dim(self, device):
         self._test_gather(1)
 
-    def test_gather_neg_dim(self):
+    def test_gather_neg_dim(self, device):
         self._test_gather(-1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_memory_format_scatter_gather(self):
+    def test_memory_format_scatter_gather(self, device):
         nhwc = torch.randn((10, 3, 32, 32), device="cpu").contiguous(
             memory_format=torch.channels_last
         )
@@ -1723,7 +1727,7 @@ class TestCudaComm(TestCase):
         self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
-    def test_scatter_namedtuple(self):
+    def test_scatter_namedtuple(self, device):
         # tests ability to scatter namedtuples and retrieve a list where each
         # element is of the expected namedtuple type.
         fields = ("a", "b")
@@ -1766,7 +1770,7 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_b, x.b)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
-    def test_gather_namedtuple(self):
+    def test_gather_namedtuple(self, device):
         # tests ability to gather a list of namedtuples and return a namedtuple where each
         # element is of the expected tensor type.
         fields = ["a", "b"]
@@ -1822,7 +1826,8 @@ class TestCudaComm(TestCase):
             self.assertTrue(torch.equal(x, cat))
 
 
-instantiate_parametrized_tests(TestCudaMultiGPU)
+instantiate_device_type_tests(TestCudaMultiGPU, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCudaComm, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":

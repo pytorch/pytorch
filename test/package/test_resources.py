@@ -6,7 +6,7 @@ from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -18,6 +18,8 @@ except ImportError:
 
 class TestResources(PackageTestCase):
     """Tests for access APIs for packaged resources."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
