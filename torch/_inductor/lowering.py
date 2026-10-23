@@ -4179,6 +4179,8 @@ def arange_start_step(
 ):
     if dtype is None:
         raise AssertionError("expected: dtype is not None")
+    if dtype == torch.bool:
+        raise NotImplementedError('"arange" not implemented for \'Bool\'')
     length = ceildiv(end - start, step)
     return iota(
         length,

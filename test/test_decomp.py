@@ -859,6 +859,22 @@ def forward(self, x_1, start_1):
     return convert_element_type""",
         )
 
+    def test_arange_bool_rejected(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        out = torch.empty(5, dtype=torch.bool, device=device)
+        with self.assertRaises(NotImplementedError):
+            make_fx(
+                lambda out: torch.arange(0.0, 5.0, out=out),
+                decomposition_table=decomposition_table,
+            )(out)
+
+        with self.assertRaises(NotImplementedError):
+            make_fx(
+                lambda: torch.arange(5, dtype=torch.bool, device=device),
+                decomposition_table=decomposition_table,
+            )()
+
     def test_masked_fill(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
 
