@@ -29,7 +29,7 @@ from ...kernel.mm import (
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
     xpu_persistent_mm_template,
-    xpu_tiled2d_mm_template,
+    xpu_non_persistent_mm_template,
 )
 from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
@@ -4265,11 +4265,11 @@ class XPUPersistentMMTemplateConfigHeuristic(
             }
 
 
-@register_template_heuristic(xpu_tiled2d_mm_template.uid, "xpu")
-class XPUTiled2DMMTemplateConfigHeuristic(
+@register_template_heuristic(xpu_non_persistent_mm_template.uid, "xpu")
+class XPUNonPersistentMMTemplateConfigHeuristic(
     XPUDescriptorMMTemplateConfigMixin, XPUConfigHeuristic
 ):
-    """Tiled 2D MM template heuristic for XPU (small M); configs are tuned on Xe2 (BMG)."""
+    """Non-persistent MM template heuristic for XPU (small M); configs are tuned on Xe2 (BMG)."""
 
     def __init__(self) -> None:
         super().__init__()

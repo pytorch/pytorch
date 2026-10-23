@@ -338,7 +338,7 @@ class TestMaxAutotune(TestCase):
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
     @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
-    @parametrize("template", ("mm_xpu_persistent", "mm_xpu_tiled2d"))
+    @parametrize("template", ("mm_xpu_persistent", "mm_xpu_non_persistent"))
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
