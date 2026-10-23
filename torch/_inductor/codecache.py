@@ -2999,6 +2999,22 @@ class AotCodeCompiler:
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
                 return consts_asm, "weights.S"
 
+            # This is a usably fast way to convert binary to comma separated text
+            # with 16 bytes per line. 
+            def _quick_format_array_to_string(data: bytes | bytearray) -> str:
+                all_lines = []
+                count_bytes = 0
+                while count_bytes < len(data):
+                    if count_bytes+16<len(data):
+                        line = struct.unpack('16B',data[count_bytes:count_bytes+16])
+                        count_bytes+=16
+                    else:
+                        line = struct.unpack(f'{len(data)-count_bytes}B',data[count_bytes:])
+                        count_bytes=len(data)
+                    all_lines.append(str(line).replace(" ", "").strip("()")+",\t\n")
+                return "".join(all_lines)
+
+            
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
                 consts: bytes | bytearray, align_bytes: int
@@ -3016,12 +3032,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp += (
                     f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
                 )
-                count_bytes = 0
-                for c in consts:
-                    const_cpp += f"{c}, "
-                    count_bytes = count_bytes + 1
-                    if count_bytes % 16 == 0:
-                        const_cpp += "\t\n"
+                const_cpp+= _quick_format_array_to_string(consts)
                 const_cpp += "};\t\n"
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
                 return const_cpp, "weights.cpp"
