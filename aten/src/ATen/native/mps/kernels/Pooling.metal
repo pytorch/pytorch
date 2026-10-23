@@ -74,12 +74,12 @@ IterBounds<int32_t> get_pool_input_iter_bounds(
 // Iterates through all the input elements that this kernel needs to
 // apply max to. Specialized for 3 pooling dimensions.
 // TODO: Support any number of pooling dims
-template <typename T>
+template <typename T, typename idx_t>
 void max_pool_3d_input_iter(
     device const T* input,
     device T* output,
     device int64_t* indices,
-    constant int32_t* input_strides,
+    constant int64_t* input_strides,
     thread int32_t (&pooling_dim_indices)[3],
     PoolDimGeom geom,
     bool return_indices) {
@@ -91,21 +91,23 @@ void max_pool_3d_input_iter(
   auto d1 = geom.dilation[1];
   auto d2 = geom.dilation[2];
 
+  const idx_t stride0 = input_strides[0], stride1 = input_strides[1],
+              stride2 = input_strides[2];
   T max_value = input
-      [input_strides[0] * bounds0.start + input_strides[1] * bounds1.start +
-       input_strides[2] * bounds2.start];
-  auto size12 = geom.input_sizes[1] * geom.input_sizes[2];
-  auto max_index = bounds0.start * size12 +
+      [stride0 * bounds0.start + stride1 * bounds1.start +
+       stride2 * bounds2.start];
+  const idx_t size12 = idx_t(geom.input_sizes[1]) * geom.input_sizes[2];
+  idx_t max_index = bounds0.start * size12 +
       bounds1.start * geom.input_sizes[2] + bounds2.start;
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0 += d0) {
-    auto offset0 = input_strides[0] * i0;
+    auto offset0 = stride0 * i0;
 
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1 += d1) {
-      auto offset1 = input_strides[1] * i1;
+      auto offset1 = stride1 * i1;
 
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2 += d2) {
-        auto offset2 = input_strides[2] * i2;
+        auto offset2 = stride2 * i2;
         auto input_value = input[offset0 + offset1 + offset2];
         // Matches CPU: NaN wins, (val != val) is false for integral types
         bool is_greater = input_value > max_value || input_value != input_value;
@@ -125,12 +127,12 @@ void max_pool_3d_input_iter(
   }
 }
 
-template <typename T, bool return_indices>
+template <typename T, typename idx_t, bool return_indices>
 void max_pool_2d_input_iter(
     device const T* input,
     device T* output,
     device int64_t* indices,
-    constant int32_t* input_strides,
+    constant int64_t* input_strides,
     thread int32_t (&pooling_dim_indices)[3],
     PoolDimGeom geom) {
   auto bounds0 = get_pool_input_iter_bounds<0>(geom, pooling_dim_indices);
@@ -139,15 +141,15 @@ void max_pool_2d_input_iter(
   auto d0 = geom.dilation[0];
   auto d1 = geom.dilation[1];
 
-  T max_value = input
-      [input_strides[0] * bounds0.start + input_strides[1] * bounds1.start];
-  auto max_index = bounds0.start * geom.input_sizes[1] + bounds1.start;
+  const idx_t stride0 = input_strides[0], stride1 = input_strides[1];
+  T max_value = input[stride0 * bounds0.start + stride1 * bounds1.start];
+  idx_t max_index = idx_t(bounds0.start) * geom.input_sizes[1] + bounds1.start;
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0 += d0) {
-    auto offset0 = input_strides[0] * i0;
+    auto offset0 = stride0 * i0;
 
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1 += d1) {
-      auto offset1 = input_strides[1] * i1;
+      auto offset1 = stride1 * i1;
 
       auto input_value = input[offset0 + offset1];
       // Matches CPU: NaN wins, (val != val) is false for integral types
@@ -156,7 +158,7 @@ void max_pool_2d_input_iter(
       max_value = is_greater ? input_value : max_value;
 
       if IF_CONSTEXPR (return_indices) {
-        auto input_index = i0 * geom.input_sizes[1] + i1;
+        auto input_index = idx_t(i0) * geom.input_sizes[1] + i1;
         max_index = is_greater ? input_index : max_index;
       }
     }
@@ -167,10 +169,11 @@ void max_pool_2d_input_iter(
   }
 }
 
+template <typename idx_t>
 struct PoolOffsets {
-  int32_t output;
-  int32_t indices;
-  int32_t input_leading;
+  idx_t output;
+  idx_t indices;
+  idx_t input_leading;
 
   PoolOffsets() : output(0), indices(0), input_leading(0) {}
 };
@@ -181,28 +184,31 @@ struct PoolOffsets {
 // pooling dimension indices, `[d, h , w]`.
 // NOTE: This is templated per number of dimensions so that the compiler can
 // unroll the loop, giving better performance.
-template <int32_t dims>
-PoolOffsets find_pool_offsets_dim_specific(
+template <int32_t dims, typename idx_t, typename stride_t>
+PoolOffsets<idx_t> find_pool_offsets_dim_specific(
     constant int32_t* output_sizes,
-    constant int32_t* output_strides,
-    constant int32_t* indices_strides,
-    constant int32_t* input_strides,
+    constant stride_t* output_strides,
+    constant stride_t* indices_strides,
+    constant stride_t* input_strides,
     int32_t pooling_dim_indices[3],
     int32_t leading_dims,
     bool return_indices,
     uint tid) {
-  auto output_idx = static_cast<int32_t>(tid);
-  PoolOffsets offsets;
+  // Signed division is faster, but there can be more than 2^31 threads when
+  // 64-bit indexing is needed
+  using pos_t = ::metal::conditional_t<sizeof(idx_t) == 8, uint, int32_t>;
+  auto output_idx = static_cast<pos_t>(tid);
+  PoolOffsets<idx_t> offsets;
 
   for (auto dim = dims - 1; dim >= 0; dim--) {
-    auto dim_idx = output_idx % (output_sizes[dim]);
-    offsets.output += output_strides[dim] * dim_idx;
+    auto dim_idx = output_idx % static_cast<pos_t>(output_sizes[dim]);
+    offsets.output += idx_t(output_strides[dim]) * dim_idx;
     if (return_indices) {
-      offsets.indices += indices_strides[dim] * dim_idx;
+      offsets.indices += idx_t(indices_strides[dim]) * dim_idx;
     }
 
     if (dim < leading_dims) {
-      offsets.input_leading += input_strides[dim] * dim_idx;
+      offsets.input_leading += idx_t(input_strides[dim]) * dim_idx;
     } else {
       // Keep track of pooling dimension indices of the output element, so we
       // can use them in the input iteration later on.
@@ -210,17 +216,18 @@ PoolOffsets find_pool_offsets_dim_specific(
         pooling_dim_indices[dim - leading_dims] = dim_idx;
       }
     }
-    output_idx = output_idx / output_sizes[dim];
+    output_idx = output_idx / static_cast<pos_t>(output_sizes[dim]);
   }
 
   return offsets;
 }
 
-PoolOffsets find_pool_offsets(
+template <typename idx_t, typename stride_t>
+PoolOffsets<idx_t> find_pool_offsets(
     constant int32_t* output_sizes,
-    constant int32_t* output_strides,
-    constant int32_t* indices_strides,
-    constant int32_t* input_strides,
+    constant stride_t* output_strides,
+    constant stride_t* indices_strides,
+    constant stride_t* input_strides,
     int32_t pooling_dim_indices[3],
     int32_t dims,
     int32_t leading_dims,
@@ -228,7 +235,7 @@ PoolOffsets find_pool_offsets(
     uint tid) {
   switch (dims) {
     case 5:
-      return find_pool_offsets_dim_specific<5>(
+      return find_pool_offsets_dim_specific<5, idx_t, stride_t>(
           output_sizes,
           output_strides,
           indices_strides,
@@ -238,7 +245,7 @@ PoolOffsets find_pool_offsets(
           return_indices,
           tid);
     case 4:
-      return find_pool_offsets_dim_specific<4>(
+      return find_pool_offsets_dim_specific<4, idx_t, stride_t>(
           output_sizes,
           output_strides,
           indices_strides,
@@ -248,7 +255,7 @@ PoolOffsets find_pool_offsets(
           return_indices,
           tid);
     case 3:
-      return find_pool_offsets_dim_specific<3>(
+      return find_pool_offsets_dim_specific<3, idx_t, stride_t>(
           output_sizes,
           output_strides,
           indices_strides,
@@ -258,11 +265,12 @@ PoolOffsets find_pool_offsets(
           return_indices,
           tid);
   }
-  return PoolOffsets();
+  return PoolOffsets<idx_t>();
 }
 
-// Kernel computes one element of the output per kernel call.
-template <typename T>
+// Kernel computes one element of the output per kernel call. idx_t is the
+// type of the offsets, int32_t unless the tensors need 64-bit indexing.
+template <typename T, typename idx_t>
 kernel void max_pool(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -296,7 +304,7 @@ kernel void max_pool(
   // element of the output. We need to fill it with the proper values below.
   int32_t pooling_dim_indices[3];
 
-  PoolOffsets offsets = find_pool_offsets(
+  auto offsets = find_pool_offsets<idx_t>(
       output_sizes,
       output_strides,
       return_indices ? indices_strides : nullptr,
@@ -314,7 +322,7 @@ kernel void max_pool(
   switch (pooling_dims) {
     case 2:
       if (return_indices) {
-        return max_pool_2d_input_iter<T, /*return_indices=*/true>(
+        return max_pool_2d_input_iter<T, idx_t, /*return_indices=*/true>(
             input,
             output,
             indices,
@@ -322,7 +330,7 @@ kernel void max_pool(
             pooling_dim_indices,
             geom);
       } else {
-        return max_pool_2d_input_iter<T, /*return_indices=*/false>(
+        return max_pool_2d_input_iter<T, idx_t, /*return_indices=*/false>(
             input,
             output,
             indices,
@@ -331,7 +339,7 @@ kernel void max_pool(
             geom);
       }
     case 3:
-      return max_pool_3d_input_iter<T>(
+      return max_pool_3d_input_iter<T, idx_t>(
           input,
           output,
           indices,
@@ -356,23 +364,25 @@ kernel void max_pool2d_dense(
   const int32_t IH = p.input_sizes[p.dims - 2], IW = p.input_sizes[p.dims - 1];
   const int32_t OH = p.output_sizes[p.dims - 2],
                 OW = p.output_sizes[p.dims - 1];
-  int32_t oh, ow, stride_h, stride_w, in_base, out_offset;
+  int32_t oh, ow, stride_h, stride_w;
+  // Only the base offset of the image (NHWC) or plane (NCHW) needs 64 bits
+  int64_t in_base, out_offset;
   if IF_CONSTEXPR (channels_last) {
     // pos = (c, ow, n * OH + oh)
     oh = pos.z % OH;
     ow = pos.y;
     stride_w = C;
     stride_h = IW * C;
-    in_base = (pos.z / OH) * IH * stride_h + pos.x;
-    out_offset = (pos.z * OW + ow) * C + pos.x;
+    in_base = int64_t(pos.z / OH) * (IH * stride_h) + pos.x;
+    out_offset = int64_t(pos.z) * (OW * C) + (ow * C + pos.x);
   } else {
     // pos = (ow, oh, n * C + c)
     oh = pos.y;
     ow = pos.x;
     stride_w = 1;
     stride_h = IW;
-    in_base = pos.z * IH * IW;
-    out_offset = (pos.z * OH + oh) * OW + ow;
+    in_base = int64_t(pos.z) * (IH * IW);
+    out_offset = int64_t(pos.z) * (OH * OW) + (oh * OW + ow);
   }
   const auto dh = p.dilation[0], dw = p.dilation[1];
   auto h_start = oh * p.stride[0] - p.padding[0];
@@ -429,7 +439,7 @@ kernel void max_pool2d_s1_nchw(
   const int32_t ow0 = pos.x * kCols;
   const int32_t oh0 = pos.y * kRows;
   const int32_t c0 = ow0 - p.padding[1];
-  input += pos.z * IH * IW;
+  input += int64_t(pos.z) * (IH * IW);
 
   ::metal::array<::metal::array<T, kCols>, kRows> acc;
   ::metal::array<int32_t, kRows> first_row;
@@ -489,7 +499,7 @@ kernel void max_pool2d_s1_nchw(
     }
   }
 
-  const auto out_base = (pos.z * OH + oh0) * OW + ow0;
+  const auto out_base = int64_t(pos.z) * (OH * OW) + (oh0 * OW + ow0);
   for (int u = 0; u < kRows && oh0 + u < OH; ++u) {
     for (int v = 0; v < kCols && ow0 + v < OW; ++v) {
       output[out_base + u * OW + v] = acc[u][v];
@@ -540,7 +550,7 @@ kernel void max_pool_backward(
 
   auto leading_dims = dims - pooling_dims;
 
-  PoolOffsets offsets = find_pool_offsets(
+  auto offsets = find_pool_offsets<int32_t>(
       grad_output_sizes,
       grad_output_strides,
       indices_strides,
@@ -617,7 +627,7 @@ kernel void max_unpool(
   // NOTE: Since we're doing unpooling, the variable names "input" and "output"
   // are reversed compared to the pooling operations. So in `find_pool_offsets`,
   // we need to map "input" -> "output" and "output" -> "input".
-  PoolOffsets offsets = find_pool_offsets(
+  auto offsets = find_pool_offsets<int32_t>(
       /*output_sizes=*/input_sizes,
       /*output_strides=*/input_strides,
       indices_strides,
@@ -848,7 +858,7 @@ kernel void avg_pool(
   // element of the output. We need to fill it with the proper values below.
   int32_t pooling_dim_indices[3];
 
-  PoolOffsets offsets = find_pool_offsets(
+  auto offsets = find_pool_offsets<int32_t, int32_t>(
       output_sizes,
       output_strides,
       /*indices_strides=*/nullptr,
@@ -914,7 +924,7 @@ kernel void avg_pool_backward(
   // element of the output. We need to fill it with the proper values below.
   int32_t pooling_dim_indices[3];
 
-  PoolOffsets offsets = find_pool_offsets(
+  auto offsets = find_pool_offsets<int32_t, int32_t>(
       grad_output_sizes,
       grad_output_strides,
       /*indices_strides=*/nullptr,
@@ -961,13 +971,18 @@ kernel void avg_pool_backward(
       constant PoolingParams<5>& p [[buffer(3)]],               \
       uint3 pos [[thread_position_in_grid]]);
 
+#define REGISTER_MAX_POOL(DTYPE, IDX_T, SUFFIX)                    \
+  template [[host_name("max_pool" SUFFIX "_" #DTYPE)]] kernel void \
+  max_pool<DTYPE, IDX_T>(                                          \
+      device const DTYPE* input [[buffer(0)]],                     \
+      device DTYPE* output [[buffer(1)]],                          \
+      device int64_t* indices [[buffer(2)]],                       \
+      constant PoolingParams<5>& params [[buffer(3)]],             \
+      uint tid [[thread_position_in_grid]]);
+
 #define REGISTER_POOL_OP(DTYPE)                                               \
-  template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>(     \
-      device const DTYPE* input [[buffer(0)]],                                \
-      device DTYPE* output [[buffer(1)]],                                     \
-      device int64_t* indices [[buffer(2)]],                                  \
-      constant PoolingParams<5>& params [[buffer(3)]],                        \
-      uint tid [[thread_position_in_grid]]);                                  \
+  REGISTER_MAX_POOL(DTYPE, int32_t, "")                                       \
+  REGISTER_MAX_POOL(DTYPE, int64_t, "_i64")                                   \
                                                                               \
   template [[host_name("max_unpool_" #DTYPE)]] kernel void max_unpool<DTYPE>( \
       device DTYPE * output [[buffer(0)]],                                    \

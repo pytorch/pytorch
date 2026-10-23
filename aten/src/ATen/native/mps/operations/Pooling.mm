@@ -417,17 +417,14 @@ static void fill_pool_size_strides(PoolingParams<5>& params,
                                    const Tensor& output,
                                    const std::optional<Tensor>& indices_opt) {
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
-  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
-                                  (!indices.defined() || canUse32BitIndexMath(indices)),
-                              "MPS pooling does not support tensors that require 64-bit indexing");
   for (const auto dim : c10::irange(input.dim())) {
     params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
-    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
+    params.input_strides[dim] = input.stride(dim);
     params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
-    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(output.stride(dim));
+    params.output_strides[dim] = output.stride(dim);
     if (indices.defined()) {
       params.indices_sizes[dim] = safe_downcast<int32_t, int64_t>(indices.size(dim));
-      params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+      params.indices_strides[dim] = indices.stride(dim);
     }
   }
 }
@@ -443,9 +440,14 @@ static void launch_max_pool_kernel(const Tensor& input,
   }
 
   const auto memory_format = input.suggest_memory_format();
-  const bool is_dense = !params.adaptive && params.pooling_dims == 2 && input.is_contiguous(memory_format) &&
-      output.is_contiguous(memory_format) && (!indices_opt || indices_opt->is_contiguous(memory_format));
   const bool channels_last = memory_format == MemoryFormat::ChannelsLast;
+  const auto dims = params.dims;
+  // Dense kernels use 32-bit offsets within a plane (NCHW) or an image (NHWC)
+  const auto plane_numel = (channels_last ? input.size(dims - 3) : 1) *
+      std::max(input.size(dims - 2) * input.size(dims - 1), output.size(dims - 2) * output.size(dims - 1));
+  const bool is_dense = !params.adaptive && params.pooling_dims == 2 && input.is_contiguous(memory_format) &&
+      output.is_contiguous(memory_format) && (!indices_opt || indices_opt->is_contiguous(memory_format)) &&
+      plane_numel <= std::numeric_limits<int32_t>::max();
   const auto kw = params.kernel_size[1];
   // With indices the dense kernel is already bound by the int64 writes
   const bool use_s1 = is_dense && !channels_last && !params.return_indices && params.stride[0] == 1 &&
@@ -460,7 +462,9 @@ static void launch_max_pool_kernel(const Tensor& input,
                               params.return_indices ? "_idx" : "",
                               scalarToMetalTypeString(input));
   } else {
-    kernel_name = "max_pool_" + scalarToMetalTypeString(input);
+    const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
+        (!indices_opt || canUse32BitIndexMath(*indices_opt));
+    kernel_name = fmt::format("max_pool{}_{}", use_32bit ? "" : "_i64", scalarToMetalTypeString(input));
   }
 
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -476,7 +480,6 @@ static void launch_max_pool_kernel(const Tensor& input,
       if (!is_dense) {
         mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
       } else {
-        const auto dims = params.dims;
         const int64_t N = dims == 4 ? params.output_sizes[0] : 1;
         const int64_t C = params.output_sizes[dims - 3];
         const int64_t OH = params.output_sizes[dims - 2];
