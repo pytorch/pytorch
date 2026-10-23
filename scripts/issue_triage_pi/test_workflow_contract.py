@@ -19,7 +19,10 @@ def load_jobs(name: str) -> dict:
 
 
 PLAN = load_jobs("pi-triage-plan.yml")["plan"]
-CALLERS = {name: load_jobs(name) for name in ("issue-triage-pi.yml",)}
+CALLERS = {
+    name: load_jobs(name)
+    for name in ("issue-triage-pi.yml", "distributed-triage-pi.yml")
+}
 ACTION = yaml.safe_load((ROOT / ".github/actions/pi-agent/action.yml").read_text())
 RUN_SH = (ROOT / ".github/actions/pi-agent/run.sh").read_text()
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
@@ -126,6 +129,11 @@ class TriageWorkflowContract(unittest.TestCase):
     def test_no_workflow_runs_claude_code(self):
         for s in all_steps():
             self.assertNotIn("claude-code-action", s.get("uses", ""))
+
+    def test_manifest_job_runs_no_model_and_cannot_write_issues(self):
+        record = CALLERS["distributed-triage-pi.yml"]["record"]
+        self.assertEqual(record["permissions"].get("issues"), "read")
+        self.assertFalse(any("pi-agent" in s.get("uses", "") for s in steps(record)))
 
 
 class PiAgentActionContract(unittest.TestCase):
