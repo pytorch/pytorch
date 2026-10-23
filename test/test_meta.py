@@ -2073,6 +2073,14 @@ class TestMetaCore(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res.untyped_storage().data_ptr(), 0)
 
+    def test_weight_int4pack_mm(self):
+        x = torch.empty(4, 64, device="meta", dtype=torch.bfloat16)
+        w = torch.empty(8, 2, 32, 4, device="meta", dtype=torch.int32)
+        q_scale_and_zeros = torch.empty(2, 64, 2, device="meta", dtype=torch.bfloat16)
+        res = torch.ops.aten._weight_int4pack_mm(x, w, 32, q_scale_and_zeros)
+        self.assertEqual(res.shape, (4, 64))
+        self.assertEqual(res.dtype, torch.bfloat16)
+
     def test_index_select_out(self):
         def f():
             input = torch.randn([8, 16], device='meta')
