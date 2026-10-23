@@ -94,9 +94,6 @@ if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
     set "CUDNN_SETUP_FILE=%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
 )
 
-call :install_zlib
-if errorlevel 1 exit /b 1
-
 goto cuda_common
 
 :cuda_common
@@ -250,13 +247,15 @@ if exist "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\x64\*.*" (
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64\"
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
-call :install_zlib
-if errorlevel 1 exit /b 1
-
 echo Cleaning temp files
 rd /s /q "%SRC_DIR%\temp_build" || ver > nul
 
 :set_cuda_env_vars
+
+:: The wheel bundles whatever zlibwapi.dll is in System32, including when CUDA and
+:: cuDNN are already installed, so always install it.
+call :install_zlib
+if errorlevel 1 exit /b 1
 
 echo Setting up environment...
 set "PATH=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin;%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\libnvvp;%PATH%"
@@ -271,13 +270,15 @@ goto :eof
 echo Installing ZLIB dlls
 set "ZLIB_ZIP=zlib131dllx64.zip"
 set "ZLIB_SHA256=D09BE2E08B6519B89882CE89941936F2AE7190B038A711087384B80D05362ED9"
-curl --retry 3 --retry-all-errors -L "https://ossci-windows.s3.us-east-1.amazonaws.com/%ZLIB_ZIP%" --output "%SRC_DIR%\temp_build\%ZLIB_ZIP%"
+if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
+curl --retry 3 --retry-all-errors -L "https://ossci-windows.s3.us-east-1.amazonaws.com/zlib131dllx64.zip" --output "%SRC_DIR%\temp_build\%ZLIB_ZIP%"
 if errorlevel 1 exit /b 1
 for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%SRC_DIR%\temp_build\%ZLIB_ZIP%').Hash"') do set "ZLIB_ACTUAL_SHA256=%%H"
 if /I not "%ZLIB_ACTUAL_SHA256%"=="%ZLIB_SHA256%" (
     echo ZLIB checksum mismatch: got %ZLIB_ACTUAL_SHA256%, expected %ZLIB_SHA256%
     exit /b 1
 )
-7z x "%SRC_DIR%\temp_build\%ZLIB_ZIP%" -o"%SRC_DIR%\temp_build\zlib"
+7z x -y "%SRC_DIR%\temp_build\%ZLIB_ZIP%" -o"%SRC_DIR%\temp_build\zlib"
+if errorlevel 1 exit /b 1
 xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
 goto :eof

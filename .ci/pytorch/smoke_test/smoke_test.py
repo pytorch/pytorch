@@ -307,6 +307,30 @@ def check_cudnn_version(cuda_version: str, actual_cudnn_version: str) -> None:
     )
 
 
+def check_windows_zlibwapi_version() -> None:
+    """Fail if the bundled zlibwapi.dll is older than zlib 1.3.1 (see #201626)."""
+    dll = Path(torch.__file__).parent / "lib" / "zlibwapi.dll"
+    if not dll.exists():
+        print("zlibwapi.dll is not bundled, skipping zlib version check")
+        return
+
+    file_version = subprocess.check_output(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"(Get-Item '{dll}').VersionInfo.FileVersion",
+        ],
+        text=True,
+    ).strip()
+    version = tuple(int(part) for part in re.findall(r"\d+", file_version)[:3])
+    if version < (1, 3, 1):
+        raise RuntimeError(
+            f"Bundled {dll} reports version {file_version!r}, expected zlib >= 1.3.1"
+        )
+    print(f"zlibwapi.dll version check passed: {file_version}")
+
+
 def cudnn_to_version_str(cudnn_version: int) -> str:
     patch = int(cudnn_version % 10)
     minor = int((cudnn_version / 100) % 100)
@@ -699,6 +723,8 @@ def main() -> None:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
         test_sdpa("cuda")
+        if sys.platform == "win32":
+            check_windows_zlibwapi_version()
 
     if options.package in ["all", "torch_torchvision"]:
         smoke_test_modules(options.package)
