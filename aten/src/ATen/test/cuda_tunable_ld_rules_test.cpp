@@ -197,6 +197,37 @@ TEST(TunableLdRules, NearestMatchRoundsMSingleDimUp) {
   EXPECT_EQ(delta, 32);
 }
 
+TEST(TunableLdRules, NearestMatchRoundsNUpWhenBNotTransposed) {
+  // transb='N': ldb tracks K and is unchanged, lda and ldc never track N, so
+  // rounding N up leaves every leading dim identical.
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_32_512_256_ld_32_256_32");
+  const GemmShape c = ParseSig("NN_32_1024_256_ld_32_256_32");
+  EXPECT_TRUE(NearestLargerMatch(q, c, delta));
+  EXPECT_EQ(delta, 512);
+}
+
+TEST(TunableLdRules, NearestMatchRoundsNUpWhenBTransposed) {
+  // transb='T': ldb tracks N, so it has to grow with it and be tight in both.
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NT_32_16_256_ld_32_16_32");
+  EXPECT_TRUE(NearestLargerMatch(q, ParseSig("NT_32_32_256_ld_32_32_32"), delta));
+  EXPECT_EQ(delta, 16);
+  // Same donor but with ldb padded rather than tight: not a function of N.
+  EXPECT_FALSE(
+      NearestLargerMatch(q, ParseSig("NT_32_32_256_ld_32_40_32"), delta));
+}
+
+TEST(TunableLdRules, NearestMatchRejectsBatchedAgainstNonBatched) {
+  // A strided-batched solution and a plain GEMM solution are different ops
+  // even at batch 1, so has_b must agree before any dim is compared.
+  int64_t delta = -1;
+  const GemmShape batched = ParseSig("NN_8_512_256_B_2_ld_512_256_8");
+  const GemmShape plain = ParseSig("NN_8_512_256_ld_512_256_8");
+  EXPECT_FALSE(NearestLargerMatch(batched, plain, delta));
+  EXPECT_FALSE(NearestLargerMatch(plain, batched, delta));
+}
+
 TEST(TunableLdRules, NearestMatchRejectsRoundDown) {
   int64_t delta = -1;
   const GemmShape q = ParseSig("NN_64_512_256_ld_64_256_64");
