@@ -260,6 +260,49 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @skipIfNoCuteDSL
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("p", (1, 3, 5, 16))
+    @parametrize("inner_tree", (False, True))
+    def test_mvlgamma_sum_order(self, device, dtype, numerics, p, inner_tree):
+        from torch._native.registry import (
+            deregister_op_overrides,
+            native_decomp_table,
+            reenable_op_overrides,
+        )
+
+        if torch.ops.aten.sum.dim_IntList not in native_decomp_table(
+            overrides_only=True
+        ):
+            self.skipTest("requires active native inner-tree sum registration")
+        if not inner_tree:
+            deregister_op_overrides(disable_op_symbols="sum.dim_IntList")
+        try:
+            x = torch.linspace(10, 30, 257, device=device, dtype=dtype).requires_grad_()
+            grad = torch.linspace(-1.3, 1.7, x.numel(), device=device, dtype=dtype)
+
+            def fn(x):
+                return torch.mvlgamma(x, p)
+
+            expected = fn(x)
+            expected_grad = torch.autograd.grad(expected, x, grad)[0]
+            with config.patch(force_disable_caches=True):
+                torch._dynamo.reset()
+                result, codes = run_and_get_code(
+                    torch.compile(fn, fullgraph=True, options={"numerics": numerics}), x
+                )
+                self.assertIn("@triton.jit", "\n".join(codes))
+                grads, codes = run_and_get_code(torch.autograd.grad, result, x, grad)
+                self.assertIn("@triton.jit", "\n".join(codes))
+            bits = _BIT_VIEW[dtype]
+            self.assertEqual(result.view(bits), expected.view(bits))
+            self.assertEqual(grads[0].view(bits), expected_grad.view(bits))
+        finally:
+            if not inner_tree:
+                reenable_op_overrides(enable_op_symbols="sum.dim_IntList")
+            torch._dynamo.reset()
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("lambd", (-0.5, 0.0, 0.3, float("inf"), float("nan")))
