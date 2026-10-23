@@ -25,6 +25,7 @@ import functools
 import getpass
 import inspect
 import itertools
+import json
 import logging
 import os
 import re
@@ -45,7 +46,11 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._config_module import ConfigModule
-from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
+from torch.utils._content_store import (
+    _check_storage_nbytes,
+    ContentStoreReader,
+    ContentStoreWriter,
+)
 
 from . import config
 from .utils import clone_inputs, get_debug_dir, warn_once
@@ -843,6 +848,20 @@ class NopInputReader:
         self.total += 1
 
 
+_STORAGE_MANIFEST_SCHEMA_VERSION = 1
+
+
+def _validate_capture_store_path(save_dir: str, store_root: str) -> None:
+    capture_root = os.path.dirname(os.path.abspath(save_dir))
+    store_root = os.path.abspath(store_root)
+    try:
+        inside_capture = os.path.commonpath((capture_root, store_root)) == capture_root
+    except ValueError:
+        inside_capture = False
+    if not inside_capture:
+        raise ValueError(f"content store path escapes the capture root: {store_root}")
+
+
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
@@ -855,7 +874,73 @@ class InputReader:
         # reproduces even on random data.
         if save_dir is None:
             log.warning("no save_dir specified, will generate random data")
-        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
+        self.store = None
+        self.strict_storage = False
+        if save_dir is not None:
+            storage_manifest_path = os.path.join(save_dir, "storage_manifest.json")
+            capture_metadata_path = os.path.join(save_dir, "capture_metadata.json")
+            storage_manifest_required = False
+            if os.path.exists(capture_metadata_path):
+                with open(capture_metadata_path) as f:
+                    capture_metadata = json.load(f)
+                if not isinstance(capture_metadata, dict):
+                    raise ValueError("capture metadata must be a JSON object")
+                storage_manifest_required = (
+                    capture_metadata.get("storage_manifest_required") is True
+                )
+            if os.path.exists(storage_manifest_path):
+                with open(storage_manifest_path) as f:
+                    storage_manifest = json.load(f)
+                if not isinstance(storage_manifest, dict):
+                    raise ValueError("storage manifest must be a JSON object")
+                if (
+                    storage_manifest.get("schema_version")
+                    != _STORAGE_MANIFEST_SCHEMA_VERSION
+                ):
+                    raise ValueError(
+                        "unsupported storage manifest schema: "
+                        f"{storage_manifest.get('schema_version')}"
+                    )
+                store = storage_manifest.get("store")
+                if not isinstance(store, str) or not store:
+                    raise ValueError(
+                        "storage manifest 'store' must be a non-empty string"
+                    )
+                storages = storage_manifest.get("storages")
+                if not isinstance(storages, dict):
+                    raise ValueError("storage manifest 'storages' must be an object")
+                for metadata in storages.values():
+                    if not isinstance(metadata, dict):
+                        raise ValueError("storage manifest entries must be objects")
+                    path = metadata.get("path")
+                    if not isinstance(path, str) or not path:
+                        raise ValueError(
+                            "storage manifest entry 'path' must be a non-empty string"
+                        )
+                    codec = metadata.get("codec")
+                    if codec not in ("none", "zstd"):
+                        raise ValueError(f"unknown content-store codec: {codec}")
+                    for field in ("logical_nbytes", "stored_nbytes"):
+                        value = metadata.get(field)
+                        if type(value) is not int or value < 0:
+                            raise ValueError(
+                                f"storage manifest entry '{field}' must be "
+                                "a non-negative integer"
+                            )
+                store_root = os.path.abspath(os.path.join(save_dir, store))
+                _validate_capture_store_path(save_dir, store_root)
+                self.store = ContentStoreReader(
+                    store_root,
+                    cache=False,
+                    storage_metadata=storages,
+                )
+                self.strict_storage = True
+            elif storage_manifest_required:
+                raise FileNotFoundError(
+                    f"required storage manifest is missing: {storage_manifest_path}"
+                )
+            else:
+                self.store = ContentStoreReader(save_dir, cache=False)
         self.args: list[Any] = []
         self.pbar = pbar
 
@@ -875,8 +960,10 @@ class InputReader:
             try:
                 storage = self.store.read_storage(storage_hash)
             except FileNotFoundError:
-                pass
+                if self.strict_storage:
+                    raise
             else:
+                _check_storage_nbytes(storage_hash, nbytes, storage.nbytes())
                 if device != storage.device:
                     log.warning("device mismatch: %s != %s", device, storage.device)
                     # TODO: transfer it to the right device?  But failing this
@@ -980,27 +1067,66 @@ def _serialize_sym_tuple(vals: Sequence[int | torch.SymInt]) -> str:
 
 
 class InputWriter:
-    def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
+    """Serialize inputs, optionally using a store shared by sibling bundles.
+
+    For a concrete save_dir, a shared store must stay within its parent capture
+    directory. Call write_storage_manifest after writing the bundle's inputs.
+    With save_dir=None, the caller owns storage lookup and bundle metadata.
+    """
+
+    def __init__(
+        self,
+        save_dir: str | None,
+        *,
+        stable_hash: bool | None = None,
+        content_store: ContentStoreWriter | None = None,
+    ) -> None:
         self._lines: list[str] = []
         # TODO: consider ensuring tensor and storage counters line up?
         self.storage_counter = itertools.count()
         self.save_dir = save_dir
-        self.store = (
-            ContentStoreWriter(save_dir, stable_hash=stable_hash)
-            if save_dir is not None
-            else None
-        )
+        self.store = content_store
+        if content_store is not None:
+            if stable_hash is not None and stable_hash != content_store.stable_hash:
+                raise ValueError("stable_hash must match the supplied content store")
+            if not content_store.stable_hash:
+                raise ValueError("a shared content store requires stable_hash=True")
+        if self.store is None and save_dir is not None:
+            self.store = ContentStoreWriter(save_dir, stable_hash=bool(stable_hash))
         self.seen_storages: dict[StorageWeakRef, str] = {}
+        self.storage_hashes: set[str] = set()
 
     def lines(self) -> list[str]:
         r = [
             "def load_args(reader):",
         ]
-        r.extend(f"    {l}" for l in self._lines)
+        r.extend(f"    {l}" for l in self._lines or ["pass"])
         # In case we need to change the internal format of load_args
         # in an FC-breaking way
         r.append("load_args._version = 0")
         return r
+
+    def write_storage_manifest(self) -> None:
+        """Record which content-store storages this bundle's load_args reads.
+
+        InputReader uses the manifest to locate and decode those storages,
+        including from a store shared with sibling bundles. Schema 1 records the
+        relative store path and each storage's path, codec, and byte sizes in
+        storage_manifest.json. capture_metadata.json marks shared-store bundles
+        with storage_manifest_required=True so a missing manifest is an error.
+        """
+        if self.save_dir is None or self.store is None:
+            raise RuntimeError("a storage manifest needs a save_dir and a store")
+        _validate_capture_store_path(self.save_dir, self.store.loc)
+        manifest = {
+            "schema_version": _STORAGE_MANIFEST_SCHEMA_VERSION,
+            "store": os.path.relpath(self.store.loc, self.save_dir),
+            "storages": {
+                h: self.store.storage_metadata[h] for h in sorted(self.storage_hashes)
+            },
+        }
+        with open(os.path.join(self.save_dir, "storage_manifest.json"), "w") as f:
+            json.dump(manifest, f, indent=2)
 
     # Storages are untyped, but we need to initialize them with data if
     # we don't have the real data, so we give a hint saying what kind
@@ -1038,7 +1164,24 @@ class InputWriter:
         nbytes_source = _serialize_sym_expr(nbytes)
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
+            if self.save_dir is not None and os.path.abspath(
+                self.store.loc
+            ) != os.path.abspath(self.save_dir):
+                _validate_capture_store_path(self.save_dir, self.store.loc)
+                if not self.storage_hashes:
+                    metadata_path = os.path.join(self.save_dir, "capture_metadata.json")
+                    metadata: dict[str, Any] = {}
+                    if os.path.exists(metadata_path):
+                        with open(metadata_path) as f:
+                            metadata = json.load(f)
+                        if not isinstance(metadata, dict):
+                            raise ValueError("capture metadata must be a JSON object")
+                    metadata["storage_manifest_required"] = True
+                    os.makedirs(self.save_dir, exist_ok=True)
+                    with open(metadata_path, "w") as f:
+                        json.dump(metadata, f, indent=2)
             storage_hash = self.store.write_storage(untyped_storage)
+            self.storage_hashes.add(storage_hash)
         self._lines.append(
             f"{v} = reader.storage({storage_hash!r}, {nbytes_source}{maybe_device}{maybe_dtype_hint})"
         )
