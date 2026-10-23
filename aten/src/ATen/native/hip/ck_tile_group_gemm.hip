@@ -205,29 +205,35 @@ namespace at::hip::detail {
 			using AnyShape = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>;
 
 			// Forward (2D x 3D, 3D x 3D): row-major A, column-major B
+			// List order breaks load_cost ties, which happen mostly on small shapes, so faster small tiles come first.
 			struct Forward {
 				using Candidates = std::tuple<
-					CkTileGroupGemmConfig<256, 192, 64, 16, 16, 32, 2, 2, false, true, false>,
-					CkTileGroupGemmConfig<128, 192, 64, 32, 32, 16, 2, 2, false, true, false>>;
+					CkTileGroupGemmConfig<128, 192, 64, 32, 32, 16, 2, 2, false, true, false>,
+					CkTileGroupGemmConfig<128, 128, 64, 32, 32, 16, 2, 2, false, true, false>,
+					CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>,
+					CkTileGroupGemmConfig<256, 192, 64, 16, 16, 32, 2, 2, false, true, false>>;
 				using Unaligned = AnyShape;
 			};
 
 			// dX (2D x 3D, 3D x 3D): row-major A and B
 			struct GradInput {
 				using Candidates = std::tuple<
+					CkTileGroupGemmConfig<256, 64, 64, 16, 16, 32, 2, 2, false, false, false>,
 					// eight waves split 256x256 into 128 accumulators per lane
 					CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>,
-					CkTileGroupGemmConfig<256, 128, 32, 16, 16, 32, 2, 2, false, true, false>,
 					CkTileGroupGemmConfig<128, 128, 64, 16, 16, 32, 2, 2, false, false, false>,
-					CkTileGroupGemmConfig<128, 64, 64, 16, 16, 32, 2, 2, false, false, false>>;
+					CkTileGroupGemmConfig<256, 128, 32, 16, 16, 32, 2, 2, false, false, false>,
+					CkTileGroupGemmConfig<128, 64, 64, 16, 16, 32, 2, 2, false, false, false>,
+					CkTileGroupGemmConfig<256, 128, 32, 16, 16, 32, 2, 2, false, true, false>>;
 				using Unaligned = AnyShape;
 			};
 
-			// dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K
+			// dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K. No eight-wave 256x256:
+			// load_cost picks it for large M, where it is up to 28% slower here.
 			struct GradWeight {
 				using Candidates = std::tuple<
-					CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true>,
-					CkTileGroupGemmConfig<128, 128, 64, 16, 16, 32, 2, 2, false, false, true>>;
+					CkTileGroupGemmConfig<128, 128, 64, 32, 32, 16, 2, 2, false, false, true>,
+					CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true>>;
 				using Unaligned = AnyShape;
 			};
 
