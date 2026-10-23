@@ -293,6 +293,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Cleaning temp files
-rd /s /q "%SRC_DIR%\temp_build" || ver > nul
+del /q "%SRC_DIR%\temp_build\%ZLIB_ZIP%"
+rd /s /q "%SRC_DIR%\temp_build\zlib" || ver > nul
 goto :eof
