@@ -68,14 +68,13 @@ class WorkerSpec:
                      if not specified then will choose a random free port
         master_addr: fixed master_addr to run the c10d store on rank 0
                      if not specified then will choose hostname on agent rank 0
-        redirects: redirect std streams to a file,
-                   selectively redirect for a particular
-                   local rank by passing a map
-        tee: tees the specified std stream(s) to console + file,
-             selectively tee for a particular local rank by passing a map,
-             takes precedence over ``redirects`` settings.
+        local_addr: address of the local node, informational only; the agent
+                    does not read it. The address advertised during rendezvous
+                    comes from ``RendezvousParameters.local_addr`` (defaults to
+                    the local FQDN)
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        numa_options: NUMA binding options for the workers (see :ref:`numa-api`)
         duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
                                  that match _any_ of the filter strings.
         duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
