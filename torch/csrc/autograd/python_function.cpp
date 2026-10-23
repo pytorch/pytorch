@@ -37,6 +37,7 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -162,6 +163,41 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   return ret.release();
 }
 
+// Returns a bool class attribute, such as boxed_grads_call, of the
+// autograd.Function whose apply created ctx, or false if none did. Read where
+// needed instead of in apply, to keep apply's attribute lookups few.
+bool get_forward_cls_flag(PyObject* ctx, PyObject* name) {
+  static PyObject* forward_cls_name =
+      PyUnicode_InternFromString("_forward_cls");
+  PyObject* forward_cls = nullptr;
+  if (PyObject_GetOptionalAttr(
+          reinterpret_cast<PyObject*>(Py_TYPE(ctx)),
+          forward_cls_name,
+          &forward_cls) < 0) {
+    throw_python_error();
+  }
+  if (!forward_cls) {
+    return false;
+  }
+  THPObjectPtr forward_cls_ptr(forward_cls);
+  THPObjectPtr attr(PyObject_GetAttr(forward_cls, name));
+  if (!attr) {
+    throw_python_error();
+  }
+  TORCH_CHECK(
+      PyBool_Check(attr.get()),
+      THPUtils_unpackString(name),
+      " must be a bool, got ",
+      Py_TYPE(attr.get())->tp_name);
+  return Py_IsTrue(attr.get());
+}
+
+bool clear_saved_tensors_on_access(THPFunction* self) {
+  static PyObject* name =
+      PyUnicode_InternFromString("clear_saved_tensors_on_access");
+  return get_forward_cls_flag(reinterpret_cast<PyObject*>(self), name);
+}
+
 } // namespace
 
 namespace torch::autograd {
@@ -180,7 +216,15 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   inputs.clear();
 
   THPObjectPtr r;
-  if (py_fn->boxed_grads_call) {
+  // With boxed_grads_call, grads are passed as a single mutable list argument
+  // instead of individual args in an immutable tuple, allowing backward to
+  // free individual grads mid-execution and reduce peak memory. Used by pt2
+  // compiled AutogradFunctions: the standard calling convention keeps a
+  // reference to all grads (via the immutable args tuple) for the entire
+  // backward, preventing deallocation after last use.
+  static PyObject* boxed_grads_call_name =
+      PyUnicode_InternFromString("boxed_grads_call");
+  if (get_forward_cls_flag(pyobj(), boxed_grads_call_name)) {
     // Move grad tensors from the immutable args tuple into a plain list
     // and call apply_boxed instead of apply. This lets backward pop/clear
     // individual grads to free memory mid-execution, because the mutable
@@ -624,7 +668,6 @@ static PyObject* THPFunction_new(
   self->materialize_grads = true;
   self->pure_view = false;
   self->materialize_non_diff_grads = true;
-  self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
   self->output_grad_dtypes = nullptr;
   torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
@@ -1513,23 +1556,6 @@ static PyObject* get_base_setup_context() {
   return setup_context;
 }
 
-// Stable interned names let CPython cache type lookups without caching values.
-// They are intentionally kept alive for the lifetime of the process.
-static int is_setup_context_defined(PyObject* cls) {
-  static PyObject* setup_context_name =
-      PyUnicode_InternFromString("setup_context");
-  auto cls_setup_context =
-      THPObjectPtr(PyObject_GetAttr(cls, setup_context_name));
-  if (!cls_setup_context) {
-    return -1;
-  }
-  auto orig_setup_context = get_base_setup_context();
-  if (!orig_setup_context) {
-    return -1;
-  }
-  return cls_setup_context.get() != orig_setup_context;
-}
-
 static PyObject* get_autograd_function_attr(const char* name) {
   auto module_ = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
   if (!module_) {
@@ -1538,31 +1564,119 @@ static PyObject* get_autograd_function_attr(const char* name) {
   return PyObject_GetAttrString(module_, name);
 }
 
-static int is_function_subclass(PyObject* cls) {
-  // This checks for subclasses of torch.autograd.Function, not its internal
-  // base torch.autograd.function._SingleLevelFunction.
-  THPObjectPtr function(get_autograd_function_attr("Function"));
-  if (!function) {
-    return -1;
+// Returns a borrowed reference to torch.autograd.Function, or nullptr with a
+// Python error set. Like the base setup_context, intentionally never freed.
+static PyObject* get_function_class() {
+  static std::atomic<PyObject*> function_class = nullptr;
+
+  PyObject* function = function_class.load(std::memory_order_acquire);
+  if (function != nullptr) {
+    return function;
   }
-  return PyObject_IsSubclass(cls, function.get());
+  function = get_autograd_function_attr("Function");
+  if (!function) {
+    return nullptr;
+  }
+  PyObject* expected = nullptr;
+  if (!function_class.compare_exchange_strong(
+          expected, function, std::memory_order_acq_rel)) {
+    Py_DECREF(function);
+    return expected;
+  }
+  return function;
+}
+
+// Returns a new reference to cls.<name>, or nullptr with a Python error set.
+//
+// getattr consults CPython's type attribute cache, which picks slots by the
+// address of the attribute name. Names whose slots collide with each other, or
+// with lookups elsewhere, miss on every call, making apply's cost depend on
+// memory layout. So for classes whose metaclass is FunctionMeta, which defines
+// none of the names apply reads, search the dicts of the MRO directly.
+static PyObject* get_class_attr(PyObject* cls, PyObject* name) {
+  auto* function = get_function_class();
+  if (!function) {
+    return nullptr;
+  }
+  if (Py_TYPE(cls) == Py_TYPE(function)) {
+    THPObjectPtr mro(Py_NewRef(reinterpret_cast<PyTypeObject*>(cls)->tp_mro));
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(mro.get()))) {
+#if IS_PYTHON_3_12_PLUS
+      THPObjectPtr dict(PyType_GetDict(
+          reinterpret_cast<PyTypeObject*>(PyTuple_GET_ITEM(mro.get(), i))));
+#else
+      THPObjectPtr dict(Py_XNewRef(
+          reinterpret_cast<PyTypeObject*>(PyTuple_GET_ITEM(mro.get(), i))
+              ->tp_dict));
+#endif
+      PyObject* attr = nullptr;
+      if (!dict || PyDict_GetItemRef(dict, name, &attr) < 0) {
+        return nullptr;
+      }
+      if (attr) {
+        auto get = Py_TYPE(attr)->tp_descr_get;
+        if (!get) {
+          return attr;
+        }
+        THPObjectPtr descr(attr);
+        return get(attr, nullptr, cls);
+      }
+    }
+  }
+  return PyObject_GetAttr(cls, name);
+}
+
+// The class attributes of an autograd.Function that apply reads on every call.
+struct FunctionClassInfo {
+  THPObjectPtr backward_cls;
+  THPObjectPtr forward;
+  THPObjectPtr setup_context;
+  bool setup_ctx_defined = false;
+  // Whether cls subclasses torch.autograd.Function, not just its internal base
+  // torch.autograd.function._SingleLevelFunction.
+  bool function_subclass = false;
+};
+
+// Returns false with a Python error set on failure.
+static bool get_function_class_info(PyObject* cls, FunctionClassInfo& info) {
+  // Interned names, intentionally never freed.
+  static PyObject* backward_cls_name =
+      PyUnicode_InternFromString("_backward_cls");
+  static PyObject* setup_context_name =
+      PyUnicode_InternFromString("setup_context");
+  static PyObject* forward_name = PyUnicode_InternFromString("forward");
+
+  info.setup_context = get_class_attr(cls, setup_context_name);
+  if (!info.setup_context) {
+    return false;
+  }
+  auto base_setup_context = get_base_setup_context();
+  if (!base_setup_context) {
+    return false;
+  }
+  info.setup_ctx_defined = info.setup_context.get() != base_setup_context;
+
+  // Not PyObject_IsSubclass, which looks up __subclasscheck__ on FunctionMeta
+  info.function_subclass = PyType_IsSubtype(
+      reinterpret_cast<PyTypeObject*>(cls),
+      reinterpret_cast<PyTypeObject*>(get_function_class()));
+
+  info.backward_cls = get_class_attr(cls, backward_cls_name);
+  info.forward = get_class_attr(cls, forward_name);
+  return info.backward_cls && info.forward;
 }
 
 static PyObject* bind_default_args(
-    PyObject* cls,
+    PyObject* forward_fn,
     PyObject* args,
     PyObject* kwargs) {
-  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
-  if (!forward_fn) {
-    return nullptr;
-  }
   THPObjectPtr helper(get_autograd_function_attr("_bind_default_args"));
   if (!helper) {
     return nullptr;
   }
   auto* kwargs_arg = kwargs ? kwargs : Py_None;
   return PyObject_CallFunctionObjArgs(
-      helper.get(), forward_fn.get(), args, kwargs_arg, nullptr);
+      helper.get(), forward_fn, args, kwargs_arg, nullptr);
 }
 
 static PyObject* call_custom_function_call(
@@ -1578,26 +1692,23 @@ static PyObject* call_custom_function_call(
       helper.get(), cls, args, kwargs_arg, nullptr);
 }
 
-// Given cls (a Function subclass), args, and kwargs, resolve kwargs into
-// positional arguments by inspecting the forward method's signature.
+// Resolves kwargs into positional arguments by inspecting the signature of a
+// Function subclass's forward. setup_ctx_defined says whether the subclass
+// overrides setup_context.
 // Returns a new reference to a tuple of positional args.
 //
 // Uses co_varnames/co_argcount directly instead of inspect.signature to
 // stay in C on this hot path. This means we don't handle *args, **kwargs,
 // defaults, or decorated/wrapped forwards correctly.
 static PyObject* resolve_kwargs_to_positional(
-    PyObject* cls,
+    PyObject* func,
+    bool setup_ctx_defined,
     PyObject* args,
     PyObject* kwargs) {
   if (!kwargs || PyDict_Size(kwargs) == 0) {
     return Py_NewRef(args);
   }
 
-  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
-  if (!forward_fn)
-    return nullptr;
-
-  PyObject* func = forward_fn.get();
   THPObjectPtr code_py(PyObject_GetAttrString(func, "__code__"));
   if (!code_py)
     return nullptr;
@@ -1612,19 +1723,9 @@ static PyObject* resolve_kwargs_to_positional(
   if (!varnames_obj)
     return nullptr;
 
-  // Determine if forward takes ctx as first arg.
-  // If setup_context is overridden, forward does NOT take ctx.
-  auto cls_setup_context =
-      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
-  if (!cls_setup_context)
-    return nullptr;
-  auto orig_setup_context = get_base_setup_context();
-  if (!orig_setup_context)
-    return nullptr;
-  bool has_ctx = (cls_setup_context.get() == orig_setup_context);
-
-  // param_offset: number of leading params to skip (ctx for old-style)
-  Py_ssize_t param_offset = has_ctx ? 1 : 0;
+  // param_offset: number of leading params to skip, i.e. ctx unless
+  // setup_context is overridden.
+  Py_ssize_t param_offset = setup_ctx_defined ? 0 : 1;
 
   // Number of user-visible parameters (excluding ctx)
   Py_ssize_t num_params = co_argcount - param_offset;
@@ -1743,31 +1844,19 @@ PyObject* THPFunction_apply(
     PyObject* orig_kwargs) {
   HANDLE_TH_ERRORS
 
-  static PyObject* backward_cls_name =
-      PyUnicode_InternFromString("_backward_cls");
-  static PyObject* clear_saved_tensors_on_access_name =
-      PyUnicode_InternFromString("clear_saved_tensors_on_access");
-  static PyObject* boxed_grads_call_name =
-      PyUnicode_InternFromString("boxed_grads_call");
-  static PyObject* forward_name = PyUnicode_InternFromString("forward");
-
-  auto is_setup_ctx_defined = is_setup_context_defined(cls);
-  if (is_setup_ctx_defined == -1) {
+  FunctionClassInfo cls_info;
+  if (!get_function_class_info(cls, cls_info)) {
     return nullptr;
   }
+  const bool is_setup_ctx_defined = cls_info.setup_ctx_defined;
 
   THPObjectPtr args(Py_NewRef(orig_args));
   THPObjectPtr kwargs(orig_kwargs ? Py_NewRef(orig_kwargs) : nullptr);
-  int function_subclass = -1;
 
   if (is_setup_ctx_defined) {
-    function_subclass = is_function_subclass(cls);
-    if (function_subclass == -1) {
-      return nullptr;
-    }
-    if (function_subclass) {
+    if (cls_info.function_subclass) {
       THPObjectPtr bound_args_kwargs(
-          bind_default_args(cls, args.get(), kwargs.get()));
+          bind_default_args(cls_info.forward, args.get(), kwargs.get()));
       if (!bound_args_kwargs) {
         return nullptr;
       }
@@ -1779,13 +1868,7 @@ PyObject* THPFunction_apply(
   }
 
   if (are_functorch_transforms_active()) {
-    if (function_subclass == -1) {
-      function_subclass = is_function_subclass(cls);
-      if (function_subclass == -1) {
-        return nullptr;
-      }
-    }
-    if (function_subclass && !is_setup_ctx_defined) {
+    if (cls_info.function_subclass && !is_setup_ctx_defined) {
       PyErr_SetString(
           PyExc_RuntimeError,
           "In order to use an autograd.Function with functorch transforms "
@@ -1794,13 +1877,13 @@ PyObject* THPFunction_apply(
           "https://pytorch.org/docs/main/notes/extending.func.html");
       return nullptr;
     }
-    if (function_subclass) {
+    if (cls_info.function_subclass) {
       return call_custom_function_call(cls, args.get(), kwargs.get());
     }
   }
 
-  THPObjectPtr resolved_args(
-      resolve_kwargs_to_positional(cls, args.get(), kwargs.get()));
+  THPObjectPtr resolved_args(resolve_kwargs_to_positional(
+      cls_info.forward, is_setup_ctx_defined, args.get(), kwargs.get()));
   if (!resolved_args)
     return nullptr;
   auto* unwrapped_args =
@@ -1841,10 +1924,7 @@ PyObject* THPFunction_apply(
     functorch_tls->checkSupportsSingleLevelAutogradFunction();
   }
 
-  THPObjectPtr backward_cls(PyObject_GetAttr(cls, backward_cls_name));
-  if (!backward_cls)
-    return nullptr;
-  THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
+  THPObjectPtr ctx_obj(PyObject_CallNoArgs(cls_info.backward_cls));
   if (!ctx_obj)
     return nullptr;
   auto* ctx = reinterpret_cast<THPFunction*>(ctx_obj.get());
@@ -1860,28 +1940,6 @@ PyObject* THPFunction_apply(
   ctx->needs_input_grad_bits.emplace(std::move(input_info.needs_input_grad));
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
-  // Get clear_saved_tensors_on_access from the Function class
-  THPObjectPtr clear_attr(
-      PyObject_GetAttr(cls, clear_saved_tensors_on_access_name));
-  TORCH_CHECK(
-      clear_attr,
-      "autograd.Function is missing clear_saved_tensors_on_access attribute");
-  TORCH_CHECK(
-      PyBool_Check(clear_attr.get()),
-      "clear_saved_tensors_on_access must be a bool, got ",
-      Py_TYPE(clear_attr.get())->tp_name);
-  ctx->clear_saved_tensors_on_access = Py_IsTrue(clear_attr.get());
-
-  // Get boxed_grads_call from the Function class
-  THPObjectPtr boxed_attr(PyObject_GetAttr(cls, boxed_grads_call_name));
-  TORCH_CHECK(
-      boxed_attr, "autograd.Function is missing boxed_grads_call attribute");
-  TORCH_CHECK(
-      PyBool_Check(boxed_attr.get()),
-      "boxed_grads_call must be a bool, got ",
-      Py_TYPE(boxed_attr.get())->tp_name);
-  ctx->boxed_grads_call = Py_IsTrue(boxed_attr.get());
-
   auto num_args = PyTuple_GET_SIZE(inputs);
 
   // Call forward
@@ -1889,9 +1947,7 @@ PyObject* THPFunction_apply(
   {
     AutoGradMode grad_mode(false);
     at::AutoFwGradMode fw_grad_mode(false);
-    THPObjectPtr forward_fn(PyObject_GetAttr(cls, forward_name));
-    if (!forward_fn)
-      return nullptr;
+    PyObject* forward_fn = cls_info.forward.get();
     if (is_setup_ctx_defined) {
       // call forward followed by setup_context
       output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
@@ -1904,10 +1960,8 @@ PyObject* THPFunction_apply(
       if (!ctx_input_output_tuple) {
         return nullptr;
       }
-      THPObjectPtr setup_context_fn(
-          PyObject_GetAttrString(cls, "setup_context"));
       THPObjectPtr result(
-          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple));
+          PyObject_CallObject(cls_info.setup_context, ctx_input_output_tuple));
       if (!result) {
         return nullptr;
       }
@@ -2041,7 +2095,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
       return nullptr;
     }
 
-    if (self->clear_saved_tensors_on_access) {
+    if (clear_saved_tensors_on_access(self)) {
       self->saved_variables.clear();
       self->saved_tensors_accessed_and_cleared = true;
     }
@@ -2071,7 +2125,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
     return nullptr;
   }
 
-  if (self->clear_saved_tensors_on_access) {
+  if (clear_saved_tensors_on_access(self)) {
     self->saved_variables.clear();
     self->saved_tensors_accessed_and_cleared = true;
   }
