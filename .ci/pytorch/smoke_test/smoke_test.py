@@ -313,7 +313,13 @@ def check_windows_zlibwapi_version() -> None:
     if not dll.exists():
         # cmake/PostBuildSteps.cmake bundles the CUDA DLLs, including zlibwapi.dll,
         # only into wheels that do not depend on the cuda-toolkit pip package.
-        if find_torch_cuda_toolkit_metadata_version() is None:
+        from importlib import metadata
+
+        requirements = metadata.distribution("torch").requires or []
+        if not any(
+            requirement.partition(";")[0].strip().lower().startswith("cuda-toolkit")
+            for requirement in requirements
+        ):
             raise RuntimeError(
                 f"{dll} is missing, but this wheel has no cuda-toolkit requirement "
                 "and is expected to bundle it"
