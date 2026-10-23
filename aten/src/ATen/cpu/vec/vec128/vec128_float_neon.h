@@ -575,7 +575,6 @@ class Vectorized<float> {
   Vectorized<float> tanh() const {
     return sve_to_neon(at::vec::tanh_impl(
         neon_to_sve(values),
-        svptrue_b32(),
         [](svfloat32_t input) -> svfloat32_t {
           return neon_to_sve(Vectorized<float>(sve_to_neon(input)).exp_u20());
         }));

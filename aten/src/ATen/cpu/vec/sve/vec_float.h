@@ -67,8 +67,8 @@ template <typename ExpU20>
 // upstream minor version.
 __attribute__((optimize("O0")))
 #endif
-static inline svfloat32_t
-tanh_impl(svfloat32_t values, svbool_t pg, ExpU20 exp_u20) {
+static inline svfloat32_t tanh_impl(svfloat32_t values, ExpU20 exp_u20) {
+  const svbool_t pg = svptrue_b32();
   // Constants used for the tanh calculation.
   const svfloat32_t CONST_1 =
       svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
@@ -573,10 +573,9 @@ class Vectorized<float> {
         Vectorized<float>(Sleef_tanfx_u10sve(values)), map(std::tan));
   }
   Vectorized<float> tanh() const {
-    return at::vec::tanh_impl(
-        values, svptrue_b32(), [](svfloat32_t input) -> svfloat32_t {
-          return Vectorized<float>(input).exp_u20();
-        });
+    return at::vec::tanh_impl(values, [](svfloat32_t input) -> svfloat32_t {
+      return Vectorized<float>(input).exp_u20();
+    });
   }
 #endif
   Vectorized<float> trunc() const {
