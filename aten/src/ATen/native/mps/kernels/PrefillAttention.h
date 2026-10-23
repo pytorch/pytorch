@@ -7,9 +7,9 @@
 // real width Dv <= BD.
 // Operates on PyTorch's dense [B, H, L, D] layout via per-tensor strides.
 //
-// Included from Attention.metal — no top-level includes / `using` here so the
-// includer controls them. Builds as part of Attention.metallib (one file →
-// one bundled section), so Attention.mm only needs a single library handle.
+// Included from Attention.metal, which supplies `using namespace metal`. Builds
+// as part of Attention.metallib (one file, one bundled section), so
+// Attention.mm only needs a single library handle.
 #pragma once
 
 #include <ATen/native/mps/kernels/Attention.h>

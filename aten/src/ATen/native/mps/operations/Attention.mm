@@ -4,6 +4,7 @@
 #include <optional>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Attention.h>
@@ -17,7 +18,6 @@
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at {
@@ -30,24 +30,20 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 using namespace std::literals;
 
-static constexpr int SIMD_SIZE = 32;
-
 // Decode tile (padded head dim), or 0 when the head dims do not fit the decode
 // kernels: a lane's window of tile / 32 columns must fit inside both dims.
 // Keep the tiles in sync with the instantiations in DecodeAttention.h.
 static int64_t decode_bucket(int64_t d, int64_t dv) {
   static constexpr std::array<int64_t, 6> tiles{32, 64, 96, 128, 256, 512};
   const auto it = std::lower_bound(tiles.begin(), tiles.end(), std::max(d, dv));
-  return it != tiles.end() && std::min(d, dv) >= *it / SIMD_SIZE ? *it : 0;
+  return it != tiles.end() && std::min(d, dv) >= *it / c10::metal::simdgroup_size ? *it : 0;
 }
 
-// The decode kernels run one threadgroup per query row (split over 32 key
-// blocks from kTwoPassMinKeys on); past kDecodeMaxQueries rows the prefill
-// kernel's 32-row Q blocks fill up and win.
+// The decode kernels take up to kDecodeMaxQueries query rows, one threadgroup
+// each, and split the keys over 32 blocks from kTwoPassMinKeys keys on.
 static constexpr int64_t kDecodeMaxQueries = 8;
 static constexpr int64_t kTwoPassMinKeys = 1024;
 
-// Head dims narrower than the tile run the kernels with clamped lane windows.
 static std::string_view padded_suffix(const Tensor& q, const Tensor& v, int64_t bd) {
   return q.size(3) == bd && v.size(3) == bd ? ""sv : "_padded"sv;
 }
@@ -70,7 +66,6 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
   uint num_head = q_.size(1);
   uint headSize = q_.size(3);
   uint N = k_.size(2);
-  uint B = q_.size(0) * q_.size(1);
   uint gqa_factor = q_.size(1) / k_.size(1);
   uint q_batch_stride = q_.stride(0);
   uint q_head_stride = q_.stride(1);
@@ -82,7 +77,7 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
   uint v_head_stride = v_.stride(1);
   uint v_seq_stride = v_.stride(2);
 
-  const std::array<uint32_t, 2> head_dims{headSize, uint32_t(v_.size(3))};
+  const std::array<uint32_t, 2> head_dims{headSize, c10::safe_conv<uint32_t>(v_.size(3))};
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -113,7 +108,6 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
 
       if (has_mask) {
         auto mask = mask_.value();
-        int nd = mask.dim();
         uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
         uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
         uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
@@ -157,12 +151,11 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
   uint v_head_stride = v_.stride(1);
   uint v_seq_stride = v_.stride(2);
 
-  // Partial rows span the padded tile, with the real columns at their positions.
-  auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, uint32_t(bd)}, q_.options());
+  auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, bd}, q_.options());
   auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
   auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
 
-  const std::array<uint32_t, 2> head_dims{headSize, uint32_t(v_.size(3))};
+  const std::array<uint32_t, 2> head_dims{headSize, c10::safe_conv<uint32_t>(v_.size(3))};
   const bool has_mask = mask_.has_value();
 
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -179,7 +172,7 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
       const std::string kname_pass2 = fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), bd);
       auto sdpa_vector_pass1PSO = lib.getPipelineStateForFunc(kname_pass1);
       auto sdpa_vector_pass2PSO = lib.getPipelineStateForFunc(kname_pass2);
-      MTLSize group_dims = MTLSizeMake(8 * SIMD_SIZE, 1, 1);
+      MTLSize group_dims = MTLSizeMake(8 * c10::metal::simdgroup_size, 1, 1);
       MTLSize grid_dims = MTLSizeMake(B, seq_len_q, blocks);
       auto computeEncoder = mpsStream->commandEncoder();
 
@@ -199,7 +192,6 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
 
       if (has_mask) {
         auto mask = mask_.value();
-        int nd = mask.dim();
         uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
         uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
         uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
@@ -289,7 +281,7 @@ static void sdpa_prefill_mps(const Tensor& q,
                         mask_dtype);
   }
   const auto pso = lib.getPipelineStateForFunc(kname);
-  const MTLSize grid = MTLSizeMake(c10::metal::ceil_div(q.size(2), bq), q.size(1), q.size(0));
+  const MTLSize grid = MTLSizeMake(at::ceil_div(q.size(2), bq), q.size(1), q.size(0));
   const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, simdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
   for (int64_t v0 = 0; v0 < dv; v0 += bd) {

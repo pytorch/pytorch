@@ -5,7 +5,6 @@
 // Simdgroups per prefill threadgroup, stacked along the Q block: one 8-row
 // simdgroup-matrix fragment or one 16-row MPP fragment each.
 C10_METAL_CONSTEXPR int kPrefillSimdgroups = 4;
-C10_METAL_CONSTEXPR int kPrefillBQ = kPrefillSimdgroups * 8;
 C10_METAL_CONSTEXPR int kMppBQ = kPrefillSimdgroups * 16;
 C10_METAL_CONSTEXPR int kMppBK = 32;
 // Keys per K block of a simdgroup-matrix tile: the wide tiles take fewer so

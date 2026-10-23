@@ -54,9 +54,8 @@ template <typename T,
   const uint mask_batch_stride = mask_strides.w;
   uint inner_k_stride = BN * int(k_seq_stride);
   uint inner_v_stride = BN * int(v_seq_stride);
-  // With PADDED, D and V are tiles wider than the real head dims: lane windows
-  // are clamped inside them, and a lane whose window repeats earlier columns
-  // zeroes their query. Exact dims keep the unclamped, provably aligned loads.
+  // PADDED clamps lane windows inside head dims narrower than the D / V tiles;
+  // exact dims keep unclamped offsets, which the compiler can prove aligned.
   const uint qk_off = PADDED ? min(simd_lid * qk_per_thread, head_dims.x - qk_per_thread) : simd_lid * qk_per_thread;
   const uint qk_skip = simd_lid * qk_per_thread - qk_off;
   const uint v_off = PADDED ? min(simd_lid * v_per_thread, head_dims.y - v_per_thread) : simd_lid * v_per_thread;
@@ -234,9 +233,6 @@ template <typename T,
   const uint mask_batch_stride = mask_strides.w;
   int inner_k_stride = BN * int(k_seq_stride);
   int inner_v_stride = BN * int(v_seq_stride);
-  // With PADDED, D and V are tiles wider than the real head dims: lane windows
-  // are clamped inside them, and a lane whose window repeats earlier columns
-  // zeroes their query. Exact dims keep the unclamped, provably aligned loads.
   const uint qk_off = PADDED ? min(simd_lid * qk_per_thread, head_dims.x - qk_per_thread) : simd_lid * qk_per_thread;
   const uint qk_skip = simd_lid * qk_per_thread - qk_off;
   const uint v_off = PADDED ? min(simd_lid * v_per_thread, head_dims.y - v_per_thread) : simd_lid * v_per_thread;
@@ -347,8 +343,7 @@ template <typename T,
     sum_exp_scores[simd_gid] = sum_exp_score;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  // Lanes past BN are neutral: a finite sentinel would beat finite mask values
-  // such as finfo(float32).min and zero a row the CPU math path averages.
+  // A finite sentinel would beat mask values such as finfo(float32).min.
   max_score = (simd_lid < BN) ? max_scores[simd_lid] : -INFINITY;
   U new_max = simd_max(max_score);
   U factor = new_max == -INFINITY ? U(1) : fast::exp(max_score - new_max);
@@ -427,7 +422,6 @@ template <typename T, int D>
   }
 
   // And write the output
-  // Partial rows keep the real columns at their positions in the padded tile.
   if (simd_lid == 0) {
     for (uint i = 0; i < elem_per_thread && simd_gid * elem_per_thread + i < v_dim; i++) {
       out[i] = static_cast<T>(o[i]);
@@ -528,15 +522,14 @@ template <typename T, int D>
                      MASK_TYPE,                                                                   \
                      true)
 
-// Head dims that are not a tile width pad to the next one.
 #define INSTANTIATE_SDPA_VECTOR_PADDED(DTYPE, TILE)                                        \
   INSTANTIATE_SDPA_VECTOR_PADDED_ONE(DTYPE, TILE, false, false, float, "_masknone");       \
   INSTANTIATE_SDPA_VECTOR_PADDED_ONE(DTYPE, TILE, true, false, float, "_masknone_causal"); \
   INSTANTIATE_SDPA_VECTOR_PADDED_ONE(DTYPE, TILE, false, true, bool, "_maskbool");         \
   INSTANTIATE_SDPA_VECTOR_PADDED_ONE(DTYPE, TILE, false, true, DTYPE, "_mask" #DTYPE);
 
-// Half and bfloat also take an fp32 additive mask (the public API allows one
-// with any query dtype), added in fp32 like the CPU math path.
+// Half and bfloat also take an fp32 additive mask, added in fp32 like the CPU
+// math path.
 #define INSTANTIATE_SDPA_VECTOR_FLOAT_MASK(DTYPE, TILE)                                    \
   INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, TILE, TILE, false, true, float, "_maskfloat")         \
   INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, TILE, TILE, false, true, float, "_maskfloat") \
