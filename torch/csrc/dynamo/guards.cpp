@@ -669,6 +669,9 @@ struct AutocastState {
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
+  // Excluded autocast dispatch keys, equivalent to `enabled` but checkable in
+  // one mask compare.
+  c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -676,22 +679,26 @@ struct AutocastState {
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
     cache_enabled = at::autocast::is_autocast_cache_enabled();
+    disabled_keys = c10::impl::tls_local_dispatch_key_set().excluded_ &
+        c10::autocast_dispatch_keyset;
   }
 
-  bool operator==(const AutocastState& o) const {
-    for (size_t i = 0; i < DEVICES.size(); i++) {
-      // If disabled audocast, autocast_dtype comparison not occur
-      if (enabled[i] == false && o.enabled[i] == false) {
-        continue;
-      }
-      if (enabled[i] != o.enabled[i] || dtype[i] != o.dtype[i]) {
+  // Compares all enabled flags at once via the TLS excluded set, and only
+  // fetches dtypes for enabled devices.
+  bool matches_current() const {
+    const auto& excluded{c10::impl::tls_local_dispatch_key_set().excluded_};
+    if ((excluded & c10::autocast_dispatch_keyset) != disabled_keys) {
+      return false;
+    }
+
+    for (size_t i{0}; i < DEVICES.size(); ++i) {
+      if (enabled[i] &&
+          dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
       }
     }
-    if (cache_enabled != o.cache_enabled) {
-      return false;
-    }
-    return true;
+
+    return cache_enabled == at::autocast::is_autocast_cache_enabled();
   }
 
   std::string reason(const AutocastState& o) const {
@@ -725,6 +732,16 @@ struct AutocastState {
     json_t.enabled = json_j.at("enabled");
     json_t.dtype = json_j.at("dtype");
     json_t.cache_enabled = json_j.at("cached_enabled");
+
+    // Rebuild disabled_keys from enabled
+    json_t.disabled_keys = c10::DispatchKeySet();
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (!json_t.enabled[i]) {
+        json_t.disabled_keys = json_t.disabled_keys.add(
+            at::autocast::get_autocast_dispatch_key_from_device_type(
+                DEVICES[i]));
+      }
+    }
   }
 };
 
@@ -768,7 +785,7 @@ struct GlobalStateGuard {
   bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
-            _autocast_state == AutocastState() &&
+            _autocast_state.matches_current() &&
             _torch_function == torch::torch_function_enabled() &&
             _torch_function_all_disabled ==
                 at::impl::torch_function_all_disabled() &&
@@ -787,9 +804,8 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    AutocastState current_autocast;
-    if (!(_autocast_state == current_autocast))
-      os << _autocast_state.reason(current_autocast);
+    if (!_autocast_state.matches_current())
+      os << _autocast_state.reason(AutocastState{});
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())
