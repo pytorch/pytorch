@@ -2,6 +2,28 @@
 #pragma once
 #include <c10/metal/common.h>
 
+// Decode takes up to kDecodeMaxQueries query rows, one threadgroup of
+// kDecodeSimdgroups simdgroups each. From kTwoPassMinKeys keys on, pass 1
+// splits the keys over kDecodeBlocks threadgroups of kDecode2PassSimdgroups
+// simdgroups and pass 2 merges the blocks, one simdgroup each.
+// DecodeAttention.h instantiates the kernels for each of kDecodeTiles.
+C10_METAL_CONSTEXPR int kDecodeMaxQueries = 8;
+C10_METAL_CONSTEXPR int kTwoPassMinKeys = 1024;
+C10_METAL_CONSTEXPR int kDecodeSimdgroups = 32;
+C10_METAL_CONSTEXPR int kDecodeBlocks = 32;
+C10_METAL_CONSTEXPR int kDecode2PassSimdgroups = 8;
+C10_METAL_CONSTEXPR ::c10::metal::array<int, 6> kDecodeTiles =
+    {32, 64, 96, 128, 256, 512};
+
+// Prefill tiles (padded head dims); PrefillAttention.h and MppAttention.h
+// instantiate the kernels for each. Head dims above the widest simdgroup tile
+// run on kChunkTile: the QK dim in tile-wide chunks, V/O in tile-wide column
+// slabs, one launch per slab.
+C10_METAL_CONSTEXPR ::c10::metal::array<int, 9> kPrefillTiles =
+    {32, 64, 72, 80, 96, 128, 160, 192, 256};
+C10_METAL_CONSTEXPR ::c10::metal::array<int, 4> kMppTiles = {64, 96, 128, 256};
+C10_METAL_CONSTEXPR int kChunkTile = 128;
+
 // Simdgroups per prefill threadgroup, stacked along the Q block: one 8-row
 // simdgroup-matrix fragment or one 16-row MPP fragment each.
 C10_METAL_CONSTEXPR int kPrefillSimdgroups = 4;
@@ -16,6 +38,9 @@ constexpr int prefill_bk(int bd) {
 // The 256 tile only fits two simdgroups' Q rows in fp32's 32 KB.
 constexpr int prefill_simdgroups(int bd) {
   return bd == 256 ? 2 : kPrefillSimdgroups;
+}
+constexpr int prefill_bq(int bd) {
+  return prefill_simdgroups(bd) * 8;
 }
 
 struct PrefillAttnParams {

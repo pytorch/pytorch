@@ -1036,8 +1036,8 @@ prefill_attention_mpp(
   instantiate_mpp_attn_arch(                                                \
       "a9", false, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype);
 
-// BK is always 32: mpp_prefill_block_shape_for_head_dim returns it for every
-// supported head dim.
+// Keep in sync with kMppTiles, kMppBQ, kMppBK and kPrefillSimdgroups in
+// Attention.h.
 #define instantiate_mpp_attn_shapes(iname, itype, hm, dc, mname, mtype)        \
   instantiate_mpp_attn(iname, itype, 64, 32, 256, 4, 1, hm, dc, mname, mtype); \
   instantiate_mpp_attn(iname, itype, 64, 32, 128, 4, 1, hm, dc, mname, mtype); \

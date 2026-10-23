@@ -551,7 +551,7 @@ prefill_attention(
   constexpr bool has_mask = HAS_MASK;
   constexpr bool do_causal = DO_CAUSAL;
   constexpr int kThreads = prefill_simdgroups(BD) * 32;
-  constexpr int BQ = prefill_simdgroups(BD) * 8;
+  constexpr int BQ = prefill_bq(BD);
   constexpr int BK = prefill_bk(BD);
 
   const int batch_idx = tid.z;
@@ -945,9 +945,8 @@ prefill_attention(
   instantiate_attn_one(dtype, bd, hm, dc, ck, 0, mtype); \
   instantiate_attn_one(dtype, bd, hm, dc, ck, 1, mtype)
 
-// Head dims above 192 are chunked / sliced on the 128 tile, so only it gets
-// the chunked variant. Keep the tiles in sync with kPrefillTiles in
-// Attention.mm.
+// Keep the tiles in sync with kPrefillTiles in Attention.h. Head dims above
+// the widest tile run on kChunkTile, so only it gets the chunked variant.
 #define instantiate_attn_tiles(dtype, hm, dc, mtype)     \
   instantiate_attn(dtype, 256, hm, dc, 0, mtype);        \
   instantiate_attn(dtype, 192, hm, dc, 0, mtype);        \

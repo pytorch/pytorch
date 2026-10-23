@@ -32,7 +32,7 @@ template <typename T,
                             uint3 tpg [[threadgroups_per_grid]],
                             uint simd_gid [[simdgroup_index_in_threadgroup]],
                             uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr uint BN = 32;
+  constexpr uint BN = kDecodeSimdgroups;
   constexpr uint BD = 32;
   constexpr uint qk_per_thread = D / BD;
   constexpr uint v_per_thread = V / BD;
@@ -211,7 +211,7 @@ template <typename T,
                                     uint3 tpg [[threadgroups_per_grid]],
                                     uint simd_gid [[simdgroup_index_in_threadgroup]],
                                     uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr int BN = 8;
+  constexpr int BN = kDecode2PassSimdgroups;
   constexpr int BD = 32;
   constexpr int qk_per_thread = D / BD;
   constexpr int v_per_thread = V / BD;
@@ -237,7 +237,7 @@ template <typename T,
   const uint qk_skip = simd_lid * qk_per_thread - qk_off;
   const uint v_off = PADDED ? min(simd_lid * v_per_thread, head_dims.y - v_per_thread) : simd_lid * v_per_thread;
   const uint v_skip = simd_lid * v_per_thread - v_off;
-  constexpr int blocks = 32;
+  constexpr int blocks = kDecodeBlocks;
 
   typedef float U;
 
@@ -383,10 +383,10 @@ template <typename T, int D>
                                     uint3 tpg [[threadgroups_per_grid]],
                                     uint simd_gid [[simdgroup_index_in_threadgroup]],
                                     uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr int BN = 32;
+  constexpr int BN = kDecodeBlocks;
   constexpr int BD = 32;
   constexpr int elem_per_thread = D / BD;
-  constexpr int blocks = 32;
+  constexpr int blocks = kDecodeBlocks;
 
   typedef float U;
 
@@ -535,7 +535,7 @@ template <typename T, int D>
   INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, TILE, TILE, false, true, float, "_maskfloat") \
   INSTANTIATE_SDPA_VECTOR_PADDED_ONE(DTYPE, TILE, false, true, float, "_maskfloat");
 
-// Keep the tiles in sync with decode_bucket in Attention.mm.
+// Keep the tiles in sync with kDecodeTiles in Attention.h.
 #define INSTANTIATE_SDPA_VECTOR_TILES(DTYPE, INSTANTIATE) \
   INSTANTIATE(DTYPE, 32);                                 \
   INSTANTIATE(DTYPE, 64);                                 \

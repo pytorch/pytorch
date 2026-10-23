@@ -32,17 +32,10 @@ using namespace std::literals;
 
 // Decode tile (padded head dim), or 0 when the head dims do not fit the decode
 // kernels: a lane's window of tile / 32 columns must fit inside both dims.
-// Keep the tiles in sync with the instantiations in DecodeAttention.h.
 static int64_t decode_bucket(int64_t d, int64_t dv) {
-  static constexpr std::array<int64_t, 6> tiles{32, 64, 96, 128, 256, 512};
-  const auto it = std::lower_bound(tiles.begin(), tiles.end(), std::max(d, dv));
-  return it != tiles.end() && std::min(d, dv) >= *it / c10::metal::simdgroup_size ? *it : 0;
+  const auto it = std::lower_bound(kDecodeTiles.begin(), kDecodeTiles.end(), std::max(d, dv));
+  return it != kDecodeTiles.end() && std::min(d, dv) >= *it / c10::metal::simdgroup_size ? *it : 0;
 }
-
-// The decode kernels take up to kDecodeMaxQueries query rows, one threadgroup
-// each, and split the keys over 32 blocks from kTwoPassMinKeys keys on.
-static constexpr int64_t kDecodeMaxQueries = 8;
-static constexpr int64_t kTwoPassMinKeys = 1024;
 
 static std::string_view padded_suffix(const Tensor& q, const Tensor& v, int64_t bd) {
   return q.size(3) == bd && v.size(3) == bd ? ""sv : "_padded"sv;
@@ -82,7 +75,7 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      auto group_dims = MTLSizeMake(1024, 1, 1);
+      auto group_dims = MTLSizeMake(kDecodeSimdgroups * c10::metal::simdgroup_size, 1, 1);
       auto grid_dims = MTLSizeMake(batchSize * num_head, q_.size(2), 1);
       const bool has_mask = mask_.has_value();
 
@@ -137,7 +130,7 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
   uint seq_len_q = q_.size(2);
   uint headSize = q_.size(3);
   uint N = k_.size(2);
-  const uint blocks = 32;
+  const uint blocks = kDecodeBlocks;
   uint B = batchSize * num_heads;
   uint gqa_factor = q_.size(1) / k_.size(1);
 
@@ -172,7 +165,7 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
       const std::string kname_pass2 = fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), bd);
       auto sdpa_vector_pass1PSO = lib.getPipelineStateForFunc(kname_pass1);
       auto sdpa_vector_pass2PSO = lib.getPipelineStateForFunc(kname_pass2);
-      MTLSize group_dims = MTLSizeMake(8 * c10::metal::simdgroup_size, 1, 1);
+      MTLSize group_dims = MTLSizeMake(kDecode2PassSimdgroups * c10::metal::simdgroup_size, 1, 1);
       MTLSize grid_dims = MTLSizeMake(B, seq_len_q, blocks);
       auto computeEncoder = mpsStream->commandEncoder();
 
@@ -206,18 +199,11 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
       mtl_setArgs(computeEncoder, intermediate, sums, maxs, out, head_dims[1]);
-      [computeEncoder dispatchThreadgroups:MTLSizeMake(B, seq_len_q, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
+      const auto pass2_group_dims = MTLSizeMake(blocks * c10::metal::simdgroup_size, 1, 1);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B, seq_len_q, 1) threadsPerThreadgroup:pass2_group_dims];
     }
   });
 }
-
-// Prefill tiles (padded head dims); keep in sync with the instantiations in
-// PrefillAttention.h and MppAttention.h. Head dims above the widest simdgroup
-// tile run on kChunkTile: the QK dim in tile-wide chunks, V/O in tile-wide
-// column slabs, one launch per slab.
-static constexpr std::array<int64_t, 9> kPrefillTiles{32, 64, 72, 80, 96, 128, 160, 192, 256};
-static constexpr std::array<int64_t, 4> kMppTiles{64, 96, 128, 256};
-static constexpr int64_t kChunkTile = 128;
 
 // Prefill: flash attention on simdgroup matrices (PrefillAttention.h) or, on
 // macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h) for half and
@@ -242,7 +228,7 @@ static void sdpa_prefill_mps(const Tensor& q,
       : widest > kPrefillTiles.back() ? kChunkTile
                                       : *std::lower_bound(kPrefillTiles.begin(), kPrefillTiles.end(), widest);
   const int64_t simdgroups = use_mpp ? kPrefillSimdgroups : prefill_simdgroups(bd);
-  const int64_t bq = use_mpp ? kMppBQ : simdgroups * 8;
+  const int64_t bq = use_mpp ? kMppBQ : prefill_bq(bd);
 
   std::optional<Tensor> mask = mask_;
   PrefillAttnMaskParams mask_params{};
@@ -328,9 +314,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                                                   std::optional<double> scale,
                                                                   bool enable_gqa) {
   const auto dtype = query.scalar_type();
-  TORCH_CHECK_NOT_IMPLEMENTED(dtype == kFloat || dtype == kHalf || dtype == kBFloat16,
-                              "scaled_dot_product_attention for MPS does not support dtype ",
-                              dtype);
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isFloatingType(dtype), "scaled_dot_product_attention for MPS does not support dtype ", dtype);
   TORCH_CHECK_TYPE(key_.scalar_type() == dtype && value_.scalar_type() == dtype,
                    "scaled_dot_product_attention for MPS expects query, key and value to share a dtype");
   TORCH_CHECK_VALUE(
@@ -409,6 +394,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   }
   // The attention weights are never materialized (nothing consumes them); an
   // empty tensor stands in, as the flash attention ops do for unrequested outputs.
+  // TODO: implement the flash, efficient and math attention ops for MPS properly
+  // instead of routing them all through this op.
   return {out.view_symint(out_shape), at::empty({0}, q_.options())};
 }
 } // namespace native
