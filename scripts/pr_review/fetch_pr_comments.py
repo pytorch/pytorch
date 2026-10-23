@@ -11,23 +11,24 @@ author or by a user with triage access or above, and this workflow's own
 earlier findings (role ``automated_review``): its inline findings still on the
 PR and the body of its latest review, which holds the findings it did not post
 inline. post_review.py deletes superseded inline findings nobody replied or
-reacted to, so those are normally not shown. Each
-inline comment's ``original_commit_id`` is the commit it was written against,
-and ``head_sha``, passed in by the caller, is the commit under review. Other
-bots and other users are dropped. A comment's ``reactions`` are the emoji
-reactions of the author and maintainers, read for the newest
-``MAX_REACTION_LOOKUPS`` reacted comments, and ``reactions_truncated`` is set
-when a limit or a failed lookup may have left some out. Bodies are capped and,
-if the conversation is too long, ``truncated`` is set and items are dropped in
-this order: earlier automated findings with no reply or reaction seen, then
-other earlier automated findings, then the oldest comments people wrote; within each group
-the oldest go first.
+reacted to, so those are normally not shown. Each inline comment's
+``original_commit_id`` is the commit it was written against, and ``head_sha``,
+passed in by the caller, is the commit under review. Other bots and other users
+are dropped. A comment's ``reactions`` are the emoji reactions of the author
+and maintainers, read for the newest ``MAX_REACTION_LOOKUPS`` reacted comments
+(reactions to a review body have no REST endpoint and are not read), and
+``reactions_truncated`` is set when a limit or a failed lookup may have left
+some out. Bodies are capped and, if the conversation is too long,
+``truncated`` is set and items are dropped in this order: earlier automated
+findings with no reply or reaction seen, then other earlier automated findings,
+then the oldest comments people wrote; within each group the oldest go first,
+and a kept reply keeps the finding it answers.
 
-Every failure is fatal except two. A user with no permission record (404) is
-not a maintainer, and a failed reaction lookup keeps the comment with
-``reactions_truncated`` set: reactions are context, while a review that
-silently saw no comments would approve a PR whose maintainer feedback it was
-never shown.
+Every failure is fatal except a 404 on a permission check (that user is not a
+maintainer) and any failure while reading a comment's reactions, including the
+reactors' permission checks: the comment is kept with ``reactions_truncated``
+set. Reactions are context, while a review that silently saw no comments would
+approve a PR whose maintainer feedback it was never shown.
 """
 
 from __future__ import annotations
@@ -310,13 +311,21 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "items": [],
     }
     size = len(dumps(envelope))
+    # A reply from a person is kept together with the finding it answers.
+    findings = {
+        i["id"]: n
+        for n, i in enumerate(items)
+        if i["role"] == AUTOMATED and i["kind"] == "review_comment"
+    }
     # A group is considered only if every item before it fit.
     for n in (n for group in groups for n in group):
-        grow = len(dumps(items[n])) + 1
-        if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
+        parent = findings.get(items[n].get("in_reply_to_id"))
+        unit = [m for m in (n, parent) if m is not None and m not in kept]
+        grow = sum(len(dumps(items[m])) + 1 for m in unit)
+        if len(kept) + len(unit) > MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
             break
         size += grow
-        kept.append(n)
+        kept += unit
     omitted = len(items) - len(kept)
     return {
         **head,

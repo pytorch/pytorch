@@ -399,6 +399,28 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(item["role"], fpc.AUTOMATED)
         self.assertEqual(len(item["body"]), fpc.MAX_REVIEW_BODY + len(" [truncated]"))
 
+    def test_a_kept_reply_keeps_the_finding_it_answers(self):
+        issue = [
+            comment("maint", body="y" * 3000, when=f"2026-01-{i:02d}")
+            for i in range(1, 6)
+        ]
+        api = FakeApi(
+            issue=issue,
+            inline=[
+                finding(cid=10, when="2025-12-01", body="z" * 3000),
+                comment("author", id=11, in_reply_to_id=10, when="2026-02-01"),
+            ],
+            reviews=[ours()],
+            maintainers={"maint"},
+        )
+        full = fpc.collect(api, REPO, PR)
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 2000):
+            out = fpc.collect(api, REPO, PR)
+        ids = [i["id"] for i in out["items"]]
+        self.assertIn(11, ids)
+        self.assertIn(10, ids)
+        self.assertTrue(out["truncated"])
+
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [
             comment("maint", body="y" * fpc.MAX_BODY, when=f"2026-01-{i:02d}")
@@ -486,6 +508,24 @@ class TestReactions(unittest.TestCase):
 
         out = fpc.collect(throttled, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"]], [20])
+        self.assertTrue(out["reactions_truncated"])
+
+    def test_a_failed_reactor_permission_check_keeps_the_comment(self):
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint"},
+            reactions={"issues/comments/20": [reaction("stranger", "-1")]},
+        )
+        real = api.__call__
+
+        def flaky(endpoint):
+            if "/collaborators/stranger/" in endpoint:
+                raise RuntimeError("gh api failed: HTTP 502")
+            return real(endpoint)
+
+        out = fpc.collect(flaky, REPO, PR)
+        (item,) = out["items"]
+        self.assertNotIn("reactions", item)
         self.assertTrue(out["reactions_truncated"])
 
     def test_a_failed_lookup_does_not_inherit_the_previous_reactions(self):
