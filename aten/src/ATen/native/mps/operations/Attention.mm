@@ -62,9 +62,11 @@ static int64_t decode_bucket(int64_t d, int64_t dv) {
   return it != tiles.end() && std::min(d, dv) >= *it / c10::metal::simdgroup_size ? *it : 0;
 }
 
-// Two-pass decode trades a merge for a kDecodeBlocks times larger grid; it
-// pays off from this many keys.
-static constexpr uint32_t kTwoPassMinKeys = 1024;
+// Two-pass decode trades a merge for a kDecodeBlocks times larger grid, so it
+// only wins while one threadgroup per (batch, head) row leaves the GPU idle:
+// below these row counts, by key length. Crossovers measured on an M5 Pro.
+static constexpr uint32_t kTwoPassMinKeys = 1024, kTwoPassMaxRows = 16;
+static constexpr uint32_t kTwoPassLongKeys = 4096, kTwoPassLongMaxRows = 96;
 
 // Decode (qL == 1): DecodeAttention.h, one simdgroup per key.
 static void sdpa_vector_mps(const Tensor& q,
@@ -77,7 +79,7 @@ static void sdpa_vector_mps(const Tensor& q,
                             int64_t bd) {
   using namespace mps;
   const uint32_t rows = c10::safe_conv<uint32_t>(q.size(0) * q.size(1)), n = c10::safe_conv<uint32_t>(k.size(2));
-  const bool two_pass = n >= kTwoPassMinKeys;
+  const bool two_pass = n >= kTwoPassMinKeys && rows < (n >= kTwoPassLongKeys ? kTwoPassLongMaxRows : kTwoPassMaxRows);
   auto stride = [](const Tensor& t, int d) { return c10::safe_conv<uint32_t>(t.stride(d)); };
   auto mask_stride = [&](int d) { return mask && mask->size(d) > 1 ? stride(*mask, d) : 0u; };
   const DecodeAttnParams params{
