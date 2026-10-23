@@ -4,9 +4,17 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 
 #include <gtest/gtest.h>
 
+#if (defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)) && defined(__linux__)
+#define C10_TEST_HIP_VMM_INTERPOSITION
+#include <dlfcn.h>
+#include <hip/hip_runtime_api.h>
+#endif
+
+#include <array>
 #include <atomic>
 #include <string>
 
@@ -15,6 +23,59 @@
 // allocator's normal out-of-memory path -- notifying OOM observers -- and not
 // crash or bypass it. Live in their own binary because they mutate the
 // process-global allocator config and tag streams.
+
+#ifdef C10_TEST_HIP_VMM_INTERPOSITION
+namespace {
+enum class InjectedVmmFailure : uint8_t { None, Map, SetAccess };
+
+std::atomic<InjectedVmmFailure> g_injected_vmm_failure{
+    InjectedVmmFailure::None};
+
+bool takeInjectedVmmFailure(InjectedVmmFailure failure) {
+  auto expected = failure;
+  return g_injected_vmm_failure.compare_exchange_strong(
+      expected, InjectedVmmFailure::None);
+}
+} // namespace
+
+extern "C" hipError_t hipMemMap(
+    void* ptr,
+    size_t size,
+    size_t offset,
+    hipMemGenericAllocationHandle_t handle,
+    unsigned long long flags) {
+  if (takeInjectedVmmFailure(InjectedVmmFailure::Map)) {
+    return hipErrorInvalidValue;
+  }
+  using HipMemMap = hipError_t (*)(
+      void*,
+      size_t,
+      size_t,
+      hipMemGenericAllocationHandle_t,
+      unsigned long long);
+  static const auto real_hip_mem_map =
+      reinterpret_cast<HipMemMap>(dlsym(RTLD_NEXT, "hipMemMap"));
+  return real_hip_mem_map ? real_hip_mem_map(ptr, size, offset, handle, flags)
+                          : hipErrorUnknown;
+}
+
+extern "C" hipError_t hipMemSetAccess(
+    void* ptr,
+    size_t size,
+    const hipMemAccessDesc* desc,
+    size_t count) {
+  if (takeInjectedVmmFailure(InjectedVmmFailure::SetAccess)) {
+    return hipErrorInvalidValue;
+  }
+  using HipMemSetAccess =
+      hipError_t (*)(void*, size_t, const hipMemAccessDesc*, size_t);
+  static const auto real_hip_mem_set_access =
+      reinterpret_cast<HipMemSetAccess>(dlsym(RTLD_NEXT, "hipMemSetAccess"));
+  return real_hip_mem_set_access
+      ? real_hip_mem_set_access(ptr, size, desc, count)
+      : hipErrorUnknown;
+}
+#endif
 
 namespace {
 
@@ -63,6 +124,56 @@ size_t deviceTotalBytes() {
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
   return prop.totalGlobalMem;
 }
+
+#ifdef C10_TEST_HIP_VMM_INTERPOSITION
+void expectVmmFailureIsRetryable(InjectedVmmFailure failure) {
+  c10::CachingAllocator::setAllocatorSettings("expandable_segments:True");
+  const size_t segment_size =
+      c10::CachingAllocator::AcceleratorAllocatorConfig::large_segment_size();
+  c10::cuda::CUDACachingAllocator::emptyCache();
+  const auto stream = c10::cuda::getStreamFromPool(false, 0);
+
+  std::array<void*, 3> blocks{};
+  auto release_blocks = c10::make_scope_exit([&] {
+    for (auto& block : blocks) {
+      if (block) {
+        c10::cuda::CUDACachingAllocator::raw_delete(block);
+        block = nullptr;
+      }
+    }
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  });
+  for (auto& block : blocks) {
+    block = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(
+        segment_size, stream.stream());
+  }
+  ASSERT_EQ(
+      static_cast<char*>(blocks[1]) - static_cast<char*>(blocks[0]),
+      segment_size);
+  ASSERT_EQ(
+      static_cast<char*>(blocks[2]) - static_cast<char*>(blocks[1]),
+      segment_size);
+
+  void* hole = blocks[1];
+  c10::cuda::CUDACachingAllocator::raw_delete(hole);
+  blocks[1] = nullptr;
+  c10::cuda::CUDACachingAllocator::emptyCache();
+
+  g_injected_vmm_failure = failure;
+  auto reset_injected_failure = c10::make_scope_exit(
+      [] { g_injected_vmm_failure = InjectedVmmFailure::None; });
+  EXPECT_THROW(
+      blocks[1] = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(
+          segment_size, stream.stream()),
+      c10::Error);
+  EXPECT_EQ(g_injected_vmm_failure, InjectedVmmFailure::None);
+  ASSERT_EQ(blocks[1], nullptr);
+
+  blocks[1] = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(
+      segment_size, stream.stream());
+  EXPECT_EQ(blocks[1], hole);
+}
+#endif
 
 } // namespace
 
@@ -162,4 +273,26 @@ TEST(ExpandableSegmentReserveDeviceTest, OversizedAllocNotifiesOomObserver) {
   // device at all -- so the message must not send the user chasing the reserve
   // knobs.
   EXPECT_EQ(msg.find("expandable-segment"), std::string::npos) << msg;
+}
+
+TEST(ExpandableSegmentReserveDeviceTest, RocmMapFailureIsRetryable) {
+#ifdef C10_TEST_HIP_VMM_INTERPOSITION
+  if (!initDeviceOrSkip()) {
+    GTEST_SKIP() << "no ROCm device";
+  }
+  expectVmmFailureIsRetryable(InjectedVmmFailure::Map);
+#else
+  GTEST_SKIP() << "requires Linux HIP VMM interposition";
+#endif
+}
+
+TEST(ExpandableSegmentReserveDeviceTest, RocmSetAccessFailureIsRetryable) {
+#ifdef C10_TEST_HIP_VMM_INTERPOSITION
+  if (!initDeviceOrSkip()) {
+    GTEST_SKIP() << "no ROCm device";
+  }
+  expectVmmFailureIsRetryable(InjectedVmmFailure::SetAccess);
+#else
+  GTEST_SKIP() << "requires Linux HIP VMM interposition";
+#endif
 }
