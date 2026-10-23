@@ -1,6 +1,5 @@
 
 #include <cstdint>
-#include <ATen/native/IndexKernel.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
@@ -10,6 +9,10 @@ struct ScatterAddOp;
 struct ScatterCopyOp;
 struct ScatterMinOp;
 struct ScatterMaxOp;
+
+// Below 256-byte slices, the per-entry overhead of vectorized/TMA scatter
+// outweighs the benefit of processing a row at a time.
+inline constexpr size_t kFastScatterMinSliceBytes = 256;
 
 template<int alignment>
 inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const out_ptr, char * const in_ptr, const size_t index_stride_bytes, const size_t element_size) {

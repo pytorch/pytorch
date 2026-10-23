@@ -3061,7 +3061,8 @@
   precomputed:
   - dim -> int dim
   dispatch:
-    CPU, CUDA, XPU: index_copy_out
+    CPU, XPU: index_copy_out
+    CUDA: index_copy_cuda_out
     MPS: index_copy_out_mps
 
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)

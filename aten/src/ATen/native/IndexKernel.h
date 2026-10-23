@@ -15,10 +15,6 @@ class Scalar;
 
 namespace at::native {
 
-// Below 256-byte slices, the per-entry overhead of vectorized/TMA scatter
-// outweighs the benefit of processing a row at a time.
-inline constexpr size_t kFastScatterMinSliceBytes = 256;
-
 using index_fn = void(*)(TensorIteratorBase &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, const Scalar& source);
 using index_copy_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride);

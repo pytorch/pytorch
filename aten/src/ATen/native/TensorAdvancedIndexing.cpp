@@ -1087,12 +1087,12 @@ Tensor& index_put_(
       self, indices, value, accumulate, /*unsafe=*/false);
 }
 
-TORCH_IMPL_FUNC(index_copy_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- const Tensor& result) {
+void index_copy_out_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const Tensor& result) {
   if (!result.is_same(self))
     result.copy_(self);
 
@@ -1122,15 +1122,6 @@ TORCH_IMPL_FUNC(index_copy_out)
   index_strides[dim] =
       (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
   auto index_restrided = index.as_strided(index_sizes, index_strides);
-
-  // Like index_add, delegate CUDA row copies to scatter's fast-path dispatch.
-  if (result.is_cuda() && dim == 0 && index.is_contiguous() &&
-      index.numel() > 1 &&
-      source.nbytes() / index.numel() >= kFastScatterMinSliceBytes) {
-    result_nonzero.scatter_(
-        dim, index_restrided.expand_as(source_nonzero), source_nonzero);
-    return;
-  }
 
   // Prepare `result` for TensorIterator.
   // Restride `result` to not advance in dimension `dim`.
@@ -1164,6 +1155,15 @@ TORCH_IMPL_FUNC(index_copy_out)
   auto result_dim_stride = result_nonzero.stride(dim);
   index_copy_stub(
       iter.device_type(), iter, dim, result_dim_size, result_dim_stride);
+}
+
+TORCH_IMPL_FUNC(index_copy_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Tensor& result) {
+  index_copy_out_impl(self, dim, index, source, result);
 }
 
 // Not calling into index_reduce_func_impl because of a different dtype dispatch
