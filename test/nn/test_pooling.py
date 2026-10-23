@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXLA,
     instantiate_device_type_tests,
+    largeMPSBufferTest,
     largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
@@ -1985,10 +1986,105 @@ torch.{device_type}.synchronize()
             out_x = fn(x)
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
+    # Pooling past INT32_MAX elements. References come from a slice of the
+    # input, so each test first checks that the fill landed.
+    @onlyAccelerator
+    @largeMPSBufferTest(int(4.2 * 1024**3))
+    @largeTensorTest("10GB")
+    @parametrize_test("mode", ["max", "avg"])
+    def test_pool3d_64bit_indexing(self, device, mode):
+        N, C, D, H, W = 70, 32, 100, 100, 100
+        pat = (
+            torch.arange(D, device=device).view(D, 1, 1) * 7
+            + torch.arange(H, device=device).view(1, H, 1) * 3
+            + torch.arange(W, device=device)
+        ).remainder(61)
+        chan = torch.arange(C, device=device).view(C, 1, 1, 1)
+        x = torch.empty(N, C, D, H, W, dtype=torch.half, device=device)
+        for n in range(N):
+            x[n] = pat + chan + n
+        self.assertGreater(x[-1, -1, -1, -1].abs().max().item(), 0)
+
+        if mode == "max":
+            pool = partial(F.max_pool3d, kernel_size=5, padding=1, dilation=2)
+        else:
+            pool = partial(
+                F.avg_pool3d, kernel_size=2, padding=1, count_include_pad=False
+            )
+        x.requires_grad_(True)
+        y = pool(x)
+        y.sum().backward()
+        for n in [0, N - 1]:
+            ref_x = x[n : n + 1, -1:].detach().float().cpu().requires_grad_(True)
+            ref_y = pool(ref_x)
+            ref_y.sum().backward()
+            self.assertEqual(y[n : n + 1, -1:].detach().float().cpu(), ref_y)
+            if mode == "max":
+                # Windows can tie, so only the number of gradient hits is fixed
+                self.assertEqual(
+                    x.grad[n].sum(dtype=torch.float32).item(), y[n].numel()
+                )
+            else:
+                self.assertEqual(x.grad[n : n + 1, -1:].float().cpu(), ref_x.grad)
+
+        del x, y
+        torch.accelerator.empty_cache()
+
+    @onlyAccelerator
+    @largeMPSBufferTest(int(4.2 * 1024**3))
+    @largeTensorTest("6GB")
+    @parametrize_test("batched", [True, False])
+    def test_avg_pool2d_64bit_indexing(self, device, batched):
+        # MPS only uses its Metal kernel for avg_pool2d with ceil_mode
+        N, H, W, K = 33, 8192, 8192, 8
+        h_idx = torch.arange(H, device=device).view(H, 1)
+        w_idx = torch.arange(W, device=device)
+        x = torch.empty(N, H, W, dtype=torch.half, device=device)
+        for n in range(N):
+            x[n] = w_idx.remainder(13) + h_idx.remainder(7) * 16 + n
+        self.assertGreater(x[-1, -1].abs().max().item(), 0)
+        if batched:
+            x = x.unsqueeze(1)
+
+        y = F.avg_pool2d(x, K, ceil_mode=True)
+        for n in [0, N - 1]:
+            ref = F.avg_pool2d(
+                x[n : n + 1, ..., -K:, :].float().cpu(), K, ceil_mode=True
+            )
+            self.assertEqual(y[n : n + 1, ..., -1:, :].float().cpu(), ref)
+
+        del x, y
+        torch.accelerator.empty_cache()
+
+    @onlyAccelerator
+    @largeMPSBufferTest(int(5.6 * 1024**3))
+    @largeTensorTest("7GB")
+    @parametrize_test("pool_dims", [2, 3])
+    def test_max_unpool_64bit_indexing(self, device, pool_dims):
+        N = 33
+        S, K = (1024, 8) if pool_dims == 2 else (64, 7)
+        shape = (1, 1) + (S,) * pool_dims
+        numel = S**pool_dims
+        x = (torch.arange(numel, device=device).remainder(997) + 1).to(torch.half)
+        # 379 is coprime with the plane size, so the indices are distinct
+        idx = (torch.arange(numel, device=device) * 379).remainder((S * K) ** pool_dims)
+        x = x.view(shape).expand(N, *shape[1:]).contiguous()
+        idx = idx.view(shape).expand(N, *shape[1:]).contiguous()
+
+        unpool = F.max_unpool2d if pool_dims == 2 else F.max_unpool3d
+        y = unpool(x, idx, K).view(N, -1)
+        for n in [0, N - 1]:
+            self.assertEqual(y[n].count_nonzero().item(), numel)
+            self.assertEqual(
+                y[n, idx[n, 0].flatten()].float().cpu(), x[n, 0].flatten().float().cpu()
+            )
+
+        del x, y, idx
+        torch.accelerator.empty_cache()
+
     @onlyAccelerator
     @largeTensorTest("18GB")
     @largeTensorTest("180GB", "cpu")
-    @expectedFailureMPS
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
         x = torch.randn(
