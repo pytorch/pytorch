@@ -175,12 +175,9 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
 
 ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     const std::string& params_signature) {
-  // Never borrow during a tuning pass: that shape should be tuned for real.
-  auto* ctx = getTuningContext();
-  if (!ctx->IsNearestMatchEnabled() || ctx->IsTuningEnabled()) {
-    return ResultEntry::Null();
-  }
-
+  // No flag gate here. TunableOp dispatch resolves shapes through Lookup and
+  // never reaches this, so calling it is itself the opt-in; the reuse pass is
+  // the only caller and already decides whether borrowing applies.
   const GemmShape q = ParseGemmShape(SplitUnderscore(params_signature));
   if (!q.ok) {
     TUNABLE_LOG3("unparsable params_signature, no nearest match for ", op_signature, ",", params_signature);
@@ -260,7 +257,10 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
   TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", it->second);
 }
 
-void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
+void TuningResultsManager::AddAndMaybePersist(const std::string& op_signature,
+    const std::string& params_signature,
+    ResultEntry best,
+    bool force_persist) {
   bool is_new = false;
   ResultEntry inserted = ResultEntry::Null();
 
@@ -276,15 +276,9 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   }
    if (!is_new) return;  // only write once per unique (op, params)
 
-  TuningContext* ctx = getTuningContext();
-  // Tuning writes unless the run is only collecting untuned shapes. Borrowed
-  // results must persist regardless: the reuse pass suppresses RecordUntuned
-  // precisely so it can RecordBorrowed instead, and nothing bulk-writes
-  // results_ at shutdown, so gating this on !record_untuned would drop the
-  // borrowed decision on process exit.
-  const bool persist = ctx->IsRecordBorrowedEnabled() ||
-      (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled());
-  if (persist) {
+   TuningContext* ctx = getTuningContext();
+  if (force_persist ||
+      (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled())) {
     InitRealtimeAppend(ctx->GetFilename(), ctx->GetTuningResultsValidator().GetAllValidators());
 
     if (is_new && realtime_out_ && realtime_out_->good()) {
@@ -292,6 +286,10 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
     }
   }
 
+}
+
+void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
+  AddAndMaybePersist(op_signature, params_signature, std::move(best), /*force_persist=*/false);
 }
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
@@ -330,11 +328,12 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
 void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry entry) {
-  if (!getTuningContext()->IsRecordBorrowedEnabled()) {
-    TORCH_WARN_ONCE("RecordBorrowed called while record-borrowed is disabled; ignoring");
-    return;
-  }
-  Add(op_signature, params_signature, entry);
+  // Always persists, and deliberately reads none of the global tuning flags:
+  // the reuse pass runs with tuning off and suppresses RecordUntuned for this
+  // shape precisely so it can record the borrow here, and nothing bulk-writes
+  // results_ at process exit. Keeping the override local to this entry point
+  // means recording a borrow cannot change what any other Add() caller writes.
+  AddAndMaybePersist(op_signature, params_signature, std::move(entry), /*force_persist=*/true);
 }
 
 void TuningResultsManager::ClearUntuned() {
