@@ -168,7 +168,7 @@
         do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
         {%- endif %}
         if PRESCALE_QK:
-            q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+            q = (q * tl.cast(SM_SCALE, q.dtype) * RCP_LN2).to(MATMUL_PRECISION)
 
         if IS_DIVISIBLE:
             Di = tl.load(DELTA2 + offs_m2)
@@ -272,7 +272,7 @@
         v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM, INDEX_DTYPE)
         {%- endif %}
         if PRESCALE_QK:
-            k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+            k = (k * tl.cast(SM_SCALE, k.dtype) * RCP_LN2).to(MATMUL_PRECISION)
 
         for off_g in range(0, GQA_SHARED_HEADS):
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g

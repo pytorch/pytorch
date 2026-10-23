@@ -173,7 +173,7 @@ def forward_inner(
     RCP_LN2: tl.constexpr = 1.44269504
 
     if PRESCALE_QK:
-        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+        q = (q * tl.cast(SM_SCALE, q.dtype) * RCP_LN2).to(MATMUL_PRECISION)
 
     kv_offset = 0
 
