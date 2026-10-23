@@ -809,6 +809,35 @@ class TestGroupBatchFusion(TestCase):
         },
         post_grad_fusion_options={},
     )
+    def test_batch_linear_lhs_symbolic_projection_width_fuses(self):
+        # Weights and biases are graph inputs so Dynamo keeps their leading
+        # dimension symbolic; the matcher must still prove the width check.
+        def fn(x, w1, w2, b1, b2):
+            return (
+                torch.sin(torch.nn.functional.linear(x, w1, b1)),
+                torch.cos(torch.nn.functional.linear(x, w2, b2)),
+            )
+
+        x = torch.randn(4, 8)
+        w1 = torch.randn(6, 8)
+        w2 = torch.randn(6, 8)
+        b1 = torch.randn(6)
+        b2 = torch.randn(6)
+        for tensor in (w1, w2, b1, b2):
+            torch._dynamo.mark_dynamic(tensor, 0)
+        counters.clear()
+        with torch.no_grad():
+            expected = fn(x, w1, w2, b1, b2)
+            actual = torch.compile(fn, fullgraph=True)(x, w1, w2, b1, b2)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
     def test_batch_linear_lhs_keeps_contiguous_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
