@@ -884,8 +884,20 @@ def _sympy_floordiv(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
     return FloorDiv(a, b)
 
 
-def _sympy_mod(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_mod(
+    a: sympy.Basic | int | float | bool, b: sympy.Basic | int | float | bool
+) -> sympy.Basic:
+    import sympy
+
     from torch.utils._sympy.functions import Mod, PythonMod
+
+    # Callers (e.g. the inductor lowering for operator.mod) may pass plain
+    # Python scalars instead of sympy objects when neither operand is
+    # symbolic; sympify them so the assumption checks below don't crash.
+    if isinstance(a, (int, float, bool)):
+        a = sympy.sympify(a)
+    if isinstance(b, (int, float, bool)):
+        b = sympy.sympify(b)
 
     if a.is_nonnegative and b.is_nonnegative:
         return Mod(a, b)

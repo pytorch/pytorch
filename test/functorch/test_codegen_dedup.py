@@ -19,7 +19,11 @@ from common_utils import capture_codegen_source
 import torch
 import torch._functorch.config
 from torch._functorch.aot_autograd import aot_function
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _nop_compiler(gm, example_inputs):  # type: ignore[no-untyped-def]
@@ -27,6 +31,8 @@ def _nop_compiler(gm, example_inputs):  # type: ignore[no-untyped-def]
 
 
 class TestCodegenDedup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _capture_codegen_source(self, artifact_name):
         return capture_codegen_source(artifact_name)
 

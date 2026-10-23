@@ -1,12 +1,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
+#include <algorithm>
 #include <tuple>
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
@@ -1101,7 +1103,14 @@ void launch_vectorized_layer_norm_kernel(
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
-    const dim3 threads(warp_size, num_threads() / warp_size, 1);
+    // Only N / vec_size threads have a vector to read. For narrow rows (e.g. per-head
+    // q/k norms) launch just enough warps to cover them, instead of idle warps that
+    // still take part in the cross-warp reduction.
+    int threads_y = num_threads() / warp_size;
+    while (threads_y > 1 && (threads_y / 2) * warp_size >= N / vec_size) {
+      threads_y /= 2;
+    }
+    const dim3 threads(warp_size, threads_y, 1);
     dim3 blocks(M);
 
 #ifdef USE_ROCM
@@ -1130,10 +1139,10 @@ void launch_vectorized_layer_norm_kernel(
     T* Y_data2 = Y_data;
 
     while (remaining > 0) {
-      X_data2 += N * blocks.x;
+      X_data2 += static_cast<int64_t>(N) * blocks.x;
       mean_data2 += blocks.x;
       rstd_data2 += blocks.x;
-      Y_data2 += N * blocks.x;
+      Y_data2 += static_cast<int64_t>(N) * blocks.x;
 
       blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
 
@@ -1710,6 +1719,10 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
+    // One thread per vec_size elements, rounded up to whole warps because BlockReduceSum reduces warp by warp; the
+    // extra threads in the last warp add zeros. Keep nshared sized for num_threads(), not threads_per_row: after the
+    // reduction, thread 0 writes buf[1], which would be past the end of a one-warp block's single slot.
+    const int threads_per_row = std::min<int64_t>(at::round_up<int64_t>(at::ceil_div<int64_t>(N, vec_size), warp_size), num_threads());
 #ifdef USE_ROCM
     if (M >= 32768) {
       const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
@@ -1732,7 +1745,7 @@ void LayerNormBackwardKernelImplInternal(
     } else {
       const dim3 blocks(M);
       int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
-      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, threads_per_row, nshared, cuda_stream>>>(dY_data,
       X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -1747,11 +1760,11 @@ void LayerNormBackwardKernelImplInternal(
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
     if (bAlignedBuffers && bTargetDataTypes && bVectorSizeMultiple) {
-      layer_norm_grad_input_kernel_vectorized<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel_vectorized<T, T_ACC, rms_norm><<<blocks, threads_per_row, nshared, cuda_stream>>>(dY_data,
           X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, threads_per_row, nshared, cuda_stream>>>(dY_data,
           X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }

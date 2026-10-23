@@ -20,6 +20,14 @@ just buffers the raw columns (the cost is in Cuspy's decode, not here). Source i
 therefore all-or-nothing: selecting MEMCPY2, which has no such field, gives up source
 keying for the kernels in the same batch too (they still resolve by exec node id).
 
+``key_space`` picks which node id identifies a span. The default ``"auto"`` selects both
+and resolves source-then-exec, which is what a run mixing graphs captured with
+``annotation_config["key_by"] == "source"`` and with the default ``"exec"`` needs.
+``"source"`` is an assertion by the caller that every graph it cares about was captured
+source-keyed: the exec id is then not selected at all, which is 8 bytes off each record,
+and :meth:`drain` reports source ids in its first column. Once every kind CUPTI reports
+carries a source id, ``"source"`` is the cheaper shape for everyone.
+
 Durations are keyed by graph_node_id alone, kind-agnostic: each CUDA-graph node
 is a single op, so its kind is unambiguous. Eager (non-graph) activities report
 ``graph_node_id == 0`` and collapse into one node-0 bucket.
@@ -142,8 +150,13 @@ class NodeTimerObserver(CuspyObserver):
         self,
         kinds: Iterable[int] | None = None,
         *,
+        key_space: str = "auto",
         annotations: ObserverAnnotationSettings | None = None,
     ) -> None:
+        if key_space not in ("auto", "source"):
+            raise ValueError(
+                f"NodeTimerObserver: key_space must be 'auto' or 'source', got {key_space!r}"
+            )
         self._kinds: tuple[int, ...] = (
             tuple(kinds) if kinds is not None else (ActivityKind.CONCURRENT_KERNEL,)
         )
@@ -177,11 +190,26 @@ class NodeTimerObserver(CuspyObserver):
         # with annotation_config["key_by"] == "source". All-or-nothing across the selected
         # kinds (MEMCPY2 has no such field) so every record stays one size and the decode
         # stays on the vectorized path.
+        sourceless = [k for k in fields if k not in SOURCE_GRAPH_NODE_FIELD]
+        if key_space == "source" and sourceless:
+            raise ValueError(
+                f"NodeTimerObserver: key_space='source' needs a source node id on every "
+                f"selected kind, but CUPTI reports none for {sorted(sourceless)} "
+                f"(MEMCPY2 has no such field, and no kind has one before the 13.4 ABI). "
+                f"Use key_space='auto'."
+            )
         self._source_fields: dict[int, int] = (
-            {k: SOURCE_GRAPH_NODE_FIELD[k] for k in fields}
-            if all(k in SOURCE_GRAPH_NODE_FIELD for k in fields)
-            else {}
+            {} if sourceless else {k: SOURCE_GRAPH_NODE_FIELD[k] for k in fields}
         )
+        # Under key_space="source" a node is identified by its source id alone: the exec id
+        # is left out of the selection (see CuspyObserver._with_graph_fields), so spans are
+        # reported and named under the capture-graph ids a source-keyed graph's annotations
+        # sit on. _node_fields is the field that carries the node id either way.
+        self._source_key_space = key_space == "source"
+        self._node_fields: dict[int, int] = {
+            k: self._source_fields[k] if self._source_key_space else _TIMED_FIELDS[k][2]
+            for k in fields
+        }
         for kind, field in self._source_fields.items():
             fields[kind].add(field)
         super().__init__(fields, annotations=annotations)
@@ -205,16 +233,18 @@ class NodeTimerObserver(CuspyObserver):
             if spec is None:
                 continue
             sf, ef, gf, stf = spec
+            source_field = self._source_fields.get(k)
+            # Under key_space="source" the exec id was never selected, so the source id is
+            # the node id -- the one column then serves as both.
             start, end, gnode, stream = (
                 cols.get(sf),
                 cols.get(ef),
-                cols.get(gf),
+                cols.get(self._node_fields.get(k, gf)),
                 cols.get(stf),
             )
             if start is None or end is None or gnode is None or stream is None:
                 continue
             corr = cols.get(CORRELATION_FIELD[k]) if self._eager else None
-            source_field = self._source_fields.get(k)
             src = None if source_field is None else cols.get(source_field)
             src = gnode if src is None else src
             spans.append((gnode, start, end, stream, corr, src))
@@ -253,7 +283,9 @@ class NodeTimerObserver(CuspyObserver):
     def drain(self, flush: bool = False) -> tuple[Any, Any, Any, Any]:
         """Return the raw per-activity spans delivered since the last call as four
         parallel numpy columns ``(graph_node_id, start_ns, end_ns, stream_id)`` (dtypes
-        ``<u8, <i8, <i8, <u8``), and reset. Empty -> four length-0 arrays.
+        ``<u8, <i8, <i8, <u8``), and reset. Empty -> four length-0 arrays. Under
+        ``key_space="source"`` the first column carries source (capture-graph) node ids
+        instead, which are stable across a re-instantiate where exec ids are not.
 
         Flat and vectorized on purpose: consumers bucket/aggregate with numpy
         (e.g. ``bincount``/``searchsorted``) without a Python loop over the (~50k)
@@ -316,7 +348,8 @@ class NodeTimerObserver(CuspyObserver):
             # ids, so a hit is never ambiguous.
             source = np.concatenate([c[5] for c in chunks]).astype("<u8", copy=False)
             span_names = _graph_names(resolver, source)
-            if self._source_fields:
+            # Skipped under key_space="source": gnode IS the source column there.
+            if self._source_fields and not self._source_key_space:
                 unnamed = span_names == ""
                 if unnamed.any():
                     span_names[unnamed] = _graph_names(resolver, gnode)[unnamed]

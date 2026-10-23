@@ -14,8 +14,14 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch._inductor.runtime.hints import (
+    AutotuneHint,
+    mix_order_reduction_max_num_stages,
+    ReductionHint,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_MIX_ORDER_XBLOCK,
+)
+from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -215,7 +221,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in inductor_meta.get(
             "autotune_hints", ()
         )
-        MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
+        MAX_R0_BLOCK = self._max_r0_block(device_major)
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
             register_intensive = True
@@ -525,6 +531,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     # Hook methods for device-specific overrides
     # ------------------------------------------------------------------
 
+    def _max_r0_block(self, device_major: int | None) -> int:
+        """Architecture cap on R0_BLOCK, before workload-specific limits."""
+        # SM100+ (B200/GB200) needs the smaller cap.
+        return 1024 if device_major is not None and device_major >= 10 else 2048
+
     def _get_outer_config(
         self,
         make_config,
@@ -596,7 +607,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate configs for cooperative reduction (RSPLIT)."""
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
 
         # Cooperative reductions currently only support a single reduction dimension.
         if len(size_hints) != 2:
@@ -655,7 +665,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             required_x_block = max(
                 required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
             )
-        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        x_block = last_power_of_2(
+            min(
+                max(rsplit_size // 32, min_x_block, required_x_block),
+                TRITON_MAX_MIX_ORDER_XBLOCK,
+            )
+        )
+        while rsplit_size % x_block != 0:
+            x_block //= 2
+        if x_block < required_x_block:
+            raise ValueError(
+                f"RSPLIT_SIZE={rsplit_size} is incompatible with the required "
+                f"XBLOCK={required_x_block}"
+            )
 
         new_configs: list[Config] = []
         for c in configs:
@@ -664,16 +686,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
             num_iters = rsplit_size // x_block
 
-            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
-                MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
-            else:
-                MAX_NUM_STAGES = 1
-            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
-            # emitted by device-side descriptors.
-            if inductor_meta.get("uses_device_tma"):
-                MAX_NUM_STAGES = 1
+            max_num_stages = mix_order_reduction_max_num_stages(
+                rnumel_hint, inductor_meta
+            )
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
-                max(num_iters // 4, 1), MAX_NUM_STAGES
+                max(num_iters // 4, 1), max_num_stages
             )
 
             if rnumel_hint <= 1024:
@@ -728,6 +745,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 @register_codegen_heuristic("reduction", "hip", register=torch.version.hip is not None)
 class ROCmReductionHeuristic(ReductionHeuristic):
     """Reduction configs for ROCm/HIP devices."""
+
+    def _max_r0_block(self, device_major: int | None) -> int:
+        # gfx major is not an NVIDIA SM version, so keep the default cap.
+        return 2048
 
     def _get_outer_config(
         self,

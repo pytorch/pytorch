@@ -233,7 +233,7 @@ static PyMappingMethods THPSize_as_mapping = {
     wrap_tuple_fn<decltype(&mp_subscript), &mp_subscript>,
     nullptr};
 
-static PyObject* THPSize_numel(PyObject* _self, PyObject* noargs) {
+static PyObject* THPSize_numel(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPSize*>(_self);
   int64_t numel = 1;
@@ -244,7 +244,7 @@ static PyObject* THPSize_numel(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPSize_reduce(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPSize*>(_self);
   auto ret = THPObjectPtr{PyTuple_New(2)};

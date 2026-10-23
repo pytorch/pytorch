@@ -9,6 +9,7 @@
 #include <functional>
 #include <initializer_list>
 #include <iterator>
+#include <ostream>
 #include <type_traits>
 #include <vector>
 
@@ -258,14 +259,28 @@ class HeaderOnlyArrayRef {
     return !a1.equals(a2);
   }
   /// @}
+  /// @name Stream operator
+  /// @{
+  friend std::ostream& operator<<(std::ostream& out, HeaderOnlyArrayRef list) {
+    int i = 0;
+    out << '[';
+    for (const auto& e : list) {
+      if (i++ > 0)
+        out << ", ";
+      out << e;
+    }
+    out << ']';
+    return out;
+  }
+  /// @}
 };
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::HeaderOnlyArrayRef;
 using IntHeaderOnlyArrayRef = HeaderOnlyArrayRef<int64_t>;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 #if __cplusplus >= 202002L
 #include <ranges>
