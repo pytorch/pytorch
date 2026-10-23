@@ -219,7 +219,8 @@ class TestCollect(unittest.TestCase):
     def test_the_byte_cap_counts_the_envelope(self):
         issue = [comment("maint", when=f"{i:05d}") for i in range(30)]
         api = FakeApi(issue=issue, maintainers={"maint"})
-        for limit in range(100, 4000, 7):
+        empty = len(fpc.dumps(fpc.collect(FakeApi(), REPO, PR)))
+        for limit in range(empty, 4000, 7):
             with mock.patch.object(fpc, "MAX_TOTAL_BYTES", limit):
                 out = fpc.collect(api, REPO, PR)
             self.assertLessEqual(len(fpc.dumps(out)), limit)
@@ -368,6 +369,7 @@ class TestReactions(unittest.TestCase):
             by_id[20]["reactions"],
             [{"author": "author", "role": "author", "content": "confused"}],
         )
+        self.assertFalse(out["reactions_truncated"])
 
     def test_unreacted_comments_cost_no_call_and_carry_no_field(self):
         api = FakeApi(
@@ -407,6 +409,7 @@ class TestReactions(unittest.TestCase):
             out = fpc.collect(api, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"] if "reactions" in i], [22, 23])
         self.assertEqual(len([c for c in api.calls if "/reactions" in c]), 2)
+        self.assertTrue(out["reactions_truncated"])
 
     def test_permission_checks_for_new_reactors_are_bounded(self):
         crowd = [reaction(f"u{n}", "+1") for n in range(10)]
@@ -422,7 +425,9 @@ class TestReactions(unittest.TestCase):
             },
         )
         with mock.patch.object(fpc, "MAX_REACTOR_CHECKS", 3):
-            (item,) = fpc.collect(api, REPO, PR)["items"]
+            out = fpc.collect(api, REPO, PR)
+        (item,) = out["items"]
+        self.assertTrue(out["reactions_truncated"])
         checks = [c for c in api.calls if "/collaborators/" in c]
         # maint, from its comment, plus three reactors.
         self.assertEqual(len(checks), 4)
@@ -437,8 +442,71 @@ class TestReactions(unittest.TestCase):
             maintainers={"maint"},
             reactions={"issues/comments/20": [reaction("drive-by", "-1")]},
         )
-        (item,) = fpc.collect(api, REPO, PR)["items"]
-        self.assertNotIn("reactions", item)
+        out = fpc.collect(api, REPO, PR)
+        self.assertNotIn("reactions", out["items"][0])
+        self.assertFalse(out["reactions_truncated"])
+
+    def test_a_full_first_page_is_reported_missing(self):
+        # The listing's count can be stale: a full page is what says more may exist.
+        page = [reaction("author", "-1")] + [
+            reaction(f"bot{n}", "+1", "Bot") for n in range(fpc.PER_PAGE - 1)
+        ]
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint"},
+            reactions={"issues/comments/20": page},
+        )
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(len(out["items"][0]["reactions"]), 1)
+        self.assertTrue(out["reactions_truncated"])
+
+    def reacted_comments(self, n):
+        issue = [
+            comment(
+                "maint", id=20 + k, when=f"2026-01-0{k}", reactions={"total_count": 1}
+            )
+            for k in range(1, n + 1)
+        ]
+        reactions = {
+            f"issues/comments/{20 + k}": [reaction("author", "+1")]
+            for k in range(1, n + 1)
+        }
+        return FakeApi(issue=issue, maintainers={"maint"}, reactions=reactions)
+
+    def test_exactly_the_lookup_allowance_is_not_reported(self):
+        with mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2):
+            out = fpc.collect(self.reacted_comments(2), REPO, PR)
+        self.assertFalse(out["reactions_truncated"])
+
+    def test_an_unchecked_reactor_marks_only_its_own_comment(self):
+        # The newest finding exhausts the checks and is then left out; the older
+        # comment's author reaction needs no check, so nothing kept is partial.
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[finding(reactions={"total_count": 2})],
+            issue=[comment("maint", id=20, when="2025", reactions={"total_count": 1})],
+            maintainers={"maint"},
+            reactions={
+                "pulls/comments/10": [reaction("x1", "+1"), reaction("x2", "+1")],
+                "issues/comments/20": [reaction("author", "+1")],
+            },
+        )
+        with (
+            mock.patch.object(fpc, "MAX_REACTOR_CHECKS", 1),
+            mock.patch.object(fpc, "MAX_ITEMS", 1),
+        ):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [20])
+        self.assertFalse(out["reactions_truncated"])
+
+    def test_a_partial_comment_left_out_is_not_reported(self):
+        with (
+            mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2),
+            mock.patch.object(fpc, "MAX_ITEMS", 2),
+        ):
+            out = fpc.collect(self.reacted_comments(3), REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [22, 23])
+        self.assertFalse(out["reactions_truncated"])
 
 
 class TestFailsClosed(unittest.TestCase):

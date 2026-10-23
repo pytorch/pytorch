@@ -13,9 +13,10 @@ replies to them have something to answer. post_review.py deletes superseded
 findings nobody replied or reacted to, so those are not shown. Other bots and
 other users are dropped. A comment's ``reactions`` are the emoji reactions of
 the author and maintainers, read for the newest ``MAX_REACTION_LOOKUPS``
-reacted comments. Bodies are capped and, if the conversation is too
-long, the oldest items are dropped first, earlier automated findings before
-anything people wrote, and ``truncated`` is set.
+reacted comments, and ``reactions_truncated`` is set when a limit may have
+left some out. Bodies are capped and, if the conversation is too long, the
+oldest items are dropped first, earlier automated findings before anything
+people wrote, and ``truncated`` is set.
 
 Every failure is fatal. A review that silently saw no comments would approve a
 PR whose maintainer feedback it was never shown.
@@ -133,9 +134,10 @@ def reacted(kind: str, obj: dict[str, Any]) -> bool:
 
 def reactions_of(
     api: Api, repo: str, kind: str, obj: dict[str, Any], role_of
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
     """The author's and maintainers' reactions to a comment, from its first
-    page of reactions. NotFound if the comment was deleted since it was listed."""
+    page of reactions, and whether that page was full, so more may exist.
+    NotFound if the comment was deleted since it was listed."""
     page = api(
         f"repos/{repo}/{REACTIONS[kind]}/{obj.get('id')}/reactions?per_page={PER_PAGE}"
     )
@@ -147,7 +149,7 @@ def reactions_of(
         role = role_of(login) if login else None
         if role:
             out.append({"author": login, "role": role, "content": r.get("content")})
-    return out
+    return out, len(page) >= PER_PAGE
 
 
 def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
@@ -177,12 +179,14 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
         return roles[login]
 
     checks_left = MAX_REACTOR_CHECKS
+    unchecked = False
 
     def reactor_role(login: str) -> str | None:
-        nonlocal checks_left
+        nonlocal checks_left, unchecked
         if login in roles or login == author:
             return role_of(login)
         if checks_left == 0:
+            unchecked = True
             return None
         checks_left -= 1
         return role_of(login)
@@ -238,12 +242,17 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     items.sort(key=lambda i: i["created_at"])
     deleted = set()
     newest = [i for i in reversed(items) if id(i) in lookups]
+    # Items whose reactions some limit may have left out.
+    partial = {id(i) for i in newest[MAX_REACTION_LOOKUPS:]}
     for item in newest[:MAX_REACTION_LOOKUPS]:
+        unchecked = False
         try:
-            reactions = reactions_of(api, repo, *lookups[id(item)], reactor_role)
+            reactions, full = reactions_of(api, repo, *lookups[id(item)], reactor_role)
         except NotFound:
             deleted.add(id(item))
             continue
+        if full or unchecked:
+            partial.add(id(item))
         if reactions:
             item["reactions"] = reactions
     items = [i for i in items if id(i) not in deleted]
@@ -252,6 +261,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     envelope = {
         **head,
         "truncated": False,
+        "reactions_truncated": False,
         "omitted_items": len(items),
         "items": [],
     }
@@ -274,6 +284,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     return {
         **head,
         "truncated": omitted > 0,
+        "reactions_truncated": any(id(items[n]) in partial for n in kept),
         "omitted_items": omitted,
         "items": [items[n] for n in sorted(kept)],
     }
