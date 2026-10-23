@@ -10764,7 +10764,7 @@ class MultiOutput(ExternKernel):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel)
+            if isinstance(inp, (FallbackKernel, InvokeSubgraph))
             and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
@@ -11322,6 +11322,32 @@ class InvokeSubgraph(ExternKernel):
 
     def get_subgraphs(self) -> list[Subgraph]:
         return [self.subgraph] if self.subgraph else []
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        if self.subgraph is None or self.subgraph.graph is None:
+            raise AssertionError("Expected a lowered invoke_subgraph body")
+        graph = self.subgraph.graph
+        pending = [
+            output.get_name()
+            for output in graph.graph_outputs
+            if not isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer))
+        ]
+        aliases: OrderedSet[str] = OrderedSet()
+        while pending:
+            name = pending.pop()
+            if name in aliases:
+                continue
+            aliases.add(name)
+            if (buffer := graph.name_to_buffer.get(name)) is not None:
+                pending.extend(buffer.get_inputs_that_alias_output())
+
+        # Views use their storage's name; nested calls and fallback outputs can
+        # reach an input through additional alias edges.
+        return [
+            self.input_name(i)
+            for i, name in enumerate(graph.graph_input_names)
+            if name in aliases
+        ]
 
     @classmethod
     def create(

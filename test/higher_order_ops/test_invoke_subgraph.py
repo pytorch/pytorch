@@ -49,6 +49,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
+    parametrize,
     run_tests,
     skipIfCppFakeTensor,
     skipIfTorchDynamo,
@@ -3576,6 +3577,47 @@ _reuse_test_global = None
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphInputAliases(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("view", ("identity", "transpose", "slice"))
+    @parametrize("nested", (False, True))
+    @parametrize("dynamic", (False, True))
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @inductor_config.patch(allow_buffer_reuse=True)
+    def test_saved_input_lifetime(self, device, view, nested, dynamic):
+        @nested_compile_region
+        def inner(a, b):
+            return a * b
+
+        @nested_compile_region
+        def region(a, b):
+            if view == "transpose":
+                a, b = a.t(), b.t()
+            elif view == "slice":
+                a, b = a[:, ::2], b[:, ::2]
+            return inner(a, b) if nested else a * b
+
+        def fn(x, y):
+            return region(x, x + 1).sum() + region(y, y + 1).sum()
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for rows in (4, 8, 4) if dynamic else (4, 4):
+            x = torch.randn(rows, 4, device=device, requires_grad=True)
+            y = torch.randn(rows, 4, device=device, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_()
+            y_ref = y.detach().clone().requires_grad_()
+
+            actual = compiled(x, y)
+            expected = fn(x_ref, y_ref)
+            self.assertEqual(actual, expected)
+            actual.backward()
+            expected.backward()
+            self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(y.grad, y_ref.grad)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -6399,6 +6441,14 @@ class GraphModule(torch.nn.Module):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+
+instantiate_device_type_tests(
+    TestInvokeSubgraphInputAliases,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 instantiate_device_type_tests(
