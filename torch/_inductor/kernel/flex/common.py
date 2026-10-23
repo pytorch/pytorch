@@ -456,6 +456,23 @@ def contiguous_last_dim(x):
     return x
 
 
+def guard_scale(scale: float | sympy.Expr) -> float:
+    """Specialize a symbolic scale, e.g. the default 1/sqrt(head_dim) under dynamic shapes,
+    for backends that bake the scale in as a compile-time constant."""
+    if isinstance(scale, sympy.Expr):
+        # evaluate_expr's default hint is int-only and would guard scale == 0.
+        shape_env = V.graph.sizevars.shape_env
+        hinted = scale.xreplace(shape_env.backed_var_to_val)
+        if hinted.free_symbols:
+            raise NotImplementedError(
+                f"flex_attention scale {scale} depends on data-dependent sizes, "
+                "which this backend cannot specialize"
+            )
+        hint = float(hinted)
+        return float(shape_env.evaluate_expr(scale, hint=hint))
+    return scale
+
+
 def set_head_dim_values(
     kernel_options: dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
 ):
