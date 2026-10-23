@@ -2063,6 +2063,46 @@
       ]
     }
   ],
+  "GB4770": [
+    {
+      "Gb_type": "Unsupported property subclass initialization",
+      "Context": "property subclass initialization",
+      "Explanation": "Dynamo cannot trace property subclass initialization on Python < 3.12, for existing objects, or with custom __setattr__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3325": [
+    {
+      "Gb_type": "Property subclass initialization with a custom doc setter",
+      "Context": "property subclass initialization with a custom __doc__ descriptor",
+      "Explanation": "Dynamo cannot reconstruct a property subclass with a custom __doc__ setter without repeating user code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0431": [
+    {
+      "Gb_type": "Property subclass setter without a source",
+      "Context": "property subclass {slot} without a source",
+      "Explanation": "A source is required to trace a custom property descriptor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3832": [
+    {
+      "Gb_type": "Property subclass getter without a source",
+      "Context": "property subclass __get__ without a source",
+      "Explanation": "A source is required to trace a custom property descriptor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4026": [
     {
       "Gb_type": "triton.set_allocator not supported",

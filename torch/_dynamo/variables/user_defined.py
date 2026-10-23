@@ -3431,6 +3431,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 desc_source = self.get_source_by_walking_mro(tx, name_str)
 
             if isinstance(descriptor, property):
+                if type(descriptor) is not property and desc_source is not None:
+                    desc_var = VariableTracker.build(
+                        tx, descriptor, desc_source, realize=True
+                    )
+                    descr_val = (
+                        None if isinstance(value, variables.DeletedVariable) else value
+                    )
+                    return desc_var.tp_descr_set_impl(tx, self, descr_val)
+                slot = (
+                    "__delete__"
+                    if isinstance(value, variables.DeletedVariable)
+                    else "__set__"
+                )
+                if inspect.getattr_static(type(descriptor), slot) is not getattr(
+                    property, slot
+                ):
+                    unimplemented(
+                        gb_type="Property subclass setter without a source",
+                        context=f"property subclass {slot} without a source",
+                        explanation="A source is required to trace a custom property descriptor method.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 if isinstance(value, variables.DeletedVariable):
                     if descriptor.fdel is None:
                         raise_property_error("deleter")
@@ -3894,9 +3916,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the property wrapper.
-            if self.source:
+            if self.cls_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            prop_vt = variables.PropertyVariable(type_attr, source=source)
+            if source is None:
+                if (
+                    inspect.getattr_static(type(type_attr), "__get__")
+                    is not property.__get__
+                ):
+                    unimplemented(
+                        gb_type="Property subclass getter without a source",
+                        context="property subclass __get__ without a source",
+                        explanation="A source is required to trace a custom property descriptor method.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                prop_vt = variables.PropertyVariable(type_attr)
+            else:
+                prop_vt = VariableTracker.build(tx, type_attr, source, realize=True)
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )

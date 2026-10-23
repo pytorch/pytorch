@@ -1168,6 +1168,7 @@ class SideEffects:
         # Since newly constructed objects don't have a source, we manually
         # codegen their construction and store them to a newly assigned local
         # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
+        properties = []
         for var in self._get_modified_vars():
             if not isinstance(var.mutation_type, AttributeMutationNew):
                 if var.source is None:
@@ -1308,7 +1309,7 @@ class SideEffects:
                 var.source = TempLocalSource(cg.tempvars[var])
 
                 if isinstance(var, variables.UserDefinedPropertyVariable):
-                    var.codegen_init(cg)
+                    properties.append(var)
 
                 # For frozen dataclasses, we must emit object.__setattr__
                 # immediately after __new__ — before any other code can
@@ -1329,6 +1330,10 @@ class SideEffects:
                         cg.extend_output(
                             [*create_call_method(3), create_instruction("POP_TOP")]
                         )
+
+        # Initialize C fields after every new object has a reconstruction source.
+        for var in properties:
+            var.codegen_init(cg)
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)

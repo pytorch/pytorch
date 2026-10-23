@@ -4702,6 +4702,17 @@ def import_submodule(mod: types.ModuleType) -> None:
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
+def initialize_property(obj: property, fget: Any, fset: Any, fdel: Any) -> None:
+    # A non-None doc avoids reading a getter whose mutations have not replayed.
+    # Only plain attribute setters/doc slots are supported by the tracing model.
+    property.__init__(obj, fget, fset, fdel, "")
+    # Leave __doc__ to traced attribute replay, including deletion.
+    try:
+        object.__delattr__(obj, "__doc__")
+    except AttributeError:
+        pass
+
+
 def object_has_getattribute(value: object) -> bool:
     return class_has_getattribute(type(value))
 

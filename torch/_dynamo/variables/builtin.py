@@ -1976,6 +1976,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                         args=list(e.args),
                     )
 
+        if self.fn is property and name == "__init__" and args:
+            return variables.PropertyVariable.tp_init_impl(
+                args[0], tx, args[1:], kwargs
+            )
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
