@@ -93,8 +93,8 @@ from trymerge import (
     PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
+    remember_comment_author,
     remove_job_name_suffix,
-    reopen_reverted_prs,
     REVIEW_PAGE_LIMIT,
     REVIEWS_PER_PAGE,
     sha_from_committed_event,
@@ -655,6 +655,7 @@ class TestTryMerge(TestCase):
         refetched = self._pr_with_merge_comment("meta-codesync")
         for pr in (first, refetched):
             pr.org, pr.project, pr.pr_num = "pytorch", "pytorch", 1
+        remember_comment_author(first, 123)
         self.assertTrue(can_skip_internal_checks(first, 123))
         self.assertTrue(can_skip_internal_checks(refetched, 123))
         # Remembered per comment: another comment id is not vouched for.
@@ -696,25 +697,14 @@ class TestTryMerge(TestCase):
             )
             self.assertFalse(can_skip_internal_checks(pr, 123), status)
 
-    @mock.patch("trymerge.gh_update_pr_state")
-    @mock.patch("trymerge.gh_post_commit_comment")
-    @mock.patch("trymerge.gh_post_pr_comment")
-    def test_revert_warning_is_waived_per_pr(self, mock_post: Any, *args: Any) -> None:
-        "A revert comment's waiver covers only the PRs it vouches for."
-        waived, warned = mock.MagicMock(pr_num=1), mock.MagicMock(pr_num=2)
-        for pr in (waived, warned):
-            pr.has_internal_changes.return_value = True
-            pr.has_no_connected_diff.return_value = False
-        reopen_reverted_prs(
-            waived,
-            [("sha1", waived), ("sha2", warned)],
-            "reverted",
-            skip_internal_checks=lambda pr: pr is waived,
-            dry_run=True,
+    def test_meta_codesync_revert_keeps_internal_checks(self, *args: Any) -> None:
+        "The meta-codesync waiver covers its merge comments, not its reverts."
+        codesync = self._pr_with_merge_comment(
+            "meta-codesync", "https://github.com/apps/meta-codesync"
         )
-        bodies = {c.args[2]: c.args[3] for c in mock_post.call_args_list}
-        self.assertNotIn("might contain internal changes", bodies[1])
-        self.assertIn("might contain internal changes", bodies[2])
+        self.assertFalse(can_skip_internal_checks(codesync, 123, for_merge=False))
+        legacy = self._pr_with_merge_comment("facebook-github-bot")
+        self.assertTrue(can_skip_internal_checks(legacy, 123, for_merge=False))
 
     def test_merge_loop_skips_the_comment_lookup_without_internal_changes(
         self, *args: Any
@@ -2889,7 +2879,7 @@ class TestMergeInternalChecksWaiver(TestCase):
         self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
     ) -> None:
         "The URL is cached while the merge comment is still in the prefetch window."
-        with mock.patch("trymerge._unedited_comment_author") as mock_author:
+        with mock.patch("trymerge.remember_comment_author") as mock_author:
             self._merge(mock_pr_cls, mock_rule, False)
         mock_author.assert_called_once_with(mock_pr_cls.return_value, 1)
 
