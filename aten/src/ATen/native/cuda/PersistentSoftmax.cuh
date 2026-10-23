@@ -44,7 +44,7 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 }
 
 // The softmax_warp_* methods perform softmax forward and backward propagation on samples spanning the fast dimension.
-// Each sample contains element_count scalar elements. Forward supports values up to 2048; backward supports values up to 1024.
+// Each sample contains element_count scalar elements. Forward and backward support values up to 2048.
 // The template arguments have the following meaning:
 // One "WARP" works on one "BATCH". One "BATCH" contains "WARP_BATCH" samples.
 // WARP_BATCH is equal to 1 when element_count is large, and > 1 when element_count is small.
@@ -98,7 +98,8 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     // the nested loops.
     // This should have no impact on performance because the loops are unrolled anyway.
 
-    // load data from global memory
+    // load data from global memory. Masked positions are stored as -inf so that
+    // the max and sum loops below stay branch-free.
     acc_t elements[WARP_BATCH][WARP_ITERATIONS];
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         int batch_element_count = (i >= local_batches) ? 0 : element_count;
@@ -106,82 +107,52 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < batch_element_count) {
                 elements[i][it] = src[i*element_count+it*WARP_SIZE];
+                if (is_masked) {
+                    int idx = it*WARP_SIZE;
+                    if (!is_transformer_mask) {
+                        idx += i*element_count;
+                    }
+                    elements[i][it] = mask[idx] ? -std::numeric_limits<acc_t>::infinity() : elements[i][it];
+                }
             } else {
                 elements[i][it] = -std::numeric_limits<acc_t>::infinity();
             }
         }
     }
 
-    // compute max_value
+    // compute max_value. Masked positions are already -inf, so a plain max
+    // reduction ignores them.
     acc_t max_value[WARP_BATCH];
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
-        int batch_element_count = (i >= local_batches) ? 0 : element_count;
-        bool is_meaningful_max = false;
         max_value[i] = elements[i][0];
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
-            if (is_masked) {
-                int idx = it*WARP_SIZE;
-                if ((idx + local_idx) < batch_element_count) {
-                    if (!is_transformer_mask) {
-                        idx += i*element_count;
-                    }
-                    if (!mask[idx]) {
-                        max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
-                        is_meaningful_max = true;
-                    }
-                }
-            } else {
-                max_value[i] = max_value[i] > elements[i][it] ? max_value[i] : elements[i][it];
-            }
-        }
-        if (is_masked) {
-            if (!is_meaningful_max) {
-                max_value[i] = -std::numeric_limits<acc_t>::infinity();
-            }
+            max_value[i] = max_value[i] > elements[i][it] ? max_value[i] : elements[i][it];
         }
     }
     warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Max>(max_value);
 
+    if (is_masked) {
+        // A fully-masked row has max == -inf, which makes the sum loop below
+        // compute exp(-inf - -inf) == NaN. Normalize to 0 so such rows still
+        // hit the sum == 0 branch (quiet_NaN) in the store loop.
+        #pragma unroll
+        for (int i = 0;  i < WARP_BATCH;  ++i) {
+            max_value[i] = max_value[i] == -std::numeric_limits<acc_t>::infinity() ? acc_t(0) : max_value[i];
+        }
+    }
+
     acc_t sum[WARP_BATCH] { 0.0f };
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
-        int batch_element_count = (i >= local_batches) ? 0 : element_count;
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
-            if (!is_masked) {
-                if (is_log_softmax) {
-                    sum[i] += std::exp(elements[i][it] - max_value[i]);
-                } else {
-                    elements[i][it] = std::exp(elements[i][it] - max_value[i]);
-                    sum[i] += elements[i][it];
-                }
+            if (is_log_softmax) {
+                sum[i] += std::exp(elements[i][it] - max_value[i]);
             } else {
-                int idx = it*WARP_SIZE;
-                bool valid = (idx + local_idx) < batch_element_count;
-                if (!is_transformer_mask) {
-                    idx += i*element_count;
-                }
-                if (valid) {
-                    if (!mask[idx]) {
-                        if (is_log_softmax) {
-                            sum[i] += std::exp(elements[i][it] - max_value[i]);
-                        } else {
-                            elements[i][it] = std::exp(elements[i][it] - max_value[i]);
-                            sum[i] += elements[i][it];
-                        }
-                    } else {
-                        if (!is_log_softmax) {
-                            // Masked values are treated as -infinity, and std::exp(-infinity) is 0.
-                            elements[i][it] = 0;
-                        }
-                    }
-                } else {
-                    if (!is_log_softmax) {
-                        elements[i][it] = 0.;
-                    }
-                }
+                elements[i][it] = std::exp(elements[i][it] - max_value[i]);
+                sum[i] += elements[i][it];
             }
         }
     }
@@ -245,7 +216,8 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     // the nested loops.
     // This should have no impact on performance because the loops are unrolled anyway.
 
-    // load data from global memory
+    // load data from global memory. Masked positions are stored as 0 so that
+    // the sum and store loops below stay branch-free.
     acc_t grad_reg[WARP_BATCH][WARP_ITERATIONS];
     acc_t output_reg[WARP_BATCH][WARP_ITERATIONS];
     for (int i = 0;  i < WARP_BATCH;  ++i) {
@@ -255,6 +227,10 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
             if (element_index < batch_element_count) {
                 grad_reg[i][it] = grad[i*element_count+it*WARP_SIZE];
                 output_reg[i][it] = output[i*element_count+it*WARP_SIZE];
+                if (is_masked) {
+                    grad_reg[i][it] = mask[i*element_count+it*WARP_SIZE] ? acc_t(0) : grad_reg[i][it];
+                    output_reg[i][it] = mask[i*element_count+it*WARP_SIZE] ? acc_t(0) : output_reg[i][it];
+                }
             } else {
                 grad_reg[i][it] = acc_t(0);
                 output_reg[i][it] = acc_t(0);
@@ -267,9 +243,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
-            if (!is_masked || !mask[i*element_count+it*WARP_SIZE]) {
-                sum[i] += grad_reg[i][it];
-            }
+            sum[i] += grad_reg[i][it];
         }
     }
     warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum);
@@ -283,11 +257,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
-                if (is_masked && mask[i*element_count+it*WARP_SIZE]) {
-                    gradInput[i*element_count+it*WARP_SIZE] = 0;
-                }
-                // compute gradients
-                else if (is_log_softmax) {
+                if (is_log_softmax) {
                     gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - std::exp(output_reg[i][it]) * sum[i]);
                 } else {
                     gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - output_reg[i][it] * sum[i]);
@@ -370,7 +340,7 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
 template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, bool is_masked>
 void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const input_t *output, int softmax_elements, int softmax_elements_stride, int batch_count, const bool *mask = nullptr)
 {
-    TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
+    TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 2048 );
     if (softmax_elements == 0) {
        return;
     } else {
@@ -431,6 +401,7 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
             LAUNCH_SOFTMAX_WARP_BACKWARD(8); // 256
             LAUNCH_SOFTMAX_WARP_BACKWARD(9); // 512
             LAUNCH_SOFTMAX_WARP_BACKWARD(10); // 1024
+            LAUNCH_SOFTMAX_WARP_BACKWARD(11); // 2048
             default:
                 break;
         }
