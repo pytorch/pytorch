@@ -383,6 +383,11 @@ def _write_sub_tensor_to_file_optimized(
         sub_tensor_offsets: Starting offsets of the sub-tensor within the full tensor
         sub_tensor_shape: Shape of the sub-tensor
     """
+    # Scalar tensors have no dimensions, but they contain one element.
+    if not tensor_shape and not sub_tensor_shape:
+        full_tensor_mv[:element_size] = sub_tensor_bytes
+        return
+
     # Handle empty tensors
     if not tensor_shape or not sub_tensor_shape:
         return
