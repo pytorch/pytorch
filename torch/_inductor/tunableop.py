@@ -35,7 +35,7 @@ _mode_warned = False
 def _mode() -> str:
     """The configured mode, warning once on values that silently mean "off".
 
-    config.aten_tunableop_mode accepts any string from INDUCTOR_ATEN_TUNABLEOP_MODE,
+    config.aten_tunableop_mode accepts any string from TORCHINDUCTOR_ATEN_TUNABLEOP_MODE,
     so a typo like "Tune" or "on" would otherwise disable both passes silently.
     """
     global _mode_warned
@@ -43,7 +43,7 @@ def _mode() -> str:
     if mode not in _valid_modes and not _mode_warned:
         _mode_warned = True
         log.warning(
-            "Unknown INDUCTOR_ATEN_TUNABLEOP_MODE=%r (expected one of %s); "
+            "Unknown TORCHINDUCTOR_ATEN_TUNABLEOP_MODE=%r (expected one of %s); "
             'treating as "off"',
             mode,
             ", ".join(_valid_modes),
@@ -77,6 +77,10 @@ class BenchmarkJob:
         self.bmreq = bmreq
         self.tuning = tuning
         self.nearest_match = nearest_match
+        # Stamped by submit() with the parent's tuning knobs (see
+        # snapshot_settings): the worker is a long-lived fresh process that
+        # would otherwise tune with defaults.
+        self.settings: dict[str, Any] = {}
         # Stamped by submit() with the submitting process's logical device.
         self.device = 0
         # Stamped by submit() with the resolved results filename (see
@@ -100,6 +104,12 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
+        # Re-enter the parent's tuning knobs (snapshot_settings): process-global
+        # C++ state, not env vars, so the worker would otherwise silently use
+        # defaults. Numerical-check tolerances have no getter and are not
+        # propagated -- documented in snapshot_settings.
+        for name, value in self.settings.items():
+            getattr(tunable, name)(value)
         # TunableOp cannot tune under graph capture.
         self.bmreq.benchmark_with_cudagraphs = False
         return self.bmreq.benchmark()
@@ -148,7 +158,7 @@ def get_worker(key: tuple[int, str]) -> Any:
     from .autotune_process import TuningProcess
 
     if _worker is not None and _worker_key != key:
-        shutdown_worker()
+        _shutdown_locked()
     if _worker is None:
         # device=None on purpose. TuningProcess.start() *replaces* the inherited
         # CUDA_VISIBLE_DEVICES with str(device), so handing it a logical ordinal
@@ -168,6 +178,13 @@ def get_worker(key: tuple[int, str]) -> Any:
 
 
 def shutdown_worker() -> None:
+    """Shut down the worker. Callers holding _worker_lock use _shutdown_locked."""
+    with _worker_lock:
+        _shutdown_locked()
+
+
+def _shutdown_locked() -> None:
+    """Assumes _worker_lock is held (get_worker calls it on key change)."""
     global _worker, _worker_key
     if _worker is not None:
         try:
@@ -187,6 +204,36 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
     if dot != -1:
         return filename[:dot] + ordinal + filename[dot:]
     return filename + ordinal
+
+
+# Tuning knobs propagated to the worker: (parent getter, worker setter) pairs.
+# Numerical-check tolerances are deliberately absent -- set_numerical_check_-
+# tolerances has no getter, so there is nothing to snapshot. Documented here so
+# a reader does not assume full propagation.
+_TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
+    ("get_max_tuning_duration", "set_max_tuning_duration"),
+    ("get_max_tuning_iterations", "set_max_tuning_iterations"),
+    ("get_rotating_buffer_size", "set_rotating_buffer_size"),
+    ("get_cublaslt_requested_algo_count", "set_cublaslt_requested_algo_count"),
+)
+
+
+def snapshot_settings() -> dict[str, Any]:
+    """Read the parent's tuning knobs for stamping onto the job.
+
+    The worker is long-lived and keyed only on (device, filename), so it never
+    sees settings changed after it starts; stamping per job keeps it in sync.
+    Best-effort per knob: a getter failure leaves that knob at the worker's
+    default rather than failing the submission.
+    """
+    tunable = torch.cuda.tunable
+    settings: dict[str, Any] = {}
+    for getter, setter in _TUNABLE_SETTINGS:
+        try:
+            settings[setter] = getattr(tunable, getter)()
+        except Exception:
+            log.debug("TunableOp setting snapshot failed for %s", getter)
+    return settings
 
 
 def resolve_filename(device: int) -> str:
@@ -235,19 +282,36 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         # the worker is a fresh process and would otherwise lazily initialize
         # its manager from the env/default file, not the parent's file.
         job.filename = resolve_filename(device)
+        # Stamp the parent's tuning knobs for the same reason: process-global
+        # C++ state does not cross the pipe.
+        job.settings = snapshot_settings()
+    except Exception as e:  # resolve before the worker: no restart
+        # Failed before the worker was involved (no device, no filename): report
+        # without touching it. Shutting down here would kill a healthy worker
+        # another thread is using, and -- worse -- write the None sentinel into
+        # the pipe mid-stream after _worker_lock is released.
+        log.debug("TunableOp benchmark setup failed: %s", e)
+        return Outcome(None, "error")
+    try:
         with _worker_lock:
             worker = get_worker((device, job.filename))
-            worker.put(job)
-            return Outcome(worker.get(timeout=timeout), "ok")
-    except TimeoutError:
-        return Outcome(None, "timeout")
-    except EOFError:
-        return Outcome(None, "crash")
-    except Exception as e:  # a failed benchmark must not fail the compile
-        log.debug("TunableOp benchmark failed: %s", e)
-        # A catchable exception can leave a sticky fault behind (e.g. an illegal
-        # address corrupting the GPU context): the worker stays alive, so every
-        # later GEMM would fail the same way. Restart it so the next submission
-        # gets a clean process; recorded solutions survive via the results file.
-        shutdown_worker()
+            try:
+                worker.put(job)
+                return Outcome(worker.get(timeout=timeout), "ok")
+            except TimeoutError:
+                return Outcome(None, "timeout")
+            except EOFError:
+                return Outcome(None, "crash")
+            except Exception as e:  # a failed benchmark must not fail the compile
+                log.debug("TunableOp benchmark failed: %s", e)
+                # A catchable exception can leave a sticky fault behind (e.g. an
+                # illegal address corrupting the GPU context): the worker stays
+                # alive, so every later GEMM would fail the same way. Restart it
+                # here, inside the lock, so no other thread observes the dead
+                # worker or interleaves on the pipe; recorded solutions survive
+                # via the results file.
+                _shutdown_locked()
+                return Outcome(None, "error")
+    except Exception as e:  # lock/restart machinery itself failed
+        log.debug("TunableOp worker machinery failed: %s", e)
         return Outcome(None, "error")
