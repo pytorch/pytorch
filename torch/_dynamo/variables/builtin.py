@@ -3890,6 +3890,23 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        if (
+            istype(obj, variables.UserFunctionVariable)
+            and obj.source is not None
+            and obj.fn in tx.output.side_effects
+        ):
+            from .builder import VariableBuilder
+
+            tracked = VariableBuilder(tx, obj.source)._reuse_tracked_variable(obj.fn)
+            if tracked is not None:
+                obj = tracked
+        if (
+            istype(obj, variables.UserFunctionVariable)
+            and obj.source is not None
+            and name_var.is_python_constant()
+            and obj.lookup_tp_getset_member(name_var.as_python_constant()) is None
+        ):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         if isinstance(
             obj,
             (

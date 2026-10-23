@@ -15,6 +15,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.variables import (
     CellVariable,
     ConstantVariable,
+    DeletedVariable,
     UserDefinedObjectVariable,
 )
 from torch._dynamo.variables.base import (
@@ -28,9 +29,12 @@ from torch._dynamo.variables.dicts import SideEffectsProxyDict
 
 class SideEffectReplayRegistryTests(TestCase):
     def test_attribute_mutation_overlaps_clone(self) -> None:
+        class Object:
+            __slots__ = ("name", "__dict__")
+
         output = Mock()
         side_effects = SideEffects(output)
-        obj = SimpleNamespace()
+        obj = Object()
         var = UserDefinedObjectVariable(obj)
         side_effects.track_object_existing(obj, var)
         side_effects.store_attr(var, "name", ConstantVariable.create("slot"))
@@ -56,6 +60,25 @@ class SideEffectReplayRegistryTests(TestCase):
         )
         self.assertNotEqual(side_effects, saved)
         self.assertEqual(saved, saved.clone())
+
+    def test_instance_dict_membership_ignores_slot_mutations(self) -> None:
+        class Object:
+            __slots__ = ("name", "__dict__")
+
+        output = Mock()
+        side_effects = output.side_effects = SideEffects(output)
+        tx = Mock(output=output)
+        obj = Object()
+        var = UserDefinedObjectVariable(obj)
+        side_effects.track_object_existing(obj, var)
+        side_effects.store_instance_dict_attr(
+            var, "name", ConstantVariable.create("dict")
+        )
+        side_effects.store_attr(var, "name", DeletedVariable())
+        self.assertTrue(var.has_key_in_generic_dict(tx, "name"))
+        side_effects.store_instance_dict_attr(var, "name", DeletedVariable())
+        side_effects.store_attr(var, "name", ConstantVariable.create("slot"))
+        self.assertFalse(var.has_key_in_generic_dict(tx, "name"))
 
     def test_instance_dict_deletion_restores_with_side_effects(self) -> None:
         output = Mock()

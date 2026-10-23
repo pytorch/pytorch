@@ -29,6 +29,75 @@ def _staticmethod_identity(value):
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("new_function", [False, True])
+    @parametrize(
+        "name",
+        ["__name__", "__qualname__"]
+        + (["__type_params__"] if sys.version_info >= (3, 12) else []),
+    )
+    def test_function_slot_deletion_raises_during_tracing(self, new_function, name):
+        def existing():
+            pass
+
+        def fn(x, f):
+            if new_function:
+
+                def f():
+                    pass
+
+            try:
+                delattr(f, name)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.randn(3)
+        expected = fn(x, existing)
+        counter = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=counter, fullgraph=True)(x, existing)
+        self.assertEqual(result, expected)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_function_slot_deletion_ignores_instance_dict(self):
+        def existing():
+            pass
+
+        existing.__dict__[object()] = "unrelated"
+
+        def fn(x):
+            try:
+                del existing.__name__
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @unittest.skipIf(sys.version_info >= (3, 12), "__type_params__ is a function slot")
+    @parametrize("new_function", [False, True])
+    def test_function_type_params_instance_dict(self, new_function):
+        def existing():
+            pass
+
+        def fn(x, f):
+            if new_function:
+
+                def f():
+                    pass
+
+            f.__type_params__ = ()
+            before = f.__dict__["__type_params__"]
+            del f.__type_params__
+            return before, hasattr(f, "__type_params__"), x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, existing),
+            fn(x, existing),
+        )
+
     # --- getattr() builtin ---
 
     def test_getattr_constant(self):

@@ -3702,6 +3702,163 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result(x), expected(x))
         self.assertEqual(value, x + 1)
 
+    @parametrize("new_function", [False, True])
+    @parametrize("dict_first", [False, True])
+    @parametrize("delete", [False, True])
+    def test_function_attribute_and_dict_share_binding(
+        self, new_function, dict_first, delete
+    ):
+        def existing(y):
+            return y
+
+        def fn(x, f):
+            if new_function:
+
+                def f(y):
+                    return y
+
+            if dict_first:
+                f.__dict__["attr"] = x
+            else:
+                f.attr = x
+            before = f.attr
+            if delete:
+                del f.attr
+            elif dict_first:
+                f.attr = x + 1
+            else:
+                f.__dict__["attr"] = x + 1
+            attrs = f.__dict__
+            return f, before, getattr(f, "attr", None), attrs.get("attr"), tuple(attrs)
+
+        x = torch.randn(3)
+        expected = fn(x, existing)
+        existing.__dict__.clear()
+        f, before, attr, dict_attr, keys = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, existing)
+        self.assertIs(before, x)
+        self.assertEqual((attr, dict_attr, keys), expected[2:])
+        self.assertEqual(tuple(f.__dict__), keys)
+        if delete:
+            self.assertNotIn("attr", f.__dict__)
+        else:
+            self.assertEqual(f.attr, x + 1)
+            self.assertIs(f.attr, attr)
+            self.assertIs(attr, dict_attr)
+
+    def test_decorated_function_annotations(self):
+        def fn(x):
+            def inner(value: int) -> str:
+                return str(value)
+
+            decorated = torch.no_grad()(inner)
+            return decorated, decorated.__annotations__, x + 1
+
+        x = torch.randn(3)
+        decorated, annotations, value = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x)
+        expected, expected_annotations, expected_value = fn(x)
+        self.assertEqual(annotations, expected_annotations)
+        self.assertEqual(decorated.__annotations__, expected.__annotations__)
+        self.assertEqual(value, expected_value)
+
+    def test_input_function_annotations_assignment(self):
+        def inner(y):
+            return y
+
+        inner.__annotations__ = {"old": str}
+
+        def fn(x, f):
+            f.__annotations__ = {"new": int}
+            return x + 1, f.__annotations__
+
+        x = torch.randn(3)
+        value, annotations = torch.compile(fn, backend="eager", fullgraph=True)(
+            x, inner
+        )
+        self.assertEqual(value, x + 1)
+        self.assertEqual(annotations, {"new": int})
+        self.assertEqual(inner.__annotations__, annotations)
+
+    def test_bound_method_instance_dict_aliases(self):
+        class Object:
+            def method(self, x):
+                return x
+
+        Object.method.attr = "old"
+
+        def fn(x, obj):
+            first = obj.method.__dict__
+            second = obj.method.__dict__
+            first["attr"] = x
+            before = obj.method.attr
+            obj.method.__dict__["attr"] = x + 1
+            return (
+                first,
+                second,
+                Object.method.__dict__,
+                obj.method.__func__.__dict__,
+                before,
+                obj.method.attr,
+                x + 2,
+            )
+
+        x = torch.randn(3)
+        obj = Object()
+        first, second, class_attrs, func_attrs, before, after, value = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, obj)
+        self.assertIs(first, second)
+        self.assertIs(first, class_attrs)
+        self.assertIs(first, func_attrs)
+        self.assertIs(first, Object.method.__dict__)
+        self.assertIs(before, x)
+        self.assertEqual(after, x + 1)
+        self.assertIs(first["attr"], after)
+        self.assertEqual(value, x + 2)
+
+    def test_function_instance_dict_alias_guard(self):
+        def first(y):
+            return y
+
+        def second(y):
+            return y
+
+        second.attr = "separate"
+
+        def fn(x, f, g):
+            f.__dict__["attr"] = x
+            return g.__dict__["attr"], x + 1
+
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        attr, value = compiled(x, first, first)
+        self.assertIs(attr, x)
+        self.assertEqual(value, x + 1)
+        attr, value = compiled(x, first, second)
+        self.assertEqual(attr, "separate")
+        self.assertEqual(value, x + 1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_decorated_input_function_dict_is_separate(self):
+        def inner(y):
+            return y
+
+        def fn(x, f):
+            original_attrs = f.__dict__
+            decorated = torch.no_grad()(f)
+            return decorated.__dict__, original_attrs, x + 1
+
+        x = torch.randn(3)
+        attrs, original_attrs, value = torch.compile(fn, backend="eager")(x, inner)
+        self.assertIs(attrs["__wrapped__"], inner)
+        self.assertIsNot(attrs, original_attrs)
+        self.assertIs(original_attrs, inner.__dict__)
+        self.assertEqual(value, x + 1)
+
     @parametrize("slot_first", [False, True])
     @parametrize("delete_shadow", [False, True])
     def test_function_slot_and_instance_dict_same_name(self, slot_first, delete_shadow):

@@ -533,8 +533,8 @@ class BaseUserFunctionVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), tuple):
-            raise_type_error(tx, "__type_params__ must be set to a tuple object")
+        if value is None or not issubclass(value.python_type(), tuple):
+            raise_type_error(tx, "__type_params__ must be set to a tuple")
         store_attr_mutation(tx, self, "__type_params__", value)
 
     def _set_name(
@@ -542,7 +542,7 @@ class BaseUserFunctionVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
+        if value is None or not issubclass(value.python_type(), str):
             raise_type_error(tx, "__name__ must be set to a string object")
         store_attr_mutation(tx, self, "__name__", value)
 
@@ -551,7 +551,7 @@ class BaseUserFunctionVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
+        if value is None or not issubclass(value.python_type(), str):
             raise_type_error(tx, "__qualname__ must be set to a string object")
         store_attr_mutation(tx, self, "__qualname__", value)
 
@@ -629,8 +629,10 @@ class BaseUserFunctionVariable(VariableTracker):
             unmodeled_setter,
         ),
         "__annotations__": GetSet(_get_annotations, _set_annotations),
-        "__type_params__": GetSet(_get_type_params, _set_type_params),
     }
+    if sys.version_info >= (3, 12):
+        tp_getset["__type_params__"] = GetSet(_get_type_params, _set_type_params)
+
     tp_members = {
         "__doc__": Member(
             lambda s, tx: s._get_metadata(tx, "__doc__"),
@@ -657,6 +659,11 @@ class BaseUserFunctionVariable(VariableTracker):
             fn = self.get_function()
         except NotImplementedError:
             return None
+        if fn in tx.output.side_effects and istype(
+            self, (UserFunctionVariable, UserMethodVariable)
+        ):
+            attrs = self.get_dict_vt(tx)
+            return attrs.getitem(name) if attrs.contains(name) else None
         fn_dict = getattr(fn, "__dict__", None)
         if not fn_dict or name not in fn_dict:
             return None
@@ -752,6 +759,24 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_value_for_setattr(self) -> object | None:
         return self.fn
+
+    def get_dict_vt(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "variables.DunderDictVariable":
+        side_effects = tx.output.side_effects
+        if not istype(self, UserFunctionVariable):
+            return super().get_dict_vt(tx)
+        if self.fn in side_effects:
+            owner = side_effects[self.fn]
+            if owner is not self:
+                if self.source is not None:
+                    from .builder import VariableBuilder
+
+                    VariableBuilder(tx, self.source)._reuse_tracked_variable(self.fn)
+                self.dict_vt = owner.get_dict_vt(tx)
+        elif self.source is not None:
+            side_effects.track_object_existing(self.fn, self)
+        return super().get_dict_vt(tx)
 
     def __init__(
         self,
@@ -2625,7 +2650,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.closure,
             wrapped.wrapped_fn,
         )
-        self.annotations = wrapped.annotations
         self.wrapped = wrapped
         self.context = context
         from .object_protocol import generic_getattr
@@ -2634,7 +2658,7 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             name: generic_getattr(tx, wrapped, name)
             for name in functools.WRAPPER_ASSIGNMENTS
         }
-        self.annotations = self.copied_attrs.get("__annotations__")
+        self.annotations = self.copied_attrs.get("__annotations__", wrapped.annotations)
         self.initial_dict = (
             {
                 key if isinstance(key, str) else key.vt.as_python_constant(): value

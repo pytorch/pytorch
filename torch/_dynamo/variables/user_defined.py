@@ -3676,7 +3676,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self, key, AttrMutationKind.INSTANCE_DICT
         ):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            mutated_attr = tx.output.side_effects.load_attr(
+                self, key, deleted_ok=True, mutation_kind=AttrMutationKind.INSTANCE_DICT
+            )
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
         # TODO(guilhermeleobas): This can trigger a side effect
