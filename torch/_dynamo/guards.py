@@ -5218,6 +5218,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = torch._subclasses.fake_tensor.is_fake_tensor(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
@@ -5226,11 +5227,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
             # pickle; no_dispatch makes the template a plain meta tensor.
-            with (
-                no_dispatch()
-                if torch._subclasses.fake_tensor.is_fake_tensor(obj)
-                else contextlib.nullcontext()
-            ):
+            with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
