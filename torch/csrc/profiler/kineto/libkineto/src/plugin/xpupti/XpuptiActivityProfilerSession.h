@@ -54,6 +54,12 @@ using pti_view_record_memcpy_p2p_t = pti_view_record_memory_copy_p2p;
 using pti_view_record_memfill_t = pti_view_record_memory_fill;
 #endif
 
+// A PTI-clock time and the system_clock time of the same instant.
+struct XpuptiClockSample {
+  int64_t pti{0};
+  int64_t sys{0};
+};
+
 class XpuptiActivityProfilerSession
     : public libkineto::IActivityProfilerSession {
  public:
@@ -97,6 +103,7 @@ class XpuptiActivityProfilerSession
   void checkTimestampOrder(const ITraceActivity* act1);
   void removeCorrelatedPtiActivities(const ITraceActivity* act1);
   bool outOfRange(const ITraceActivity* act);
+  uint64_t toKinetoTime(uint64_t ptiTimestamp) const;
   int64_t getMappedQueueId(uint64_t sycl_queue_id);
   const ITraceActivity* linkedActivity(
       int32_t correlationId,
@@ -158,6 +165,11 @@ class XpuptiActivityProfilerSession
   int64_t captureWindowEndTime_{0};
   int64_t profilerStartTs_{0};
   int64_t profilerEndTs_{0};
+  // toKinetoTime maps PTI times onto system_clock from the sample taken at
+  // session start and the rate measured over the session in processTrace().
+  XpuptiClockSample clockAtStart_;
+  double clockRateError_{0.0};
+  bool ptiClockIsMonotonicRaw_{false};
   std::unordered_map<int64_t, int64_t> cpuCorrelationMap_;
   std::unordered_map<int64_t, int64_t> userCorrelationMap_;
   std::unordered_map<int64_t, const ITraceActivity*> correlatedPtiActivities_;

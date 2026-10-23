@@ -49,6 +49,13 @@ class XpuptiActivityApi {
   void clearActivities();
   void flushActivities();
 
+  // The clock PTI is asked to report in (CLOCK_MONOTONIC_RAW on Linux), and
+  // whether PTI accepted it; if not, PTI keeps its default clock.
+  static uint64_t ptiClockNs();
+  virtual bool ptiClockIsMonotonicRaw() const {
+    return ptiClockIsMonotonicRaw_;
+  }
+
   virtual std::unique_ptr<XpuptiActivityBufferMap> activityBuffers();
 
   virtual ActivitiesStats processActivities(
@@ -60,6 +67,7 @@ class XpuptiActivityApi {
   std::unique_ptr<XpuptiActivityBufferMap> readyGpuTraceBuffers_;
   std::mutex mutex_;
   bool externalCorrelationEnabled_{false};
+  bool ptiClockIsMonotonicRaw_{false};
 
   std::size_t processActivitiesForBuffer(
       std::uint8_t* buf,
