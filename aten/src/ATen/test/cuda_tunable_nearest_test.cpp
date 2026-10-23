@@ -3,14 +3,17 @@
 #include <cstdio>
 #include <fstream>
 
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/tunable/GemmCommon.h>
+#include <ATen/cuda/tunable/GemmLdRules.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/tempfile.h>
 
 // Manager-level coverage for LookupNearest / RecordBorrowed. Unlike
 // cuda_tunable_ld_rules_test.cpp (header-only, no ATen), this drives the real
-// TuningResultsManager through getTuningContext(). The manager logic is CPU
-// logic -- no GEMM is launched -- but the test links against torch_cuda like
-// every other ATen CUDA test.
+// TuningResultsManager through getTuningContext(). No GEMM is launched -- the
+// logic under test is all CPU -- but reaching the context at all needs a
+// device, so those tests skip without one. See TunableNearestTest below.
 //
 // Each test uses a fresh TuningResultsManager and saves/restores the global
 // context flags it touches, so tests do not leak flag state into each other.
@@ -36,46 +39,93 @@ struct FlagGuard {
   FlagGuard() {
     auto* ctx = getTuningContext();
     tuning_ = ctx->IsTuningEnabled();
+    untuned_ = ctx->IsRecordUntunedEnabled();
     nearest_ = ctx->IsNearestMatchEnabled();
     borrowed_ = ctx->IsRecordBorrowedEnabled();
   }
   ~FlagGuard() {
     auto* ctx = getTuningContext();
     ctx->EnableTuning(tuning_);
+    ctx->EnableRecordUntuned(untuned_);
     ctx->EnableNearestMatch(nearest_);
     ctx->EnableRecordBorrowed(borrowed_);
   }
-  bool tuning_, nearest_, borrowed_;
+  bool tuning_, untuned_, nearest_, borrowed_;
 };
+
+// Read an entire file into a string for content assertions.
+std::string ReadFile(const std::string& path) {
+  std::ifstream in(path);
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  return content;
+}
+
+// Point the global context's results file at a tmp file for the duration of a
+// test. Any test that might write has to own the file rather than append to
+// whatever the process default is. No global manager init is required.
+class TempResultsFile {
+ public:
+  explicit TempResultsFile(const char* prefix)
+      : tmp_(c10::make_tempfile(prefix)),
+        prev_(getTuningContext()->GetFilename()) {
+    getTuningContext()->SetFilename(tmp_.name, /*insert_device_ordinal=*/false);
+  }
+  ~TempResultsFile() {
+    getTuningContext()->SetFilename(prev_, /*insert_device_ordinal=*/false);
+  }
+  std::string Contents() const { return ReadFile(tmp_.name); }
+
+ private:
+  c10::TempFile tmp_;
+  std::string prev_;
+};
+
+// Seed a manager's map without taking the write path, which needs a device.
+void SeedDonor(TuningResultsManager& mgr) {
+  getTuningContext()->EnableTuning(false);
+  mgr.Add(kOp, kCSig, Donor("k64"));
+}
 
 } // namespace
 
-TEST(TunableNearest, ReturnsNullWhenFlagOff) {
-  FlagGuard g;
-  auto* ctx = getTuningContext();
-  ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(false);
-  TuningResultsManager mgr;
-  mgr.Add(kOp, kCSig, Donor("k1"));
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), ResultEntry::Null());
-}
+// Constructing the TuningContext builds the results validator, which queries
+// the current device. Without a usable one that is a segfault inside
+// c10::cuda::get_cuda_error_help rather than a clean error, so skip instead of
+// crashing the binary. Every test below reaches getTuningContext(); the
+// TunableNearestParse suite does not and stays unguarded.
+class TunableNearestTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    if (!at::cuda::is_available()) {
+      GTEST_SKIP() << "needs a device to construct the TuningContext";
+    }
+  }
+};
 
-TEST(TunableNearest, ReturnsNullWhileTuning) {
-  // A tuning pass must tune the real shape, never short-circuit to a neighbour.
+TEST_F(TunableNearestTest, LookupNearestIgnoresGlobalFlags) {
+  // Calling LookupNearest is itself the opt-in: TunableOp dispatch resolves
+  // through Lookup and never reaches it, so it answers the question asked
+  // rather than re-deciding from process-global state. Whether borrowing
+  // applies at all -- including "never while tuning" -- is the reuse pass's
+  // call, and it only reaches here on its non-tuning path.
   FlagGuard g;
   auto* ctx = getTuningContext();
+  TuningResultsManager mgr;
+  SeedDonor(mgr);
+
+  ctx->EnableNearestMatch(false);
+  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
+
   ctx->EnableTuning(true);
   ctx->EnableNearestMatch(true);
-  TuningResultsManager mgr;
-  mgr.Add(kOp, kCSig, Donor("k1"));
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), ResultEntry::Null());
+  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
 }
 
-TEST(TunableNearest, BorrowsClosestDonor) {
+TEST_F(TunableNearestTest, BorrowsClosestDonor) {
   FlagGuard g;
   auto* ctx = getTuningContext();
   ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
   TuningResultsManager mgr;
   mgr.Add(kOp, kCSig, Donor("k64"));
   mgr.Add(kOp, "NN_128_512_256_ld_128_256_128", Donor("k128"));
@@ -83,26 +133,24 @@ TEST(TunableNearest, BorrowsClosestDonor) {
   EXPECT_EQ(got, Donor("k64"));
 }
 
-TEST(TunableNearest, SkipsDefaultDonors) {
+TEST_F(TunableNearestTest, SkipsDefaultDonors) {
   // A near Default must not mask a farther specialized donor: the validator
   // would benchmark Default against Default and persist it.
   FlagGuard g;
   auto* ctx = getTuningContext();
   ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
   TuningResultsManager mgr;
   mgr.Add(kOp, "NN_48_512_256_ld_48_256_48", ResultEntry::Default());
   mgr.Add(kOp, kCSig, Donor("k64"));
   EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
 }
 
-TEST(TunableNearest, TieBreakIsDeterministic) {
+TEST_F(TunableNearestTest, TieBreakIsDeterministic) {
   // Equal absolute deltas in different dims must not depend on unordered_map
   // iteration order: lexicographically smallest signature wins.
   FlagGuard g;
   auto* ctx = getTuningContext();
   ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
   TuningResultsManager mgr;
   // M-gap 32 (64-32) vs N-gap 32 (544-512): tie on delta. ldb tracks K=256
   // for transb='N', so it stays 256 in both; ldc tracks M and matches.
@@ -113,13 +161,12 @@ TEST(TunableNearest, TieBreakIsDeterministic) {
   EXPECT_EQ(got, Donor("n544"));
 }
 
-TEST(TunableNearest, ResultIsNotMemoized) {
+TEST_F(TunableNearestTest, ResultIsNotMemoized) {
   // The borrow is unmeasured for this shape; the caller validates and persists
   // instead. A second lookup must still report the donor, not an exact hit.
   FlagGuard g;
   auto* ctx = getTuningContext();
   ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
   TuningResultsManager mgr;
   mgr.Add(kOp, kCSig, Donor("k64"));
   EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
@@ -127,87 +174,215 @@ TEST(TunableNearest, ResultIsNotMemoized) {
   EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
 }
 
-TEST(TunableNearest, RecordBorrowedBecomesExactHit) {
+TEST_F(TunableNearestTest, RecordBorrowedBecomesExactHit) {
   FlagGuard g;
-  auto* ctx = getTuningContext();
-  ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
-  ctx->EnableRecordBorrowed(true);
+  TempResultsFile results("tunableop-exact-hit-");
   TuningResultsManager mgr;
-  mgr.Add(kOp, kCSig, Donor("k64"));
+  SeedDonor(mgr);
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
   mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
   // The recorded borrow is an ordinary exact hit from then on.
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
 }
 
-TEST(TunableNearest, RecordBorrowedDisabledWritesNothing) {
+TEST_F(TunableNearestTest, RecordBorrowedIgnoresGlobalFlags) {
+  // Same opt-in-by-calling contract as LookupNearest: the reuse pass decides
+  // whether to record, and RecordBorrowed records what it is handed.
   FlagGuard g;
   auto* ctx = getTuningContext();
+  TempResultsFile results("tunableop-flags-");
   ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
   ctx->EnableRecordBorrowed(false);
   TuningResultsManager mgr;
-  // Warns and ignores; the shape stays a miss.
   mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
-  EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
+  EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
 }
+
+TEST_F(TunableNearestTest, RecordBorrowedPersistsWhileTuningIsOff) {
+  // Why RecordBorrowed exists: Add() only writes during tuning, and nothing
+  // bulk-writes results_ at exit, so the reuse pass needs an entry point that
+  // reaches the results file with tuning off.
+  FlagGuard g;
+  TempResultsFile results("tunableop-borrowed-");
+  getTuningContext()->EnableTuning(false);
+  {
+    TuningResultsManager mgr;
+    mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
+  }
+  EXPECT_NE(results.Contents().find(kQSig), std::string::npos);
+}
+
+TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
+  // RecordBorrowed overrides the write rule for itself only. Add()'s rule --
+  // write during tuning unless the run is merely collecting untuned shapes --
+  // must be unchanged no matter what the reuse-pass flags say, because Add()
+  // is on every GEMM's path on every thread. Both combinations below wrote
+  // nothing before nearest-match existed and must still write nothing.
+  FlagGuard g;
+  auto* ctx = getTuningContext();
+  ctx->EnableNearestMatch(true);
+  ctx->EnableRecordBorrowed(true);
+
+  {  // Tuning off: not a tuning run, so Add() has nothing to record.
+    TempResultsFile results("tunableop-add-notuning-");
+    ctx->EnableTuning(false);
+    {
+      TuningResultsManager mgr;
+      mgr.Add(kOp, kCSig, Donor("k64"));
+    }
+    EXPECT_TRUE(results.Contents().empty());
+  }
+
+  {  // Tuning on but record-untuned on: a collection run writes the untuned
+     // file, not the results file.
+    TempResultsFile results("tunableop-add-untuned-");
+    ctx->EnableTuning(true);
+    ctx->EnableRecordUntuned(true);
+    {
+      TuningResultsManager mgr;
+      mgr.Add(kOp, kCSig, Donor("k64"));
+    }
+    EXPECT_TRUE(results.Contents().empty());
+  }
+}
+
+// --- The parser against the real signature builders ---
+//
+// ParseGemmShape only works because it agrees with the Signature() builders in
+// GemmCommon.h, and nothing but these tests ties the two together. Drift is
+// silent: every parse would return !ok, LookupNearest would return Null for
+// every shape, and borrowing would just stop happening. So parse what the
+// builders actually emit, never a hand-written string.
+
+using at::cuda::tunable::GemmShape;
+using at::cuda::tunable::NearestLargerMatch;
+using at::cuda::tunable::ParseGemmShape;
+using at::cuda::tunable::SplitUnderscore;
 
 namespace {
 
-// Read an entire file into a string for content assertions.
-std::string ReadFile(const std::string& path) {
-  std::ifstream in(path);
-  std::string content((std::istreambuf_iterator<char>(in)),
-                      std::istreambuf_iterator<char>());
-  return content;
+GemmShape Parse(const std::string& sig) {
+  return ParseGemmShape(SplitUnderscore(sig));
+}
+
+// Reassemble a parsed shape into a signature. Equality with the builder's
+// output proves the parser accounted for every token, not merely that it found
+// the ones it was looking for.
+std::string Rebuild(const GemmShape& s) {
+  std::string out = s.transab + "_" + std::to_string(s.m) + "_" +
+      std::to_string(s.n) + "_" + std::to_string(s.k);
+  if (s.has_b) {
+    out += "_B_" + std::to_string(s.b);
+  }
+  out += "_ld_" + std::to_string(s.lda) + "_" + std::to_string(s.ldb) + "_" +
+      std::to_string(s.ldc);
+  return out + s.suffix;
+}
+
+// A scaled GEMM with tight leading dims, so only M separates two of them.
+std::string ScaledSig(int64_t m, at::ScalarType bias_dtype) {
+  const double bias = 0.0;  // never dereferenced; only nullness is read
+  at::cuda::tunable::ScaledGemmParams<float> p;
+  p.transa = 'N';
+  p.transb = 'N';
+  p.m = m;
+  p.n = 512;
+  p.k = 256;
+  p.lda = m;
+  p.ldb = 256;
+  p.ldc = m;
+  p.a_dtype = at::ScalarType::Float8_e4m3fn;
+  p.b_dtype = at::ScalarType::Float8_e4m3fn;
+  p.c_dtype = at::ScalarType::BFloat16;
+  p.a_scale_dtype = at::ScalarType::Float;
+  p.b_scale_dtype = at::ScalarType::Float;
+  p.bias_ptr = &bias;
+  p.bias_dtype = bias_dtype;
+  return p.Signature();
 }
 
 } // namespace
 
-TEST(TunableNearest, RecordBorrowedPersistsToFile) {
-  // The persist predicate in Add() is the reason RecordBorrowed exists: with
-  // tuning off and record-borrowed on, the entry must reach the results file,
-  // not just the in-memory map. Uses a standalone manager but points the
-  // global context at a tmp file (no global manager init required).
-  FlagGuard g;
-  auto* ctx = getTuningContext();
-  const std::string prev_file = ctx->GetFilename();
-  auto tmp = c10::make_tempfile("tunableop-borrowed-");
-  ctx->SetFilename(tmp.name, /*insert_device_ordinal=*/false);
-  ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
-  ctx->EnableRecordBorrowed(true);
-  {
-    TuningResultsManager mgr;
-    mgr.Add(kOp, kCSig, Donor("k64"));
-    mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
-    EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
-  }
-  const std::string content = ReadFile(tmp.name);
-  EXPECT_NE(content.find(kQSig), std::string::npos);
-  ctx->SetFilename(prev_file, /*insert_device_ordinal=*/false);
+TEST(TunableNearestParse, ParsesRealGemmParamsSignature) {
+  at::cuda::tunable::GemmParams<double> p;
+  p.transa = 'N';
+  p.transb = 'T';
+  p.m = 1024;
+  p.n = 512;
+  p.k = 256;
+  p.lda = 1024;
+  p.ldb = 512;
+  p.ldc = 1024;
+
+  const std::string sig = p.Signature();
+  const GemmShape s = Parse(sig);
+  ASSERT_TRUE(s.ok) << sig;
+  EXPECT_EQ(s.transab, "NT");
+  EXPECT_EQ(s.m, 1024);
+  EXPECT_EQ(s.n, 512);
+  EXPECT_EQ(s.k, 256);
+  EXPECT_FALSE(s.has_b);
+  EXPECT_EQ(s.lda, 1024);
+  EXPECT_EQ(s.ldb, 512);
+  EXPECT_EQ(s.ldc, 1024);
+  EXPECT_EQ(Rebuild(s), sig);
 }
 
-TEST(TunableNearest, NoPersistWithoutBorrowOrTuning) {
-  // Tuning off and record-borrowed off writes nothing: the verdict lives only
-  // in the calling manager's map. The tmp file exists (created by
-  // make_tempfile) but must stay empty.
-  FlagGuard g;
-  auto* ctx = getTuningContext();
-  const std::string prev_file = ctx->GetFilename();
-  auto tmp = c10::make_tempfile("tunableop-nopersist-");
-  ctx->SetFilename(tmp.name, /*insert_device_ordinal=*/false);
-  ctx->EnableTuning(false);
-  ctx->EnableNearestMatch(true);
-  ctx->EnableRecordBorrowed(false);
-  {
-    TuningResultsManager mgr;
-    mgr.Add(kOp, kCSig, Donor("k64"));
-    // Disabled path warns and ignores.
-    mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
-    EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
-  }
-  EXPECT_TRUE(ReadFile(tmp.name).empty());
-  ctx->SetFilename(prev_file, /*insert_device_ordinal=*/false);
+TEST(TunableNearestParse, ParsesRealStridedBatchedSignature) {
+  at::cuda::tunable::GemmStridedBatchedParams<double> p;
+  p.transa = 'N';
+  p.transb = 'N';
+  p.m = 8;
+  p.n = 512;
+  p.k = 256;
+  p.batch = 4;
+  p.lda = 8;
+  p.ldb = 256;
+  p.ldc = 8;
+
+  const std::string sig = p.Signature();
+  const GemmShape s = Parse(sig);
+  ASSERT_TRUE(s.ok) << sig;
+  EXPECT_TRUE(s.has_b);
+  EXPECT_EQ(s.b, 4);
+  EXPECT_EQ(s.m, 8);
+  EXPECT_EQ(s.lda, 8);
+  EXPECT_EQ(Rebuild(s), sig);
 }
+
+TEST(TunableNearestParse, ParsesRealScaledGemmSignature) {
+  const std::string sig = ScaledSig(32, at::ScalarType::BFloat16);
+  const GemmShape s = Parse(sig);
+  ASSERT_TRUE(s.ok) << sig;
+  EXPECT_EQ(s.m, 32);
+  EXPECT_EQ(s.n, 512);
+  EXPECT_EQ(s.k, 256);
+  EXPECT_EQ(s.lda, 32);
+  EXPECT_EQ(s.ldc, 32);
+  // The scaled suffix carries dtype names that themselves contain underscores
+  // (Float8_e4m3fn), the case most likely to confuse a token-based parser.
+  EXPECT_FALSE(s.suffix.empty());
+  EXPECT_EQ(Rebuild(s), sig);
+}
+
+TEST(TunableNearestParse, RealScaledGemmBorrowsAcrossM) {
+  int64_t delta = -1;
+  const GemmShape q = Parse(ScaledSig(32, at::ScalarType::BFloat16));
+  const GemmShape c = Parse(ScaledSig(64, at::ScalarType::BFloat16));
+  ASSERT_TRUE(q.ok);
+  ASSERT_TRUE(c.ok);
+  EXPECT_TRUE(NearestLargerMatch(q, c, delta));
+  EXPECT_EQ(delta, 32);
+}
+
+TEST(TunableNearestParse, RealScaledGemmRejectsDifferingSuffix) {
+  // bias dtype appears in the suffix on both the ROCm and CUDA forms, so this
+  // donor is rejected on either platform.
+  int64_t delta = -1;
+  const GemmShape q = Parse(ScaledSig(32, at::ScalarType::BFloat16));
+  const GemmShape c = Parse(ScaledSig(64, at::ScalarType::Half));
+  ASSERT_TRUE(q.ok);
+  ASSERT_TRUE(c.ok);
+  EXPECT_FALSE(NearestLargerMatch(q, c, delta));
+}
+

@@ -298,13 +298,15 @@ def wildcard_fallback_is_enabled() -> bool:
 def _nearest_match_enable(val: bool = True) -> None:
     r"""Allow the compile-time reuse pass to borrow a tuned solution.
 
-    When enabled (and tuning is off), TuningResultsManager::LookupNearest may
-    return the tuned solution identical except in one free dimension (M, N or
-    batch count), rounded up. Reached via torch._inductor (downstream in the
-    stack): the reuse-mode ExternKernelCaller.benchmark submits to the TunableOp
-    worker, which calls LookupNearest, benchmarks the borrow against Default
-    and records the winner -- it is not consulted by TunableOp dispatch, so
-    execution only needs exact matches. No effect on its own in this commit.
+    Policy only: it is read by the reuse pass to decide whether to call
+    TuningResultsManager::LookupNearest, which returns the tuned solution
+    identical except in one free dimension (M, N or batch count), rounded up.
+    Neither the manager nor TunableOp dispatch consults this flag, so execution
+    still resolves shapes by exact match no matter how it is set. Reached via
+    torch._inductor (downstream in the stack): the reuse-mode
+    ExternKernelCaller.benchmark submits to the TunableOp worker, which looks
+    up the borrow, benchmarks it against Default and records the winner. No
+    effect on its own in this commit.
     """
     torch._C._cuda_tunableop_nearest_match_enable(val)  # type: ignore[attr-defined]
 
@@ -317,8 +319,10 @@ def _nearest_match_is_enabled() -> bool:
 def _record_borrowed_enable(val: bool = True) -> None:
     r"""Allow persisting borrowed results while tuning is disabled.
 
-    The normal write path only records results during tuning. Enable this so a
-    reuse pass can write what it decided.
+    Policy only, like _nearest_match_enable: the reuse pass reads it to decide
+    whether to call TuningResultsManager::RecordBorrowed, which is what
+    actually writes with tuning off. Setting it does not change what any other
+    caller writes.
     """
     torch._C._cuda_tunableop_record_borrowed_enable(val)  # type: ignore[attr-defined]
 
