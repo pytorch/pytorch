@@ -9,6 +9,8 @@ import json
 import os
 import pickle
 import re
+import select
+import signal
 import subprocess
 import sys
 import tempfile
@@ -31,6 +33,7 @@ from torch._C._distributed_c10d import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
+    core_dumps_disabled,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_nccl,
@@ -430,6 +433,111 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         dist.destroy_process_group()
         del work
         gc.collect()
+
+
+def _pidfd_open(pid: int) -> int:
+    # Some Python builds lack os.pidfd_open.
+    if hasattr(os, "pidfd_open"):
+        return os.pidfd_open(pid)
+    fd = ctypes.CDLL(None, use_errno=True).syscall(434, pid, 0)  # SYS_pidfd_open
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "pidfd_open failed")
+    return fd
+
+
+class ProcessGroupNCCL2FinalizeHangTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        return False
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Rank 0 hangs in destroy waiting for rank 1 and aborts. Sandcastle
+        # passes skipped tests with exit code 0. Only the test being run has
+        # __wrapped__.
+        if self._testMethodName == "test_destroy_hang_aborts":
+            skipped = not dist.is_nccl_available() or torch.cuda.nccl.version() < (
+                2,
+                31,
+            )
+            self.special_return_code_checks = {
+                self.test_destroy_hang_aborts.__wrapped__: (
+                    0 if (IS_SANDCASTLE and skipped) else -signal.SIGABRT
+                ),
+            }
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        for path in [self.file_name, *glob.glob(f"{self.file_name}_fr_*")]:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _check_return_codes(self, fn, elapsed_time) -> None:
+        super()._check_return_codes(fn, elapsed_time)
+        # The base class only checks rank 0's exit code.
+        self.assertEqual(self.processes[1].exitcode, 0)
+
+    def _init_pg(self, async_error_handling: str) -> dist.Store:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = async_error_handling
+        os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "0"
+        os.environ["TORCH_FR_DUMP_TEMP_FILE"] = f"{self.file_name}_fr_"
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+            timeout=timedelta(seconds=5),
+        )
+        dist.all_reduce(torch.ones(4, device=device))
+        torch.cuda.synchronize(device)
+        return store
+
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for the destroy barrier")
+    @skip_if_lt_x_gpu(2)
+    def test_destroy_hang_aborts(self) -> None:
+        store = self._init_pg("3")
+        if self.rank == 0:
+            store.set("pid", str(os.getpid()))
+            with core_dumps_disabled():
+                dist.destroy_process_group()
+            return
+        # Rank 0's destroy waits for this rank to tear down, so hold off until
+        # it has been aborted.
+        pid = int(store.get("pid"))
+        try:
+            fd = _pidfd_open(pid)
+        except ProcessLookupError:
+            fd = None
+        if fd is not None:
+            readable, _, _ = select.select([fd], [], [], 60)
+            os.close(fd)
+            if not readable:
+                self.fail("rank 0 was not aborted")
+        # Rank 0 died mid-destroy; skip graceful teardown.
+        dist.distributed_c10d._abort_process_group()
+
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for the destroy barrier")
+    @skip_if_lt_x_gpu(2)
+    def test_destroy_hang_runs_hooks(self) -> None:
+        # Without tear down, rank 0 runs the abort hooks and keeps waiting.
+        store = self._init_pg("0")
+        if self.rank == 0:
+            dist.group.WORLD.register_abort_hook(0, lambda: store.set("hook_ran", "1"))
+            dist.destroy_process_group()
+            return
+        store.wait(["hook_ran"], timedelta(seconds=60))
+        dist.destroy_process_group()
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):

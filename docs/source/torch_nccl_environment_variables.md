@@ -13,7 +13,7 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_DIST_NAN_CHECK``
   - **All backends.** If set to ``1``, attach a backend-agnostic NaN check to every new process group; input buffers of collectives are checked for NaNs. Use this with ``nccl``, which ignores ``TORCH_NCCL_NAN_CHECK``. Default: ``0``.
 * - ``TORCH_NCCL_ASYNC_ERROR_HANDLING``
-  - **All NCCL backends.** Control how we perform Async Error Handling with NCCL when an exception is observed in watchdog. If set to 0, no handling of asynchronous NCCL errors. If set to 1, aborting NCCL communicator and tearing down process upon error. If set to 2, only abort NCCL communicator and if set to 3, tearing down process without aborting NCCL communicator. By default, it is set to 3; ``torchrun`` sets it to 1 for its workers if it is unset.
+  - **All NCCL backends.** Control how we perform Async Error Handling with NCCL when an exception is observed in watchdog. For ``nccl`` and ``nccl-lazy`` (not ``nccl-legacy``), if communicator destruction exceeds the timeout, modes 1 and 3 tear down the process (unless the group uses ``enable_reconfigure``) and 0 and 2 keep waiting. If set to 0, no handling of asynchronous NCCL errors. If set to 1, aborting NCCL communicator and tearing down process upon error. If set to 2, only abort NCCL communicator and if set to 3, tearing down process without aborting NCCL communicator. By default, it is set to 3; ``torchrun`` sets it to 1 for its workers if it is unset.
 * - ``TORCH_NCCL_HIGH_PRIORITY``
   - **All NCCL backends.** Control whether to use high priority stream for the NCCL communicator. Default: ``0``.
 * - ``TORCH_NCCL_BLOCKING_WAIT``
