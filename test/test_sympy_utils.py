@@ -12,8 +12,12 @@ import sympy
 import torch
 import torch.fx as fx
 from sympy.core.relational import is_ge, is_gt, is_le, is_lt
-from torch.testing._internal.common_device_type import skipIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -23,6 +27,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    IntTrueDiv,
     Max as TorchSymMax,
     Min as TorchSymMin,
     LShift,
@@ -411,6 +416,32 @@ class TestValueRanges(TestCase):
                     ):
                         getattr(ValueRangeAnalysis, fn)(a, b)
 
+    def test_eq_ne_bool_ranges(self):
+        # eq/ne must accept boolean ranges. sympy booleans do not support
+        # ordered comparison (bool >/< raises), which the disjoint-range test in
+        # eq would otherwise hit. Regression test for eq/ne raising TypeError on
+        # a boolean range, which test_binary_bool_ref_range does not cover (it
+        # omits COMPARE_OPS).
+        full = ValueRanges(sympy.false, sympy.true)
+        T = ValueRanges.wrap(sympy.true)
+        F = ValueRanges.wrap(sympy.false)
+        for a, b in [(full, full), (full, T), (F, full), (T, F), (T, T), (F, F)]:
+            with self.subTest(a=a, b=b):
+                for fn in ("eq", "ne"):
+                    r = getattr(ValueRangeAnalysis, fn)(a, b)
+                    self.assertTrue(r.is_bool)
+                    self.assertIn(r.lower, (sympy.true, sympy.false))
+                    self.assertIn(r.upper, (sympy.true, sympy.false))
+        # singletons resolve precisely: equal -> definitely eq, disjoint -> not
+        self.assertEqual(ValueRangeAnalysis.eq(T, T), T)
+        self.assertEqual(ValueRangeAnalysis.ne(T, T), F)
+        self.assertEqual(ValueRangeAnalysis.eq(F, F), T)
+        self.assertEqual(ValueRangeAnalysis.ne(F, F), F)
+        self.assertEqual(ValueRangeAnalysis.eq(T, F), F)
+        self.assertEqual(ValueRangeAnalysis.ne(T, F), T)
+        self.assertEqual(ValueRangeAnalysis.eq(F, T), F)
+        self.assertEqual(ValueRangeAnalysis.ne(F, T), T)
+
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
         # TODO: bring back sympy.oo testing for float unary fns
@@ -594,6 +625,8 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -712,10 +745,25 @@ class TestSympyInterp(TestCase):
                     gm(*args),
                 )
 
+    def test_python_interp_fx_int_truediv(self):
+        x = sympy.Symbol("x", integer=True)
+        y = sympy.Symbol("y", integer=True)
+        expr = IntTrueDiv(x, y)
+
+        def trace_f(px, py):
+            return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, expr)
+
+        gm = fx.symbolic_trace(trace_f)
+        self.assertEqual(gm(7, 2), 3.5)
+
+class TestSympyInterpDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
-    def test_tensor_interp(self, fn):
+    def test_tensor_interp(self, device, fn):
         # Skip operations not implemented or not applicable for tensors
         if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
             return
@@ -750,7 +798,9 @@ class TestSympyInterp(TestCase):
             with self.subTest(args=args):
                 tensor_args = [
                     torch.tensor(
-                        a, dtype=torch.double if isinstance(a, float) else torch.int64
+                        a,
+                        dtype=torch.double if isinstance(a, float) else torch.int64,
+                        device=device,
                     )
                     for a in args
                 ]
@@ -834,6 +884,8 @@ class TestSympySolve(TestCase):
             Eq(FloorDiv(a, b), c),
             # Result is a 'sympy.Or'.
             Ne(FloorDiv(a, b), c),
+            # Relational operation over booleans, not arithmetic expressions.
+            Eq(Eq(a, 0, evaluate=False), Eq(b, 0, evaluate=False), evaluate=False),
         ]
 
         for case in cases:
@@ -1294,6 +1346,7 @@ class TestCCodePrinting(TestCase):
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
+instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
 
 

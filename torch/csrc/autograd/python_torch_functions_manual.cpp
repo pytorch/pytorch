@@ -1,7 +1,5 @@
-#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -14,8 +12,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/structseq.h>
-#include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 
@@ -24,8 +20,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/ops/from_blob.h>
 
-#include <Python.h>
-#include <fmt/format.h>
 #include <pybind11/pybind11.h>
 #include <utility>
 #include <vector>
@@ -68,7 +62,7 @@ inline static Tensor dispatch_range(
 }
 
 static PyObject* THPVariable_range(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -86,8 +80,7 @@ static PyObject* THPVariable_range(
         "because its behavior is inconsistent with Python's range builtin. "
         "Instead, use torch.arange, which produces values in [start, end).",
         1);
-    if (ret != 0)
-      throw python_error();
+    TORCH_CHECK_PYTHON(ret == 0);
     if (r.isNone(3)) {
       const auto options = TensorOptions()
                                .dtype(r.scalartype(4))
@@ -116,7 +109,7 @@ static PyObject* THPVariable_range(
 // implemented on python object to allow torch.as_tensor to be constructed with
 // arbitrarily nested python objects - list, tuple, np array, scalar, etc.
 static PyObject* THPVariable_as_tensor(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -140,7 +133,7 @@ static PyObject* THPVariable_as_tensor(
 
 // implemented on python object here because PyObject currently not natively
 // declarable See: ATen/native/README.md for more context
-static PyObject* THPVariable_from_numpy(PyObject* module, PyObject* arg) {
+static PyObject* THPVariable_from_numpy(PyObject* /*module*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.from_numpy", jit::tracer::WARN_CONSTRUCTOR);
   return THPVariable_Wrap(torch::utils::tensor_from_numpy(arg));
@@ -216,7 +209,7 @@ THPVARIABLE_SPARSE_COMPRESSED_CTOR(
       "sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)"}))
 
 static PyObject* THPVariable_sparse_coo_tensor(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -243,7 +236,7 @@ static PyObject* THPVariable_sparse_coo_tensor(
 // implemented on python object to allow torch.tensor to be constructed with
 // arbitrarily nested python objects - list, tuple, np array, scalar, etc.
 static PyObject* THPVariable_tensor(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -267,7 +260,7 @@ static PyObject* THPVariable_tensor(
 }
 
 static PyObject* THPVariable_get_device(
-    PyObject* self_,
+    PyObject* /*self_*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -337,7 +330,7 @@ static PyObject* THPVariable__from_blob(
 }
 
 static PyObject* THPVariable_frombuffer(
-    PyObject* self_,
+    PyObject* /*self_*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -369,7 +362,7 @@ static PyObject* THPVariable_frombuffer(
 }
 
 static PyObject* THPVariable_asarray(
-    PyObject* self_,
+    PyObject* /*self_*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -474,7 +467,7 @@ static PyMethodDef torch_functions_manual[] = {
 };
 
 static PyObject* THPVariable_nonzero(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -509,7 +502,7 @@ static PyObject* THPVariable_nonzero(
 }
 
 static PyObject* THPVariable_numel(
-    PyObject* self_,
+    PyObject* /*self_*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -629,27 +622,23 @@ void initTorchFunctions(PyObject* module) {
   gatherTorchFunctions(torch_functions);
   THPVariableFunctions.tp_methods = torch_functions.data();
 
-  if (PyType_Ready(&THPVariableFunctions) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THPVariableFunctions) >= 0);
   Py_INCREF(&THPVariableFunctions);
 
   // Steals
   Py_INCREF(&THPVariableFunctions);
-  if (PyModule_AddObject(
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
           module,
           "_VariableFunctionsClass",
-          reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
-    throw python_error();
-  }
+          reinterpret_cast<PyObject*>(&THPVariableFunctions)) >= 0);
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule =
       PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference
-  if (PyModule_AddObject(
-          module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_VariableFunctions", THPVariableFunctionsModule) >= 0);
 
   // pybind registrations to torch module
   // TODO: move these from torch.* to torch._C.*

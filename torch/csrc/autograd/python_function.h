@@ -69,9 +69,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
     return false;
 
   PyObject* tuple = PyTuple_New(1);
-  if (!tuple)
-    // NOLINTNEXTLINE(hicpp-exception-baseclass)
-    throw python_error();
+  TORCH_CHECK_PYTHON(tuple);
   PyTuple_SET_ITEM(tuple, 0, obj.release());
   obj = tuple;
   return true;
@@ -139,6 +137,11 @@ struct THPFunction {
   // Flag for clear_saved_tensors_on_access feature
   bool clear_saved_tensors_on_access;
   bool saved_tensors_accessed_and_cleared;
+
+  // Owned tuple of per-output grad dtype declarations recorded by
+  // set_output_grad_dtype; consumed while wrapping outputs. nullptr when the
+  // API was not called.
+  PyObject* output_grad_dtypes = nullptr;
 
   PyObject* saved_for_forward;
   // The C++ PyNode for this THPFunction. Ownership follows the same

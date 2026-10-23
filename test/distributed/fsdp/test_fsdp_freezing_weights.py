@@ -11,7 +11,7 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_full_params
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_full_params
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -117,7 +117,7 @@ class FreezingMethod(str, Enum):
     RequiresGrad = "requires_grad"
 
 
-class TestFreezingWeights(FSDPTest):
+class TestFreezingWeights(FSDPTestContinuous):
     def _create_model(
         self,
         with_fsdp,

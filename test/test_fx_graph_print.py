@@ -3,11 +3,17 @@
 import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestFxGraphPrint(TestCase):
     """Tests for GraphModule.print_readable() with additional_meta."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_print_readable_with_list_of_meta_keys(self):
         """Test print_readable with a list of meta keys to include."""

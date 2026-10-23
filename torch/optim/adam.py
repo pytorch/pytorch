@@ -11,6 +11,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _fused_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -926,10 +927,6 @@ def adam(
     eps: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs Adam algorithm computation.
-
-    See :class:`~torch.optim.Adam` for details.
-    """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -988,3 +985,14 @@ def adam(
         found_inf=found_inf,
         decoupled_weight_decay=decoupled_weight_decay,
     )
+
+
+adam.__doc__ = (
+    _functional_api_doc.format(optimizer="Adam")
+    + r"""
+
+.. note::
+    With ``fused=True``, CUDA supports FP32 parameters and gradients with
+    BF16 moment buffers. See :ref:`functional-adamw-bf16-state` for an example.
+"""
+)

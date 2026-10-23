@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -245,12 +245,9 @@ class TestReaderView(TestCase):
         self.assertEqual(ba, b"VWXYZ\0\0\0")
 
 
-class TestDistWrapper(DTensorTestBase):
+class TestDistWrapper(DTensorContinuousTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    @property
-    def world_size(self):
-        return min(4, torch.accelerator.device_count())
+    world_size = min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
