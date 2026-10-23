@@ -272,6 +272,17 @@ class GraphRegionTrackerTests(TestCase):
         torch.backends.cuda.matmul.fp32_precision = "bfx9"
         self.assertNotEqual(get_global_state_key(), ieee_key)
 
+    @recover_orig_fp32_precision
+    def test_conv_precision_global_state_key(self):
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        key = get_global_state_key()
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        self.assertNotEqual(get_global_state_key(), key)
+        key = get_global_state_key()
+        torch._C._set_fp32_precision_setter("cuda", "all", "tf32")
+        self.assertNotEqual(get_global_state_key(), key)
+
     def test_mutation_tracking_simple(self):
         def fn(x, y, z):
             x0 = torch.sin(x)

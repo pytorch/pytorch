@@ -3373,6 +3373,27 @@ Call this whenever a new thread is created in order to propagate values from
         return precision;
       });
 
+  // Opaque on purpose: callers can only hand back a state read here.
+  py::class_<at::Context::Float32PrecisionState>(
+      py_module, "_Float32PrecisionState")
+      .def(py::pickle(
+          [](const at::Context::Float32PrecisionState& state) {
+            return state.encode();
+          },
+          [](const std::vector<int64_t>& values) {
+            return at::Context::Float32PrecisionState::decode(values);
+          }));
+
+  py_module.def("_get_float32_precision_state", []() {
+    return at::globalContext().float32PrecisionState();
+  });
+
+  py_module.def(
+      "_set_float32_precision_state",
+      [](const at::Context::Float32PrecisionState& state) {
+        at::globalContext().setFloat32PrecisionState(state);
+      });
+
   py_module.def(
       "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {
         Py_INCREF(arg.ptr());

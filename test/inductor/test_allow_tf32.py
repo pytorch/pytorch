@@ -15,10 +15,12 @@ from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.triton import MMTemplateConfigMixin
 from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.kernel.conv import conv_template_allow_tf32
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 
 
 class _TensorNode:
@@ -41,10 +43,18 @@ class _TensorNode:
 
 class _MutableAllowTf32Interface(DeviceInterface):
     enabled = False
+    conv_enabled = False
+    depthwise_conv_enabled = False
 
     @staticmethod
     def allow_tf32() -> bool:
         return _MutableAllowTf32Interface.enabled
+
+    @staticmethod
+    def conv_allow_tf32(*, depthwise: bool = False) -> bool:
+        if depthwise:
+            return _MutableAllowTf32Interface.depthwise_conv_enabled
+        return _MutableAllowTf32Interface.conv_enabled
 
     @staticmethod
     def is_available() -> bool:
@@ -55,6 +65,10 @@ class _AllowTf32Interface(DeviceInterface):
     @staticmethod
     def allow_tf32() -> bool:
         return True
+
+    @staticmethod
+    def conv_allow_tf32(*, depthwise: bool = False) -> bool:
+        return not depthwise
 
     @staticmethod
     def is_available() -> bool:
@@ -74,6 +88,13 @@ class TestAllowTf32Interface(TestCase):
             self.assertFalse(CudaInterface.allow_tf32())
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
+
+    @recover_orig_fp32_precision
+    def test_device_interface_conv_default_follows_cudnn_precision(self):
+        torch._C._set_fp32_precision_setter("cuda", "all", "tf32")
+        self.assertTrue(DeviceInterface.conv_allow_tf32())
+        torch._C._set_fp32_precision_setter("cuda", "all", "ieee")
+        self.assertFalse(DeviceInterface.conv_allow_tf32())
 
     def test_xpu_allow_tf32_matches_mkldnn(self):
         # Without USE_XPU the raw flag is None. The interface still returns a bool.
@@ -143,6 +164,14 @@ class TestAllowTf32ExtraKwargs(TestCase):
         extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
         self.assertFalse(extra["ALLOW_TF32"])
 
+    def test_conv_template_allow_tf32_follows_device_interface(self):
+        register_interface_for_device("privateuseone", _AllowTf32Interface)
+        self.assertTrue(conv_template_allow_tf32("privateuseone"))
+        self.assertFalse(conv_template_allow_tf32("privateuseone", depthwise=True))
+        # No device, or a device type with no DeviceInterface.
+        self.assertFalse(conv_template_allow_tf32(None))
+        self.assertFalse(conv_template_allow_tf32("meta"))
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_cuda_small_shapes_disable_allow_tf32(self):
         orig = torch.backends.cuda.matmul.fp32_precision
@@ -205,23 +234,34 @@ class TestAllowTf32ExtraKwargs(TestCase):
     def test_non_cuda_flag_changes_fx_graph_cache_key(self):
         # cuda_matmul_settings already hashes CUDA fp32_precision. This swaps
         # the CPU interface so a flag outside that tuple changes the cache key.
+        self._check_cpu_flag_changes_cache_key("enabled", "mm_template_allow_tf32")
+
+    def test_conv_flag_changes_fx_graph_cache_key(self):
+        self._check_cpu_flag_changes_cache_key(
+            "conv_enabled", "conv_template_allow_tf32"
+        )
+        self._check_cpu_flag_changes_cache_key(
+            "depthwise_conv_enabled", "depthwise_conv_template_allow_tf32"
+        )
+
+    def _check_cpu_flag_changes_cache_key(self, flag, field):
         get_interface_for_device("cpu")
         previous = device_interfaces["cpu"]
         gm = make_fx(lambda x: x * 2)(torch.zeros(2, 2))
         example = [torch.zeros(2, 2)]
         try:
             register_interface_for_device("cpu", _MutableAllowTf32Interface)
-            _MutableAllowTf32Interface.enabled = True
+            setattr(_MutableAllowTf32Interface, flag, True)
             enabled = FxGraphHashDetails(gm, example, {}, [])
             enabled_key, _ = compiled_fx_graph_hash(gm, example, {}, [])
-            _MutableAllowTf32Interface.enabled = False
+            setattr(_MutableAllowTf32Interface, flag, False)
             disabled = FxGraphHashDetails(gm, example, {}, [])
             disabled_key, _ = compiled_fx_graph_hash(gm, example, {}, [])
-            self.assertEqual(enabled.mm_template_allow_tf32, (("cpu", True),))
-            self.assertEqual(disabled.mm_template_allow_tf32, (("cpu", False),))
+            self.assertEqual(getattr(enabled, field), (("cpu", True),))
+            self.assertEqual(getattr(disabled, field), (("cpu", False),))
             self.assertNotEqual(enabled_key, disabled_key)
         finally:
-            _MutableAllowTf32Interface.enabled = False
+            setattr(_MutableAllowTf32Interface, flag, False)
             register_interface_for_device("cpu", previous)
 
 

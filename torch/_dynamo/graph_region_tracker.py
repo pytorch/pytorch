@@ -55,6 +55,8 @@ GlobalStateKey = tuple[
     torch.dtype,
     bool,
     str,
+    str,
+    str,
     bool,
     bool,
 ]
@@ -166,6 +168,8 @@ def get_global_state_key() -> GlobalStateKey:
         torch.get_default_dtype(),
         torch.are_deterministic_algorithms_enabled(),
         torch._C._get_fp32_precision_getter("cuda", "matmul"),
+        torch._C._get_fp32_precision_getter("cuda", "conv"),
+        torch._C._get_fp32_precision_getter("cuda", "all"),
         torch.is_deterministic_algorithms_warn_only_enabled(),
         torch._C._autograd._saved_tensors_hooks_is_enabled(),  # type: ignore[attr-defined]
     )

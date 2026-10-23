@@ -274,6 +274,69 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+Context::Float32PrecisionState Context::float32PrecisionState() const {
+  Float32PrecisionState state;
+  state.fp32_precision = fp32_precision;
+  state.float32_matmul_precision = float32_matmul_precision;
+  state.allow_tf32_cudnn = allow_tf32_cudnn;
+  state.allow_tf32_onednn = allow_tf32_onednn;
+  return state;
+}
+
+std::vector<int64_t> Context::Float32PrecisionState::encode() const {
+  std::vector<int64_t> values{
+      static_cast<int64_t>(float32_matmul_precision),
+      allow_tf32_cudnn,
+      allow_tf32_onednn};
+  for (const auto& [key, precision] : fp32_precision) {
+    values.insert(
+        values.end(),
+        {static_cast<int64_t>(key.first),
+         static_cast<int64_t>(key.second),
+         static_cast<int64_t>(precision)});
+  }
+  return values;
+}
+
+Context::Float32PrecisionState Context::Float32PrecisionState::decode(
+    const std::vector<int64_t>& values) {
+  TORCH_CHECK(
+      values.size() >= 3 && values.size() % 3 == 0,
+      "Invalid fp32 precision state");
+  Float32PrecisionState state;
+  state.float32_matmul_precision =
+      static_cast<Float32MatmulPrecision>(values[0]);
+  state.allow_tf32_cudnn = values[1] != 0;
+  state.allow_tf32_onednn = values[2] != 0;
+  for (size_t i = 3; i < values.size(); i += 3) {
+    state.fp32_precision.emplace(
+        Key{static_cast<Float32Backend>(values[i]),
+            static_cast<Float32Op>(values[i + 1])},
+        static_cast<Float32Precision>(values[i + 2]));
+  }
+  return state;
+}
+
+void Context::setFloat32PrecisionState(const Float32PrecisionState& state) {
+  TORCH_CHECK(
+      state.fp32_precision.size() == fp32_precision.size() &&
+          std::all_of(
+              state.fp32_precision.begin(),
+              state.fp32_precision.end(),
+              [this](const auto& entry) {
+                return fp32_precision.count(entry.first) == 1;
+              }),
+      "Invalid fp32 precision state");
+  // Other threads read the map without a lock, so assign the values in place
+  // rather than replacing the map and freeing what they may be reading.
+  for (const auto& [key, precision] : state.fp32_precision) {
+    fp32_precision.at(key) = precision;
+  }
+  float32_matmul_precision = state.float32_matmul_precision;
+  allow_tf32_cudnn = state.allow_tf32_cudnn;
+  allow_tf32_onednn = state.allow_tf32_onednn;
+}
+
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
   // TODO*eqy): should it always be the number of backends - 1 (override backend excluded?)
   TORCH_CHECK(at::num_sdp_backends == sdp_priority_order.size(),

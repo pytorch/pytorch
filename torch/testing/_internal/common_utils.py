@@ -6780,9 +6780,10 @@ def _set_legacy_float32_matmul_precision(value):
         torch.set_float32_matmul_precision(value)
 
 
-# Single source of truth for which globals count as "fp32 precision state".
-# Add a new flag here and both recover_orig_fp32_precision and the TestCase
-# leak detector pick it up automatically.
+# Which globals count as "fp32 precision state" for the TestCase leak detector
+# and _snapshot/_restore_fp32_precision, which compare and restore resolved
+# values. Add a new flag here and they pick it up automatically.
+# recover_orig_fp32_precision restores the exact stored state instead.
 def _fp32_precision_flag_specs():
     return (
         # Must stay first: set_float32_matmul_precision also writes the cuda
@@ -6833,11 +6834,13 @@ def _restore_fp32_precision(snapshot):
 def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
     def recover():
-        snap = _snapshot_fp32_precision()
+        # The exact stored state, so a precision that inherits from a wider
+        # setting still inherits afterwards.
+        state = torch._C._get_float32_precision_state()
         try:
             yield
         finally:
-            _restore_fp32_precision(snap)
+            torch._C._set_float32_precision_state(state)
 
     return recover()(fn)
 

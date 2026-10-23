@@ -226,6 +226,23 @@ class DeviceInterface:
         """
         return False
 
+    @staticmethod
+    def conv_allow_tf32(*, depthwise: bool = False) -> bool:
+        """Whether the backend permits the convolution lowering's templates to set
+        ALLOW_TF32 (forward, and the template a transposed convolution uses).
+
+        depthwise is True for a non-transposed convolution with more than one
+        group and one input channel per group. The default follows the cuDNN-wide
+        fp32 precision for every convolution. The FX graph cache key records both
+        results per device. Dynamo's global state guard (GlobalStateGuard in
+        torch/csrc/dynamo/guards.cpp) records the CUDA matmul, CUDA conv and
+        cuDNN-wide fp32 precisions; if an override reads any other setting,
+        changing that setting does not recompile code that Dynamo already
+        compiled. The convolution_backward lowering's templates do not use this
+        hook: they read torch.backends.cudnn.allow_tf32 and run only off CUDA.
+        """
+        return torch.backends.cudnn.fp32_precision == "tf32"
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
