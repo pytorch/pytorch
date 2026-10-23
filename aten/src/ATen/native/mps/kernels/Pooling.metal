@@ -944,6 +944,23 @@ kernel void avg_pool_backward(
       params.divisor_override);
 }
 
+#define REGISTER_MAX_POOL2D_DENSE(DTYPE, IDX, CL, SUFFIX)       \
+  template [[host_name("max_pool2d_dense_" SUFFIX "_" #DTYPE)]] \
+  kernel void max_pool2d_dense<DTYPE, IDX, CL>(                 \
+      device const DTYPE* input [[buffer(0)]],                  \
+      device DTYPE* output [[buffer(1)]],                       \
+      device int64_t* indices [[buffer(2)]],                    \
+      constant PoolingParams<5>& p [[buffer(3)]],               \
+      uint3 pos [[thread_position_in_grid]]);
+
+#define REGISTER_MAX_POOL2D_S1(DTYPE, KW)                       \
+  template [[host_name("max_pool2d_s1_nchw_k" #KW "_" #DTYPE)]] \
+  kernel void max_pool2d_s1_nchw<DTYPE, KW>(                    \
+      device const DTYPE* input [[buffer(0)]],                  \
+      device DTYPE* output [[buffer(1)]],                       \
+      constant PoolingParams<5>& p [[buffer(3)]],               \
+      uint3 pos [[thread_position_in_grid]]);
+
 #define REGISTER_POOL_OP(DTYPE)                                               \
   template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>(     \
       device const DTYPE* input [[buffer(0)]],                                \
@@ -964,7 +981,15 @@ kernel void avg_pool_backward(
       device const DTYPE* input [[buffer(0)]],                                \
       device DTYPE* output [[buffer(1)]],                                     \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                     \
-      uint tid [[thread_position_in_grid]]);
+      uint tid [[thread_position_in_grid]]);                                  \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, false, false, "nchw")                      \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, true, false, "nchw_idx")                   \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, false, true, "nhwc")                       \
+  REGISTER_MAX_POOL2D_DENSE(DTYPE, true, true, "nhwc_idx")                    \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 0)                                            \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 2)                                            \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 3)                                            \
+  REGISTER_MAX_POOL2D_S1(DTYPE, 5)
 
 #define REGISTER_POOL_BACKWARD_OP(DTYPE)                       \
   template [[host_name("max_pool_backward_" #DTYPE)]]          \
@@ -991,55 +1016,6 @@ REGISTER_POOL_OP(short);
 REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
-
-#define REGISTER_MAX_POOL2D_DENSE(DTYPE, IDX, CL, SUFFIX)       \
-  template [[host_name("max_pool2d_dense_" SUFFIX "_" #DTYPE)]] \
-  kernel void max_pool2d_dense<DTYPE, IDX, CL>(                 \
-      device const DTYPE* input [[buffer(0)]],                  \
-      device DTYPE* output [[buffer(1)]],                       \
-      device int64_t* indices [[buffer(2)]],                    \
-      constant PoolingParams<5>& p [[buffer(3)]],               \
-      uint3 pos [[thread_position_in_grid]]);
-
-#define REGISTER_MAX_POOL2D_DENSE_ALL(DTYPE)                \
-  REGISTER_MAX_POOL2D_DENSE(DTYPE, false, false, "nchw")    \
-  REGISTER_MAX_POOL2D_DENSE(DTYPE, true, false, "nchw_idx") \
-  REGISTER_MAX_POOL2D_DENSE(DTYPE, false, true, "nhwc")     \
-  REGISTER_MAX_POOL2D_DENSE(DTYPE, true, true, "nhwc_idx")
-
-REGISTER_MAX_POOL2D_DENSE_ALL(float);
-REGISTER_MAX_POOL2D_DENSE_ALL(half);
-REGISTER_MAX_POOL2D_DENSE_ALL(bfloat);
-REGISTER_MAX_POOL2D_DENSE_ALL(int);
-REGISTER_MAX_POOL2D_DENSE_ALL(long);
-REGISTER_MAX_POOL2D_DENSE_ALL(short);
-REGISTER_MAX_POOL2D_DENSE_ALL(char);
-REGISTER_MAX_POOL2D_DENSE_ALL(uchar);
-REGISTER_MAX_POOL2D_DENSE_ALL(bool);
-
-#define REGISTER_MAX_POOL2D_S1(DTYPE, KW)                       \
-  template [[host_name("max_pool2d_s1_nchw_k" #KW "_" #DTYPE)]] \
-  kernel void max_pool2d_s1_nchw<DTYPE, KW>(                    \
-      device const DTYPE* input [[buffer(0)]],                  \
-      device DTYPE* output [[buffer(1)]],                       \
-      constant PoolingParams<5>& p [[buffer(3)]],               \
-      uint3 pos [[thread_position_in_grid]]);
-
-#define REGISTER_MAX_POOL2D_S1_ALL(DTYPE) \
-  REGISTER_MAX_POOL2D_S1(DTYPE, 0)        \
-  REGISTER_MAX_POOL2D_S1(DTYPE, 2)        \
-  REGISTER_MAX_POOL2D_S1(DTYPE, 3)        \
-  REGISTER_MAX_POOL2D_S1(DTYPE, 5)
-
-REGISTER_MAX_POOL2D_S1_ALL(float);
-REGISTER_MAX_POOL2D_S1_ALL(half);
-REGISTER_MAX_POOL2D_S1_ALL(bfloat);
-REGISTER_MAX_POOL2D_S1_ALL(int);
-REGISTER_MAX_POOL2D_S1_ALL(long);
-REGISTER_MAX_POOL2D_S1_ALL(short);
-REGISTER_MAX_POOL2D_S1_ALL(char);
-REGISTER_MAX_POOL2D_S1_ALL(uchar);
-REGISTER_MAX_POOL2D_S1_ALL(bool);
 
 REGISTER_POOL_BACKWARD_OP(float);
 REGISTER_POOL_BACKWARD_OP(half);
