@@ -11,17 +11,17 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
-
-
-device_type = torch.device(get_devtype())
+from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 class TestFullyShardGradientScaler(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(4)
-    def test_gradient_scaler(self):
+    def test_gradient_scaler(self, device):
         self.run_subtests(
             {"has_inf": [True, False], "test_2d": [True, False]},
             self._test_gradient_scaler,
@@ -30,16 +30,18 @@ class TestFullyShardGradientScaler(FSDPTest):
     def _test_gradient_scaler(self, has_inf: bool, test_2d: bool):
         torch.manual_seed(0)
         model = nn.Sequential(
-            *[nn.Linear(4, 4, device=device_type, bias=False) for _ in range(2)]
+            *[nn.Linear(4, 4, device=self.device_type, bias=False) for _ in range(2)]
         )
         for layer in model:
             fully_shard(layer)
         fully_shard(model)
-        input = torch.randn([4, 4], device=device_type)
+        input = torch.randn([4, 4], device=self.device_type)
 
         if test_2d:
             mesh_2d = init_device_mesh(
-                device_type.type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+                self.device_type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("dp", "tp"),
             )
             dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
             model = nn.Sequential(MLP(2), MLP(2), MLP(2))
@@ -59,10 +61,10 @@ class TestFullyShardGradientScaler(FSDPTest):
             for module in model:
                 fully_shard(module, mesh=dp_mesh)
             fully_shard(model, mesh=dp_mesh)
-            input = torch.randn((2,), device=device_type)
+            input = torch.randn((2,), device=self.device_type)
 
         loss = model(input).sum()
-        scaler = GradScaler(init_scale=2.0, enabled=True, device=device_type.type)
+        scaler = GradScaler(init_scale=2.0, enabled=True, device=self.device_type)
         opt = torch.optim.Adam(model.parameters(), lr=1e-2)
         scaler.scale(loss).backward()
         inv_scale = scaler._scale.double().reciprocal().float()
@@ -107,6 +109,14 @@ class TestFullyShardGradientScaler(FSDPTest):
         else:
             # scale is not updated
             self.assertEqual(updated_scale, initial_scale)
+
+
+instantiate_device_type_tests(
+    TestFullyShardGradientScaler,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
