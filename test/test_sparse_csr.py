@@ -21,6 +21,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -32,10 +33,12 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
+    skipMPS,
     tol,
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
+    all_mps_types,
     all_types_and_complex,
     all_types_and_complex_and,
     floating_and_complex_types,
@@ -65,7 +68,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_CUDA_CUDSS,
     TEST_MKL,
-    TEST_MPS,
     TEST_NUMPY,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -312,9 +314,13 @@ class TestSparseCompressedDevice(TestCase):
     @parametrize('input_kind', [subtest('tensor', name='from_tensor'), subtest('list', name='from_list')])
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types())
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
         device_type = torch.device(device).type
+        if device_type == 'mps':
+            # TODO: remove when _validate_compressed_sparse_indices supports MPS
+            torch.sparse.check_sparse_tensor_invariants.disable()
 
         if input_kind == 'list' and shape_and_device_inference:
             if device_type != 'cpu':
@@ -400,6 +406,7 @@ class TestSparseCompressedDevice(TestCase):
                         self.assertFalse(compressed_indices_mth(sparse).requires_grad)
                         self.assertFalse(plain_indices_mth(sparse).requires_grad)
 
+    @skipMPS
     @skipMeta
     @sparse_compressed_nonblock_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
@@ -431,6 +438,7 @@ class TestSparseCompressedDevice(TestCase):
             self.assertEqual(plain_indices_mth(result).dtype, torch.int64)
             self.assertEqual(result.values().dtype, dtype)
 
+    @skipMPS
     @skipMeta
     @sparse_compressed_nonblock_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -440,6 +448,7 @@ class TestSparseCompressedDevice(TestCase):
                                     ", but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=layout)
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
@@ -480,6 +489,7 @@ class TestSparseCompressedDevice(TestCase):
                 for k, v in e_prop.items():
                     self.assertEqual(v, t_prop[k], lambda msg: f'{msg} when comparing {k}, expected {t_prop[k]}, got {v}')
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -489,6 +499,7 @@ class TestSparseCompressedDevice(TestCase):
             cloned_sparse = sparse.clone()
             self.assertEqual(sparse, cloned_sparse)
 
+    @skipMPS
     @all_sparse_compressed_layouts()
     def test_print(self, layout, device):
         compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
@@ -561,6 +572,7 @@ class TestSparseCompressedDevice(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -583,6 +595,7 @@ class TestSparseCompressedDevice(TestCase):
             run_test((*b, m, n), blocksize, 0, index_dtype)
             run_test((*b, m, n), blocksize, m * n, index_dtype)
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -628,6 +641,7 @@ class TestSparseCompressedDevice(TestCase):
                 return i
         return n
 
+    @skipMPS
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @all_sparse_compressed_layouts()
     @ops(_sparse_compressed_ops)
@@ -700,6 +714,7 @@ class TestSparseCompressedDevice(TestCase):
                 expected.masked_fill_(~output_mask, 0)
             self.assertEqual(strided_output, expected, atol=atol, rtol=rtol)
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @all_sparse_compressed_layouts('layout2')
@@ -722,6 +737,7 @@ class TestSparseCompressedDevice(TestCase):
                     lambda: torch.empty_like(sparse, layout=layout2)
                 )
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -976,6 +992,7 @@ class TestSparseCompressedDevice(TestCase):
                    shape((2, 3)),
                    rf'Expected all tensors to be on the same device, but found at least two devices, {device_type}:0 and {device_type}:1!')
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @parametrize('target', [subtest('validate_sparse_compressed_tensor_args'),
@@ -1018,6 +1035,7 @@ class TestSparseCompressedDevice(TestCase):
                 else:
                     raise NotImplementedError(target)
 
+    @skipMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -1029,6 +1047,7 @@ class TestSparseCompressedDevice(TestCase):
                 dense_to_dtype = sparse.to_dense().to(to_dtype)
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
 
+    @skipMPS
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182086")
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181682")
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181536")
@@ -1045,6 +1064,7 @@ class TestSparseCompressedDevice(TestCase):
 
             self.assertEqual(sparse, sparse_loaded)
 
+    @skipMPS
     @all_sparse_compressed_layouts()
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
@@ -1093,79 +1113,18 @@ class TestSparseCompressedDevice(TestCase):
                         self.assertEqual(sparse_select, dense_select)
                         self.assertFalse(is_view_of(sparse_select.values(), sparse.values()))
 
-
-@unittest.skipIf(not TEST_MPS, "MPS not available")
-class TestSparseCompressedMPS(TestCase):
-    """Construction of sparse compressed tensors on MPS.
-
-    Index validation has no MPS kernel, so check_invariants=True is expected to
-    raise until one is added.
-    """
-    hw_classification = HardwareClassification.MPS
-
-    def _sample(self, layout, index_dtype):
-        blocked = layout in {torch.sparse_bsr, torch.sparse_bsc}
-        compressed_indices = torch.tensor([0, 1, 2] if blocked else [0, 1, 2, 3, 4], dtype=index_dtype)
-        plain_indices = torch.tensor([0, 1] if blocked else [0, 1, 2, 3], dtype=index_dtype)
-        values = torch.arange(1, 9 if blocked else 5, dtype=torch.float32)
-        if blocked:
-            values = values.reshape(2, 2, 2)
-        return compressed_indices, plain_indices, values, (4, 4)
-
-    def _indices(self, sparse):
-        if sparse.layout in {torch.sparse_csr, torch.sparse_bsr}:
-            return sparse.crow_indices(), sparse.col_indices()
-        return sparse.ccol_indices(), sparse.row_indices()
-
+    @onlyAccelerator
     @all_sparse_compressed_layouts()
     @parametrize("index_dtype", [torch.int32, torch.int64])
-    def test_unsafe_construction(self, layout, index_dtype):
-        compressed_indices, plain_indices, values, size = self._sample(layout, index_dtype)
-        with torch.sparse.check_sparse_tensor_invariants(False):
-            sparse = torch.ops.aten._sparse_compressed_tensor_unsafe(
-                compressed_indices.to("mps"), plain_indices.to("mps"), values.to("mps"), size,
-                layout=layout, device="mps")
-
-        self.assertEqual(sparse.layout, layout)
-        self.assertEqual(sparse.device.type, "mps")
-        self.assertEqual(sparse.shape, size)
-        self.assertEqual(sparse._nnz(), values.shape[0])
-
-        actual_compressed, actual_plain = self._indices(sparse)
-        self.assertEqual(actual_compressed.cpu(), compressed_indices)
-        self.assertEqual(actual_plain.cpu(), plain_indices)
-        self.assertEqual(sparse.values().cpu(), values)
-
-    @all_sparse_compressed_layouts()
-    @parametrize("index_dtype", [torch.int32, torch.int64])
-    def test_construction_infers_device(self, layout, index_dtype):
-        compressed_indices, plain_indices, values, size = self._sample(layout, index_dtype)
-        sparse = torch.sparse_compressed_tensor(
-            compressed_indices.to("mps"), plain_indices.to("mps"), values.to("mps"), size,
-            layout=layout, check_invariants=False)
-        self.assertEqual(sparse.device.type, "mps")
-        self.assertEqual(sparse.layout, layout)
-
-    @all_sparse_compressed_layouts()
-    @parametrize("index_dtype", [torch.int32, torch.int64])
-    def test_to_mps_roundtrip(self, layout, index_dtype):
-        compressed_indices, plain_indices, values, size = self._sample(layout, index_dtype)
-        expected = torch.sparse_compressed_tensor(
-            compressed_indices, plain_indices, values, size, layout=layout)
-
-        with torch.sparse.check_sparse_tensor_invariants(False):
-            sparse = expected.to("mps")
-            self.assertEqual(sparse.device.type, "mps")
+    def test_to_device(self, layout, device, index_dtype):
+        if torch.device(device).type == 'mps':
+            # TODO: remove when _validate_compressed_sparse_indices supports MPS
+            torch.sparse.check_sparse_tensor_invariants.disable()
+        for expected in self.generate_simple_inputs(layout, dtype=torch.float32, index_dtype=index_dtype):
+            sparse = expected.to(device)
+            self.assertEqual(sparse.device, torch.device(device))
             self.assertEqual(sparse.layout, layout)
             self.assertEqual(sparse.to("cpu"), expected)
-
-    @all_sparse_compressed_layouts()
-    def test_check_invariants_not_implemented(self, layout):
-        compressed_indices, plain_indices, values, size = self._sample(layout, torch.int64)
-        with self.assertRaisesRegex(RuntimeError, "_validate_compressed_sparse_indices"):
-            torch.sparse_compressed_tensor(
-                compressed_indices.to("mps"), plain_indices.to("mps"), values.to("mps"), size,
-                layout=layout, check_invariants=True)
 
 
 def _npref_block_addmm_addmv(c, a, b, alpha, beta):
@@ -4532,8 +4491,7 @@ class TestSparseCSRGeneric(TestCase):
 
 
 instantiate_parametrized_tests(TestSparseCompressed)
-instantiate_parametrized_tests(TestSparseCompressedMPS)
-instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True, allow_mps=True)
 
 
 class TestSparseTritonMetaDeviceName(TestCase):
