@@ -111,7 +111,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
-    dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
@@ -1537,6 +1536,12 @@ class TestDistributions(DistributionsTestCase):
                         )
                     except NotImplementedError:
                         pass
+                    try:
+                        self.assertEqual(
+                            expanded.entropy(), d.entropy().expand(expanded_shape)
+                        )
+                    except NotImplementedError:
+                        pass
 
     @expectedFailureMPS
     def test_distribution_subclass_expand(self):
@@ -1941,6 +1946,22 @@ class TestDistributions(DistributionsTestCase):
             dtype=torch.get_default_dtype(),
         )
         self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
+
+    @expectedFailureMPS
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_entropy_double(self):
+        # lgamma(total_count + 1) used to be evaluated in the default dtype, so a double
+        # distribution carried a float32 error that grows with total_count
+        total_count = 1000
+        p = torch.tensor([0.1, 0.2, 0.7], dtype=torch.double)
+        dist = Multinomial(total_count, probs=p)
+        entropy = dist.entropy()
+        self.assertEqual(entropy.dtype, torch.double)
+        expected = torch.tensor(
+            scipy.stats.multinomial.entropy(total_count, p.numpy()), dtype=torch.double
+        )
+        self.assertEqual(entropy, expected)
+        self.assertEqual(dist.expand((2,)).entropy(), expected.expand(2))
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -4110,7 +4131,6 @@ class TestDistributions(DistributionsTestCase):
             )
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @dtypesIfCUDA(torch.double)
     @dtypesIfXPU(torch.double)
     def test_beta_underflow(self, dtype, device):

@@ -2196,13 +2196,21 @@ def gen_headers(
     # NB: base names repeat across groups (bmm and bmm.dtype, sum and sum.dim_IntList),
     # so the stub signature must come from the structured group the manifest targets.
     # Validation guarantees exactly one match per manifest.
-    native_aot_groups_by_op = {
+    native_aot_groups_by_op: dict[str, NativeFunction | NativeFunctionsGroup] = {
         op: g
         for g in structured_native_functions
         if g.structured
         for (_, op), m in native_aot_manifests.items()
         if m.matches_group(g)
     }
+    native_aot_groups_by_op.update(
+        {
+            op: f
+            for f in native_functions
+            for (_, op), m in native_aot_manifests.items()
+            if not m.structured and op == str(f.func.name)
+        }
+    )
     if per_operator_headers:
         gen_per_operator_headers(
             native_functions=native_functions,

@@ -3,11 +3,17 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <algorithm>
 #include <bit>
+#include <cstdlib>
+#include <optional>
+#include <thread>
 
 constexpr int64_t N = 100;
 
@@ -254,6 +260,186 @@ TEST(CachingHostAllocatorTest, check_reuse) {
     ASSERT_EQ(ptr, pinned_tensor.data_ptr());
     ASSERT_EQ(ctx, pinned_tensor.storage().data_ptr().get_context());
   }
+}
+
+namespace {
+
+// Stand-ins so the allocator can be instantiated with no device present.
+struct TestStream {
+  TestStream() = default;
+  /* implicit */ TestStream(c10::Stream) {}
+  /* implicit */ operator c10::Stream() const {
+    return c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU));
+  }
+  bool operator==(const TestStream&) const {
+    return true;
+  }
+};
+
+struct TestEvent {};
+
+} // namespace
+
+template <>
+struct std::hash<TestStream> {
+  std::size_t operator()(const TestStream&) const noexcept {
+    return 0;
+  }
+};
+
+namespace {
+
+struct ThrowingRecordAllocator
+    : at::CachingHostAllocatorImpl<TestStream, TestEvent> {
+  void allocate_host_memory(size_t size, void** ptr) override {
+    *ptr = std::malloc(size);
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    std::free(block->ptr_);
+  }
+
+  void record_stream(std::optional<std::vector<TestEvent>>&, TestStream)
+      override {
+    // @allow-raw-throw: tests catch(...) path in free() for non-std exceptions
+    throw 1;
+  }
+};
+
+} // namespace
+
+// On a real device every event record fails once the context is poisoned, and
+// free() is reached from ~StorageImpl, so an escaping throw would cross a
+// noexcept destructor and terminate the process.
+TEST(CachingHostAllocatorTest, free_does_not_propagate_record_failure) {
+  ThrowingRecordAllocator allocator;
+
+  auto [ptr, ctx] = allocator.allocate(N);
+  ASSERT_NE(ptr, nullptr);
+  ASSERT_TRUE(allocator.record_event(
+      ptr, ctx, c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU))));
+
+  EXPECT_NO_THROW(allocator.free(ctx));
+}
+
+// empty_cache() holds instance_mutex_ exclusively while it processes the
+// events of released private pools. Returning a block whose event completed
+// used to take instance_mutex_ again to find its pool, which fails with
+// "Resource deadlock avoided".
+TEST(CachingHostAllocatorTest, empty_cache_released_pool_with_completed_event) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  auto pool_id = at::cuda::graph_pool_handle();
+  auto stream = at::cuda::getStreamFromPool();
+
+  void* ptr{nullptr};
+  void* ctx{nullptr};
+  {
+    allocator->begin_allocate_to_pool(
+        pool_id, [](c10::Stream) { return true; });
+    auto pinned_tensor = at::empty(
+        {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    allocator->end_allocate_to_pool(pool_id);
+    ptr = pinned_tensor.data_ptr();
+    ctx = pinned_tensor.storage().data_ptr().get_context();
+    auto segments = allocator->get_segments();
+    auto seg = std::find_if(segments.begin(), segments.end(), [&](const auto& s) {
+      return s.address == reinterpret_cast<size_t>(ptr);
+    });
+    ASSERT_NE(seg, segments.end());
+    ASSERT_EQ(seg->owner_private_pool_id, pool_id);
+    ASSERT_TRUE(allocator->record_event(ptr, ctx, stream.unwrap()));
+    allocator->release_pool(pool_id);
+  }
+  stream.synchronize();
+
+  ASSERT_NO_THROW(allocator->empty_cache());
+  ASSERT_FALSE(allocator->record_event(ptr, ctx, stream.unwrap()));
+}
+
+// Each pool keeps its own bucket stats. getStats() adds them up, and erasing a
+// private pool leaves the totals unchanged.
+TEST(CachingHostAllocatorTest, stats_include_private_pools) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  // Let earlier tests' pending events complete, so that their blocks do not
+  // come back during this test.
+  at::cuda::device_synchronize();
+  allocator->empty_cache();
+  auto before = allocator->get_stats();
+  auto pool_id = at::cuda::graph_pool_handle();
+  {
+    allocator->begin_allocate_to_pool(
+        pool_id, [](c10::Stream) { return true; });
+    auto pinned_tensor = at::empty(
+        {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    allocator->end_allocate_to_pool(pool_id);
+    auto stats = allocator->get_stats();
+    ASSERT_EQ(stats.active_requests.current, before.active_requests.current + 1);
+    ASSERT_EQ(stats.allocations.current, before.allocations.current + 1);
+    allocator->release_pool(pool_id);
+  }
+  auto released = allocator->get_stats();
+
+  allocator->empty_cache();
+  auto after = allocator->get_stats();
+  ASSERT_EQ(after.allocations.current, before.allocations.current);
+  ASSERT_EQ(after.active_requests.allocated, released.active_requests.allocated);
+  ASSERT_EQ(after.active_requests.freed, released.active_requests.freed);
+  ASSERT_EQ(after.active_requests.peak, released.active_requests.peak);
+  ASSERT_EQ(after.active_bytes.allocated, released.active_bytes.allocated);
+  ASSERT_EQ(after.active_bytes.freed, released.active_bytes.freed);
+  ASSERT_EQ(after.active_bytes.peak, released.active_bytes.peak);
+  ASSERT_EQ(after.bucket_allocation, released.bucket_allocation);
+}
+
+// The default pool and a private pool used to update shared bucket stats, each
+// under its own free list mutex, so using both at once lost updates.
+TEST(CachingHostAllocatorTest, stats_concurrent_pools) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  at::cuda::device_synchronize();
+  allocator->empty_cache();
+  auto before = allocator->get_stats();
+  auto pool_id = at::cuda::graph_pool_handle();
+  auto pool_stream = at::cuda::getStreamFromPool();
+  allocator->begin_allocate_to_pool(
+      pool_id, [s = pool_stream.unwrap()](c10::Stream stream) { return stream == s; });
+
+  constexpr int kIters = 100000;
+  auto churn = [](std::optional<c10::cuda::CUDAStream> stream) {
+    std::optional<c10::cuda::CUDAStreamGuard> guard;
+    if (stream) {
+      guard.emplace(*stream);
+    }
+    for (int i = 0; i < kIters; ++i) {
+      at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    }
+  };
+  std::thread in_pool(churn, pool_stream);
+  std::thread in_default(churn, std::nullopt);
+  in_pool.join();
+  in_default.join();
+  allocator->end_allocate_to_pool(pool_id);
+  allocator->release_pool(pool_id);
+
+  auto after = allocator->get_stats();
+  ASSERT_EQ(after.active_requests.allocated - before.active_requests.allocated, 2 * kIters);
+  ASSERT_EQ(after.active_requests.freed - before.active_requests.freed, 2 * kIters);
+  ASSERT_EQ(after.active_requests.current, before.active_requests.current);
+  int64_t bytes = 2 * kIters * std::bit_ceil(static_cast<size_t>(N));
+  ASSERT_EQ(after.active_bytes.allocated - before.active_bytes.allocated, bytes);
+  ASSERT_EQ(after.active_bytes.freed - before.active_bytes.freed, bytes);
+  ASSERT_EQ(after.active_bytes.current, before.active_bytes.current);
 }
 
 int main(int argc, char* argv[]) {
