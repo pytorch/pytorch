@@ -408,6 +408,29 @@ class TestReactions(unittest.TestCase):
         self.assertEqual([i["id"] for i in out["items"] if "reactions" in i], [22, 23])
         self.assertEqual(len([c for c in api.calls if "/reactions" in c]), 2)
 
+    def test_permission_checks_for_new_reactors_are_bounded(self):
+        crowd = [reaction(f"u{n}", "+1") for n in range(10)]
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 12})],
+            maintainers={"maint", "u0", "u9"},
+            reactions={
+                "issues/comments/20": [
+                    *crowd,
+                    reaction("maint", "-1"),
+                    reaction("author", "eyes"),
+                ]
+            },
+        )
+        with mock.patch.object(fpc, "MAX_REACTOR_CHECKS", 3):
+            (item,) = fpc.collect(api, REPO, PR)["items"]
+        checks = [c for c in api.calls if "/collaborators/" in c]
+        # maint, from its comment, plus three reactors.
+        self.assertEqual(len(checks), 4)
+        self.assertEqual(
+            [(r["author"], r["role"]) for r in item["reactions"]],
+            [("u0", "maintainer"), ("maint", "maintainer"), ("author", "author")],
+        )
+
     def test_only_drive_by_reactions_leave_no_field(self):
         api = FakeApi(
             issue=[comment("maint", id=20, reactions={"total_count": 1})],

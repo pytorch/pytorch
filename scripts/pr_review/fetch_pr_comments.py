@@ -56,6 +56,9 @@ REACTIONS = {"issue_comment": "issues/comments", "review_comment": "pulls/commen
 # Reactions are read for the newest reacted comments only, one page each: every
 # lookup is an API call on a token the repository's other workflows share.
 MAX_REACTION_LOOKUPS = 50
+# Permission checks for reactors not already known from the conversation; a
+# reactor beyond them is left out.
+MAX_REACTOR_CHECKS = 30
 
 Api = Callable[[str], Any]
 
@@ -173,6 +176,17 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
                 roles[login] = "maintainer" if is_maintainer(api, repo, login) else None
         return roles[login]
 
+    checks_left = MAX_REACTOR_CHECKS
+
+    def reactor_role(login: str) -> str | None:
+        nonlocal checks_left
+        if login in roles or login == author:
+            return role_of(login)
+        if checks_left == 0:
+            return None
+        checks_left -= 1
+        return role_of(login)
+
     items = []
     lookups: dict[int, tuple[str, dict[str, Any]]] = {}
     for kind, raw in sources.items():
@@ -226,7 +240,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     newest = [i for i in reversed(items) if id(i) in lookups]
     for item in newest[:MAX_REACTION_LOOKUPS]:
         try:
-            reactions = reactions_of(api, repo, *lookups[id(item)], role_of)
+            reactions = reactions_of(api, repo, *lookups[id(item)], reactor_role)
         except NotFound:
             deleted.add(id(item))
             continue
