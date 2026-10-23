@@ -260,6 +260,27 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_mvlgamma_unbacked_size(self, device, dtype, numerics):
+        def fn(x):
+            return torch.mvlgamma(x[x > 10], 3)
+
+        x = torch.linspace(-30, 30, 257, device=device, dtype=dtype).requires_grad_()
+        expected = fn(x)
+        grad = torch.ones_like(expected)
+        expected_grad = torch.autograd.grad(expected, x, grad)[0]
+        with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
+            result, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True, options={"numerics": numerics}), x
+            )
+            self.assertIn("@triton.jit", "\n".join(codes))
+            actual_grad = torch.autograd.grad(result, x, grad)[0]
+        # Unbacked geometry retains the existing decomposition; this checks
+        # compilation and ordinary numerical agreement, not exact-bit equivalence.
+        self.assertEqual(result, expected)
+        self.assertEqual(actual_grad, expected_grad)
+
     @skipIfNoCuteDSL
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -375,7 +396,10 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("eps", (None, -1.0, 0.0, 0.1, 0.7))
+    @parametrize(
+        "eps",
+        (None, -1.0, -1e-100, -(2.0**-149), -(2.0**-150), 2.0**-150, 0.0, 0.1, 0.7),
+    )
     def test_logit_backward_bounds(self, device, dtype, numerics, eps):
         x = torch.tensor(
             [
