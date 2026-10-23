@@ -2247,17 +2247,17 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             def wrapper(*args, **kwargs):
                 if TEST_WITH_TORCHDYNAMO:
                     raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
+                fn(*args, **kwargs)
+        else:
+            wrapper = fn
 
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
+        # Also skip statically, so TestCase.run doesn't set up Dynamo just to
+        # raise SkipTest. The wrapper still skips where the marker is dropped.
         if TEST_WITH_TORCHDYNAMO:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
+            wrapper.__unittest_skip__ = True  # type: ignore[attr-defined]
+            wrapper.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
-        return fn
+        return wrapper
 
     return decorator
 
@@ -2269,17 +2269,16 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
             def wrapper(*args, **kwargs):
                 if condition:
                     raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
+                fn(*args, **kwargs)
+        else:
+            wrapper = fn
 
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
+        # See skipIfTorchDynamo.
         if condition:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
+            wrapper.__unittest_skip__ = True  # type: ignore[attr-defined]
+            wrapper.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
-        return fn
+        return wrapper
 
     return decorator
 
@@ -4058,6 +4057,11 @@ class TestCase(expecttest.TestCase):
         return torch._dynamo.optimize(backend, nopython=nopython)(fn)
 
     def _run_custom(self, result=None):
+        # unittest reports static skips without running setUp; skip the Dynamo
+        # setup below too, which costs ~40ms per test.
+        if getattr(getattr(self, self._testMethodName, None), "__unittest_skip__", False):
+            return super().run(result)
+
         using_unittest = isinstance(result, unittest.TestResult)
 
         super_run = super().run

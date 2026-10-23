@@ -108,11 +108,23 @@ NEXTAFTER_DTYPE_CONFIG = {
     torch.float64: (torch.int64, 0x7FF0000000000000, 0x0008000000000000),
 }
 
-_ops = partial(
-    ops,
-    dtypes=OpDTypes.supported,
-    allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8, u16, u32, u64],
-)
+_unsigned_ops = {
+    "nn.functional.interpolate.bilinear",
+    "nn.functional.interpolate.bicubic",
+    "nn.functional.upsample_bilinear",
+    "nn.functional.upsample_nearest",
+    "fill",
+    "full_like",
+}
+
+
+def _allowed_dtypes(op):
+    if op.full_name in _unsigned_ops:
+        return [f16, f32, f64, i32, i64, b8, u8, u16, u32, u64]
+    return [f16, f32, f64, i32, i64, b8]
+
+
+_ops = partial(ops, dtypes=OpDTypes.supported, allowed_dtypes=_allowed_dtypes)
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
 ExpectedTestResult = Enum("ExpectedTestResult", ("SUCCESS", "XFAILURE", "SKIP"))
@@ -1481,19 +1493,6 @@ class TestInductorOpInfo(TestCase):
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
-
-        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
-        allowed_dtypes = [f16, f32, f64, i32, i64, b8]
-        if op_name not in (
-            "nn.functional.interpolate.bilinear",
-            "nn.functional.interpolate.bicubic",
-            "nn.functional.upsample_bilinear",
-            "nn.functional.upsample_nearest",
-            "fill",
-            "full_like",
-        ):
-            if dtype not in allowed_dtypes:
-                raise unittest.SkipTest("Skipped!")
 
         # with open("test_output.txt", "a") as f:
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
