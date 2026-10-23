@@ -234,12 +234,14 @@ inline vec<I, 2> batch_norm_offset(constant BatchNormLayout<>& layout, I o) {
   return off + o * vec<I, 2>(dims[last].yz);
 }
 
-template <typename T, bool STRIDED, typename I>
+template <typename T, bool BACKWARD, bool STRIDED, typename I>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void batch_norm_reduce(
     device const T* x [[buffer(0)]],
     device packed_float3* out [[buffer(1)]],
     constant BatchNormLayout<>& layout [[buffer(2)]],
+    device const T* dy [[buffer(3)]],
+    device const float* mean [[buffer(4)]],
     uint3 tg [[threadgroup_position_in_grid]],
     uint3 ntg [[threadgroups_per_grid]],
     uint3 pos [[thread_position_in_threadgroup]],
@@ -250,30 +252,47 @@ kernel void batch_norm_reduce(
   const uint c = channels_last ? tg.x * tptg.x + pos.x : tg.x;
   const I o0 = tg.y * tptg.y + pos.y,
           r0 = channels_last ? 0 : tg.z * tptg.x + pos.x;
-  const I cr = STRIDED ? c * I(layout.channel.y) + r0 * I(layout.inner.y)
-                       : c * inner + r0;
-  const I step = tptg.x * ntg.z * (STRIDED ? I(layout.inner.y) : 1);
+  const vec<I, 2> cr = STRIDED
+      ? I(c) * vec<I, 2>(layout.channel.yz) + r0 * vec<I, 2>(layout.inner.yz)
+      : vec<I, 2>(c * inner + r0);
+  const vec<I, 2> step =
+      I(tptg.x * ntg.z) * (STRIDED ? vec<I, 2>(layout.inner.yz) : vec<I, 2>(1));
   float3 acc = 0;
   if (c < C && o0 < outer && r0 < inner) {
     const I first =
-        cr + (STRIDED ? batch_norm_offset(layout, o0).x : o0 * C * inner);
-    const float shift = float(x[first]);
+        cr.x + (STRIDED ? batch_norm_offset(layout, o0).x : o0 * C * inner);
+    const float shift = BACKWARD ? mean[c] : float(x[first]);
     float3 sum = 0;
     for (I o = o0; o < outer; o += tptg.y * ntg.y) {
-      I i = cr + (STRIDED ? batch_norm_offset(layout, o).x : o * C * inner);
+      vec<I, 2> i = cr +
+          (STRIDED ? batch_norm_offset(layout, o) : vec<I, 2>(o * C * inner));
       for (I r = r0; r < inner; r += tptg.x * ntg.z, i += step) {
-        const float v = float(x[i]) - shift;
-        sum += float3(v, v * v, 1);
+        const float v = float(x[i.x]) - shift,
+                    g = BACKWARD ? float(dy[i.y]) : v;
+        sum += float3(g, g * v, 1);
       }
     }
-    acc = float3(shift + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
+    acc = BACKWARD
+        ? sum
+        : float3(shift + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
   }
   threadgroup float3 buf[c10::metal::max_threadgroup_size];
   const uint tid = channels_last ? pos.y : pos.y * tptg.x + pos.x;
   const uint base = channels_last ? pos.x * tptg.y : 0;
+  const uint n = channels_last ? tptg.y : tptg.x * tptg.y;
   buf[base + tid] = acc;
-  acc = threadgroup_welford_combine(
-      buf + base, tid, channels_last ? tptg.y : tptg.x * tptg.y);
+  if IF_CONSTEXPR (BACKWARD) {
+    for (uint s = 1; s < n; s <<= 1) {
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (tid % (2 * s) == 0 && tid + s < n) {
+        buf[base + tid] += buf[base + tid + s];
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    acc = buf[base];
+  } else {
+    acc = threadgroup_welford_combine(buf + base, tid, n);
+  }
   if (tid == 0 && c < C) {
     out[(tg.z * ntg.y + tg.y) * C + c] = packed_float3(acc);
   }
@@ -319,18 +338,60 @@ kernel void batch_norm_stats(
   }
 }
 
+template <typename P>
+kernel void batch_norm_backward_stats(
+    device const packed_float3* part [[buffer(0)]],
+    device float* stats [[buffer(1)]],
+    constant BatchNormStatsParams& params [[buffer(2)]],
+    device const P* weight [[buffer(3)]],
+    device const P* mean [[buffer(4)]],
+    device const P* var [[buffer(5)]],
+    device P* grad_weight [[buffer(6)]],
+    device P* grad_bias [[buffer(7)]],
+    constant bool& train [[buffer(8)]],
+    uint c [[thread_position_in_grid]]) {
+  constant auto& strides = params.strides;
+  float3 sum = 0;
+  for (uint i = 0; i < params.num_partials; ++i) {
+    sum += float3(part[i * params.num_channels + c]);
+  }
+  const float v = float(var[c * strides[bn_idx(BNBackwardParam::Var)]]);
+  const float invstd = train ? v : metal::precise::rsqrt(v + params.eps);
+  const float scale = invstd *
+      (weight != nullptr
+           ? float(weight[c * strides[bn_idx(BNBackwardParam::Weight)]])
+           : 1);
+  device float* s = stats + bn_idx(BNStat::NumStats) * c;
+  s[bn_idx(BNStat::Mean)] =
+      train ? float(mean[c * strides[bn_idx(BNBackwardParam::Mean)]]) : 0;
+  s[bn_idx(BNStat::Scale)] =
+      train ? -scale * invstd * invstd * sum.y / sum.z : scale;
+  s[bn_idx(BNStat::Shift)] = train ? -scale * sum.x / sum.z : 0;
+  s[bn_idx(BNStat::DyScale)] = scale;
+  if (grad_weight != nullptr) {
+    grad_weight[c * strides[bn_idx(BNBackwardParam::GradWeight)]] =
+        static_cast<P>(sum.y * invstd);
+  }
+  if (grad_bias != nullptr) {
+    grad_bias[c * strides[bn_idx(BNBackwardParam::GradBias)]] =
+        static_cast<P>(sum.x);
+  }
+}
+
 template <typename T, bool STRIDED, typename I>
 kernel void batch_norm_elemt(
     device T* out [[buffer(0)]],
     device const T* x [[buffer(1)]],
     device const float* stats [[buffer(2)]],
     constant BatchNormLayout<>& layout [[buffer(3)]],
+    device const T* dy [[buffer(4)]],
     uint3 pos [[thread_position_in_grid]],
     uint3 size [[threads_per_grid]]) {
   device const float* s = stats + pos.y * bn_idx(BNStat::NumStats);
   const float mean = s[bn_idx(BNStat::Mean)];
   const float scale = s[bn_idx(BNStat::Scale)];
   const float shift = s[bn_idx(BNStat::Shift)];
+  const float dy_scale = s[bn_idx(BNStat::DyScale)];
   I o = pos.z;
   do {
     vec<I, 2> i = (o * size.y + pos.y) * size.x + pos.x;
@@ -338,23 +399,31 @@ kernel void batch_norm_elemt(
       i = batch_norm_offset(layout, o) + pos.y * vec<I, 2>(layout.channel.yz) +
           pos.x * vec<I, 2>(layout.inner.yz);
     }
-    out[i.y] = static_cast<T>((float(x[i.x]) - mean) * scale + shift);
+    const float y = (float(x[i.x]) - mean) * scale + shift;
+    out[i.y] =
+        static_cast<T>(dy != nullptr ? y + float(dy[i.y]) * dy_scale : y);
     o += size.z;
   } while (is_same_v<I, ulong> && o < I(layout.outer_numel));
 }
 
-#define REGISTER_BATCH_NORM_KERNELS(T, SUFFIX, STRIDED, I)                     \
-  template [[host_name("batch_norm_reduce_" SUFFIX #T)]] [[kernel]]            \
-  decltype(batch_norm_reduce<T, STRIDED, I>) batch_norm_reduce<T, STRIDED, I>; \
-  template [[host_name("batch_norm_elemt_" SUFFIX #T)]] [[kernel]]             \
+#define REGISTER_BATCH_NORM_KERNELS(T, SUFFIX, STRIDED, I)                   \
+  template [[host_name("batch_norm_reduce_" SUFFIX #T)]] [[kernel]]          \
+  decltype(batch_norm_reduce<T, false, STRIDED, I>)                          \
+      batch_norm_reduce<T, false, STRIDED, I>;                               \
+  template [[host_name("batch_norm_backward_reduce_" SUFFIX #T)]] [[kernel]] \
+  decltype(batch_norm_reduce<T, true, STRIDED, I>)                           \
+      batch_norm_reduce<T, true, STRIDED, I>;                                \
+  template [[host_name("batch_norm_elemt_" SUFFIX #T)]] [[kernel]]           \
   decltype(batch_norm_elemt<T, STRIDED, I>) batch_norm_elemt<T, STRIDED, I>
 
-#define REGISTER_BATCH_NORM_OPS(T)                           \
-  REGISTER_BATCH_NORM_KERNELS(T, "", false, uint);           \
-  REGISTER_BATCH_NORM_KERNELS(T, "strided_", true, uint);    \
-  REGISTER_BATCH_NORM_KERNELS(T, "strided64_", true, ulong); \
-  template [[host_name("batch_norm_stats_" #T)]] [[kernel]]  \
-  decltype(batch_norm_stats<T>) batch_norm_stats<T>
+#define REGISTER_BATCH_NORM_OPS(T)                                   \
+  REGISTER_BATCH_NORM_KERNELS(T, "", false, uint);                   \
+  REGISTER_BATCH_NORM_KERNELS(T, "strided_", true, uint);            \
+  REGISTER_BATCH_NORM_KERNELS(T, "strided64_", true, ulong);         \
+  template [[host_name("batch_norm_stats_" #T)]] [[kernel]]          \
+  decltype(batch_norm_stats<T>) batch_norm_stats<T>;                 \
+  template [[host_name("batch_norm_backward_stats_" #T)]] [[kernel]] \
+  decltype(batch_norm_backward_stats<T>) batch_norm_backward_stats<T>
 
 REGISTER_BATCH_NORM_OPS(float);
 REGISTER_BATCH_NORM_OPS(half);
