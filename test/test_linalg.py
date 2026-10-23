@@ -11864,6 +11864,58 @@ class TestLinalgCudaOnly(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"bool"):
                 torch.cuda.tunable._record_borrowed_enable("yes")
 
+    @dtypes(torch.float16)
+    def test_reuse_pass_kill_switch_tunableop(self, device, dtype):
+        # PYTORCH_TUNABLEOP_NEAREST_MATCH=0 and PYTORCH_TUNABLEOP_RECORD_BORROWED=0
+        # force borrowing off for the whole process, overriding the enable call.
+        # Both are read into a function-local static, so a fresh process is the
+        # only way to exercise them. This covers the same *DisabledByEnv()
+        # helpers that LookupNearest and RecordBorrowed consult, so it stands in
+        # for the C++ side too.
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "import torch\n"
+            "torch.cuda.tunable._nearest_match_enable(True)\n"
+            "torch.cuda.tunable._record_borrowed_enable(True)\n"
+            "print(torch.cuda.tunable._nearest_match_is_enabled(),\n"
+            "      torch.cuda.tunable._record_borrowed_is_enabled())\n"
+        )
+
+        def run(env_overrides):
+            env = os.environ.copy()
+            # Clear both first: inheriting one already set in the ambient
+            # environment would silently invalidate the control case below.
+            env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH", None)
+            env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED", None)
+            env.update(env_overrides)
+            out = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            ).stdout.split()
+            return out[-2], out[-1]
+
+        # Control: without the env vars the enable calls take effect, so a
+        # False below is the kill switch and not some unrelated failure.
+        self.assertEqual(run({}), ("True", "True"))
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH": "0"}), ("False", "True")
+        )
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED": "0"}), ("True", "False")
+        )
+        # Only "0" disables; the inverted sense is deliberate, so 1 must not
+        # be read as "force on".
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH": "1"}), ("True", "True")
+        )
+
     @dtypes(torch.float16, torch.float32)
     def test_numerical_check_accuracy_tunableop(self, device, dtype):
         shapes = [(127, 193, 61), (251, 317, 73), (89, 149, 41)]

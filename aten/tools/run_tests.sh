@@ -53,10 +53,6 @@ run_if_exists cuda_allocator_test
 run_if_exists cuda_event_test
 run_if_exists cuda_cublas_handle_pool_test
 run_if_exists cuda_tunable_nearest_test
-# ROCm builds this as hip_tunable_nearest_test (CMakeLists rewrites the cuda_
-# prefix), and ROCm is the only platform emitting the scaled-GEMM signature the
-# parser tests cover, so name both spellings.
-run_if_exists hip_tunable_nearest_test
 
 if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's

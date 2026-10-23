@@ -13,7 +13,6 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 
-#include <atomic>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -321,18 +320,16 @@ class TORCH_CUDA_CPP_API TuningContext {
     std::ostream& GetLog() const;
 
     bool enable_;
-    // Atomic: the reuse pass flips these while other threads may run GEMMs.
-    // Single-flight contract: the reuse pass must not overlap execution -- the
-    // atomics only make concurrent reads well-defined, they do not make a
-    // decision taken under transient flag values meaningful. The reuse pass
-    // reads several of these per shape to decide whether to borrow and whether
-    // to persist, so a split read can still observe a transitional
-    // combination. (Per-call dynamic-dims state instead goes through the
-    // thread-local push/pop stack; see TunableDynamicDimsGuard below.)
-    std::atomic<bool> tuning_enable_;
-    std::atomic<bool> record_untuned_enable_;
-    std::atomic<bool> nearest_match_enable_;
-    std::atomic<bool> record_borrowed_enable_;
+    bool tuning_enable_;
+    bool record_untuned_enable_;
+    // Plain bool like every other flag here, including the ones TunableOp reads
+    // on each GEMM. Each is set once before the work it governs, not flipped
+    // underneath it; a caller that needs per-call state uses the thread-local
+    // push/pop stack instead (see TunableDynamicDimsGuard below). Making only
+    // these two atomic would imply a concurrency guarantee their siblings do
+    // not share and that nothing here enforces.
+    bool nearest_match_enable_;
+    bool record_borrowed_enable_;
     bool manager_initialized_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;

@@ -211,9 +211,9 @@ ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     return ResultEntry::Null();
   }
 
-  // Copy out under the lock, then parse and match without it: per-candidate
-  // parsing allocates and calls stoll, and by design the query is not memoized,
-  // so holding lock_ for the whole scan would serialize every concurrent
+  // Copy out under the lock, then parse and match without it: splitting each
+  // candidate signature allocates, and by design the query is not memoized, so
+  // holding lock_ for the whole scan would serialize every concurrent
   // Lookup/Add on string parsing.
   std::vector<std::pair<std::string, ResultEntry>> candidates;
   {
