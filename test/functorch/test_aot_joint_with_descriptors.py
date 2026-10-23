@@ -39,8 +39,10 @@ from torch._functorch.aot_autograd import (
 from torch._guards import tracing, TracingContext
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1245,9 +1247,10 @@ class inner_f(torch.nn.Module):
         )
 
 
-class TestAOTJointWithDescriptorsDevice(TestCase):
+class TestAOTJointWithDescriptorsFlexAttention(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.attention.flex_attention)
     @onlyAccelerator
     def test_preserve_annotate_flex_attention(self, device):
         def score_mod(score, b, h, m, n):
@@ -1276,7 +1279,9 @@ class TestAOTJointWithDescriptorsDevice(TestCase):
 
         # Create block_mask with the mask_mod function (which only takes 4 args)
         # Note: We don't compile create_block_mask itself, just flex_attention
-        block_mask = create_block_mask(mask_mod, None, None, seqlen, seqlen)
+        block_mask = create_block_mask(
+            mask_mod, None, None, seqlen, seqlen, device=device
+        )
 
         class FlexAttentionModule(torch.nn.Module):
             """Flex attention submodule similar to the sdpa in Llama3 Attention"""
@@ -1354,9 +1359,8 @@ class TestAOTJointWithDescriptorsDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestAOTJointWithDescriptorsDevice,
+    TestAOTJointWithDescriptorsFlexAttention,
     globals(),
-    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
