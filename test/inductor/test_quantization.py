@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import logging
+import unittest
 
 import numpy as np
 
@@ -9,8 +10,9 @@ import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.utils._triton import has_triton
 
 
 log = logging.getLogger(__name__)
@@ -86,6 +88,8 @@ class LayernormNN(torch.nn.Module):
 
 
 class TestQuantization(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
@@ -136,7 +140,7 @@ class TestQuantization(TestCase):
             self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
         )
 
-    @requires_gpu()
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -149,15 +153,15 @@ class TestQuantization(TestCase):
             },
         },
     )
-    def test_activation_quantization_aten_with_scaling(self):
+    def test_activation_quantization_aten_with_scaling(self, device):
         counters.clear()
-        module = TargetCPModule().to(GPU_TYPE)
+        module = TargetCPModule().to(device)
         input = [
             torch.rand(
-                (16, 10), requires_grad=True, device=GPU_TYPE, dtype=torch.bfloat16
+                (16, 10), requires_grad=True, device=device, dtype=torch.bfloat16
             ),
             torch.rand(
-                (10, 16), requires_grad=True, device=GPU_TYPE, dtype=torch.bfloat16
+                (10, 16), requires_grad=True, device=device, dtype=torch.bfloat16
             ),
         ]
         traced = torch.compile(module)
@@ -177,10 +181,10 @@ class TestQuantization(TestCase):
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
-        module = FeedforwardNN().to(GPU_TYPE)
+        module = FeedforwardNN().to(device)
         X = np.linspace(-10, 10, 100).reshape(-1, 1).astype(np.float32)
         input = [
-            torch.from_numpy(X).to(GPU_TYPE),
+            torch.from_numpy(X).to(device),
         ]
         traced = torch.compile(module)
         ref = module(*input)
@@ -199,7 +203,7 @@ class TestQuantization(TestCase):
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
-    @requires_gpu()
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -212,26 +216,26 @@ class TestQuantization(TestCase):
             },
         },
     )
-    def test_activation_quantization_aten_without_scaling(self):
+    def test_activation_quantization_aten_without_scaling(self, device):
         counters.clear()
 
-        module = LayernormNN().to(GPU_TYPE)
+        module = LayernormNN().to(device)
         normalized_shape = [256]
         input = [
             torch.randn(
-                (1, 3, 256), requires_grad=True, device=GPU_TYPE, dtype=torch.bfloat16
+                (1, 3, 256), requires_grad=True, device=device, dtype=torch.bfloat16
             ),
             normalized_shape,
             torch.randn(
                 *normalized_shape,
                 requires_grad=True,
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.bfloat16,
             ),
             torch.randn(
                 *normalized_shape,
                 requires_grad=True,
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.bfloat16,
             ),
         ]
@@ -252,7 +256,7 @@ class TestQuantization(TestCase):
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
-    @requires_gpu()
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -265,12 +269,12 @@ class TestQuantization(TestCase):
             },
         },
     )
-    def test_activation_quantization_shared_output_and_saved(self):
+    def test_activation_quantization_shared_output_and_saved(self, device):
         """Test that activation quantization works when a tensor is both a user
         output and a saved-for-backward activation (T264303372)."""
         counters.clear()
-        module = SharedOutputAndSavedModule().to(GPU_TYPE)
-        x = torch.randn(8, 64, device=GPU_TYPE, requires_grad=True)
+        module = SharedOutputAndSavedModule().to(device)
+        x = torch.randn(8, 64, device=device, requires_grad=True)
         compiled = torch.compile(module)
         result, attn = compiled(x)
         loss = result.sum() + attn.sum()
@@ -284,6 +288,11 @@ class TestQuantization(TestCase):
         counters.clear()
 
 
+instantiate_device_type_tests(
+    TestQuantization, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and has_triton():
         run_tests()
