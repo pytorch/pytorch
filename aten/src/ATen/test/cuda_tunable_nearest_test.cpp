@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cstdio>
+#include <fstream>
+
 #include <ATen/cuda/tunable/Tunable.h>
 
 // Manager-level coverage for LookupNearest / RecordBorrowed. Unlike
@@ -147,4 +150,64 @@ TEST(TunableNearest, RecordBorrowedDisabledWritesNothing) {
   // Warns and ignores; the shape stays a miss.
   mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
+}
+
+namespace {
+
+// Read an entire file into a string for content assertions.
+std::string ReadFile(const std::string& path) {
+  std::ifstream in(path);
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  return content;
+}
+
+} // namespace
+
+TEST(TunableNearest, RecordBorrowedPersistsToFile) {
+  // The persist predicate in Add() is the reason RecordBorrowed exists: with
+  // tuning off and record-borrowed on, the entry must reach the results file,
+  // not just the in-memory map. Uses a standalone manager but points the
+  // global context at a tmp file (no global manager init required).
+  FlagGuard g;
+  auto* ctx = getTuningContext();
+  const std::string prev_file = ctx->GetFilename();
+  const std::string tmp = std::tmpnam(nullptr);
+  ctx->SetFilename(tmp, /*insert_device_ordinal=*/false);
+  ctx->EnableTuning(false);
+  ctx->EnableNearestMatch(true);
+  ctx->EnableRecordBorrowed(true);
+  {
+    TuningResultsManager mgr;
+    mgr.Add(kOp, kCSig, Donor("k64"));
+    mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
+    EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
+  }
+  const std::string content = ReadFile(tmp);
+  EXPECT_NE(content.find(kQSig), std::string::npos);
+  std::remove(tmp.c_str());
+  ctx->SetFilename(prev_file, /*insert_device_ordinal=*/false);
+}
+
+TEST(TunableNearest, NoPersistWithoutBorrowOrTuning) {
+  // Tuning off and record-borrowed off writes nothing: the verdict lives only
+  // in the calling manager's map.
+  FlagGuard g;
+  auto* ctx = getTuningContext();
+  const std::string prev_file = ctx->GetFilename();
+  const std::string tmp = std::tmpnam(nullptr);
+  ctx->SetFilename(tmp, /*insert_device_ordinal=*/false);
+  ctx->EnableTuning(false);
+  ctx->EnableNearestMatch(true);
+  ctx->EnableRecordBorrowed(false);
+  {
+    TuningResultsManager mgr;
+    mgr.Add(kOp, kCSig, Donor("k64"));
+    // Disabled path warns and ignores.
+    mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
+    EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
+  }
+  std::ifstream in(tmp);
+  EXPECT_FALSE(in.good());
+  ctx->SetFilename(prev_file, /*insert_device_ordinal=*/false);
 }

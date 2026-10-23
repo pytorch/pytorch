@@ -10108,6 +10108,7 @@ class TestLinalgCudaOnly(TestCase):
         # Process-global, so leaving these on would change every later test.
         torch.cuda.tunable._nearest_match_enable(False)
         torch.cuda.tunable._record_borrowed_enable(False)
+        torch.cuda.tunable.wildcard_fallback_enable(False)
         torch.cuda.tunable.tuning_enable(True)
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
@@ -12025,8 +12026,11 @@ class TestLinalgCudaOnly(TestCase):
         finally:
             shutil.rmtree(results_dir, ignore_errors=True)
 
+        # The initial tuning run logs one "finding fastest for" via FindFastest;
+        # the single borrow validation logs one more via FindFastestAmong. The
+        # second identical call must be an in-memory hit and log nothing.
         validations = result.stdout.count("finding fastest for")
-        self.assertEqual(validations, 1, result.stdout)
+        self.assertEqual(validations, 2, result.stdout)
 
     @onlyCUDA
     @dtypes(torch.float)
@@ -12158,11 +12162,81 @@ class TestLinalgCudaOnly(TestCase):
 
             self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
 
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_wildcard_donor_validated_and_persisted_tunableop(self, device, dtype):
+        # With no usable nearest donor but a wildcard entry present, the
+        # wildcard kernel is validated against Default (not returned blindly),
+        # and the verdict is persisted. Tunes under dynamic_dims_mask so the
+        # wildcard entry really exists, then drops the concrete row so nearest
+        # has no donor.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K = 64
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, 32, device=device, dtype=dtype)
+            with torch.cuda.tunable.dynamic_dims_mask(M=True):
+                torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+            # Keep only wildcard rows (param sig contains '*').
+            self._rewrite_results_file(
+                filename, lambda row: row if "*" in row[1] else None
+            )
+            torch.cuda.tunable._clear_all()
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            before = len(torch.cuda.tunable.get_results())
+            self.assertGreater(before, 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+            torch.cuda.tunable.wildcard_fallback_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertGreater(len(torch.cuda.tunable.get_results()), before)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_unusable_donor_records_nothing_tunableop(self, device, dtype):
+        # A donor naming an unregistered solution (e.g. a results file from a
+        # build with more backends) is a miss, not a fault: nothing validated,
+        # nothing recorded.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+            self._rewrite_results_file(
+                filename, lambda row: [row[0], row[1], "NoSuchKernel_xyz", row[3]]
+            )
+            torch.cuda.tunable._clear_all()
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            before = len(torch.cuda.tunable.get_results())
+            self.assertGreater(before, 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertEqual(len(torch.cuda.tunable.get_results()), before)
+
     def _rewrite_results_file(self, filename, transform):
         # Rewrite every non-Validator row of a results file through `transform`,
-        # which takes and returns a [op_sig, param_sig, solution, time] row.
-        # Tests mutate a *real* tuned entry rather than hand-authoring
-        # signatures, so the entry stays exactly what the runtime would emit.
+        # which takes and returns a [op_sig, param_sig, solution, time] row,
+        # or None to drop the row. Tests mutate a *real* tuned entry rather
+        # than hand-authoring signatures, so the entry stays exactly what the
+        # runtime would emit.
         import csv
         with open(filename) as f:
             rows = [r for r in csv.reader(f) if r]
@@ -12172,7 +12246,12 @@ class TestLinalgCudaOnly(TestCase):
             # validator check and makes read_file return False.
             writer = csv.writer(f, lineterminator="\n")
             for row in rows:
-                writer.writerow(row if row[0] == "Validator" else transform(row))
+                if row[0] == "Validator":
+                    writer.writerow(row)
+                else:
+                    rewritten = transform(row)
+                    if rewritten is not None:
+                        writer.writerow(rewritten)
 
     @onlyCUDA
     @dtypes(torch.float)

@@ -223,9 +223,14 @@ class TunableOp {
         // donor before Default. Otherwise the worker measures Default while
         // runtime (nearest match off) runs the wildcard kernel, and autotune
         // ranks a kernel that will never run. Validated like any borrow.
+        // Default wildcard entries are skipped like Default nearest donors:
+        // validating Default against Default profiles the fallback twice and
+        // persists nothing new.
         if (borrowed == ResultEntry::Null() && ctx->IsWildcardFallbackEnabled()) {
           auto wildcard = mgr.LookupWildcardFallback(op_sig, concrete_sig);
-          if (wildcard != ResultEntry::Null() && DonorIsUsable(wildcard, params)) {
+          if (wildcard != ResultEntry::Null() &&
+              wildcard != ResultEntry::Default() &&
+              DonorIsUsable(wildcard, params)) {
             borrowed = wildcard;
           }
         }
@@ -233,10 +238,10 @@ class TunableOp {
       const bool will_validate = (borrowed != ResultEntry::Null());
 
       // Only a validated donor persists this shape as an exact entry, leaving
-      // offline tuning nothing to find -- whether the donor came from nearest
-      // match or the wildcard entry. Every other path here records nothing --
-      // no donor at all -- so the shape must still be reported, and before
-      // the lookup rather than after it.
+      // offline tuning nothing to find. Report up front unless a persisted
+      // verdict is coming; the capture path below re-reports when validation
+      // is skipped, so the shape cannot drop out of both files. Reporting
+      // happens before the lookup.
       if (ctx->IsRecordUntunedEnabled() &&
           !(will_validate && ctx->IsRecordBorrowedEnabled())) {
         mgr.RecordUntuned(
@@ -247,15 +252,24 @@ class TunableOp {
       if (will_validate) {
         // Tuning under stream capture is forbidden (see the tuning path
         // above): FindFastestAmong allocates, memcpys and synchronizes events,
-        // any of which invalidates the capture. While capturing, fall through
-        // to Default below -- the parent process retries outside capture.
+        // any of which invalidates the capture. While capturing, report
+        // untuned (unless already reported above) and fall through to Default
+        // below -- the caller retries outside capture.
         bool can_validate = true;
 #ifndef USE_ROCM
         can_validate =
             c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
             c10::cuda::CaptureStatus::None;
 #endif
-        if (can_validate) {
+        if (!can_validate) {
+          if (ctx->IsRecordUntunedEnabled() && ctx->IsRecordBorrowedEnabled()) {
+            mgr.RecordUntuned(
+                ctx->GetUntunedFile(), op_sig, concrete_sig,
+                params->BLASSignature());
+          }
+          return ResultEntry::Default();
+        }
+        {
           auto result = FindFastestAmong(
               params, {ResultEntry::Default().GetKey(), borrowed.GetKey()});
           if (ctx->IsRecordBorrowedEnabled()) {
@@ -272,7 +286,6 @@ class TunableOp {
           }
           return result;
         }
-        return ResultEntry::Default();
       }
       // Nearest match takes precedence: once it is on, a miss with no usable
       // donor of either kind (nearest or wildcard) is a miss rather than a

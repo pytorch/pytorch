@@ -127,6 +127,15 @@ due to the use of concurrent futures module. The argument to `mgpu_tune_gemm_in_
 expression (? or *) to generate the list of untuned files containing the GEMMs to be processed. The `num_gpus`
 must between 1 and the total number of GPUs available.
 
+### Reuse mode writes into the results file
+
+A compile-time reuse pass (nearest-match borrowing validated against Default)
+persists its verdicts -- including Default when the borrow loses -- into the
+same results file as real tuning results, in the same format. The file cannot
+distinguish them, and a later tuning pass treats those shapes as exact hits and
+never tunes them. Keep separate files for tuning and reuse outputs if you
+intend to tune those shapes properly later.
+
 ## Tuning Context
 The behavior of TunableOp is currently manipulated through environment variables, the C++ interface of
 at::cuda::tunable::getTuningContext(), or the `torch.cuda.tunable` python interfaces. The environment variables take
@@ -156,6 +165,9 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED | Default is 1. Set to 0 to disable. |
 | PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE | Default (or < 0) is to query L2 cache size. Set to 0 to disable. Otherwise, set to the number of MiB to use for the pool of operator parameters. For example, setting this to the size of your device's memory cache will guarantee that every tuning iteration will use a cold cache. |
 | PYTORCH_TUNABLEOP_BLAS_LOG | Default is 0. Set to 1 to enable. Write BLAS parameters to tuning CSV file. |
+| PYTORCH_TUNABLEOP_WILDCARD_FALLBACK | Default is 0. Set to 1 to enable. |
+| PYTORCH_TUNABLEOP_NEAREST_MATCH | Override-off only: default is unset (nearest match follows the EnableNearestMatch API). Set to 0 to force nearest-match borrowing off. Setting it to 1 is silently ignored, unlike PYTORCH_TUNABLEOP_RECORD_UNTUNED=1 which force-enables. |
+| PYTORCH_TUNABLEOP_RECORD_BORROWED | Override-off only: default is unset (borrowed-result persistence follows the EnableRecordBorrowed API). Set to 0 to force it off. Setting it to 1 is silently ignored. |
 
 ### Python Interface
 All python APIs exist in the `torch.cuda.tunable` module.
@@ -194,6 +206,10 @@ at::cuda::tunable::getTuningContext()->EnableTunableOp(true);
 | C++ API | Description |
 | ------- | ----------- |
 | void EnableTunableOp(bool value); | |
+| void EnableNearestMatch(bool value); | Compile-time reuse pass only; default is false. |
+| bool IsNearestMatchEnabled() const; | |
+| void EnableRecordBorrowed(bool value); | Lets the reuse pass persist while tuning is off; default is false. |
+| bool IsRecordBorrowedEnabled() const; | |
 | bool IsTunableOpEnabled() const; | |
 | void EnableTuning(bool value); | |
 | bool IsTuningEnabled() const; | |
