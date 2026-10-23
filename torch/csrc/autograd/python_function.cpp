@@ -1666,10 +1666,68 @@ static bool get_function_class_info(PyObject* cls, FunctionClassInfo& info) {
   return info.backward_cls && info.forward;
 }
 
+// Returns a new reference to what
+// inspect.signature(forward).bind(*args).apply_defaults() gives as args, or
+// nullptr if that needs the general path in Python. Sets a Python error only on
+// failure.
+static PyObject* bind_positional_defaults(PyObject* forward, PyObject* args) {
+  if (!PyFunction_Check(forward)) {
+    return nullptr;
+  }
+  auto* code = reinterpret_cast<PyCodeObject*>(PyFunction_GET_CODE(forward));
+  if (code->co_kwonlyargcount != 0) {
+    return nullptr;
+  }
+  // inspect.signature follows __wrapped__ and honors __signature__
+  if (PyObject* dict =
+          reinterpret_cast<PyFunctionObject*>(forward)->func_dict) {
+    for (const char* name : {"__wrapped__", "__signature__"}) {
+      if (PyDict_ContainsString(dict, name) != 0) {
+        return nullptr;
+      }
+    }
+  }
+  auto num_args = PyTuple_GET_SIZE(args);
+  auto num_params = code->co_argcount;
+  if (num_args >= num_params) {
+    // Extra args are only accepted by *args
+    return num_args == num_params || (code->co_flags & CO_VARARGS)
+        ? Py_NewRef(args)
+        : nullptr;
+  }
+  PyObject* defaults = PyFunction_GET_DEFAULTS(forward);
+  auto first_default = num_params - (defaults ? PyTuple_GET_SIZE(defaults) : 0);
+  if (num_args < first_default) {
+    return nullptr;
+  }
+  PyObject* result = PyTuple_New(num_params);
+  if (!result) {
+    return nullptr;
+  }
+  for (const auto i : c10::irange(num_params)) {
+    PyObject* value = i < num_args
+        ? PyTuple_GET_ITEM(args, i)
+        : PyTuple_GET_ITEM(defaults, i - first_default);
+    PyTuple_SET_ITEM(result, i, Py_NewRef(value));
+  }
+  return result;
+}
+
 static PyObject* bind_default_args(
     PyObject* forward_fn,
     PyObject* args,
     PyObject* kwargs) {
+  // Binding with inspect costs hundreds of thousands of instructions, so do
+  // the common case without it
+  if (!kwargs || PyDict_GET_SIZE(kwargs) == 0) {
+    THPObjectPtr bound(bind_positional_defaults(forward_fn, args));
+    if (bound) {
+      return PyTuple_Pack(2, bound.get(), Py_None);
+    }
+    if (PyErr_Occurred()) {
+      return nullptr;
+    }
+  }
   THPObjectPtr helper(get_autograd_function_attr("_bind_default_args"));
   if (!helper) {
     return nullptr;
