@@ -11,9 +11,13 @@
 // plain unit test rather than something that needs a GPU.
 
 using at::cuda::tunable::GemmLeadingDims;
+using at::cuda::tunable::GemmShape;
 using at::cuda::tunable::LdMayVary;
 using at::cuda::tunable::LdsCompatibleWhenMVaries;
 using at::cuda::tunable::LdsCompatibleWhenNVaries;
+using at::cuda::tunable::NearestLargerMatch;
+using at::cuda::tunable::ParseGemmShape;
+using at::cuda::tunable::SplitUnderscore;
 using at::cuda::tunable::UsesKForLdb;
 using at::cuda::tunable::UsesMForLda;
 
@@ -127,4 +131,110 @@ TEST(TunableLdRules, NVariesRequiresLdaAndLdcToMatch) {
       'T', q, 16, GemmLeadingDims{64, 32, 32}, 32));
   EXPECT_FALSE(LdsCompatibleWhenNVaries(
       'T', q, 16, GemmLeadingDims{32, 32, 64}, 32));
+}
+
+namespace {
+
+// Parse a full params signature the way LookupNearest does.
+GemmShape ParseSig(const std::string& sig) {
+  return ParseGemmShape(SplitUnderscore(sig));
+}
+
+} // namespace
+
+TEST(TunableLdRules, ParsePlainSignature) {
+  // Grammar of GemmParams<T>::Signature (GemmCommon.h): ab_M_N_K_ld_lda_ldb_ldc.
+  const GemmShape s = ParseSig("NN_1024_512_256_ld_1024_256_1024");
+  EXPECT_TRUE(s.ok);
+  EXPECT_EQ(s.transab, "NN");
+  EXPECT_EQ(s.m, 1024);
+  EXPECT_EQ(s.n, 512);
+  EXPECT_EQ(s.k, 256);
+  EXPECT_FALSE(s.has_b);
+  EXPECT_EQ(s.lda, 1024);
+  EXPECT_EQ(s.ldb, 256);
+  EXPECT_EQ(s.ldc, 1024);
+  EXPECT_TRUE(s.suffix.empty());
+}
+
+TEST(TunableLdRules, ParseBatchedSignature) {
+  // Grammar of GemmStridedBatchedParams<T>::Signature: ab_M_N_K_B_b_ld_... .
+  const GemmShape s = ParseSig("NN_8_512_256_B_4_ld_512_256_8");
+  EXPECT_TRUE(s.ok);
+  EXPECT_TRUE(s.has_b);
+  EXPECT_EQ(s.b, 4);
+  EXPECT_EQ(s.lda, 512);
+}
+
+TEST(TunableLdRules, ParseScaledMmSuffix) {
+  // Grammar of ScaledGemmParams<T>::Signature (ROCm): ..._rw_0|1_bias_<dtype>.
+  const GemmShape s = ParseSig("NN_1024_512_256_ld_1024_256_1024_rw_1_bias_BFloat16");
+  EXPECT_TRUE(s.ok);
+  EXPECT_EQ(s.suffix, "_rw_1_bias_BFloat16");
+  EXPECT_EQ(s.m, 1024);
+}
+
+TEST(TunableLdRules, ParseRejectsWildcards) {
+  // Wildcard '*' tokens fail numeric conversion: borrowing is
+  // concrete-to-concrete by design, dynamic signatures never parse.
+  EXPECT_FALSE(ParseSig("NN_*_512_256_ld_*_256_1024").ok);
+  EXPECT_FALSE(ParseSig("NN_1024_512_256_ld_1024_*_1024").ok);
+}
+
+TEST(TunableLdRules, ParseRejectsMalformed) {
+  EXPECT_FALSE(ParseSig("").ok);
+  EXPECT_FALSE(ParseSig("NN_1024").ok);  // too short
+  EXPECT_FALSE(ParseSig("N_1024_512_256_ld_1024_256_1024").ok);  // transab != 2
+  EXPECT_FALSE(ParseSig("NN_1024_512_256_1024_256_1024").ok);  // missing ld token
+  EXPECT_FALSE(ParseSig("NN_x_512_256_ld_1024_256_1024").ok);  // stoll fails
+}
+
+TEST(TunableLdRules, NearestMatchRoundsMSingleDimUp) {
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_32_512_256_ld_32_256_32");
+  const GemmShape c = ParseSig("NN_64_512_256_ld_64_256_64");
+  EXPECT_TRUE(NearestLargerMatch(q, c, delta));
+  EXPECT_EQ(delta, 32);
+}
+
+TEST(TunableLdRules, NearestMatchRejectsRoundDown) {
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_64_512_256_ld_64_256_64");
+  const GemmShape c = ParseSig("NN_32_512_256_ld_32_256_32");
+  EXPECT_FALSE(NearestLargerMatch(q, c, delta));
+}
+
+TEST(TunableLdRules, NearestMatchRejectsTwoDimsDiffer) {
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_32_512_256_ld_32_256_32");
+  const GemmShape c = ParseSig("NN_64_1024_256_ld_64_256_64");
+  EXPECT_FALSE(NearestLargerMatch(q, c, delta));
+}
+
+TEST(TunableLdRules, NearestMatchRejectsKMismatch) {
+  // A solution is only valid for the exact K it was tuned at.
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_32_512_256_ld_32_256_32");
+  const GemmShape c = ParseSig("NN_64_512_128_ld_64_128_64");
+  EXPECT_FALSE(NearestLargerMatch(q, c, delta));
+}
+
+TEST(TunableLdRules, NearestMatchRejectsTransposeAndSuffixMismatch) {
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_32_512_256_ld_32_256_32");
+  EXPECT_FALSE(
+      NearestLargerMatch(q, ParseSig("NT_64_512_256_ld_256_256_64"), delta));
+  EXPECT_FALSE(NearestLargerMatch(
+      q, ParseSig("NN_64_512_256_ld_64_256_64_rw_1_bias_BFloat16"), delta));
+}
+
+TEST(TunableLdRules, NearestMatchBatchVariesRequiresLdMatch) {
+  // No ld depends on B, so all leading dims must match exactly.
+  int64_t delta = -1;
+  const GemmShape q = ParseSig("NN_8_512_256_B_2_ld_512_256_8");
+  const GemmShape c = ParseSig("NN_8_512_256_B_4_ld_512_256_8");
+  EXPECT_TRUE(NearestLargerMatch(q, c, delta));
+  EXPECT_EQ(delta, 2);
+  EXPECT_FALSE(NearestLargerMatch(
+      q, ParseSig("NN_8_512_256_B_4_ld_512_256_16"), delta));
 }
