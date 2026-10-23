@@ -136,6 +136,39 @@ TEST(TestDtype, TestComplexFloat) {
   EXPECT_EQ(a / b, div);
 }
 
+TEST(TestDtype, TestComplexTranscendentals) {
+  using ho_complex_f = torch::headeronly::complex<float>;
+  const ho_complex_f value(1.0f, 0.5f);
+  const std::complex<float> reference(1.0f, 0.5f);
+
+  const auto expect_near = [](const ho_complex_f& actual,
+                              const std::complex<float>& expected) {
+    EXPECT_NEAR(actual.real(), expected.real(), 1e-5f);
+    EXPECT_NEAR(actual.imag(), expected.imag(), 1e-5f);
+  };
+
+  expect_near(std::acos(value), std::acos(reference));
+  expect_near(std::acosh(value), std::acosh(reference));
+  expect_near(std::asin(value), std::asin(reference));
+  expect_near(std::asinh(value), std::asinh(reference));
+  expect_near(std::atan(value), std::atan(reference));
+  expect_near(std::atanh(value), std::atanh(reference));
+  expect_near(std::cos(value), std::cos(reference));
+  expect_near(std::cosh(value), std::cosh(reference));
+  expect_near(std::exp(value), std::exp(reference));
+  expect_near(std::expm1(value), std::exp(reference) - 1.0f);
+  expect_near(std::log(value), std::log(reference));
+  expect_near(std::log10(value), std::log10(reference));
+  expect_near(std::log1p(value), std::log(1.0f + reference));
+  expect_near(std::log2(value), std::log(reference) / std::log(2.0f));
+  expect_near(std::pow(value, value), std::pow(reference, reference));
+  expect_near(std::sin(value), std::sin(reference));
+  expect_near(std::sinh(value), std::sinh(reference));
+  expect_near(std::sqrt(value), std::sqrt(reference));
+  expect_near(std::tan(value), std::tan(reference));
+  expect_near(std::tanh(value), std::tanh(reference));
+}
+
 TEST(TestDtype, TestIsComplex) {
   using torch::headeronly::is_complex;
   static_assert(is_complex<torch::headeronly::complex<float>>::value);
