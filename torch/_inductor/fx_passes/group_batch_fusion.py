@@ -530,6 +530,8 @@ class BatchLinearLHSFusion(BatchFusion):
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
             weight_val = weight.meta["example_value"]
+            # A zero-width split inherits the fused output's row stride, which
+            # differs from eager when grouped with non-empty projections.
             if not statically_known_true(weight_val.shape[0] > 0):
                 return None
             # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
@@ -543,7 +545,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     return None
             bias_tensor = None
             if bias is not None:
-                bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
+                bias_tensor = bias.meta.get("example_value")
                 if (
                     bias_tensor is None
                     or bias_tensor.ndim != 1
