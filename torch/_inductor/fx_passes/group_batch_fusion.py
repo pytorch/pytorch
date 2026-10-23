@@ -522,7 +522,7 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int | None, Any] | None:
+    def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
@@ -554,8 +554,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     )
                 ):
                     return None
-            bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
-            group_key = ("batch_linear_lhs", bias_dim, input)
+            group_key = ("batch_linear_lhs", bias is not None, input)
         else:
             group_key = None
         return group_key
