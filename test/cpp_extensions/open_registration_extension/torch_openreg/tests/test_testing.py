@@ -18,6 +18,12 @@ from torch.testing._internal.common_device_type import (
     PrivateUse1TestBase,
     requires_capabilities,
 )
+from torch.testing._internal.common_modules import (
+    FunctionInput,
+    ModuleInfo,
+    ModuleInput,
+    modules,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
 
@@ -378,6 +384,134 @@ class TestCapabilityGating(TestCase):
 
 
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
+
+
+def _dummy_module_inputs(module_info, device, dtype, requires_grad, training, **kwargs):
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(
+                torch.randn(4, device=device, dtype=dtype, requires_grad=requires_grad)
+            ),
+        )
+    ]
+
+
+def _make_dummy_module(name, dtypes=(torch.float32,), **kwargs):
+    module_cls = type(name, (torch.nn.Identity,), {})
+    return ModuleInfo(
+        module_cls,
+        module_inputs_func=_dummy_module_inputs,
+        dtypes=dtypes,
+        **kwargs,
+    )
+
+
+module_normal = _make_dummy_module("module_normal")
+module_skip = _make_dummy_module("module_skip")
+module_skip_f32 = _make_dummy_module(
+    "module_skip_f32", dtypes={torch.float32, torch.float64}
+)
+module_xfail = _make_dummy_module("module_xfail")
+
+# Dummy modules for testing combined module_allowlist + module_overrides
+module_combined_supported = _make_dummy_module("module_combined_supported")
+module_combined_skip = _make_dummy_module("module_combined_skip")
+module_combined_unsupported = _make_dummy_module("module_combined_unsupported")
+
+
+class TestModuleTypeOpenReg(TestCase):
+    _executed: dict = defaultdict(int)
+
+    @classmethod
+    def tearDownClass(cls):
+        should_run = ("module_normal",)
+        should_not_run = ("module_skip", "module_xfail")
+        for module_name in should_run:
+            if cls._executed[module_name] == 0:
+                raise AssertionError(f"{module_name} tests should have run")
+        for module_name in should_not_run:
+            if cls._executed[module_name] != 0:
+                raise AssertionError(f"{module_name} test body should never run")
+        if cls._executed["module_skip_f32"] != 1:
+            raise AssertionError(
+                "module_skip_f32 should have run exactly once,"
+                f"but ran {cls._executed['module_skip_f32']} times"
+            )
+        super().tearDownClass()
+
+    @modules([module_normal, module_skip, module_skip_f32, module_xfail])
+    def test_module(self, device, dtype, module_info, training):
+        if module_info.name in ("module_skip", "module_xfail"):
+            self.fail(f"{module_info.name} deliberately fails")
+        type(self)._executed[module_info.name] += 1
+
+    @modules([module_normal])
+    def test_module_narrow_modules(self, device, dtype, module_info, training):
+        """Verify that having extra entries in module_overrides that are NOT present
+        in the @modules list does not raise a KeyError (safety check in _apply_module_overrides)
+
+        module_overrides includes module_skip and PrivateUse1TestBase.module_overrides
+        also lists module_skip; here @modules only exposes module_normal. The safety
+        check introduced in _apply_module_overrides must silently ignore the missing key.
+        """
+        # If we reach here without a KeyError the safety check worked.
+
+
+class TestModuleAllowlistWithOverrides(TestCase):
+    """Verify that module_allowlist filtering works together with module_overrides.
+
+    module_allowlist filters which modules generate variants.
+    module_overrides adds decorators to those modules that pass the filter.
+    """
+
+    _executed_combined: dict = defaultdict(int)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._executed_combined["module_combined_supported"] == 0:
+            raise AssertionError("module_combined_supported should have run")
+        if cls._executed_combined["module_combined_skip"] != 0:
+            raise AssertionError(
+                "module_combined_skip should be skipped by module_overrides"
+            )
+        if cls._executed_combined["module_combined_unsupported"] != 0:
+            raise AssertionError(
+                "module_combined_unsupported should not run (not in module_allowlist)"
+            )
+        super().tearDownClass()
+
+    @modules(
+        [module_combined_supported, module_combined_skip, module_combined_unsupported]
+    )
+    def test_combined_filter(self, device, dtype, module_info, training):
+        type(self)._executed_combined[module_info.name] += 1
+
+
+OPENREG_MODULE_OVERRIDES = {
+    "module_skip": [DecorateInfo(unittest.skip("skip module_skip"))],
+    "module_skip_f32": [
+        DecorateInfo(unittest.skip("skip module_skip_f32"), dtypes=(torch.float32,))
+    ],
+    "module_xfail": [DecorateInfo(unittest.expectedFailure)],
+}
+with _temp_test_configs(PrivateUse1TestBase, module_overrides=OPENREG_MODULE_OVERRIDES):
+    instantiate_device_type_tests(
+        TestModuleTypeOpenReg, globals(), only_for=("openreg",)
+    )
+
+with _temp_test_configs(
+    PrivateUse1TestBase,
+    module_overrides={
+        "module_combined_skip": [
+            DecorateInfo(unittest.skip("skip via module_overrides"))
+        ],
+    },
+    module_allowlist=("module_combined_supported", "module_combined_skip"),
+):
+    instantiate_device_type_tests(
+        TestModuleAllowlistWithOverrides, globals(), only_for=("openreg",)
+    )
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
