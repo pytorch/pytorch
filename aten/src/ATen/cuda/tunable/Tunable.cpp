@@ -52,6 +52,28 @@ namespace at::cuda::tunable {
 
 namespace {
 
+// Hard kill switches for compile-time borrowing, read once at startup.
+//
+// These are deliberately env-only and deliberately separate from the
+// nearest_match_enable_ / record_borrowed_enable_ members. Those members are
+// mutable process-global policy that the reuse pass sets for itself, and
+// gating the manager on them would make one caller's policy change what other
+// callers and other threads do. An env var fixed before main() cannot: it is
+// either off for the whole process or absent. Checking it at the point of
+// action means the switch holds for every caller, including one that forgets
+// to consult IsNearestMatchEnabled()/IsRecordBorrowedEnabled() first.
+bool NearestMatchDisabledByEnv() {
+  static const bool disabled =
+      c10::utils::get_env("PYTORCH_TUNABLEOP_NEAREST_MATCH") == "0";
+  return disabled;
+}
+
+bool RecordBorrowedDisabledByEnv() {
+  static const bool disabled =
+      c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_BORROWED") == "0";
+  return disabled;
+}
+
 // Matches a tunableop params signature against a wildcard pattern. Both
 // strings are split on '_' and compared token-by-token; '*' in the pattern
 // matches any single token. Returns true iff every pattern token equals
@@ -175,9 +197,14 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
 
 ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     const std::string& params_signature) {
-  // No flag gate here. TunableOp dispatch resolves shapes through Lookup and
-  // never reaches this, so calling it is itself the opt-in; the reuse pass is
-  // the only caller and already decides whether borrowing applies.
+  // No runtime-flag gate here. TunableOp dispatch resolves shapes through
+  // Lookup and never reaches this, so calling it is itself the opt-in; the
+  // reuse pass is the only caller and already decides whether borrowing
+  // applies. The env kill switch is honoured regardless of the caller.
+  if (NearestMatchDisabledByEnv()) {
+    return ResultEntry::Null();
+  }
+
   const GemmShape q = ParseGemmShape(SplitUnderscore(params_signature));
   if (!q.ok) {
     TUNABLE_LOG3("unparsable params_signature, no nearest match for ", op_signature, ",", params_signature);
@@ -328,11 +355,16 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
 void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry entry) {
-  // Always persists, and deliberately reads none of the global tuning flags:
-  // the reuse pass runs with tuning off and suppresses RecordUntuned for this
-  // shape precisely so it can record the borrow here, and nothing bulk-writes
-  // results_ at process exit. Keeping the override local to this entry point
-  // means recording a borrow cannot change what any other Add() caller writes.
+  // Honoured for every caller, not just one that remembers to ask.
+  if (RecordBorrowedDisabledByEnv()) {
+    return;
+  }
+  // Otherwise always persists, and deliberately reads none of the mutable
+  // tuning flags: the reuse pass runs with tuning off and suppresses
+  // RecordUntuned for this shape precisely so it can record the borrow here,
+  // and nothing bulk-writes results_ at process exit. Keeping the override
+  // local to this entry point means recording a borrow cannot change what any
+  // other Add() caller writes.
   AddAndMaybePersist(op_signature, params_signature, std::move(entry), /*force_persist=*/true);
 }
 
@@ -807,9 +839,9 @@ void TuningContext::EnableNearestMatch(bool value) {
 }
 
 bool TuningContext::IsNearestMatchEnabled() const {
-  // The env var is a force-off override only; the member is what the reuse pass sets.
-  static const bool disabled = c10::utils::get_env("PYTORCH_TUNABLEOP_NEAREST_MATCH") == "0";
-  if (disabled) {
+  // Same kill switch LookupNearest itself applies, so the pass's own check and
+  // the enforcement point cannot disagree. The member is the reuse pass's policy.
+  if (NearestMatchDisabledByEnv()) {
     return false;
   }
   return nearest_match_enable_;
@@ -825,9 +857,9 @@ void TuningContext::EnableRecordBorrowed(bool value) {
 }
 
 bool TuningContext::IsRecordBorrowedEnabled() const {
-  // Force-off override mirroring IsNearestMatchEnabled above.
-  static const bool disabled = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_BORROWED") == "0";
-  if (disabled) {
+  // Kill switch mirroring IsNearestMatchEnabled above; RecordBorrowed applies
+  // the same one itself.
+  if (RecordBorrowedDisabledByEnv()) {
     return false;
   }
   return record_borrowed_enable_;

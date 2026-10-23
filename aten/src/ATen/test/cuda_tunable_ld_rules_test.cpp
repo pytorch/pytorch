@@ -186,7 +186,18 @@ TEST(TunableLdRules, ParseRejectsMalformed) {
   EXPECT_FALSE(ParseSig("NN_1024").ok);  // too short
   EXPECT_FALSE(ParseSig("N_1024_512_256_ld_1024_256_1024").ok);  // transab != 2
   EXPECT_FALSE(ParseSig("NN_1024_512_256_1024_256_1024").ok);  // missing ld token
-  EXPECT_FALSE(ParseSig("NN_x_512_256_ld_1024_256_1024").ok);  // stoll fails
+  EXPECT_FALSE(ParseSig("NN_x_512_256_ld_1024_256_1024").ok);  // not a number
+}
+
+TEST(TunableLdRules, ParseRequiresWholeTokens) {
+  // A token has to be consumed entirely. std::stoll accepted all of these as
+  // a prefix match, so a malformed signature parsed as ok and borrowed against
+  // a dim it never stated.
+  EXPECT_FALSE(ParseSig("NN_12abc_512_256_ld_12_256_12").ok);
+  EXPECT_FALSE(ParseSig("NN_1024_512_256_ld_1024_256_1024abc").ok);
+  EXPECT_FALSE(ParseSig("NN_+12_512_256_ld_12_256_12").ok);
+  EXPECT_FALSE(ParseSig("NN_-12_512_256_ld_12_256_12").ok);
+  EXPECT_FALSE(ParseSig("NN__512_256_ld_1024_256_1024").ok);  // empty token
 }
 
 TEST(TunableLdRules, NearestMatchRoundsMSingleDimUp) {
