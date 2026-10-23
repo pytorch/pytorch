@@ -3285,6 +3285,13 @@ class TestOpInfoSampleFunctions(TestCase):
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
 
+    @ops([op for op in op_db if op.name in ("sin", "linalg.vector_norm")], allowed_dtypes=(torch.cfloat,))
+    def test_opinfo_conjugate_generators(self, device, dtype, op):
+        samples = list(op.conjugate_sample_inputs(device, dtype))
+        self.assertGreater(len(samples), 0)
+        for sample in samples:
+            self.assertTrue(sample.input.is_conj())
+
 # Tests test classification.
 class TestHardwareClassifications(TestCase):
     def setUp(self):
