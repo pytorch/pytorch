@@ -395,9 +395,7 @@ void apply_ldl_factor_magma(
   info.copy_(info_cpu);
 #endif
 }
-#endif
 
-#if defined(USE_ROCM)
 void ldl_factor_magma(
     const Tensor& LD,
     const Tensor& pivots,
@@ -426,7 +424,7 @@ void ldl_factor_kernel(
     bool upper,
     bool hermitian) {
 #if !defined(USE_ROCM)
-  _warn_once_magma_deprecation("linalg.cholesky_solve");
+  _warn_once_magma_deprecation("linalg.ldl_factor");
 #endif
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
