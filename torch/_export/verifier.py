@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
+import functools
 import inspect
 import math
 import operator
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
@@ -209,21 +210,25 @@ class Verifier(metaclass=_VerifierMeta):
                 raise AssertionError("allowed_getattr_types must not contain 'object'")
             return ret
 
-        def _check_valid_op(op) -> None:
-            def _allowed_builtin_ops() -> list:
-                ret = self.allowed_builtin_ops()
-                if not all(inspect.isbuiltin(op) for op in ret):
-                    raise AssertionError("allowed_builtin_ops must all be builtins")
-                return ret
+        # Cached since they're checked for every node
+        @functools.cache
+        def _allowed_builtin_ops() -> list:
+            ret = self.allowed_builtin_ops()
+            if not all(inspect.isbuiltin(op) for op in ret):
+                raise AssertionError("allowed_builtin_ops must all be builtins")
+            return ret
 
-            def _allowed_op_types() -> tuple[type[Any], ...]:
-                ret = self.allowed_op_types()
-                if any(t is object for t in ret):
-                    raise AssertionError("allowed_op_types must not contain 'object'")
-                return ret
+        @functools.cache
+        def _allowed_op_types() -> tuple[type[Any], ...]:
+            ret = self.allowed_op_types()
+            if any(t is object for t in ret):
+                raise AssertionError("allowed_op_types must not contain 'object'")
+            return ret
 
-            # TODO Remove this allowlist.
-            _allowed_torch_functions = (
+        # TODO Remove this allowlist.
+        @functools.cache
+        def _allowed_torch_functions() -> tuple[Callable[..., Any], ...]:
+            return (
                 torch.autograd.grad_mode.set_grad_enabled,
                 torch.sym_int,
                 torch.sym_float,
@@ -255,15 +260,16 @@ class Verifier(metaclass=_VerifierMeta):
                 torch._functorch.predispatch._exit_dual_level,
             )
 
+        def _check_valid_op(op) -> None:
             if not isinstance(op, _allowed_op_types()):
                 if (
                     op not in _allowed_builtin_ops()
-                    and op not in _allowed_torch_functions
+                    and op not in _allowed_torch_functions()
                 ):
                     raise SpecViolationError(
                         f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
                         f"Valid builtin ops: {_allowed_builtin_ops()}"
-                        f"Valid torch functions: {_allowed_torch_functions}"
+                        f"Valid torch functions: {_allowed_torch_functions()}"
                     )
 
             if isinstance(op, OpOverload):
