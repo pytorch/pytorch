@@ -563,6 +563,7 @@ class TestTryMerge(TestCase):
         author_url: str | None = None,
         diff_revision: str | None = "D123456",
         editor_login: str | None = None,
+        internal_check: str | None = "NEUTRAL",
     ) -> Any:
         pr = mock.MagicMock()
         pr.get_diff_revision.return_value = diff_revision
@@ -570,6 +571,21 @@ class TestTryMerge(TestCase):
             author_login=author_login,
             author_url=author_url,
             editor_login=editor_login,
+        )
+        pr.get_checkrun_conclusions.return_value = (
+            {}
+            if internal_check is None
+            else {
+                INTERNAL_CHANGES_CHECKRUN_NAME: JobCheckState(
+                    name=INTERNAL_CHANGES_CHECKRUN_NAME,
+                    url="",
+                    status=internal_check,
+                    classification=None,
+                    job_id=None,
+                    title=None,
+                    summary=None,
+                )
+            }
         )
         return pr
 
@@ -613,28 +629,74 @@ class TestTryMerge(TestCase):
         )
         self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
 
-    def test_meta_codesync_merge_skips_internal_checks(self, *args: Any) -> None:
-        "meta-codesync merges only after the diff landed, so it waives the guard."
+    def test_meta_codesync_merge_skips_neutral_internal_check(self, *args: Any) -> None:
+        "meta-codesync merges after the diff landed; a NEUTRAL check is the race."
+        # GraphQL spells the App's login bare, as on #201671's merge comment.
         pr = self._pr_with_merge_comment(
-            "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
+            "meta-codesync", "https://github.com/apps/meta-codesync"
         )
         self.assertTrue(can_skip_internal_checks(pr, 123))
-        # author_url is None for comments outside the prefetched window.
-        no_url = self._pr_with_merge_comment("meta-codesync[bot]")
-        self.assertTrue(can_skip_internal_checks(no_url, 123))
+
+    def test_meta_codesync_merge_without_url_keeps_internal_checks(
+        self, *args: Any
+    ) -> None:
+        "Comments outside the prefetched window carry no author_url to verify."
+        for login in ("meta-codesync", "meta-codesync[bot]"):
+            pr = self._pr_with_merge_comment(login)
+            self.assertFalse(can_skip_internal_checks(pr, 123), login)
+
+    def test_meta_codesync_merge_does_not_waive_stacked_prs(self, *args: Any) -> None:
+        "The comment vouches for its own PR's diff, not for PRs stacked below."
+        top = self._pr_with_merge_comment(
+            "meta-codesync", "https://github.com/apps/meta-codesync"
+        )
+        top.pr_num = 2
+        self.assertTrue(can_skip_internal_checks(top, 123, target=top))
+        below = self._pr_with_merge_comment("unused")
+        below.pr_num = 1
+        self.assertFalse(can_skip_internal_checks(top, 123, target=below))
+        # Legacy bots keep waiving the whole stack.
+        legacy = self._pr_with_merge_comment("facebook-github-bot")
+        legacy.pr_num = 2
+        self.assertTrue(can_skip_internal_checks(legacy, 123, target=below))
+
+    def test_meta_codesync_merge_keeps_failed_internal_check(self, *args: Any) -> None:
+        "CodeSync reports a reopened or out-of-sync PR as FAILURE; that still blocks."
+        for status in ("FAILURE", "ACTION_REQUIRED", None):
+            pr = self._pr_with_merge_comment(
+                "meta-codesync",
+                "https://github.com/apps/meta-codesync",
+                internal_check=status,
+            )
+            self.assertFalse(can_skip_internal_checks(pr, 123), status)
+
+    def test_legacy_bots_skip_any_internal_check(self, *args: Any) -> None:
+        "The older export bots keep their unconditional waiver."
+        legacy = self._pr_with_merge_comment(
+            "facebook-github-bot", internal_check="FAILURE"
+        )
+        self.assertTrue(can_skip_internal_checks(legacy, 123))
+        tools = self._pr_with_merge_comment(
+            "facebook-github-tools[bot]",
+            "https://github.com/apps/facebook-github-tools",
+            internal_check="FAILURE",
+        )
+        self.assertTrue(can_skip_internal_checks(tools, 123))
 
     def test_edited_meta_codesync_merge_keeps_internal_checks(self, *args: Any) -> None:
         "An edited comment can't be trusted to name its real author."
         pr = self._pr_with_merge_comment(
-            "meta-codesync[bot]",
+            "meta-codesync",
             "https://github.com/apps/meta-codesync",
             editor_login="some-human",
         )
         self.assertFalse(can_skip_internal_checks(pr, 123))
 
     def test_lookalike_login_keeps_internal_checks(self, *args: Any) -> None:
-        "A user account named like the bot, without the [bot] suffix, is not it."
-        pr = self._pr_with_merge_comment("meta-codesync")
+        "A user account with the App's bare login is not the App."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync", "https://github.com/meta-codesync"
+        )
         self.assertFalse(can_skip_internal_checks(pr, 123))
 
     def test_is_bot_initiated_codev_merge_without_author_url(self, *args: Any) -> None:
@@ -1696,6 +1758,10 @@ class TestGitHubPRGhstackDependencies(TestCase):
             mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
             waivers,
         )
+        # The internal-changes waiver is asked about the lower PR, not the top one.
+        _mock_can_skip_internal_checks.assert_called_once_with(
+            top_pr, None, target=parent_pr
+        )
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -2712,7 +2778,9 @@ class TestMergeInternalChecksWaiver(TestCase):
     """merge() runs find_matching_merge_rule before merge_into; both must get the
     waiver, or a trusted co-dev merge is refused there (#201671)."""
 
-    def _merge(self, mock_pr_cls: Any, mock_rule: Any, can_skip: bool) -> list[Any]:
+    def _merge(
+        self, mock_pr_cls: Any, mock_rule: Any, can_skip: bool | list[bool]
+    ) -> list[Any]:
         pr = mock.MagicMock(spec=GitHubPR)
         pr.org = "pytorch"
         pr.project = "pytorch"
@@ -2722,7 +2790,12 @@ class TestMergeInternalChecksWaiver(TestCase):
         pr.is_ghstack_pr.return_value = False
         pr.get_checkrun_conclusions.return_value = {}
         mock_pr_cls.return_value = pr
-        with mock.patch("trymerge.can_skip_internal_checks", return_value=can_skip):
+        waiver = (
+            {"side_effect": can_skip}
+            if isinstance(can_skip, list)
+            else {"return_value": can_skip}
+        )
+        with mock.patch("trymerge.can_skip_internal_checks", **waiver):
             merge(pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True)
         return [
             call.kwargs.get("skip_internal_checks") for call in mock_rule.call_args_list
@@ -2737,6 +2810,14 @@ class TestMergeInternalChecksWaiver(TestCase):
         self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
     ) -> None:
         self.assertEqual(self._merge(mock_pr_cls, mock_rule, False), [False, False])
+
+    def test_retry_recomputes_waiver_for_refetched_pr(
+        self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
+    ) -> None:
+        "The waiver follows the check, so a check that turns FAILURE is not waived."
+        self.assertEqual(
+            self._merge(mock_pr_cls, mock_rule, [True, False]), [True, False]
+        )
 
 
 class TestGreenlightGuardWiring(TestCase):
@@ -2796,7 +2877,7 @@ class TestGreenlightGuardWiring(TestCase):
                 [pr],
                 wait_window=None,
                 skip_mandatory_checks=True,
-                skip_internal_checks=True,
+                skip_internal_checks=lambda _: True,
                 ignore_current_checks={(7, "some-check")},
             )
             _, prs = mock_evaluate.call_args.args
@@ -2836,7 +2917,7 @@ class TestGreenlightGuardWiring(TestCase):
             )
 
         self.assertEqual(mock_check.call_args.kwargs["skip_mandatory_checks"], True)
-        self.assertEqual(mock_check.call_args.kwargs["skip_internal_checks"], True)
+        self.assertTrue(mock_check.call_args.kwargs["skip_internal_checks"](pr))
         self.assertEqual(
             mock_check.call_args.kwargs["ignore_current_checks"], {(1, "some-check")}
         )
@@ -3025,6 +3106,31 @@ class TestIgnoreCurrentAcrossAStack(TestCase):
         _, prs = mock_evaluate.call_args.args
         self.assertTrue(prs[0].is_authorized_without_greenlight())
         self.assertFalse(prs[1].is_authorized_without_greenlight())
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_each_stacked_pr_is_asked_with_its_own_internal_checks_waiver(
+        self, mock_evaluate: Any, *args: Any
+    ) -> None:
+        "A waiver granted on one PR's internal-changes check is not lent to another."
+        red = "pull / linux-build"
+        top, below = self._stacked_pr(1000, red), self._stacked_pr(1001, red)
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+
+        with mock.patch("trymerge.is_authorized_without_greenlight") as mock_authz:
+            check_greenlight_reviewed_head_sha(
+                top,
+                None,
+                [top, below],
+                wait_window=None,
+                skip_internal_checks=lambda pr: pr is below,
+            )
+            _, prs = mock_evaluate.call_args.args
+            for pr in prs:
+                pr.is_authorized_without_greenlight()
+        self.assertEqual(
+            [c.kwargs["skip_internal_checks"] for c in mock_authz.call_args_list],
+            [False, True],
+        )
 
 
 class TestAdvisorNotRelated(TestCase):
@@ -3339,6 +3445,20 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
                 "skip_internal_checks": False,
                 "ignore_current_checks": waivers,
             },
+        )
+
+    def test_lower_prs_get_their_own_internal_checks_waiver(self) -> None:
+        def waiver(pr: Any, comment_id: Any, target: Any = None) -> bool:
+            return (target or pr) is self.lower
+
+        with mock.patch("trymerge.can_skip_internal_checks", side_effect=waiver):
+            self.assertStopsBeforeLanding()
+        self.assertEqual(
+            [
+                (call.args[0], call.kwargs["skip_internal_checks"])
+                for call in self.rule.call_args_list
+            ],
+            [(self.top, False), (self.lower, True)],
         )
         self.top.merge_native_stack_into.assert_called_once_with(
             self.repo,
