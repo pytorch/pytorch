@@ -230,7 +230,7 @@ class Vectorized<float> {
         _mm512_castsi512_ps(not_nan_vec), zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm512_set1_ps(c10::pi<double>);
 
-    const auto neg_mask = _mm512_cmp_ps_mask(values, zero_vec, _CMP_LT_OQ);
+    const auto neg_mask = _mm512_movepi32_mask(_mm512_castps_si512(values));
     auto angle = _mm512_mask_blend_ps(neg_mask, zero_vec, pi);
     angle = _mm512_mask_blend_ps(nan_mask, angle, nan_vec);
     return angle;

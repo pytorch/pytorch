@@ -672,7 +672,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
       std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<U> angle() const {
     auto tmp = blendv(
-        Vectorized<U>(0), Vectorized<U>(c10::pi<U>), *this < Vectorized<U>(0));
+        Vectorized<U>(0),
+        Vectorized<U>(c10::pi<U>),
+        Vectorized<U>(c10::pi<U>).copysign(*this) < Vectorized<U>(0));
     return blendv(tmp, *this, isnan());
   }
 

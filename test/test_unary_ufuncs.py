@@ -721,6 +721,18 @@ class TestUnaryUfuncs(TestCase):
         ):
             torch.polygamma(-1, torch.tensor([1.0, 2.0], device=device))
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_angle_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0, -1.0, 1.0, nan], device=device, dtype=dtype)
+        x_np = x.cpu().to(
+            torch.float64 if dtype == torch.float64 else torch.float32
+        ).numpy()
+
+        actual = torch.angle(x)
+        expected = torch.from_numpy(np.angle(x_np)).to(dtype)
+
+        self.assertEqual(actual, expected)
+
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
         # Constructs random complex values
