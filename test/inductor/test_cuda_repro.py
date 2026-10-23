@@ -1999,12 +1999,18 @@ class CudaReproTests(TestCase):
 
         def run(fn, compiled):
             torch._dynamo.reset()
+            conv.zero_grad()
             t = x.clone().requires_grad_()
             if compiled:
                 fn = torch.compile(fn, backend="inductor", fullgraph=True)
             out = fn(t)
             (-(grad_out * out.float()).sum()).backward()
-            return out.detach(), t.grad
+            return (
+                out.detach(),
+                t.grad,
+                conv.weight.grad.clone(),
+                conv.bias.grad.clone(),
+            )
 
         with torch.no_grad():
             conv.weight.normal_(0, 0.6)
@@ -2012,14 +2018,36 @@ class CudaReproTests(TestCase):
             # the logits by ~1 ulp and log_softmax's exp amplifies it.
             conv.bias.fill_(conv_offset)
 
-        f1_out, f1_grad = run(f1, True)
-        f2_out, f2_grad = run(f2, True)
+        f1_out, f1_grad, f1_weight_grad, f1_bias_grad = run(f1, True)
+        f2_out, f2_grad, f2_weight_grad, f2_bias_grad = run(f2, True)
         self.assertEqual(f1_out, f2_out, atol=1e-3, rtol=1e-3)
         self.assertEqual(f1_grad, f2_grad, atol=1e-3, rtol=1e-3)
+        # the rounded logits also feed the weight/bias gradients
+        self.assertEqual(f1_weight_grad, f2_weight_grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(f1_bias_grad, f2_bias_grad, atol=1e-3, rtol=1e-3)
 
-        eager_out, eager_grad = run(f1, False)
+        eager_out, eager_grad, _, _ = run(f1, False)
+        # conv grads are not compared against eager: a pre-existing
+        # compiled-vs-eager bias-grad gap applies to f1 and f2 alike
         self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
         self.assertEqual(f1_grad, eager_grad, atol=1e-3, rtol=1e-3)
+
+        # The rounding must be emitted even when the numeric checks above
+        # cannot see it: fp16 ulps are too small, and conv_offset=0 rounds to
+        # identical values either way. Restrict to reduction kernels because
+        # the autocast to_copy kernels round-trip their own stores.
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        opt_fn = torch.compile(f1, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
+        code = "\n".join(codes)
+        self.assertIn(
+            f".to(tl.{lowp_name})",
+            "\n".join(
+                kernel
+                for kernel in code.split("def triton_")
+                if kernel.split("(", 1)[0].startswith("per_fused")
+            ),
+        )
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)

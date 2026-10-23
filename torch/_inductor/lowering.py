@@ -739,11 +739,6 @@ def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
     of the op's declared output, otherwise a fused consumer can observe a value
     eager never produces.
     """
-    # bf16/fp16 are the only low-precision outputs aten.convolution can produce:
-    # aten's cudnn conv has no fp8/int4 dtype mapping, and quantized convs use
-    # separate ops that are not fused through this lowering. Extend this set
-    # together with Inductor's other low-precision barriers if a new conv kernel
-    # appears.
     dtype = x.get_dtype()
     if dtype not in (torch.bfloat16, torch.float16):
         return x
