@@ -35,6 +35,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
 from torch.types import IntLikeType
+from torch.utils._inspect import _cached_parameters
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
@@ -157,13 +158,6 @@ def get_tma_descriptor_factory_signature(
     # Validating each host TMA descriptor calls this, so cache by function. A
     # bound method's signature doesn't depend on what it is bound to.
     return _function_signature(function, isinstance(factory, types.MethodType))
-
-
-@functools.cache
-def _autotuner_init_signature() -> inspect.Signature:
-    from triton.runtime.autotuner import Autotuner
-
-    return inspect.signature(Autotuner.__init__)
 
 
 @functools.cache
@@ -429,6 +423,24 @@ class KernelSideTable:
 
 
 kernel_side_table = KernelSideTable()
+
+
+# Before Triton 3.2 (https://github.com/triton-lang/triton/pull/5083), Autotuner
+# stored these as argument indices in reset_idx and restore_idx.
+def get_reset_to_zero_args(kernel: "TritonAutotunerType") -> list[str]:
+    if hasattr(kernel, "reset_idx"):
+        # pyrefly: ignore [missing-attribute]
+        return [kernel.fn.arg_names[i] for i in kernel.reset_idx]
+    # pyrefly: ignore [missing-attribute]
+    return list(kernel.reset_to_zero)
+
+
+def get_restore_value_args(kernel: "TritonAutotunerType") -> list[str]:
+    if hasattr(kernel, "restore_idx"):
+        # pyrefly: ignore [missing-attribute]
+        return [kernel.fn.arg_names[i] for i in kernel.restore_idx]
+    # pyrefly: ignore [missing-attribute]
+    return list(kernel.restore_value)
 
 
 ###############################################################################
@@ -2327,7 +2339,7 @@ class TritonHOPifier:
 
             # We only support configs, keys, and restore_value arguments
             # of triton.autotune. Make sure other arguments are defaulted.
-            defaults = _autotuner_init_signature().parameters
+            defaults = _cached_parameters(Autotuner.__init__)
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
 
@@ -2537,10 +2549,14 @@ class TritonHOPifier:
             prune_configs_by = {
                 "perf_model": variable.kernel.perf_model,
                 "early_config_prune": variable.kernel.early_config_prune,
-                "configs_top_k": variable.kernel.configs_top_k,
+                "top_k": variable.kernel.configs_top_k,
             }
             new_kernel = autotune(
-                configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                configs=new_configs,
+                key=[],
+                prune_configs_by=prune_configs_by,
+                reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                restore_value=get_restore_value_args(variable.kernel),
             )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
@@ -2579,11 +2595,15 @@ class TritonHOPifier:
                 prune_configs_by = {
                     "perf_model": variable.kernel.perf_model,
                     "early_config_prune": variable.kernel.early_config_prune,
-                    "configs_top_k": variable.kernel.configs_top_k,
+                    "top_k": variable.kernel.configs_top_k,
                 }
 
                 new_kernel = autotune(
-                    configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                    configs=new_configs,
+                    key=[],
+                    prune_configs_by=prune_configs_by,
+                    reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                    restore_value=get_restore_value_args(variable.kernel),
                 )(variable.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
@@ -2633,11 +2653,15 @@ class TritonHOPifier:
                     prune_configs_by = {
                         "perf_model": variable.kernel.perf_model,
                         "early_config_prune": variable.kernel.early_config_prune,
-                        "configs_top_k": variable.kernel.configs_top_k,
+                        "top_k": variable.kernel.configs_top_k,
                     }
 
                     new_kernel = autotune(
-                        configs=new_configs, prune_configs_by=prune_configs_by, key=[]
+                        configs=new_configs,
+                        prune_configs_by=prune_configs_by,
+                        key=[],
+                        reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                        restore_value=get_restore_value_args(variable.kernel),
                     )(variable.kernel.fn)
                     new_var = self.recreate_variable(
                         variable,
@@ -2701,7 +2725,12 @@ class TritonHOPifier:
 
             # after pruning the configs, create a new autotuner object with
             # these configs and recurse.
-            new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
+            new_kernel = autotune(
+                configs=pruned_configs,
+                key=[],
+                reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                restore_value=get_restore_value_args(variable.kernel),
+            )(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = self.recreate_variable(
