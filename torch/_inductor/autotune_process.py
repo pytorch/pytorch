@@ -780,6 +780,10 @@ class _TestBenchmarkRequest(BenchmarkRequest):
         self.exc = exc
         self.crash = crash
 
+    def __call__(self) -> float:
+        # Lets submit()-style callers treat the request itself as the job.
+        return self.benchmark()
+
     def benchmark(
         self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
     ) -> float:

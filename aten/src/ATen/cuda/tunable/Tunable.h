@@ -13,6 +13,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 
+#include <atomic>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -310,8 +311,14 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
-    bool nearest_match_enable_;
-    bool record_borrowed_enable_;
+    // Atomic: the reuse pass flips these while other threads may run GEMMs.
+    // Single-flight contract: the reuse pass must not overlap execution — the
+    // atomic only makes concurrent reads well-defined, it does not make a
+    // borrow decision taken under a transient flag value meaningful. (Per-call
+    // dynamic-dims state instead goes through the thread-local push/pop stack;
+    // see TunableDynamicDimsGuard below.)
+    std::atomic<bool> nearest_match_enable_;
+    std::atomic<bool> record_borrowed_enable_;
     bool manager_initialized_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;
