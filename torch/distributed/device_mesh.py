@@ -616,11 +616,14 @@ else:
                     == backend
                 )
             ):
+                split_ranks = pg_ranks_by_dim.tolist()
+                if not preserve_rank_order:
+                    split_ranks = [sorted(ranks) for ranks in split_ranks]
                 dim_group = split_group(
                     parent_pg=default_group,
                     timeout=timeout,
                     pg_options=pg_options,
-                    split_ranks=pg_ranks_by_dim.tolist(),
+                    split_ranks=split_ranks,
                     group_desc=group_desc,
                 )
                 if dim_group == GroupMember.NON_GROUP_MEMBER:
