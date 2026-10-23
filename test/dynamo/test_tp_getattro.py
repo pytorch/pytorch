@@ -13,7 +13,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
 )
 from torch.utils._triton import has_triton_package
 
@@ -752,6 +754,171 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIsInstance(result, staticmethod)
         self.assertEqual(result.__func__(), 1)
+
+    @parametrize("use_dict", [False, True])
+    @parametrize("wrapped", [None, len])
+    def test_staticmethod_instance_attributes(self, use_dict, wrapped):
+        def fn():
+            sm = staticmethod(wrapped)
+            attrs = sm.__dict__
+            if use_dict:
+                attrs["x"] = 42
+            else:
+                sm.x = 42
+            before = sm.x, attrs.copy()
+            if use_dict:
+                del attrs["x"]
+            else:
+                del sm.x
+            return before, attrs.copy(), hasattr(sm, "x")
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_copied_attributes_are_snapshots(self):
+        def fn():
+            def f():
+                "original doc"
+
+            sm = staticmethod(f)
+            f.__doc__ = "changed doc"
+            sm.__name__ = "renamed"
+            return sm.__doc__, sm.__name__, f.__name__, sm.__dict__["__doc__"]
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_abstract_flag_tracks_wrapped_function(self):
+        def fn():
+            def f():
+                pass
+
+            sm = staticmethod(f)
+            before = sm.__isabstractmethod__
+            f.__isabstractmethod__ = True
+            after = sm.__isabstractmethod__
+            sm.__dict__["__isabstractmethod__"] = False
+            return before, after, sm.__isabstractmethod__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_copied_annotations_and_key_order(self):
+        def fn():
+            def f(value: int) -> int:
+                return value
+
+            sm = staticmethod(f)
+            sm.x = 1
+            del sm.x
+            sm.x = 2
+            return tuple(sm.__dict__), sm.__annotations__ is f.__annotations__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_instance_dict_escapes(self):
+        def fn():
+            sm = staticmethod(None)
+            attrs = sm.__dict__
+            sm.x = [1, 2]
+            sm.alias = sm
+            return sm, attrs, sm
+
+        sm, attrs, alias = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(sm, alias)
+        self.assertIs(sm.alias, sm)
+        self.assertIs(sm.__dict__, attrs)
+        self.assertEqual(sm.x, [1, 2])
+        attrs["x"].append(3)
+        self.assertEqual(sm.x, [1, 2, 3])
+
+    @parametrize("use_dict", [False, True])
+    def test_staticmethod_tensor_attribute_cached_reconstruction(self, use_dict):
+        def fn(value):
+            sm = staticmethod(None)
+            attrs = sm.__dict__
+            if use_dict:
+                attrs["x"] = value
+            else:
+                sm.x = value
+            return sm, attrs, value + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        first = None
+        for value in (torch.ones(3), torch.zeros(3)):
+            sm, attrs, _ = compiled(value)
+            self.assertIs(sm.x, value)
+            self.assertIs(sm.__dict__, attrs)
+            self.assertIsNot(sm, first)
+            first = sm
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_staticmethod_attributes_across_graph_break(self, nested_graph_breaks):
+        def fn():
+            sm = staticmethod(None)
+            attrs = sm.__dict__
+            sm.x = [1]
+            torch._dynamo.graph_break()
+            attrs["x"].append(2)
+            sm.y = 3
+            del sm.x
+            return sm, attrs
+
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            sm, attrs = torch.compile(fn, backend="eager")()
+        self.assertIs(sm.__dict__, attrs)
+        self.assertEqual(sm.y, 3)
+        self.assertNotIn("x", attrs)
+
+    @parametrize("name", ["__func__", "__wrapped__"])
+    @parametrize("delete", [False, True])
+    def test_staticmethod_readonly_members(self, name, delete):
+        def fn():
+            sm = staticmethod(len)
+            sm.__dict__[name] = "shadow"
+            try:
+                if delete:
+                    delattr(sm, name)
+                else:
+                    setattr(sm, name, None)
+            except AttributeError:
+                return getattr(sm, name) is len, sm.__dict__[name]
+            return False, None
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_missing_attribute_errors(self):
+        def fn():
+            sm = staticmethod(None)
+            errors = []
+            try:
+                del sm.missing
+            except AttributeError as exc:
+                errors.append(str(exc))
+            sm.x = 1
+            del sm.x
+            try:
+                sm.x
+            except AttributeError as exc:
+                errors.append(str(exc))
+            return errors
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_wrapped_function_and_attributes_escape(self):
+        def fn():
+            def f(value):
+                return value
+
+            sm = staticmethod(f)
+            sm.x = 42
+            return sm, f, sm.__dict__
+
+        sm, fn, attrs = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(sm.__func__, fn)
+        self.assertIs(sm.__dict__, attrs)
+        self.assertEqual(sm.x, 42)
+        self.assertEqual(sm(5), 5)
 
     def test_classmethod_constructor_reconstruct(self):
         """The descriptor must survive being returned out of the graph."""
@@ -2295,6 +2462,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         expected = fn(x)
         actual = compiled_fn(x)
         self.assertEqual(actual, expected)
+
+
+instantiate_parametrized_tests(TpGetattroTests)
 
 
 if __name__ == "__main__":
