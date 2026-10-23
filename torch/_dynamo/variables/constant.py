@@ -25,7 +25,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import _RICHCOMPARE_OPS, ValueMutationNew, VariableTracker
+from .base import _RICHCOMPARE_OPS, SourceLocation, ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -505,6 +505,15 @@ class ConstantVariable(VariableTracker):
         # get FakeIdVariable — CPython interning of small ints/strings is an
         # implementation detail users shouldn't rely on.
         return super().get_id(tx)
+
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
+        if (
+            self is CONSTANT_VARIABLE_NONE
+            or self is CONSTANT_VARIABLE_TRUE
+            or self is CONSTANT_VARIABLE_FALSE
+        ):
+            return ConstantVariable.create(self.value, source_location=source_location)
+        return super().with_source_location(source_location)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
