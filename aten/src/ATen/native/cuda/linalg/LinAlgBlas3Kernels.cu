@@ -1122,7 +1122,7 @@ ldl_diagonal_panel_fused_kernel(
     return std::make_tuple(my_max, my_idx);
   };
 
-  // The processed block will factor nb or nb+1 rows/cols
+  // The processed block will factor nb or nb-1 rows/cols
   while (curr_step < panel_end) {
     int piv;
     int pivot_rank = 1;
