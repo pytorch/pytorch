@@ -15,6 +15,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
 )
@@ -25,7 +26,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_if_lt_x_gpu,
     with_comms,
 )
-from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+from torch.testing._internal.distributed.checkpoint_utils import (
+    random_compressed_tensors_mxfp4,
+    save_hf_checkpoint,
+    with_temp_dir,
+)
 
 
 CHECKPOINT_DIR = "checkpoint"
@@ -39,6 +44,7 @@ class MyTestModule(torch.nn.Module):
         self.emb = torch.nn.EmbeddingBag(5, 10)
 
 
+@instantiate_parametrized_tests
 class TestSingleRankSaveLoad(TestCase):
     @with_temp_dir
     def test_save(self) -> None:
@@ -66,6 +72,31 @@ class TestSingleRankSaveLoad(TestCase):
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
+
+    @with_temp_dir
+    def test_save_non_contiguous_tensor(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        weight = torch.rand(4, 8, 6)
+        state_dict_to_save = {"weight_t": weight.transpose(1, 2)}
+        self.assertFalse(state_dict_to_save["weight_t"].is_contiguous())
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+        )
+
+        state_dict_loaded = load_file(
+            CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
+        self.assertTrue(
+            torch.equal(state_dict_loaded["weight_t"], weight.transpose(1, 2))
+        )
 
     @with_temp_dir
     def test_load(self) -> None:
@@ -274,6 +305,190 @@ class TestSingleRankSaveLoad(TestCase):
                 atol=1e-5,
                 msg=f"Value mismatch for tensor {tensor_name}",
             )
+
+    @with_temp_dir
+    def test_compressed_tensors_mxfp4_loading(self) -> None:
+        """Dequantize compressed-tensors MXFP4 weight_packed using weight_scale."""
+        try:
+            import safetensors  # noqa: F401
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+        rows, cols = 4, 96
+        prefix = "model.layers.1.block_sparse_moe.experts.0"
+        packed, scale, expected = random_compressed_tensors_mxfp4(rows, cols)
+        unquantized = torch.randn(rows, cols)
+        # The scale lives in a different file than the packed weight.
+        save_hf_checkpoint(
+            CHECKPOINT_DIR,
+            {
+                "model-00001-of-00002.safetensors": {
+                    f"{prefix}.w1.weight_packed": packed,
+                    "model.layers.1.mlp_res_proj.weight": unquantized,
+                },
+                "model-00002-of-00002.safetensors": {
+                    f"{prefix}.w1.weight_scale": scale
+                },
+            },
+        )
+
+        state_dict_to_load = {
+            f"{prefix}.w1.weight_packed": torch.zeros(rows, cols),
+            "model.layers.1.mlp_res_proj.weight": torch.zeros(rows, cols),
+        }
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=QuantizedHuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
+        torch.testing.assert_close(
+            state_dict_to_load[f"{prefix}.w1.weight_packed"], expected
+        )
+        torch.testing.assert_close(
+            state_dict_to_load["model.layers.1.mlp_res_proj.weight"], unquantized
+        )
+
+        # E2M1 values times these scales are exact in bf16.
+        bf16_state_dict = {
+            f"{prefix}.w1.weight_packed": torch.zeros(rows, cols, dtype=torch.bfloat16)
+        }
+        dist_cp.load(
+            state_dict=bf16_state_dict,
+            storage_reader=QuantizedHuggingFaceStorageReader(
+                path=CHECKPOINT_DIR, target_dtype=torch.bfloat16
+            ),
+        )
+        torch.testing.assert_close(
+            bf16_state_dict[f"{prefix}.w1.weight_packed"],
+            expected.to(torch.bfloat16),
+            rtol=0,
+            atol=0,
+        )
+
+        # Empty-state-dict loads allocate their destination from the metadata,
+        # so the result must come back dequantized in target_dtype, not uint8.
+        for dtype in (torch.float32, torch.bfloat16):
+            loaded = _load_state_dict_from_keys(
+                storage_reader=QuantizedHuggingFaceStorageReader(
+                    path=CHECKPOINT_DIR, target_dtype=dtype
+                ),
+            )[f"{prefix}.w1.weight_packed"]
+            self.assertEqual(loaded.dtype, dtype)
+            torch.testing.assert_close(loaded, expected.to(dtype), rtol=0, atol=0)
+
+    @parametrize(
+        "case",
+        [
+            "nvfp4",
+            "packed_not_uint8",
+            "scale_not_uint8",
+            "scale_not_per_32",
+            "unaligned_width",
+            "int4",
+            "int4_3d",
+        ],
+    )
+    @with_temp_dir
+    def test_compressed_tensors_non_mxfp4_loads_raw(self, case: str) -> None:
+        """Other formats with these names load raw, as before MXFP4 support."""
+        try:
+            import safetensors  # noqa: F401
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        rows = 4
+        packed, scale = {
+            # NVFP4: float8 scales, one per 16 values.
+            "nvfp4": (
+                torch.randint(0, 256, (rows, 48), dtype=torch.uint8),
+                torch.rand(rows, 6).to(torch.float8_e4m3fn),
+            ),
+            # MXFP4 shapes, but one tensor is not uint8.
+            "packed_not_uint8": (
+                torch.randint(-128, 128, (rows, 48), dtype=torch.int8),
+                torch.randint(0, 256, (rows, 3), dtype=torch.uint8),
+            ),
+            "scale_not_uint8": (
+                torch.randint(0, 256, (rows, 48), dtype=torch.uint8),
+                torch.rand(rows, 3).to(torch.float8_e4m3fn),
+            ),
+            "scale_not_per_32": (
+                torch.randint(0, 256, (rows, 48), dtype=torch.uint8),
+                torch.randint(0, 256, (rows, 6), dtype=torch.uint8),
+            ),
+            # Not a whole number of 16-byte groups.
+            "unaligned_width": (
+                torch.randint(0, 256, (rows, 40), dtype=torch.uint8),
+                torch.randint(0, 256, (rows, 40 // 16), dtype=torch.uint8),
+            ),
+            # int4 pack-quantized: int32 [out, in/8] and a float scale per 128
+            # values, which matches the MXFP4 scale shape.
+            "int4": (
+                torch.randint(0, 2**31 - 1, (rows, 32), dtype=torch.int32),
+                torch.randn(rows, 2).to(torch.bfloat16),
+            ),
+            # int4 pack-quantized MoE weights stacked per expert are 3D.
+            "int4_3d": (
+                torch.randint(0, 2**31 - 1, (2, rows, 32), dtype=torch.int32),
+                torch.randn(2, rows, 2).to(torch.bfloat16),
+            ),
+        }[case]
+        prefix = "model.layers.1.block_sparse_moe.experts.0"
+        tensors = {
+            f"{prefix}.w1.weight_packed": packed,
+            f"{prefix}.w1.weight_scale": scale,
+        }
+        save_hf_checkpoint(self.temp_dir, {"model.safetensors": tensors})
+
+        state_dict = {fqn: torch.empty_like(t) for fqn, t in tensors.items()}
+        dist_cp.load(
+            state_dict=state_dict,
+            storage_reader=QuantizedHuggingFaceStorageReader(path=self.temp_dir),
+        )
+        for fqn, t in tensors.items():
+            self.assertEqual(state_dict[fqn].dtype, t.dtype)
+            self.assertTrue(
+                torch.equal(state_dict[fqn].view(torch.uint8), t.view(torch.uint8))
+            )
+
+
+class TestCompressedTensorsMXFP4ShardedLoad(DTensorTestBase):
+    @with_comms
+    @with_temp_dir
+    def test_shard_starts_mid_group(self) -> None:
+        """Each rank's Shard(1) slice starts partway into a 32-value group."""
+        try:
+            import safetensors  # noqa: F401
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        fqn = "model.layers.1.block_sparse_moe.experts.0.w1.weight_packed"
+        scale_fqn = "model.layers.1.block_sparse_moe.experts.0.w1.weight_scale"
+        # With 160 columns, every shard boundary falls mid-group for 2, 3 or 4
+        # ranks (80; 54 and 108; 40, 80 and 120).
+        rows, cols = 4, 160
+        torch.manual_seed(0)
+        packed, scale, expected = random_compressed_tensors_mxfp4(rows, cols)
+        if self.rank == 0:
+            save_hf_checkpoint(
+                self.temp_dir, {"model.safetensors": {fqn: packed, scale_fqn: scale}}
+            )
+        dist.barrier()
+
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        state_dict = {
+            fqn: distribute_tensor(
+                torch.zeros(rows, cols, device=self.device_type), mesh, [Shard(1)]
+            )
+        }
+        dist_cp.load(
+            state_dict=state_dict,
+            storage_reader=QuantizedHuggingFaceStorageReader(path=self.temp_dir),
+        )
+        torch.testing.assert_close(state_dict[fqn].full_tensor().cpu(), expected)
 
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
