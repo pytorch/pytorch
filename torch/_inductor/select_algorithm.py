@@ -3361,10 +3361,9 @@ class TritonTemplate(KernelTemplate):
         # for one example issue with this problem.
         if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
-        kwargs = {
-            k: v.unwrap_if_number() if isinstance(v, RuntimeFloat) else v
-            for k, v in kwargs.items()
-        }
+        for k, v in kwargs.items():
+            if isinstance(v, RuntimeFloat):
+                kwargs[k] = v.unwrap_if_number()
 
         if call_sizes is None:
             call_sizes = layout.size
