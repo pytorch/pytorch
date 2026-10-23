@@ -421,6 +421,44 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertIn(10, ids)
         self.assertTrue(out["truncated"])
 
+    def test_a_finding_that_does_not_fit_does_not_hide_smaller_ones(self):
+        big = fpc.MARKER + "\n" + "x" * 9000
+        api = FakeApi(
+            reviews=[ours(body=big)],
+            inline=[
+                finding(cid=10 + i, when=f"2026-01-0{i}", body="small")
+                for i in range(1, 4)
+            ],
+        )
+        full = fpc.collect(api, REPO, PR)
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 5000):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [11, 12, 13])
+
+    def test_an_older_reviews_answered_finding_is_kept(self):
+        api = FakeApi(
+            reviews=[{**ours(rid=49), "submitted_at": "0"}, ours()],
+            inline=[
+                finding(cid=10, rid=49, when="2026-01-01"),
+                comment("author", id=11, in_reply_to_id=10, when="2026-01-02"),
+            ],
+        )
+        ids = [i["id"] for i in fpc.collect(api, REPO, PR)["items"]]
+        self.assertEqual(ids, [50, 10, 11])
+
+    def test_a_drive_by_reply_does_not_make_a_finding_answered(self):
+        inline = [
+            finding(cid=10, when="2026-01-01", body="z" * 2000),
+            comment("drive-by", id=11, in_reply_to_id=10, when="2026-01-02"),
+            finding(cid=12, when="2026-01-03", body="z" * 2000),
+        ]
+        api = FakeApi(inline=inline, reviews=[ours()])
+        full = fpc.collect(api, REPO, PR)
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 1500):
+            out = fpc.collect(api, REPO, PR)
+        # Unanswered, so the newer finding is kept, not the one the stranger answered.
+        self.assertEqual([i["id"] for i in out["items"]], [50, 12])
+
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [
             comment("maint", body="y" * fpc.MAX_BODY, when=f"2026-01-{i:02d}")

@@ -146,9 +146,11 @@ gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments
 gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews
 gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments
 gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions
+gh api repos/pytorch/pytorch/pulls/comments/<COMMENT_ID>/reactions
+gh api repos/pytorch/pytorch/issues/comments/<COMMENT_ID>/reactions
 ```
 
-Any of `triage`, `push`, `maintain` or `admin` being true in the last call means a maintainer. Skip this check if you have no network or `gh` access. Skip this check in GitHub Actions Mode: the comments in the prompt do not say who has triage access.
+Any of `triage`, `push`, `maintain` or `admin` being true in the permission call means a maintainer. The reactions calls list who reacted to a comment; only the author's and maintainers' reactions count. Skip this check if you have no network or `gh` access. Skip this check in GitHub Actions Mode: the comments in the prompt do not say who has triage access.
 
 ## Earlier Automated Findings
 

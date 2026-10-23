@@ -18,11 +18,13 @@ are dropped. A comment's ``reactions`` are the emoji reactions of the author
 and maintainers, read for the newest ``MAX_REACTION_LOOKUPS`` reacted comments
 (reactions to a review body have no REST endpoint and are not read), and
 ``reactions_truncated`` is set when a limit or a failed lookup may have left
-some out. Bodies are capped and, if the conversation is too long,
-``truncated`` is set and items are dropped in this order: earlier automated
-findings with no reply or reaction seen, then other earlier automated findings,
-then the oldest comments people wrote; within each group the oldest go first,
-and a kept reply keeps the finding it answers.
+some out. Bodies are capped. If the conversation is too long, ``truncated`` is
+set and items are selected in two phases. First, people's comments, newest
+first, each with the finding it replies to; the first that does not fit ends
+selection, so older comments and every finding are left out. Then, only if all
+of them fit, earlier findings: those with a reply or reaction seen and the
+latest review body, then the rest, newest first within each group, skipping
+any that does not fit. Kept items are written in time order.
 
 Every failure is fatal except a 404 on a permission check (that user is not a
 maintainer) and any failure while reading a comment's reactions, including the
@@ -317,15 +319,24 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         for n, i in enumerate(items)
         if i["role"] == AUTOMATED and i["kind"] == "review_comment"
     }
-    # A group is considered only if every item before it fit.
-    for n in (n for group in groups for n in group):
+
+    def take(n: int) -> bool:
+        nonlocal size
         parent = findings.get(items[n].get("in_reply_to_id"))
         unit = [m for m in (n, parent) if m is not None and m not in kept]
         grow = sum(len(dumps(items[m])) + 1 for m in unit)
         if len(kept) + len(unit) > MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
-            break
+            return False
         size += grow
-        kept += unit
+        kept.extend(unit)
+        return True
+
+    # People's comments are cut strictly oldest first. Earlier findings are
+    # considered only if every person's comment fit, and one that does not fit
+    # is skipped so that smaller ones after it can still be kept.
+    if all(take(n) for n in groups[0]):
+        for n in groups[1] + groups[2]:
+            take(n)
     omitted = len(items) - len(kept)
     return {
         **head,

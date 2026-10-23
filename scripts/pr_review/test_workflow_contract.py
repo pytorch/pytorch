@@ -6413,6 +6413,8 @@ SKILL_COMMANDS = {
     "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews": COMMENTS,
     "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments": COMMENTS,
     "gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions": "`role`",
+    "gh api repos/pytorch/pytorch/pulls/comments/<COMMENT_ID>/reactions": "`reactions`",
+    "gh api repos/pytorch/pytorch/issues/comments/<COMMENT_ID>/reactions": "`reactions`",
     # GitHub Actions mode.
     "git diff origin/<baseBranch>...HEAD": None,
     "git diff --stat origin/<baseBranch>...HEAD": None,
