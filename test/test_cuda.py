@@ -1898,7 +1898,7 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
         expected = "'ieee'" if torch.version.hip else "'tf32'"
         kernel_options = {}
-        set_float32_precision(kernel_options, torch.float32)
+        set_float32_precision(kernel_options, torch.float32, "cuda")
         self.assertEqual(kernel_options["FLOAT32_PRECISION"], expected)
         self.assertEqual(get_global_state_key()[7], "tf32")
 
