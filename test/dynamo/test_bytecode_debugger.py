@@ -183,8 +183,10 @@ class TestBytecodeDebugger(TestCase):
             # (record_pregraph_bytecode_enter/exit).
             if sys.version_info >= (3, 12):
                 call_pattern = r">>>.*\[\s*\d+\]:\s*CALL\b"
-            else:
+            elif sys.version_info >= (3, 11):
                 call_pattern = r">>>.*\[\s*\d+\]:\s*PRECALL\b"
+            else:
+                call_pattern = r">>>.*\[\s*\d+\]:\s*CALL_FUNCTION\b"
             while True:
                 while not re.search(call_pattern, output):
                     output = yield "s"
@@ -212,7 +214,7 @@ Stack (TOS at end):
   [1] 0x0 <NULL>
   [2] 0xADDR tensor(...)""",
                 )
-            else:
+            elif sys.version_info >= (3, 11):
                 self.assertExpectedInline(
                     stack_at_call,
                     """\
@@ -220,6 +222,15 @@ Stack (TOS at end):
   [0] 0x0 <NULL>
   [1] 0xADDR <function forward at 0xADDR>
   [2] 0xADDR tensor(...)""",
+                )
+            else:
+                # Python 3.10
+                self.assertExpectedInline(
+                    stack_at_call,
+                    """\
+Stack (TOS at end):
+  [0] 0xADDR <function forward at 0xADDR>
+  [1] 0xADDR tensor(...)""",
                 )
 
         InteractiveDebugSession(fn, (torch.ones(3),), test_logic)
@@ -330,7 +341,8 @@ Stack (TOS at end):
             self.assertIn("# [offset]", ll_output)
 
             # Check for stable bytecode instructions
-            self.assertIn("RESUME", ll_output)
+            if sys.version_info >= (3, 11):
+                self.assertIn("RESUME", ll_output)
             self.assertIn("LOAD_FAST x", ll_output)
             self.assertIn("RETURN_VALUE", ll_output)
 
@@ -430,8 +442,10 @@ Stack (TOS at end):
             # function. See test_stack_command for details.
             if sys.version_info >= (3, 12):
                 call_pattern = r">>>.*\[\s*\d+\]:\s*CALL\b"
-            else:
+            elif sys.version_info >= (3, 11):
                 call_pattern = r">>>.*\[\s*\d+\]:\s*PRECALL\b"
+            else:
+                call_pattern = r">>>.*\[\s*\d+\]:\s*CALL_FUNCTION\b"
             while True:
                 while not re.search(call_pattern, output):
                     output = yield "s"
@@ -453,10 +467,16 @@ Stack (TOS at end):
                     stack_list,
                     """[<function forward at 0xADDR>, <NULL>, tensor(...)]""",
                 )
-            else:
+            elif sys.version_info >= (3, 11):
                 self.assertExpectedInline(
                     stack_list,
                     """[<NULL>, <function forward at 0xADDR>, tensor(...)]""",
+                )
+            else:
+                # Python 3.10
+                self.assertExpectedInline(
+                    stack_list,
+                    """[<function forward at 0xADDR>, tensor(...)]""",
                 )
 
         InteractiveDebugSession(fn, (torch.ones(3),), test_logic)
@@ -753,11 +773,15 @@ Stack (TOS at end):
 
         def patched_codegen_update_mutated(self, cg, log_side_effects=False):
             # Inject 31415/0 to cause ZeroDivisionError
+            if sys.version_info >= (3, 11):
+                div_inst = create_instruction("BINARY_OP", arg=11)  # 11 = TRUEDIV
+            else:
+                div_inst = create_instruction("BINARY_TRUE_DIVIDE")
             cg.extend_output(
                 [
                     create_instruction("LOAD_CONST", argval=31415),
                     create_instruction("LOAD_CONST", argval=0),
-                    create_instruction("BINARY_OP", arg=11),  # 11 = TRUEDIV
+                    div_inst,
                     create_instruction("POP_TOP"),
                 ]
             )
@@ -777,7 +801,10 @@ Stack (TOS at end):
 
             # Debugger should have stopped at the exception
             self.assertIn("Exception raised at instruction", output)
-            self.assertIn("BINARY_OP", output)
+            if sys.version_info >= (3, 11):
+                self.assertIn("BINARY_OP", output)
+            else:
+                self.assertIn("BINARY_TRUE_DIVIDE", output)
             self.assertIn("ZeroDivisionError", output)
             self.assertIn("division by zero", output)
 
