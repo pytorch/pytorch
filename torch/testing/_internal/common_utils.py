@@ -563,7 +563,7 @@ def clear_tracked_input() -> None:
     test_fn.tracked_input = None  # type: ignore[attr-defined]
 
 # Compiling every input is costly, and some ops generate over a thousand. Under
-# Inductor, TrackedInputIter yields at most this many.
+# Inductor, TrackedInputIter yields only the first this many.
 INDUCTOR_MAX_INPUTS = 32
 
 
@@ -2107,7 +2107,8 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
-        # Inputs may each need their own graph; past the limit they'd silently run eagerly.
+        # For all Inductor tests: OpInfo inputs may each need their own graph,
+        # and past the limit they'd silently run eagerly.
         torch._dynamo.config.recompile_limit = INDUCTOR_MAX_INPUTS
     else:
         # only dynamo for now
@@ -4068,7 +4069,8 @@ class TestCase(expecttest.TestCase):
     def _run_custom(self, result=None):
         # unittest reports static skips without running setUp; skip the Dynamo
         # setup below too, which costs ~40ms per test.
-        if getattr(getattr(self, self._testMethodName, None), "__unittest_skip__", False):
+        test_method = getattr(self, self._testMethodName, None)
+        if getattr(type(self), "__unittest_skip__", False) or getattr(test_method, "__unittest_skip__", False):
             return super().run(result)
 
         using_unittest = isinstance(result, unittest.TestResult)

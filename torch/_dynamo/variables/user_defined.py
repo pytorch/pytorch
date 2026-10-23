@@ -1384,11 +1384,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
             try:
-                res = self.as_python_constant()(  # type: ignore[operator]
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
+                res = self.as_python_constant()(*const_args, **const_kwargs)  # type: ignore[operator]
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, res)

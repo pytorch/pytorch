@@ -209,6 +209,7 @@ def eager_reference(op):
 
 
 _UNDER_DISPATCH_MODE = "Dynamo skips TorchDispatchMode frames; op runs eagerly"
+_COMPOSITE_COMPLIANCE = "Checks eager composite compliance, not Inductor"
 
 
 # Tests that apply to all operators and aren't related to any particular
@@ -781,7 +782,7 @@ class TestCommon(TestCase):
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
-    @skipIfTorchInductor("Error inputs fail in Dynamo tracing, so the op runs eagerly")
+    @skipIfTorchInductor("Checks eager error messages, not Inductor")
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
@@ -852,6 +853,7 @@ class TestCommon(TestCase):
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
+        eager = eager_reference(op)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = (
                 sample_input.input,
@@ -866,7 +868,7 @@ class TestCommon(TestCase):
             )
 
             # validates forward
-            expected = eager_reference(op)(t_inp, *t_args, **t_kwargs)
+            expected = eager(t_inp, *t_args, **t_kwargs)
             actual = op(n_inp, *n_args, **n_kwargs)
 
             self.assertEqual(actual, expected)
@@ -959,9 +961,10 @@ class TestCommon(TestCase):
             op.op = _maybe_remove_out_wrapper(op.op)
 
         samples = op.sample_inputs(device, dtype)
+        eager = eager_reference(op)
         for sample in samples:
             # calls it normally to get the expected result
-            expected = eager_reference(op)(sample.input, *sample.args, **sample.kwargs)
+            expected = eager(sample.input, *sample.args, **sample.kwargs)
             op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
 
             # Short-circuits if output is not a single tensor or an
@@ -1089,9 +1092,10 @@ class TestCommon(TestCase):
             op = copy.copy(op)
             op.op = _maybe_remove_out_wrapper(op.op)
 
+        eager = eager_reference(op)
         for sample in samples:
             # calls it normally to get the expected result
-            expected = eager_reference(op)(sample.input, *sample.args, **sample.kwargs)
+            expected = eager(sample.input, *sample.args, **sample.kwargs)
             op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
 
             # Short-circuits if output is not a single tensor or an
@@ -1547,6 +1551,7 @@ class TestCommon(TestCase):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
 
+        eager = eager_reference(op)
         for sample in op.sample_inputs(device, dtype):
             # MPS doesn't support float64
             if torch.float64 in (
@@ -1564,7 +1569,7 @@ class TestCommon(TestCase):
                 and x.dtype in (torch.complex32, torch.bcomplex32)
                 else x
             )
-            expected = eager_reference(op)(
+            expected = eager(
                 transformed_sample.input,
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
@@ -1604,8 +1609,9 @@ class TestCommon(TestCase):
             self.assertEqual(ret, x)
             return ret
 
+        eager = eager_reference(op)
         for sample in op.sample_inputs(device, dtype):
-            expect = eager_reference(op)(sample.input, *sample.args, **sample.kwargs)
+            expect = eager(sample.input, *sample.args, **sample.kwargs)
 
             transformed = sample.transform(convert_boolean_tensors)
             actual = op(transformed.input, *transformed.args, **transformed.kwargs)
@@ -1952,7 +1958,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
+    @skipIfTorchInductor(_COMPOSITE_COMPLIANCE)
     def test_operator(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
 
@@ -1985,7 +1991,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
+    @skipIfTorchInductor(_COMPOSITE_COMPLIANCE)
     def test_backward(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
@@ -2020,7 +2026,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
+    @skipIfTorchInductor(_COMPOSITE_COMPLIANCE)
     def test_forward_ad(self, device, dtype, op):
         if torch.float not in op.supported_backward_dtypes(device):
             raise unittest.SkipTest("Does not support autograd")
@@ -2152,7 +2158,7 @@ class TestCompositeCompliance(TestCase):
             leaf_tensors = composite_compliance.gather_leaf_tensors(args, kwargs)
 
             # Call forward op
-            results_raw = op(*args, **kwargs)
+            results_raw = op.get_op()(*args, **kwargs)
 
             # Check that COW inputs remain COW after the forward op is executed
             for idx, arg in enumerate(args):
@@ -2236,7 +2242,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipIfTorchInductor("Dynamo skips _force_original_view_tracking; op runs eagerly")
+    @skipIfTorchInductor("Checks eager view replay, not Inductor")
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
             self.assertEqual(a.size(), b.size())
@@ -3161,7 +3167,7 @@ class TestFakeTensor(TestCase):
         | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
-    @skipIfTorchInductor("Dynamo doesn't trace FakeTensorMode, so the op runs eagerly")
+    @skipIfTorchInductor("Checks FakeTensor metadata, not Inductor")
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
@@ -3174,7 +3180,7 @@ class TestFakeTensor(TestCase):
         | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
-    @skipIfTorchInductor("Dynamo doesn't trace FakeTensorMode, so the op runs eagerly")
+    @skipIfTorchInductor("Checks FakeTensor metadata, not Inductor")
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
         if op.name in fake_autocast_device_skips[device_type]:
@@ -3241,7 +3247,7 @@ class TestFakeTensor(TestCase):
         )
 
     @ops([op for op in ops_and_refs if op.is_factory_function])
-    @skipIfTorchInductor("Dynamo skips tensorless frames, so factory ops run eagerly")
+    @skipIfTorchInductor("Checks factory functions' output layout, not Inductor")
     def test_strided_layout(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
