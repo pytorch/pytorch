@@ -826,6 +826,10 @@ def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bo
     """The waiver merge()'s own rule checks pass: meta-codesync's only.  Those checks
     never waived the guard for the older bots, so a plain (non-force) merge from them
     is still refused while the internal-changes check is not SUCCESS."""
+    # The waiver only matters when the guard would fire; skip the comment lookup
+    # on every retry otherwise.
+    if not pr.has_internal_changes():
+        return False
     author = _unedited_comment_author(pr, comment_id)
     return (
         author is not None
@@ -838,24 +842,17 @@ def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bo
 # has landed. `meta-codesync` took this over from `facebook-github-tools`, so
 # both are listed: the older one still appears on long-lived PRs.
 #
-# GitHub Apps are matched on App URL. GraphQL, which trymerge reads comments
-# through, spells an App's login bare ("meta-codesync"), so the `[bot]` logins
-# below only match REST-spelled data, and a bare login could be a user account.
-# Only `comments(last: 5)` selects `author { url }`; _unedited_comment_author
-# remembers a URL once seen, so a comment outside that window is recognized only
-# if this process saw it inside the window earlier.
+# GitHub Apps are matched on App URL only: GraphQL, which trymerge reads comments
+# through, spells an App's login bare ("meta-codesync"), and a bare login could be
+# a user account. Only `comments(last: 5)` selects `author { url }`;
+# _unedited_comment_author remembers a URL once seen, so a comment outside that
+# window is recognized only if this process saw it inside the window earlier.
 #
 # Deliberately NOT reusing can_skip_internal_checks' allowlist. That predicate
 # also waives the "must be landed via Phabricator" guard, so adding an identity
 # to it is a trust decision; this list only decides whether a missing
 # release-notes label is auto-filled.
-CODEV_MERGE_BOT_LOGINS = frozenset(
-    {
-        "facebook-github-bot",
-        "facebook-github-tools[bot]",
-        "meta-codesync[bot]",
-    }
-)
+CODEV_MERGE_BOT_LOGINS = frozenset({"facebook-github-bot"})
 # Same identities by App URL, for the queries that do select it.
 CODEV_MERGE_BOT_APP_URLS = frozenset(
     {
@@ -3442,6 +3439,10 @@ def merge(
             native_stack=native_stack,
         )
 
+    # Remember the merge comment's author URL now, while it is the newest comment:
+    # the waiver below skips the lookup while the guard can't fire, and a retry may
+    # refetch the PR after newer comments push the comment out of the window.
+    _unedited_comment_author(pr, comment_id)
     # Check for approvals.  The rule checks raise on has_internal_changes() unless
     # told to skip it; the waiver reads the current check conclusions, so the retry
     # loop recomputes it per refetch.

@@ -600,14 +600,14 @@ class TestTryMerge(TestCase):
     def test_is_bot_initiated_codev_merge_meta_codesync(self, *args: Any) -> None:
         "meta-codesync, the current export bot, is recognized as a co-dev merge."
         pr = self._pr_with_merge_comment(
-            "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
+            "meta-codesync", "https://github.com/apps/meta-codesync"
         )
         self.assertTrue(is_bot_initiated_codev_merge(pr, 123))
 
     def test_is_bot_initiated_codev_merge_legacy_bots(self, *args: Any) -> None:
         "The bots meta-codesync superseded are still recognized."
         tools = self._pr_with_merge_comment(
-            "facebook-github-tools[bot]",
+            "facebook-github-tools",
             "https://github.com/apps/facebook-github-tools",
         )
         self.assertTrue(is_bot_initiated_codev_merge(tools, 123))
@@ -617,7 +617,7 @@ class TestTryMerge(TestCase):
     def test_is_bot_initiated_codev_merge_false_without_diff(self, *args: Any) -> None:
         "A bot-initiated merge without an internal diff is not a co-dev merge."
         pr = self._pr_with_merge_comment(
-            "meta-codesync[bot]",
+            "meta-codesync",
             "https://github.com/apps/meta-codesync",
             diff_revision=None,
         )
@@ -631,7 +631,7 @@ class TestTryMerge(TestCase):
     def test_is_bot_initiated_codev_merge_false_when_edited(self, *args: Any) -> None:
         "An edited merge comment can't be trusted to name its real author."
         pr = self._pr_with_merge_comment(
-            "meta-codesync[bot]",
+            "meta-codesync",
             "https://github.com/apps/meta-codesync",
             editor_login="some-human",
         )
@@ -668,9 +668,8 @@ class TestTryMerge(TestCase):
         self, *args: Any
     ) -> None:
         "Comments outside the prefetched window carry no author_url to verify."
-        for login in ("meta-codesync", "meta-codesync[bot]"):
-            pr = self._pr_with_merge_comment(login)
-            self.assertFalse(can_skip_internal_checks(pr, 123), login)
+        pr = self._pr_with_merge_comment("meta-codesync")
+        self.assertFalse(can_skip_internal_checks(pr, 123))
 
     def test_meta_codesync_merge_does_not_waive_stacked_prs(self, *args: Any) -> None:
         "The comment vouches for its own PR's diff, not for PRs stacked below."
@@ -717,6 +716,17 @@ class TestTryMerge(TestCase):
         self.assertNotIn("might contain internal changes", bodies[1])
         self.assertIn("might contain internal changes", bodies[2])
 
+    def test_merge_loop_skips_the_comment_lookup_without_internal_changes(
+        self, *args: Any
+    ) -> None:
+        "The waiver is irrelevant when the guard can't fire, so don't fetch comments."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync", "https://github.com/apps/meta-codesync"
+        )
+        pr.has_internal_changes.return_value = False
+        self.assertFalse(merge_loop_skips_internal_checks(pr, 123))
+        pr.get_comment_by_id.assert_not_called()
+
     def test_merge_loop_waives_only_meta_codesync(self, *args: Any) -> None:
         "merge()'s own rule checks keep refusing the older bots' plain merges."
         codesync = self._pr_with_merge_comment(
@@ -738,7 +748,7 @@ class TestTryMerge(TestCase):
         )
         self.assertTrue(can_skip_internal_checks(legacy, 123))
         tools = self._pr_with_merge_comment(
-            "facebook-github-tools[bot]",
+            "facebook-github-tools",
             "https://github.com/apps/facebook-github-tools",
             internal_check="FAILURE",
         )
@@ -761,15 +771,14 @@ class TestTryMerge(TestCase):
         self.assertFalse(can_skip_internal_checks(pr, 123))
 
     def test_is_bot_initiated_codev_merge_without_author_url(self, *args: Any) -> None:
-        """Recognition must not depend on author_url. Only `comments(last: 5)`
-        selects it; GH_GET_PR_PREV_COMMENTS and the reviews fragment select
-        `login` alone, so a merge comment older than the prefetched window comes
-        back with author_url=None."""
+        """Only `comments(last: 5)` selects author_url, and GraphQL gives an App's
+        login bare, so a merge comment older than the prefetched window is
+        recognized only if this process saw its URL earlier."""
         node = {
             "bodyText": "@pytorchbot merge",
             "createdAt": "2026-08-04T22:14:27Z",
             # No "url" — exactly what the paginated query returns.
-            "author": {"login": "meta-codesync[bot]"},
+            "author": {"login": "meta-codesync"},
             "authorAssociation": "NONE",
             "editor": None,
             "databaseId": 5185216222,
@@ -778,9 +787,13 @@ class TestTryMerge(TestCase):
         comment = GitHubPR._comment_from_node(node)
         self.assertIsNone(comment.author_url)
 
-        pr = mock.MagicMock()
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=192125)
         pr.get_diff_revision.return_value = "D114427100"
         pr.get_comment_by_id.return_value = comment
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 5185216222))
+        _COMMENT_AUTHOR_URLS[("pytorch", "pytorch", 192125, 5185216222)] = (
+            "https://github.com/apps/meta-codesync"
+        )
         self.assertTrue(is_bot_initiated_codev_merge(pr, 5185216222))
 
     @mock.patch("trymerge.gh_post_pr_comment")
@@ -2872,10 +2885,18 @@ class TestMergeInternalChecksWaiver(TestCase):
     ) -> None:
         self.assertEqual(self._merge(mock_pr_cls, mock_rule, False), [False, False])
 
-    def test_retry_recomputes_waiver_for_refetched_pr(
+    def test_merge_remembers_the_comment_author_before_the_loop(
         self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
     ) -> None:
-        "The waiver follows the check, so a check that turns FAILURE is not waived."
+        "The URL is cached while the merge comment is still in the prefetch window."
+        with mock.patch("trymerge._unedited_comment_author") as mock_author:
+            self._merge(mock_pr_cls, mock_rule, False)
+        mock_author.assert_called_once_with(mock_pr_cls.return_value, 1)
+
+    def test_waiver_is_recomputed_for_each_rule_check(
+        self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
+    ) -> None:
+        "Each rule check asks for the waiver again, so it reads the refetched PR."
         self.assertEqual(
             self._merge(mock_pr_cls, mock_rule, [True, False]), [True, False]
         )
