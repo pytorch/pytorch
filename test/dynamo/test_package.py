@@ -1714,61 +1714,60 @@ def add(x, y):
         source = ImportSource("torch")
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
+    class _tempTensorSamplerForQualName:
+        def __init__(self, val, mask, prob):
+            self.val = val
+            self.mask = mask
+            self.prob = prob
 
+        @classmethod
+        def class_method_that_is_used(cls, x):
+            prob = torch.sigmoid(x)
+            thresh = torch.rand(1, device=x.device)
+            mask = (prob > thresh).to(torch.bool)
+            return cls(x, mask, prob)
 
-class _tempTensorSamplerForQualName:
-    def __init__(self, val, mask, prob):
-        self.val = val
-        self.mask = mask
-        self.prob = prob
+        @classmethod
+        def class_method_that_is_not_used(cls, x):
+            prob = torch.sigmoid(x)
+            thresh = torch.rand(1, device=x.device)
+            mask = (prob > thresh).to(torch.bool)
+            return cls(x, mask, prob)
 
-    @classmethod
-    def class_method_that_is_used(cls, x):
-        prob = torch.sigmoid(x)
-        thresh = torch.rand(1, device=x.device)
-        mask = (prob > thresh).to(torch.bool)
-        return cls(x, mask, prob)
+        def instance_method_that_is_used(self, x):
+            return x / 2
 
-    @classmethod
-    def class_method_that_is_not_used(cls, x):
-        prob = torch.sigmoid(x)
-        thresh = torch.rand(1, device=x.device)
-        mask = (prob > thresh).to(torch.bool)
-        return cls(x, mask, prob)
+    class _tempNetForQualName(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
 
-    def instance_method_that_is_used(self, x):
-        return x / 2
+        def instance_method_without_args(self):
+            shape = [1, 2, 3, 4]
+            x = torch.randn(shape)
+            return x
 
+        def instance_method_with_args(self, x):
+            return x + 1
 
-class _tempNetForQualName(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def instance_method_without_args(self):
-        shape = [1, 2, 3, 4]
-        x = torch.randn(shape)
-        return x
-
-    def instance_method_with_args(self, x):
-        return x + 1
-
-    def forward(self, x):
-        x *= x
-        with torch.device(x.device):
-            y = self.instance_method_without_args()
-        # test classmethod called from class
-        sampler = _tempTensorSamplerForQualName.class_method_that_is_used(x)
-        x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
-        # test instance method called from instance
-        x = sampler.instance_method_that_is_used(x)
-        # test classmethod called from instance
-        another_sampler = sampler.class_method_that_is_not_used(x)
-        # test instance method called from instance
-        x = another_sampler.instance_method_that_is_used(x)
-        # test classmethod called from instance
-        x += y.sum()
-        x = self.instance_method_with_args(x)
-        return x
+        def forward(self, x):
+            x *= x
+            with torch.device(x.device):
+                y = self.instance_method_without_args()
+            # test classmethod called from class
+            sampler = (
+                TestPackage._tempTensorSamplerForQualName.class_method_that_is_used(x)
+            )
+            x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
+            # test instance method called from instance
+            x = sampler.instance_method_that_is_used(x)
+            # test classmethod called from instance
+            another_sampler = sampler.class_method_that_is_not_used(x)
+            # test instance method called from instance
+            x = another_sampler.instance_method_that_is_used(x)
+            # test classmethod called from instance
+            x += y.sum()
+            x = self.instance_method_with_args(x)
+            return x
 
 
 class TestPackageAccelerator(torch._inductor.test_case.TestCase):
@@ -1779,13 +1778,21 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._package_config_stack = contextlib.ExitStack()
-        cls._package_config_stack.enter_context(
-            functorch_config.patch("bundled_autograd_cache", True)
-        )
-        cls._package_config_stack.enter_context(
-            torch._dynamo.config.patch({"strict_precompile": True})
-        )
-        super().setUpClass()
+        try:
+            cls._package_config_stack.enter_context(
+                functorch_config.patch("bundled_autograd_cache", True)
+            )
+            cls._package_config_stack.enter_context(
+                torch._dynamo.config.patch({"strict_precompile": True})
+            )
+            super().setUpClass()
+        except BaseException:
+            # unittest does not call tearDownClass() when setUpClass() raises, so
+            # the patches have to be undone here or they leak into every later
+            # test class in the process. The ConfigPatch class decorator this
+            # replaced closed its patches on failure.
+            cls._package_config_stack.close()
+            raise
 
     @classmethod
     def tearDownClass(cls):
@@ -2410,13 +2417,61 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
         x = torch.rand(10, device=device)
-        model = _tempNetForQualName()
+        model = TestPackage._tempNetForQualName()
         model.forward(x)
         compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             model.forward,
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )
         compiled_fn(x)
+
+
+class TestAcceleratorSetUpClassReleasesPatches(torch._inductor.test_case.TestCase):
+    """Lives outside both package classes on purpose.
+
+    Neither can host a value-based leak test: TestPackage carries
+    @functorch_config.patch / @torch._dynamo.config.patch as class decorators,
+    and TestPackageAccelerator patches the same two configs in its own
+    setUpClass, which the device-type variants inherit. In both places the
+    environment value is exactly what a leaked patch would produce, so the
+    assertion could not tell "released" from "leaked".
+
+    This class patches nothing, and the fixed values below hold both configs at
+    False for the duration of the call, so released reads False and leaked
+    reads True.
+    """
+
+    def test_set_up_class_failure_releases_patches(self):
+        accelerator = _PreInstantiateAccelerator
+
+        def failing_super_set_up_class():
+            # Both patches must already be applied when super() runs, otherwise
+            # the except block has nothing to release. Pin that ordering too:
+            # moving the enter_context calls below super().setUpClass() would
+            # leave the configs untouched and should turn this test red.
+            self.assertTrue(functorch_config.bundled_autograd_cache)
+            self.assertTrue(torch._dynamo.config.strict_precompile)
+            raise RuntimeError("setUpClass failure")
+
+        with patch.object(functorch_config, "bundled_autograd_cache", False), patch.object(
+            torch._dynamo.config, "strict_precompile", False
+        ), patch(
+            "torch._dynamo.test_case.TestCase.setUpClass",
+            side_effect=failing_super_set_up_class,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "setUpClass failure"):
+                accelerator.setUpClass()
+            # setUpClass applied both patches and then failed; the except block
+            # has to have released them, or they leak into every later test
+            # class in the process.
+            self.assertFalse(functorch_config.bundled_autograd_cache)
+            self.assertFalse(torch._dynamo.config.strict_precompile)
+
+
+# Kept under its own name because instantiate_device_type_tests below removes
+# TestPackageAccelerator from this module's globals, and the setUpClass
+# regression test above has to call setUpClass on the class itself.
+_PreInstantiateAccelerator = TestPackageAccelerator
 
 
 instantiate_device_type_tests(
@@ -2429,5 +2484,4 @@ instantiate_device_type_tests(
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
     run_tests()
