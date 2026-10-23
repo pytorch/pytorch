@@ -6148,6 +6148,9 @@ class TemplateBuffer(OperationBuffer):
 
         # Inputs that the kernel mutates in-place
         self.mutated_inputs = mutated_inputs
+        # Symbolic RuntimeFloat template kwargs. The wrapper computes them from
+        # size symbols, so those symbols count as uses of this buffer.
+        self.runtime_float_values: list[sympy.Expr] = []
         self.mutation_outputs: list[MutationOutput] = []
         if mutated_inputs is not None:
             first_input = self.inputs[0]
@@ -6171,6 +6174,13 @@ class TemplateBuffer(OperationBuffer):
         # downstream consumer fusion and store-output producer fusion.
         self.allow_epilogue_fusion: bool | None = None
         self.allow_prologue_fusion: bool | None = None
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        res = super().get_free_symbol_uses(unbacked_only)
+        res.update(get_free_symbols(self.runtime_float_values, unbacked_only))
+        return res
 
     @property
     def dtype(self) -> torch.dtype:
@@ -6550,6 +6560,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
         self._choices: list[ChoiceCaller] = unfiltered_choices
         self.original_inputs = inputs
+        # Any choice may be selected, so track every choice's RuntimeFloat symbols.
+        triton_caller = torch._inductor.select_algorithm.TritonTemplateCaller
+        self.runtime_float_values = [
+            value
+            for choice in unfiltered_choices
+            if isinstance(choice, triton_caller)
+            for value in choice.runtime_float_values
+        ]
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
             or _is_output_plannable_nvgemm_choice(choice)
