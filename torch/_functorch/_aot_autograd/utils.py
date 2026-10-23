@@ -741,7 +741,7 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
     return False
 
 
-_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda"}
+_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda", "xpu"}
 
 
 def register_graphsafe_rng_device_type(device_type: str) -> None:
