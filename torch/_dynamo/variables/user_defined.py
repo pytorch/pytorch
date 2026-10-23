@@ -96,6 +96,7 @@ from ..utils import (
     no_keywords,
     no_positional,
     object_has_getattribute,
+    property_methods,
     proxy_args_kwargs,
     raise_args_mismatch,
     set_methods,
@@ -107,6 +108,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     AttrMutationKind,
     GetSet,
     Member,
@@ -135,6 +137,7 @@ from .object_protocol import (
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
 )
+from .properties import PropertyVariable
 from .sets import FrozensetVariable, SetVariable
 
 
@@ -805,15 +808,30 @@ class UserDefinedClassVariable(UserDefinedVariable):
             cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
             return cmd_vt.tp_descr_get_impl(tx, self, self)
 
-        # property_descr_get with obj=NULL returns self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1662-L1663
+        # Subclasses can override class-level descriptor access.
         if isinstance(cls_attr, property):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
                 else None
             )
-            return variables.PropertyVariable(cls_attr, source=descriptor_source)
+            if descriptor_source is None and type(cls_attr) is not property:
+                if (
+                    inspect.getattr_static(type(cls_attr), "__get__")
+                    is not property.__get__
+                ):
+                    unimplemented(
+                        gb_type="Property subclass getter without a source",
+                        context="property subclass __get__ without a source",
+                        explanation="A source is required to trace a custom property descriptor method.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                prop_vt = variables.UserDefinedPropertyVariable(cls_attr)
+            else:
+                prop_vt = VariableTracker.build(
+                    tx, cls_attr, descriptor_source, realize=True
+                )
+            return prop_vt.tp_descr_get_impl(tx, None, self)
 
         # member_get with obj=NULL returns self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
@@ -4785,6 +4803,211 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
+
+
+class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *PropertyVariable._nonvar_fields,
+    }
+
+    def __init__(self, value: property, **kwargs: Any) -> None:
+        super().__init__(value, descriptor=value, **kwargs)
+        self._base_methods = property_methods
+        self.property_args: list[VariableTracker] | None = None
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        self._validate_init_args(tx, args, kwargs)
+        if (
+            sys.version_info < (3, 12)
+            or not isinstance(self.mutation_type, AttributeMutationNew)
+            or inspect.getattr_static(self.python_type(), "__setattr__")
+            is not object.__setattr__
+        ):
+            unimplemented(
+                gb_type="Unsupported property subclass initialization",
+                context="property subclass initialization",
+                explanation="Dynamo cannot trace property subclass initialization on Python < 3.12, for existing objects, or with custom __setattr__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        doc_attr = inspect.getattr_static(self.python_type(), "__doc__", None)
+        if not isinstance(doc_attr, types.MemberDescriptorType) and (
+            hasattr(type(doc_attr), "__set__") or hasattr(type(doc_attr), "__delete__")
+        ):
+            unimplemented(
+                gb_type="Property subclass initialization with a custom doc setter",
+                context="property subclass initialization with a custom __doc__ descriptor",
+                explanation="Dynamo cannot reconstruct a property subclass with a custom __doc__ setter without repeating user code.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        names = ("fget", "fset", "fdel", "doc")
+        bound = dict.fromkeys(names, ConstantVariable.create(None))
+        bound.update(zip(names, args))
+        bound.update(kwargs)
+        bound = {name: value.realize() for name, value in bound.items()}
+        side_effects = tx.output.side_effects
+        side_effects.mutation(self)
+        self.property_args = [bound[name] for name in names[:3]]
+        if (
+            sys.version_info >= (3, 13)
+            and side_effects.has_pending_mutation_of_attr(
+                self, "__name__", AttrMutationKind.GENERIC_SETATTR
+            )
+            and self.lookup_tp_getset_member("__name__")
+            is UserDefinedPropertyVariable.tp_getset["__name__"]
+        ):
+            side_effects.remove_attr_mutation(self, "__name__")
+        doc = bound["doc"]
+        getter_doc = False
+        if doc.is_constant_none() and not bound["fget"].is_constant_none():
+            try:
+                fget = bound["fget"]
+                if isinstance(
+                    fget, variables.UserFunctionVariable
+                ) and not tx.output.side_effects.has_pending_mutation_of_attr(
+                    fget, "__doc__"
+                ):
+                    source = fget.source and AttrSource(fget.source, "__doc__")
+                    doc = VariableTracker.build(tx, fget.get_function().__doc__, source)
+                else:
+                    doc = generic_getattr(tx, fget, "__doc__")
+                doc = doc.realize()
+                getter_doc = not doc.is_constant_none()
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+                # Match the pre-3.12.5 early return for missing getter docs.
+                if sys.version_info < (3, 12, 5):
+                    return ConstantVariable.create(None)
+        if not self.python_type().__dictoffset__ and not isinstance(
+            doc_attr, types.MemberDescriptorType
+        ):
+            if getter_doc:
+                raise_attribute_error(
+                    tx,
+                    f"'{self.python_type_name()}' object attribute '__doc__' is read-only",
+                )
+            return ConstantVariable.create(None)
+        try:
+            VariableTracker.build(tx, setattr).call_function(
+                tx, [self, ConstantVariable.create("__doc__"), doc], {}
+            )
+        except ObservedAttributeError:
+            if getter_doc:
+                raise
+            handle_observed_exception(tx)
+        return ConstantVariable.create(None)
+
+    def call_base_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__init__":
+            return self.tp_init_impl(tx, args, kwargs)
+        return super().call_base_method(tx, name, args, kwargs)
+
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        if name in PropertyVariable.tp_getset or name in PropertyVariable.tp_members:
+            descriptor = inspect.getattr_static(property, name, NO_SUCH_SUBOBJ)
+            if self.lookup_class_mro_attr(name) is not descriptor:
+                return None
+            if self.cls_source is not None and descriptor is not NO_SUCH_SUBOBJ:
+                from torch._dynamo.symbolic_convert import InstructionTranslator
+
+                self.get_source_by_walking_mro(InstructionTranslator.current_tx(), name)
+                # Pin the builtin owner when __bases__ changes the MRO.
+                owner = GetItemSource(
+                    TypeMROSource(self.cls_source),
+                    self.python_type().__mro__.index(property),
+                )
+                install_guard(owner.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return super().lookup_tp_getset_member(name)
+
+    def _get_accessor(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self.property_args is not None:
+            return self.property_args[("fget", "fset", "fdel").index(name)]
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(
+            tx, getattr(self.value, name), source, realize=True
+        )
+
+    tp_members = {
+        "fget": Member(lambda s, tx: s._get_accessor(tx, "fget"), readonly_setter),
+        "fset": Member(lambda s, tx: s._get_accessor(tx, "fset"), readonly_setter),
+        "fdel": Member(lambda s, tx: s._get_accessor(tx, "fdel"), readonly_setter),
+    }
+
+    def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .base import load_pending_mutation
+        from .object_protocol import generic_getattr
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self, "__name__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            return load_pending_mutation(tx, self, "__name__")
+        if self.property_args is not None:
+            try:
+                return generic_getattr(tx, self._get_accessor(tx, "fget"), "__name__")
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+                raise_attribute_error(
+                    tx, "'property' object has no attribute '__name__'"
+                )
+        return PropertyVariable._name_getter(self, tx)
+
+    tp_getset = {
+        **PropertyVariable.tp_getset,
+        "__name__": GetSet(_name_getter, PropertyVariable.tp_getset["__name__"].setter),
+    }
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker | None,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        if self.inherits_base_slot("__get__"):
+            return PropertyVariable.tp_descr_get_impl(self, tx, obj, owner)
+        return self._vectorcall_method(
+            tx,
+            "__get__",
+            [ConstantVariable.create(None) if obj is None else obj, owner],
+            {},
+        )
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if self.inherits_base_slot("__delete__" if value is None else "__set__"):
+            return PropertyVariable.tp_descr_set_impl(self, tx, obj, value)
+        return super().tp_descr_set_impl(tx, obj, value)
+
+    def codegen_init(self, cg: "PyCodegen") -> None:
+        if self.property_args is None:
+            return
+
+        cg.add_push_null(
+            lambda: cg.load_import_from("torch._dynamo.utils", "initialize_property")
+        )
+        cg(self)
+        for arg in self.property_args:
+            cg(arg)
+        cg.extend_output(create_call_function(4, False))
+        cg.pop_top()
 
 
 # The writable BaseException attributes, whose state lives on the wrapped

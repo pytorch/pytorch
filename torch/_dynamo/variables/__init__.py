@@ -96,7 +96,6 @@ from .functions import (
     MethodWrapperVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
-    PropertyVariable,
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
@@ -106,7 +105,6 @@ from .functions import (
     TMADescriptorStableVariable,
     TritonSetAllocatorVariable,
     TupleGetterVariable,
-    UserDefinedPropertyVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperDescriptorVariable,
@@ -176,6 +174,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
+from .properties import PropertyVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
     DictKeySetVariable,
@@ -221,6 +220,7 @@ from .user_defined import (
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedOrderedDictVariable,
+    UserDefinedPropertyVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,

@@ -528,8 +528,9 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(actual[2].__name__, "getter")
 
     @parametrize("shadow_name", (False, True))
+    @parametrize("via_dict", (False, True))
     @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
-    def test_reinitialization_preserves_instance_name(self, shadow_name):
+    def test_reinitialization_preserves_instance_name(self, shadow_name, via_dict):
         class NamedProperty(property):
             __name__ = "class name"
 
@@ -540,16 +541,19 @@ class PropertySubclassTests(TestCase):
 
         def fn(x):
             p = cls()
-            p.__name__ = "custom"
+            if via_dict:
+                p.__dict__["__name__"] = "custom"
+            else:
+                p.__name__ = "custom"
             p.__init__(getter)
-            return x + 1, p.__name__, p
+            return x + 1, p.__name__, "__name__" in p.__dict__, p
 
         x = torch.ones(2)
         expected = fn(x)
         actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(actual[:2], expected[:2])
-        self.assertEqual(actual[2].__name__, expected[2].__name__)
-        self.assertEqual(actual[2].__dict__, expected[2].__dict__)
+        self.assertEqual(actual[:3], expected[:3])
+        self.assertEqual(actual[3].__name__, expected[3].__name__)
+        self.assertEqual(actual[3].__dict__, expected[3].__dict__)
 
     @parametrize("slotted", (False, True))
     @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
@@ -793,7 +797,7 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(actual[2].__dict__, expected[2].__dict__)
         self.assertIs(actual[2].fget, getter)
 
-    @parametrize("change", ("rename", "shadow"))
+    @parametrize("change", ("rename", "shadow", "insert_shadow", "swap"))
     @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
     def test_name_mro_guard(self, change):
         class BaseProperty(property):
@@ -804,6 +808,15 @@ class PropertySubclassTests(TestCase):
 
         class SubProperty(BaseProperty):
             pass
+
+        class NamedMixin:
+            __slots__ = ()
+            __name__ = "shadowed name"
+
+        if change == "swap":
+
+            class SubProperty(property, NamedMixin):
+                pass
 
         def getter(obj):
             return obj
@@ -819,18 +832,22 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(counter.frame_count, 1)
         if change == "rename":
             SubProperty.__name__ = "RenamedProperty"
-        else:
+        elif change == "shadow":
             SubProperty.__bases__ = (NamedProperty,)
+        elif change == "insert_shadow":
+            BaseProperty.__bases__ = (NamedMixin, property)
+        else:
+            SubProperty.__bases__ = (NamedMixin, property)
         self.assertEqual(compiled(x + 2), fn(x + 2))
         self.assertEqual(compiled(x + 3), fn(x + 3))
         self.assertEqual(counter.frame_count, 1 if change == "rename" else 2)
 
-    @parametrize("action", ("get", "set"))
+    @parametrize("action", ("get", "set", "class_get"))
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_sourceless_custom_descriptor_graph_break(self, action):
         class CustomProperty(property):
             def __get__(self, obj, owner=None):
-                return obj.value + 1
+                return owner.marker if obj is None else obj.value + 1
 
             def __set__(self, obj, value):
                 obj.value = value + 2
@@ -839,8 +856,11 @@ class PropertySubclassTests(TestCase):
 
         def fn(x):
             class Holder:
+                marker = "class access"
                 prop = descriptor
 
+            if action == "class_get":
+                return x + 1, Holder.prop
             obj = Holder()
             obj.value = x
             if action == "set":
@@ -848,7 +868,7 @@ class PropertySubclassTests(TestCase):
                 return obj.value
             return obj.prop
 
-        kind = "getter" if action == "get" else "setter"
+        kind = "setter" if action == "set" else "getter"
         with self.assertRaisesRegex(
             Unsupported, f"Property subclass {kind} without a source"
         ):
@@ -883,6 +903,135 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(compiled(x + 2), fn(x + 2))
         self.assertEqual(compiled(x + 3), fn(x + 3))
         self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("inherited", (False, True))
+    @parametrize("mode", ("inherited", "super", "custom"))
+    def test_class_descriptor(self, inherited, mode):
+        class DecoratorProperty(property):
+            if mode != "inherited":
+
+                def __get__(self, obj, owner=None):
+                    if mode == "custom" and obj is None:
+                        return owner.marker
+                    return super().__get__(obj, owner)
+
+        def getter(obj):
+            return obj.value
+
+        descriptor = DecoratorProperty(getter)
+        descriptor.tag = "descriptor tag"
+
+        class Base:
+            marker = "class access"
+
+        class Holder(Base):
+            pass
+
+        owner = Base if inherited else Holder
+        owner.prop = descriptor
+
+        def fn(x):
+            p = Holder.prop
+            if mode == "custom":
+                return x + 1, p
+            return x + 1, type(p) is DecoratorProperty, p.tag, p.fget is getter
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_sourceless_class_descriptor(self):
+        descriptor = PropertyWithDoc()
+        descriptor.tag = "descriptor tag"
+
+        def fn(x):
+            class Holder:
+                prop = descriptor
+
+            p = Holder.prop
+            return x + 1, type(p) is PropertyWithDoc, p.tag, p.__doc__
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("cls", (property, PropertyWithoutDoc))
+    def test_descriptor_get_none(self, cls):
+        p = cls(lambda obj: obj.value)
+
+        class Holder:
+            pass
+
+        def fn(x):
+            return x + 1, p.__get__(None, Holder) is p
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("receiver", ("none", "int", "object", "tensor", "missing"))
+    @parametrize("keyword", (False, True))
+    def test_property_init_invalid_receiver(self, receiver, keyword):
+        values = {"none": None, "int": 1, "object": object(), "tensor": torch.ones(1)}
+        value = values.get(receiver)
+
+        def fn(x, value):
+            try:
+                if receiver == "missing":
+                    if keyword:
+                        property.__init__(fget=None)
+                    else:
+                        property.__init__()
+                elif keyword:
+                    property.__init__(value, fget=None)
+                else:
+                    property.__init__(value, None)
+            except TypeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, value), fn(x, value)
+        )
+
+    def test_exact_property_initialization_graph_break(self):
+        p = property()
+
+        def getter(obj):
+            return obj
+
+        def fn(x):
+            p.__init__(getter)
+            return x + 1, p.fget is getter
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(Unsupported, "Unsupported property initialization"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIsNone(p.fget)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("method", ("getter", "setter", "deleter", "__set_name__"))
+    def test_custom_property_methods(self, method):
+        class CustomProperty(property):
+            def getter(self, value):
+                return value + 1
+
+            def setter(self, value):
+                return value + 2
+
+            def deleter(self, value):
+                return value + 3
+
+            def __set_name__(self, owner, value):
+                return value + 4
+
+        p = CustomProperty()
+
+        def fn(x):
+            if method == "__set_name__":
+                return p.__set_name__(None, x)
+            return getattr(p, method)(x)
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
 
 if __name__ == "__main__":

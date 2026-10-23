@@ -6423,6 +6423,16 @@
       ]
     }
   ],
+  "GB0845": [
+    {
+      "Gb_type": "Unsupported property initialization",
+      "Context": "property initialization",
+      "Explanation": "Dynamo cannot trace reinitialization of an existing property.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0459": [
     {
       "Gb_type": "repr() on non-constant defaultdict",

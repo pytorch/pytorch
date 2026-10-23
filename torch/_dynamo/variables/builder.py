@@ -242,11 +242,9 @@ from .functions import (
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
-    PropertyVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
-    UserDefinedPropertyVariable,
     UserFunctionVariable,
     WrapperUserFunctionVariable,
 )
@@ -303,6 +301,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
+from .properties import PropertyVariable
 from .script_object import CustomClassObjectVariable, CustomClassVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
@@ -354,6 +353,7 @@ from .user_defined import (
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedOrderedDictVariable,
+    UserDefinedPropertyVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
