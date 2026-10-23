@@ -163,6 +163,41 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   return ret.release();
 }
 
+// Returns a bool class attribute, such as boxed_grads_call, of the
+// autograd.Function whose apply created ctx, or false if none did. Read where
+// needed instead of in apply, to keep apply's attribute lookups few.
+bool get_forward_cls_flag(PyObject* ctx, PyObject* name) {
+  static PyObject* forward_cls_name =
+      PyUnicode_InternFromString("_forward_cls");
+  PyObject* forward_cls = nullptr;
+  if (PyObject_GetOptionalAttr(
+          reinterpret_cast<PyObject*>(Py_TYPE(ctx)),
+          forward_cls_name,
+          &forward_cls) < 0) {
+    throw_python_error();
+  }
+  if (!forward_cls) {
+    return false;
+  }
+  THPObjectPtr forward_cls_ptr(forward_cls);
+  THPObjectPtr attr(PyObject_GetAttr(forward_cls, name));
+  if (!attr) {
+    throw_python_error();
+  }
+  TORCH_CHECK(
+      PyBool_Check(attr.get()),
+      THPUtils_unpackString(name),
+      " must be a bool, got ",
+      Py_TYPE(attr.get())->tp_name);
+  return Py_IsTrue(attr.get());
+}
+
+bool clear_saved_tensors_on_access(THPFunction* self) {
+  static PyObject* name =
+      PyUnicode_InternFromString("clear_saved_tensors_on_access");
+  return get_forward_cls_flag(reinterpret_cast<PyObject*>(self), name);
+}
+
 } // namespace
 
 namespace torch::autograd {
@@ -181,7 +216,15 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   inputs.clear();
 
   THPObjectPtr r;
-  if (py_fn->boxed_grads_call) {
+  // With boxed_grads_call, grads are passed as a single mutable list argument
+  // instead of individual args in an immutable tuple, allowing backward to
+  // free individual grads mid-execution and reduce peak memory. Used by pt2
+  // compiled AutogradFunctions: the standard calling convention keeps a
+  // reference to all grads (via the immutable args tuple) for the entire
+  // backward, preventing deallocation after last use.
+  static PyObject* boxed_grads_call_name =
+      PyUnicode_InternFromString("boxed_grads_call");
+  if (get_forward_cls_flag(pyobj(), boxed_grads_call_name)) {
     // Move grad tensors from the immutable args tuple into a plain list
     // and call apply_boxed instead of apply. This lets backward pop/clear
     // individual grads to free memory mid-execution, because the mutable
@@ -625,7 +668,6 @@ static PyObject* THPFunction_new(
   self->materialize_grads = true;
   self->pure_view = false;
   self->materialize_non_diff_grads = true;
-  self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
   self->output_grad_dtypes = nullptr;
   torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
@@ -1522,35 +1564,66 @@ static PyObject* get_autograd_function_attr(const char* name) {
   return PyObject_GetAttrString(module_, name);
 }
 
-// Sets out to a new reference to type.__dict__[name], or to nullptr if absent.
-// Returns false with a Python error set on failure.
-static bool get_own_attr(PyObject* type, PyObject* name, THPObjectPtr& out) {
-#if IS_PYTHON_3_12_PLUS
-  THPObjectPtr dict(PyType_GetDict(reinterpret_cast<PyTypeObject*>(type)));
-#else
-  THPObjectPtr dict(Py_XNewRef(reinterpret_cast<PyTypeObject*>(type)->tp_dict));
-#endif
-  PyObject* value = nullptr;
-  if (!dict || PyDict_GetItemRef(dict, name, &value) < 0) {
-    return false;
+// Returns a borrowed reference to torch.autograd.Function, or nullptr with a
+// Python error set. Like the base setup_context, intentionally never freed.
+static PyObject* get_function_class() {
+  static std::atomic<PyObject*> function_class = nullptr;
+
+  PyObject* function = function_class.load(std::memory_order_acquire);
+  if (function != nullptr) {
+    return function;
   }
-  out = value;
-  return true;
+  function = get_autograd_function_attr("Function");
+  if (!function) {
+    return nullptr;
+  }
+  PyObject* expected = nullptr;
+  if (!function_class.compare_exchange_strong(
+          expected, function, std::memory_order_acq_rel)) {
+    Py_DECREF(function);
+    return expected;
+  }
+  return function;
 }
 
-static void get_bool_class_attr(PyObject* cls, PyObject* name, bool& out) {
-  THPObjectPtr attr(PyObject_GetAttr(cls, name));
-  TORCH_CHECK(
-      attr,
-      "autograd.Function is missing ",
-      THPUtils_unpackString(name),
-      " attribute");
-  TORCH_CHECK(
-      PyBool_Check(attr.get()),
-      THPUtils_unpackString(name),
-      " must be a bool, got ",
-      Py_TYPE(attr.get())->tp_name);
-  out = Py_IsTrue(attr.get());
+// Returns a new reference to cls.<name>, or nullptr with a Python error set.
+//
+// getattr consults CPython's type attribute cache, which picks slots by the
+// address of the attribute name. Names whose slots collide with each other, or
+// with lookups elsewhere, miss on every call, making apply's cost depend on
+// memory layout. So for classes whose metaclass is FunctionMeta, which defines
+// none of the names apply reads, search the dicts of the MRO directly.
+static PyObject* get_class_attr(PyObject* cls, PyObject* name) {
+  auto* function = get_function_class();
+  if (!function) {
+    return nullptr;
+  }
+  if (Py_TYPE(cls) == Py_TYPE(function)) {
+    THPObjectPtr mro(Py_NewRef(reinterpret_cast<PyTypeObject*>(cls)->tp_mro));
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(mro.get()))) {
+#if IS_PYTHON_3_12_PLUS
+      THPObjectPtr dict(PyType_GetDict(
+          reinterpret_cast<PyTypeObject*>(PyTuple_GET_ITEM(mro.get(), i))));
+#else
+      THPObjectPtr dict(Py_XNewRef(
+          reinterpret_cast<PyTypeObject*>(PyTuple_GET_ITEM(mro.get(), i))
+              ->tp_dict));
+#endif
+      PyObject* attr = nullptr;
+      if (!dict || PyDict_GetItemRef(dict, name, &attr) < 0) {
+        return nullptr;
+      }
+      if (attr) {
+        auto get = Py_TYPE(attr)->tp_descr_get;
+        if (!get) {
+          return attr;
+        }
+        THPObjectPtr descr(attr);
+        return get(attr, nullptr, cls);
+      }
+    }
+  }
+  return PyObject_GetAttr(cls, name);
 }
 
 // The class attributes of an autograd.Function that apply reads on every call.
@@ -1562,27 +1635,18 @@ struct FunctionClassInfo {
   // Whether cls subclasses torch.autograd.Function, not just its internal base
   // torch.autograd.function._SingleLevelFunction.
   bool function_subclass = false;
-  bool clear_saved_tensors_on_access = false;
-  bool boxed_grads_call = false;
 };
 
-static PyObject* backward_cls_name() {
-  // Like the other interned names in this file, intentionally never freed.
-  static PyObject* name = PyUnicode_InternFromString("_backward_cls");
-  return name;
-}
-
 // Returns false with a Python error set on failure.
-static bool read_function_class_info(PyObject* cls, FunctionClassInfo& info) {
+static bool get_function_class_info(PyObject* cls, FunctionClassInfo& info) {
+  // Interned names, intentionally never freed.
+  static PyObject* backward_cls_name =
+      PyUnicode_InternFromString("_backward_cls");
   static PyObject* setup_context_name =
       PyUnicode_InternFromString("setup_context");
-  static PyObject* clear_saved_tensors_on_access_name =
-      PyUnicode_InternFromString("clear_saved_tensors_on_access");
-  static PyObject* boxed_grads_call_name =
-      PyUnicode_InternFromString("boxed_grads_call");
   static PyObject* forward_name = PyUnicode_InternFromString("forward");
 
-  info.setup_context = PyObject_GetAttr(cls, setup_context_name);
+  info.setup_context = get_class_attr(cls, setup_context_name);
   if (!info.setup_context) {
     return false;
   }
@@ -1592,155 +1656,14 @@ static bool read_function_class_info(PyObject* cls, FunctionClassInfo& info) {
   }
   info.setup_ctx_defined = info.setup_context.get() != base_setup_context;
 
-  THPObjectPtr function(get_autograd_function_attr("Function"));
-  if (!function) {
-    return false;
-  }
-  auto function_subclass = PyObject_IsSubclass(cls, function.get());
-  if (function_subclass == -1) {
-    return false;
-  }
-  info.function_subclass = function_subclass;
+  // Not PyObject_IsSubclass, which looks up __subclasscheck__ on FunctionMeta
+  info.function_subclass = PyType_IsSubtype(
+      reinterpret_cast<PyTypeObject*>(cls),
+      reinterpret_cast<PyTypeObject*>(get_function_class()));
 
-  get_bool_class_attr(
-      cls,
-      clear_saved_tensors_on_access_name,
-      info.clear_saved_tensors_on_access);
-  get_bool_class_attr(cls, boxed_grads_call_name, info.boxed_grads_call);
-  info.backward_cls = PyObject_GetAttr(cls, backward_cls_name());
-  info.forward = PyObject_GetAttr(cls, forward_name);
+  info.backward_cls = get_class_attr(cls, backward_cls_name);
+  info.forward = get_class_attr(cls, forward_name);
   return info.backward_cls && info.forward;
-}
-
-// Fields of the tuple that caches a FunctionClassInfo. The tags are those of
-// cls and its metaclass when the info was read.
-enum CachedInfoField {
-  kTag,
-  kMetaTag,
-  kForward,
-  kSetupContext,
-  kFunctionSubclass,
-  kClearSavedTensorsOnAccess,
-  kBoxedGradsCall,
-  kNumCachedInfoFields,
-};
-
-// Fills info from cached if its tags match. Doesn't set info.backward_cls.
-static bool load_cached_info(
-    PyObject* cached,
-    unsigned int tag,
-    unsigned int meta_tag,
-    FunctionClassInfo& info) {
-  if (!PyTuple_CheckExact(cached) ||
-      PyTuple_GET_SIZE(cached) != kNumCachedInfoFields) {
-    return false;
-  }
-  auto field = [&](CachedInfoField i) { return PyTuple_GET_ITEM(cached, i); };
-  // Python code can overwrite the cache, so check types before reading. Cached
-  // tags are never zero, so a missing tag never matches.
-  if (!PyLong_CheckExact(field(kTag)) || !PyLong_CheckExact(field(kMetaTag)) ||
-      PyLong_AsUnsignedLongMask(field(kTag)) != tag ||
-      PyLong_AsUnsignedLongMask(field(kMetaTag)) != meta_tag) {
-    return false;
-  }
-  info.forward = Py_NewRef(field(kForward));
-  info.setup_context = Py_NewRef(field(kSetupContext));
-  info.setup_ctx_defined = info.setup_context.get() != get_base_setup_context();
-  info.function_subclass = Py_IsTrue(field(kFunctionSubclass));
-  info.clear_saved_tensors_on_access =
-      Py_IsTrue(field(kClearSavedTensorsOnAccess));
-  info.boxed_grads_call = Py_IsTrue(field(kBoxedGradsCall));
-  return true;
-}
-
-static PyObject* make_cached_info(
-    unsigned int tag,
-    unsigned int meta_tag,
-    const FunctionClassInfo& info) {
-  auto py_bool = [](bool b) { return b ? Py_True : Py_False; };
-  return Py_BuildValue(
-      "(kkOOOOO)",
-      static_cast<unsigned long>(tag),
-      static_cast<unsigned long>(meta_tag),
-      info.forward.get(),
-      info.setup_context.get(),
-      py_bool(info.function_subclass),
-      py_bool(info.clear_saved_tensors_on_access),
-      py_bool(info.boxed_grads_call));
-}
-
-// Returns type's version tag, or 0 if it has none. CPython zeroes the tag
-// whenever the type or one of its bases changes, and never reuses a tag, so a
-// tag identifies one state of a type.
-static unsigned int version_tag(PyObject* type) {
-  // Atomic because free-threaded builds update tags concurrently.
-  return std::atomic_ref(reinterpret_cast<PyTypeObject*>(type)->tp_version_tag)
-      .load(std::memory_order_relaxed);
-}
-
-// Like version_tag, but first assigns a tag if type has none. Still returns 0
-// if CPython refuses, e.g. for a type that changed too often.
-static unsigned int assign_version_tag(PyObject* type) {
-#if IS_PYTHON_3_12_PLUS
-  PyUnstable_Type_AssignVersionTag(reinterpret_cast<PyTypeObject*>(type));
-#else
-  // 3.11 lacks an API for this, but any method cache lookup assigns a tag.
-  _PyType_Lookup(reinterpret_cast<PyTypeObject*>(type), backward_cls_name());
-#endif
-  return version_tag(type);
-}
-
-// Fills info from cls's attributes, or from a copy cached in the dict of
-// cls._backward_cls, which FunctionMeta creates for each class.
-//
-// Reading the five attributes takes ten type lookups, on both cls and its
-// metaclass. CPython's method cache speeds these up, but picks slots by the
-// address of the attribute name, so lookups that collide miss on every call,
-// making apply's cost depend on memory layout. The copy is used only while the
-// version tags of cls and its metaclass are unchanged. This assumes the
-// attributes, normally staticmethods and plain values, are not descriptors
-// that return different values for an unchanged class. Storing the copy on the
-// backward class instead of in a global table frees it with the class, and is
-// safe with or without the GIL. Returns false with a Python error set on
-// failure.
-static bool get_function_class_info(PyObject* cls, FunctionClassInfo& info) {
-  static PyObject* cached_info_name =
-      PyUnicode_InternFromString("_function_class_info");
-
-  auto* meta = reinterpret_cast<PyObject*>(Py_TYPE(cls));
-  THPObjectPtr backward_cls;
-  THPObjectPtr cached;
-  if (!get_own_attr(cls, backward_cls_name(), backward_cls) ||
-      (backward_cls && PyType_Check(backward_cls.get()) &&
-       !get_own_attr(backward_cls, cached_info_name, cached))) {
-    return false;
-  }
-  if (cached &&
-      load_cached_info(cached, version_tag(cls), version_tag(meta), info)) {
-    info.backward_cls = std::move(backward_cls);
-    return true;
-  }
-
-  auto tag = assign_version_tag(cls);
-  auto meta_tag = assign_version_tag(meta);
-  if (!read_function_class_info(cls, info)) {
-    return false;
-  }
-  // Don't cache if a metaclass __getattribute__ or __getattr__ could compute
-  // attributes on each read, or if cls changed during the reads above, e.g. on
-  // another thread or in a descriptor.
-  if (tag != 0 && meta_tag != 0 &&
-      Py_TYPE(cls)->tp_getattro == PyType_Type.tp_getattro &&
-      info.backward_cls.get() == backward_cls.get() &&
-      version_tag(cls) == tag && version_tag(meta) == meta_tag) {
-    THPObjectPtr copy(make_cached_info(tag, meta_tag, info));
-    // Caching is best effort; e.g. the backward class may be immutable.
-    if (!copy ||
-        PyObject_SetAttr(backward_cls, cached_info_name, copy.get()) < 0) {
-      PyErr_Clear();
-    }
-  }
-  return true;
 }
 
 // Returns a new reference to what
@@ -2075,9 +1998,6 @@ PyObject* THPFunction_apply(
   ctx->needs_input_grad_bits.emplace(std::move(input_info.needs_input_grad));
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
-  ctx->clear_saved_tensors_on_access = cls_info.clear_saved_tensors_on_access;
-  ctx->boxed_grads_call = cls_info.boxed_grads_call;
-
   auto num_args = PyTuple_GET_SIZE(inputs);
 
   // Call forward
@@ -2233,7 +2153,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
       return nullptr;
     }
 
-    if (self->clear_saved_tensors_on_access) {
+    if (clear_saved_tensors_on_access(self)) {
       self->saved_variables.clear();
       self->saved_tensors_accessed_and_cleared = true;
     }
@@ -2263,7 +2183,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
     return nullptr;
   }
 
-  if (self->clear_saved_tensors_on_access) {
+  if (clear_saved_tensors_on_access(self)) {
     self->saved_variables.clear();
     self->saved_tensors_accessed_and_cleared = true;
   }

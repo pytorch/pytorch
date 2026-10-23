@@ -333,8 +333,23 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def log1p(x: CSEVariable) -> str:
+        return f"c10::metal::log1p({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def expm1(x: CSEVariable) -> str:
+        # same form as expm1_functor in UnaryKernel.metal
+        V.kernel.headers.add("special_math")
+        return (
+            f"(metal::fabs({x}) < 0.1f ? c10::metal::expm1f({x})"
+            f" : metal::precise::exp({x}) - 1.0f)"
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
