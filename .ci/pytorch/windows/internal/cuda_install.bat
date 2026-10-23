@@ -273,6 +273,7 @@ set "ZLIB_SHA256=D09BE2E08B6519B89882CE89941936F2AE7190B038A711087384B80D05362ED
 if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
 curl --retry 3 --retry-all-errors -L "https://ossci-windows.s3.us-east-1.amazonaws.com/zlib131dllx64.zip" --output "%SRC_DIR%\temp_build\%ZLIB_ZIP%"
 if errorlevel 1 exit /b 1
+set "ZLIB_ACTUAL_SHA256="
 for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%SRC_DIR%\temp_build\%ZLIB_ZIP%').Hash"') do set "ZLIB_ACTUAL_SHA256=%%H"
 if /I not "%ZLIB_ACTUAL_SHA256%"=="%ZLIB_SHA256%" (
     echo ZLIB checksum mismatch: got %ZLIB_ACTUAL_SHA256%, expected %ZLIB_SHA256%
@@ -280,5 +281,15 @@ if /I not "%ZLIB_ACTUAL_SHA256%"=="%ZLIB_SHA256%" (
 )
 7z x -y "%SRC_DIR%\temp_build\%ZLIB_ZIP%" -o"%SRC_DIR%\temp_build\zlib"
 if errorlevel 1 exit /b 1
-xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
+if not exist "%SRC_DIR%\temp_build\zlib\dll_x64\zlibwapi.dll" (
+    echo %ZLIB_ZIP% does not contain dll_x64\zlibwapi.dll
+    exit /b 1
+)
+copy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\zlibwapi.dll" "C:\Windows\System32\zlibwapi.dll"
+if errorlevel 1 exit /b 1
+fc /b "%SRC_DIR%\temp_build\zlib\dll_x64\zlibwapi.dll" "C:\Windows\System32\zlibwapi.dll" > nul
+if errorlevel 1 (
+    echo C:\Windows\System32\zlibwapi.dll does not match the zlibwapi.dll from %ZLIB_ZIP%
+    exit /b 1
+)
 goto :eof

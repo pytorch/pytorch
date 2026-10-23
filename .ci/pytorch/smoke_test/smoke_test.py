@@ -723,8 +723,11 @@ def main() -> None:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
         test_sdpa("cuda")
-        if sys.platform == "win32":
-            check_windows_zlibwapi_version()
+
+    # zlibwapi.dll is bundled into Windows CUDA wheels by the build, regardless
+    # of whether the machine running the test has a GPU.
+    if sys.platform == "win32" and torch.version.cuda:
+        check_windows_zlibwapi_version()
 
     if options.package in ["all", "torch_torchvision"]:
         smoke_test_modules(options.package)
