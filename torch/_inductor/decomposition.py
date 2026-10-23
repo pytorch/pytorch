@@ -239,7 +239,9 @@ def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
     return torch.copysign(res, -1.0)
 
 
-def _cuda_trailing_sum(terms: list[torch.Tensor]) -> torch.Tensor:
+def _cuda_trailing_sum(
+    terms: list[torch.Tensor], reduction_input: torch.Tensor
+) -> torch.Tensor:
     """Add `terms` in the order ATen's CUDA reduction walks a short trailing dim.
 
     gpu_reduce_kernel (Reduce.cuh) gives the reduction dim last_pow2(n) lanes, capped
@@ -250,9 +252,22 @@ def _cuda_trailing_sum(terms: list[torch.Tensor]) -> torch.Tensor:
     """
     from torch._native.registry import native_decomp_table
 
-    # Active native inner-tree sums use the adjacent order supplied by tl.sum.
     if aten.sum.dim_IntList in native_decomp_table(overrides_only=True):
-        return torch.stack(terms, dim=-1).sum(-1)
+        from torch._native.ops.reductions.cutedsl_impl import (
+            _int32_indexing_safe,
+            _SUPPORTED_DTYPES,
+        )
+
+        # These inputs are fresh dense lgamma/digamma outputs. With a contiguous
+        # sum output, native's iterator coalesces their outer dims iff the input
+        # is contiguous. Meta TensorIterator itself skips reduction coalescing.
+        if (
+            reduction_input.dtype in _SUPPORTED_DTYPES
+            and reduction_input.numel() > 0
+            and reduction_input.is_contiguous()
+            and _int32_indexing_safe(reduction_input, reduction_input.ndim - 1)
+        ):
+            return torch.stack(terms, dim=-1).sum(-1)
     vt0 = 4
     n = len(terms)
     width = min(1 << (n.bit_length() - 1), 32)
@@ -308,7 +323,23 @@ def mvlgamma(self: torch.Tensor, p: int) -> torch.Tensor:
         materialize(torch.lgamma(materialize(x + offset)))
         for offset in offsets.unbind(0)
     ]
-    total = materialize(_cuda_trailing_sum(terms))
+    from torch._tensor_iterator import binary_op
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    # Eager adds the offset vector before reducing; this preserves permuted
+    # outer dimensions, which can make the native sum override ineligible.
+    with _disable_current_modes():
+        meta_self = torch.empty_strided(
+            tuple(int(s) for s in self.shape),
+            tuple(int(s) for s in self.stride()),
+            dtype=dtype,
+            device="meta",
+        )
+        meta_offsets = torch.empty((p,), dtype=dtype, device="meta")
+        reduction_input = binary_op(
+            None, meta_offsets, meta_self.unsqueeze(-1)
+        ).output()
+    total = materialize(_cuda_trailing_sum(terms, reduction_input))
     out = total + p * (p - 1) * math.log(math.pi) * 0.25
     return out.to(dtype) if narrow else out
 
