@@ -2070,10 +2070,21 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 )
                 side_effect_occurred = True
             elif (
-                isinstance(var, variables.UserDefinedObjectVariable)
+                isinstance(
+                    var,
+                    (
+                        variables.UserDefinedObjectVariable,
+                        variables.StaticMethodVariable,
+                    ),
+                )
                 and mutation_kind is AttrMutationKind.INSTANCE_DICT
             ):
-                original_dict = getattr(getattr(var, "value", None), "__dict__", {})
+                original_dict = (
+                    var.initial_dict
+                    if isinstance(var, variables.StaticMethodVariable)
+                    and var.value is None
+                    else getattr(getattr(var, "value", None), "__dict__", {})
+                )
                 # If the key only existed in the traced instance dict, the
                 # add/delete sequence is a replay no-op.
                 if name in original_dict:
@@ -2103,9 +2114,30 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 ctx.suffixes.append([create_instruction("DELETE_ATTR", argval=name)])
                 side_effect_occurred = True
         elif (
-            isinstance(var, variables.UserDefinedObjectVariable)
+            isinstance(
+                var,
+                (variables.UserDefinedObjectVariable, variables.StaticMethodVariable),
+            )
             and mutation_kind is AttrMutationKind.INSTANCE_DICT
         ):
+            if (
+                isinstance(var, variables.StaticMethodVariable)
+                and name in var.initial_dict
+                and var.dict_vt is not None
+                and name not in var.dict_vt.items.item_dict
+            ):
+                # Remove the constructor's slot before replaying a reinsert,
+                # so the runtime dict has the same observable key order.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "object_delattr_ignore_descriptor"
+                    )
+                )
+                cg(var.source)
+                cg(variables.ConstantVariable(name))
+                cg.extend_output(
+                    [*create_call_function(2, False), create_instruction("POP_TOP")]
+                )
             cg.add_push_null(
                 lambda: cg.load_import_from(
                     utils.__name__, "object_setattr_ignore_descriptor"

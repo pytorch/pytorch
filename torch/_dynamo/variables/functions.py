@@ -5074,7 +5074,7 @@ def _lookup_wraps_copied_attr(
     return generic_getattr(tx, descriptor, name)
 
 
-class StaticMethodVariable(UserDefinedObjectVariable):
+class StaticMethodVariable(VariableTracker):
     """staticmethod descriptor wrapping a callable.
 
     CPython's staticmethod (PyStaticMethod_Type) is a non-data descriptor
@@ -5097,11 +5097,10 @@ class StaticMethodVariable(UserDefinedObjectVariable):
         value: staticmethod | None = None,  # type: ignore[type-arg]
         **kwargs: Any,
     ) -> None:
-        if value is None:
-            value = staticmethod(None)
-            value.__dict__.clear()
-        super().__init__(value, **kwargs)
+        super().__init__(**kwargs)
+        self.value = value
         self.descriptor = descriptor
+        self.initial_dict: dict[str, VariableTracker] = {}
 
     @classmethod
     def create(
@@ -5111,6 +5110,37 @@ class StaticMethodVariable(UserDefinedObjectVariable):
 
         result = cls(descriptor, mutation_type=AttributeMutationNew())
         tx.output.side_effects.track_attribute_mutation_new(result)
+        wrapped = (
+            NO_SUCH_SUBOBJ
+            if isinstance(
+                descriptor,
+                (
+                    NestedUserFunctionVariable,
+                    LocalGeneratorFunctionVariable,
+                    UserDefinedObjectVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
+            else descriptor.get_real_python_backed_value()
+        )
+        if wrapped is not NO_SUCH_SUBOBJ:
+            # Read the callable's runtime metadata, including functools.wraps
+            # updates, rather than the original name/doc in its code object.
+            for name, value in staticmethod(cast(Any, wrapped)).__dict__.items():
+                if (
+                    name == "__annotations__"
+                    and isinstance(descriptor, BaseUserFunctionVariable)
+                ) or tx.output.side_effects.has_pending_mutation_of_attr(
+                    descriptor, name
+                ):
+                    result.initial_dict[name] = generic_getattr(tx, descriptor, name)
+                else:
+                    result.initial_dict[name] = VariableTracker.build(
+                        tx,
+                        value,
+                        descriptor.source and AttrSource(descriptor.source, name),
+                    )
+            return result
         attrs = ("__module__", "__name__", "__qualname__", "__doc__")
         if sys.version_info < (3, 14):
             attrs += ("__annotations__",)
@@ -5120,8 +5150,11 @@ class StaticMethodVariable(UserDefinedObjectVariable):
             except get_dynamo_observed_exception(AttributeError):
                 tx.exn_vt_stack.clear_current_exception()
                 continue
-            result.get_dict_vt(tx).setitem(name, value)
+            result.initial_dict[name] = value
         return result
+
+    def get_real_python_backed_value(self) -> object:
+        return self.value if self.value is not None else NO_SUCH_SUBOBJ
 
     def _is_abstract(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .object_protocol import generic_getattr, generic_is_true
@@ -5191,13 +5224,55 @@ class StaticMethodVariable(UserDefinedObjectVariable):
         return staticmethod
 
     def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
-        return staticmethod(self.descriptor.as_python_constant())
+        if self.value is not None:
+            return self.value
+        result = staticmethod(self.descriptor.as_python_constant())
+        attrs = self.dict_vt.items if self.dict_vt is not None else self.initial_dict
+        result.__dict__.clear()
+        result.__dict__.update(
+            (
+                key if isinstance(key, str) else key.vt.as_python_constant(),
+                value.as_python_constant(),
+            )
+            for key, value in attrs.items()
+        )
+        return result
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
         attrs = self.get_dict_vt(tx)
         return attrs.getitem(name) if attrs.contains(name) else None
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        try:
+            return super().tp_getattro_impl(tx, name)
+        except NotImplementedError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'staticmethod' object has no attribute '{name}'"],
+            )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__"):
+            attr = args[0].as_python_constant()
+            value = args[1] if name == "__setattr__" else None
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None:
+                getset.setter(self, tx, value)
+            else:
+                self._set_wrapped_attr(tx, attr, value)
+            return ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
 
     def call_function(
         self,
@@ -5227,6 +5302,39 @@ class StaticMethodVariable(UserDefinedObjectVariable):
         )
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
+        # Reconstruction may see the function after its metadata mutations.
+        # Restore copies whose wrapped slot changed, or whose custom getter
+        # could depend on another pending attribute mutation.
+        side_effects = codegen.tx.output.side_effects
+        custom_getters = isinstance(
+            self.descriptor,
+            (UserDefinedObjectVariable, variables.UserDefinedClassVariable),
+        ) and bool(side_effects.store_attr_mutations.get(self.descriptor))
+        for name, value in self.initial_dict.items():
+            annotations_changed = (
+                name == "__annotations__"
+                and isinstance(self.descriptor, BaseUserFunctionVariable)
+                and (
+                    self.descriptor.annotations is not value
+                    or (
+                        isinstance(self.descriptor, UserFunctionVariable)
+                        and value.source
+                        != (
+                            self.descriptor.source
+                            and AttrSource(self.descriptor.source, name)
+                        )
+                    )
+                )
+            )
+            if (
+                custom_getters
+                or annotations_changed
+                or side_effects.has_pending_mutation_of_attr(self.descriptor, name)
+            ):
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
 
 
 class ClassMethodVariable(VariableTracker):

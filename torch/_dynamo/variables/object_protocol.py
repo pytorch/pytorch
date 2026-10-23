@@ -2477,7 +2477,9 @@ def generic_getattr(
         name = "grad"
 
     # Side effects: check for pending attribute mutations.
-    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+    if not isinstance(
+        obj, variables.StaticMethodVariable
+    ) and tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
             value = tx.output.side_effects.load_attr(obj, name)
             # A pending store of a descriptor onto a class lands in cls.__dict__,

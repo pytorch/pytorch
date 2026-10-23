@@ -1593,6 +1593,9 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def get_value___dict__(
         tx: "InstructionTranslatorBase", vt: VariableTracker
     ) -> dict[str, VariableTracker]:
+        if isinstance(vt, variables.StaticMethodVariable) and vt.value is None:
+            # Constructor copies are the initial state, not user mutations.
+            return vt.initial_dict.copy()
         # GENERIC_SETATTR on "__dict__" means the whole instance dict was
         # replaced through the __dict__ getset descriptor (obj.__dict__ = ...).
         # Per-key obj.__dict__[name] mutations are tracked as INSTANCE_DICT.
@@ -1703,6 +1706,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
     def __delitem__(self, key: kV) -> None:
         name = self._maybe_unwrap_key(key)
+        if isinstance(self.item, variables.StaticMethodVariable):
+            self.item_dict.pop(name, None)
         self.side_effects.store_instance_dict_attr(
             self.item, name, variables.DeletedVariable()
         )
@@ -1722,6 +1727,18 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def __iter__(self) -> Iterator[HashableTracker]:
         Hasher = HashableTracker
         d = self.side_effects_table()
+        if isinstance(self.item, variables.StaticMethodVariable):
+            # Updates preserve the initial position; a deleted/reinserted key
+            # was removed from item_dict and now appears with the new keys.
+            for k in self.item_dict:
+                if not isinstance(d.get(k), variables.DeletedVariable):
+                    yield Hasher(ConstantVariable.create(k))
+            for k, v in d.items():
+                if k not in self.item_dict and not isinstance(
+                    v, variables.DeletedVariable
+                ):
+                    yield Hasher(ConstantVariable.create(k))
+            return
         for k, v in d.items():
             if isinstance(v, variables.DeletedVariable):
                 continue
