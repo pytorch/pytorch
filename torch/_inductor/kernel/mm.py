@@ -87,7 +87,6 @@ from .mm_common import (
     load_kernel_template,
     mm_args,
     mm_grid,
-    mm_grid_2d,
     persistent_mm_grid,
     use_native_matmul,
     zero_addmm_input,
@@ -146,18 +145,18 @@ persistent_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_mm"),
 )
 
-# Intel XPU: persistent GROUP_M-swizzled GEMM with 2D block IO
+# Intel XPU: the persistent descriptor template above with Xe2-tuned configs from
+# its own heuristics; mm_xpu_tiled2d runs it with one tile per work-group.
 xpu_persistent_mm_template = TritonTemplate(
     name="mm_xpu_persistent",
     grid=persistent_mm_grid,
-    source=load_kernel_template("triton_xpu_persistent_mm"),
+    source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
-# Intel XPU: non-persistent 2D-grid GEMM for small M
 xpu_tiled2d_mm_template = TritonTemplate(
     name="mm_xpu_tiled2d",
-    grid=mm_grid_2d,
-    source=load_kernel_template("triton_xpu_tiled2d_mm"),
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
 
@@ -750,7 +749,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
-            if use_triton_xpu_template(layout):
+            if use_triton_xpu_template(mat1, mat2, layout=layout):
                 templates_to_use.append(xpu_persistent_mm_template)
                 templates_to_use.append(xpu_tiled2d_mm_template)
 

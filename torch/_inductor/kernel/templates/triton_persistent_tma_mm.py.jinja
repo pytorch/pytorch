@@ -70,8 +70,16 @@
         rn_desc = rn.to(tl.int32)
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
+        {%- if K_LOOP_OVER_TILES | default(0) %}
+
+        # XPU keeps 2D block IO for A only when its K offset comes from a tile index.
+        for k_idx in tl.range(0, tl.cdiv(K, BLOCK_K)):
+            rk_desc = (k_idx * BLOCK_K).to(tl.int32)
+        {%- else %}
+
         for rk in tl.range(0, K, BLOCK_K):
             rk_desc = rk.to(tl.int32)
+        {%- endif %}
 
             {%- if TMA_EXPERIMENTAL_API %}
             a = tl._experimental_descriptor_load(
@@ -124,4 +132,11 @@
         {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"))}}
         {%- else %}
         {{store_output(("rm", "rn"), "acc", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+        {%- endif %}
+        {%- if TILE_BARRIER_MIN_K_STEPS | default(0) %}
+
+        # Without SLM staging nothing else keeps a work-group's warps on the same tile.
+        # Runtime sizes, so a dynamic-shape kernel still decides per call.
+        if tl.cdiv(num_tiles, NUM_SMS) * tl.cdiv(K, BLOCK_K) >= TILE_BARRIER_MIN_K_STEPS:
+            tl.debug_barrier()
         {%- endif %}

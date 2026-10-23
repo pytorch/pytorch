@@ -336,6 +336,64 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
+    @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
+    @parametrize("template", ("mm_xpu_persistent", "mm_xpu_tiled2d"))
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_xpu_mm_templates(
+        self,
+        template: str,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        from torch.testing._internal.common_xpu import XPUArch
+
+        def mm(a, b):
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+            return torch.mm(a, b)
+
+        # Multiples of 8 keep every orientation 16-byte aligned; no tile multiples.
+        M, N, K = 168, 248, 88
+        a = torch.randn(
+            *((K, M) if a_transposed else (M, K)), dtype=torch.bfloat16, device=GPU_TYPE
+        )
+        b = torch.randn(
+            *((N, K) if b_transposed else (K, N)), dtype=torch.bfloat16, device=GPU_TYPE
+        )
+
+        # The templates are gated to Xe2 or later; force it so CI on PVC runs them.
+        with (
+            mock.patch(
+                "torch.testing._internal.common_xpu.get_xpu_arch",
+                return_value=XPUArch.Xe2,
+            ),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.native_matmul": False,
+                    "test_configs.autotune_choice_name_regex": template,
+                }
+            ),
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
+
+        checker = (
+            FileCheck()
+            .check("triton_tem_fused_mm")
+            .check("triton.language.make_tensor_descriptor")
+            .check("tl.load_tensor_descriptor")
+        )
+        if template == "mm_xpu_persistent":
+            checker = checker.check("tl.debug_barrier()")
+        checker.run(code[0])
+        torch.testing.assert_close(c_actual, mm(a, b), atol=1e-2, rtol=1e-2)
+
     def test_use_triton_tma_template_rejects_descriptor_shapes_exceeding_int32(self):
         from torch._inductor.utils import use_triton_tma_template
 

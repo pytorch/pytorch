@@ -38,7 +38,6 @@ from ...utils import (
     _rocm_version_tuple,
     _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
     _TDM_MIN_INNERMOST_REQUEST_BYTES,
-    ceildiv,
     commit_tdm_operand_layout,
     get_backend_num_stages,
     get_default_kpack,
@@ -145,10 +144,11 @@ def _tdm_descriptor_blocks_aligned(
     *,
     a_row_major: bool,
     b_row_major: bool,
+    block_ok: Callable[[int, int], bool] = _tdm_block_aligned,
 ) -> bool:
     a_contiguous_block = block_k if a_row_major else block_m
     b_contiguous_block = block_n if b_row_major else block_k
-    return _tdm_block_aligned(a_contiguous_block, dtype_size) and _tdm_block_aligned(
+    return block_ok(a_contiguous_block, dtype_size) and block_ok(
         b_contiguous_block, dtype_size
     )
 
@@ -4034,24 +4034,17 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 
 
 def _xpu_descriptor_row_major(kernel_inputs: KernelInputs) -> dict[str, bool] | None:
-    """A_ROW_MAJOR / B_ROW_MAJOR for the XPU descriptor templates, or None when
-    an operand has no unit stride or an outer stride that is not 16-byte aligned."""
+    """A_ROW_MAJOR / B_ROW_MAJOR for the XPU mm templates, or None when they do
+    not take this mm."""
     if not isinstance(kernel_inputs, MMKernelInputs):
         return None
-    sizevars = V.graph.sizevars
-    flags = {}
-    for key, node in zip(("A_ROW_MAJOR", "B_ROW_MAJOR"), kernel_inputs.mat1mat2()):
-        stride = [
-            sizevars.replace_backed_symbols_with_hints(s) for s in node.get_stride()
-        ]
-        inner = tma_inner_dim(stride)
-        if len(stride) != 2 or inner is None:
-            return None
-        outer_bytes = stride[1 - inner] * node.get_dtype().itemsize
-        if not sizevars.statically_known_multiple_of(outer_bytes, 16):
-            return None
-        flags[key] = inner == 1
-    return flags
+    mat1, mat2 = kernel_inputs.mat1mat2()
+    if not use_triton_xpu_template(mat1, mat2, layout=kernel_inputs.output_layout()):
+        return None
+    return {
+        "A_ROW_MAJOR": bool(tdm_descriptor_row_major(mat1)),
+        "B_ROW_MAJOR": bool(tdm_descriptor_row_major(mat2)),
+    }
 
 
 @register_template_heuristic(mm_template.uid, "xpu")
@@ -4091,7 +4084,6 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
             op_name == "mm"
             and config.max_autotune_gemm_search_space != "EXHAUSTIVE"
             and _xpu_descriptor_row_major(kernel_inputs) is not None
-            and use_triton_xpu_template(kernel_inputs.output_layout())
         ):
             m, n, k = kernel_inputs.mnk_symbolic()
             keep = {
@@ -4184,14 +4176,16 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
 
 
 class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
-    """Shared logic for the XPU mm templates, which load operands through tensor
-    descriptors: pass operand row-majorness and skip layouts that a descriptor
-    cannot describe (no unit stride, or outer stride not 16-byte aligned)."""
+    """Shared logic for the XPU mm templates, which drive the persistent descriptor
+    template (stable descriptor API, no workspace) with their own Xe2-tuned pools."""
 
     def __init__(self) -> None:
         super().__init__()
         # Configs were tuned as exact tiles; do not rescale them per shape.
         self.should_scale_configs = False
+
+    def _num_sms(self) -> int:
+        return get_num_sms()
 
     def _get_template_configs_impl(
         self,
@@ -4202,10 +4196,27 @@ class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
         flags = _xpu_descriptor_row_major(kernel_inputs)
         if flags is None:
             return
+        dtype_size = kernel_inputs.dtype().itemsize
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
         ):
-            yield {**template_kwargs, **flags}
+            if not _tdm_descriptor_blocks_aligned(
+                template_kwargs["BLOCK_M"],
+                template_kwargs["BLOCK_N"],
+                template_kwargs["BLOCK_K"],
+                dtype_size,
+                a_row_major=flags["A_ROW_MAJOR"],
+                b_row_major=flags["B_ROW_MAJOR"],
+                block_ok=_tdm_block_legal,
+            ):
+                continue
+            yield {
+                **template_kwargs,
+                **flags,
+                "NUM_SMS": self._num_sms(),
+                "TMA_EXPERIMENTAL_API": False,
+                "K_LOOP_OVER_TILES": True,
+            }
 
 
 @register_template_heuristic(xpu_persistent_mm_template.uid, "xpu")
@@ -4236,7 +4247,7 @@ class XPUPersistentMMTemplateConfigHeuristic(
         ]
         self.exhaustive_configs = self.mm_configs
 
-    # Below this many K steps per WG the warps of a WG stay in step without a per-tile barrier.
+    # A work-group walking at least this many K steps gets a barrier after each tile.
     TILE_BARRIER_MIN_K_STEPS = 1024
 
     def _get_template_configs_impl(
@@ -4245,19 +4256,12 @@ class XPUPersistentMMTemplateConfigHeuristic(
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
-        m, n, k = kernel_inputs.mnk_hinted()
-        num_sms = get_num_sms()
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
         ):
-            tiles = ceildiv(m, template_kwargs["BLOCK_M"]) * ceildiv(
-                n, template_kwargs["BLOCK_N"]
-            )
-            k_steps = ceildiv(tiles, num_sms) * ceildiv(k, template_kwargs["BLOCK_K"])
             yield {
                 **template_kwargs,
-                "NUM_SMS": num_sms,
-                "TILE_BARRIER": k_steps >= self.TILE_BARRIER_MIN_K_STEPS,
+                "TILE_BARRIER_MIN_K_STEPS": self.TILE_BARRIER_MIN_K_STEPS,
             }
 
 
@@ -4280,6 +4284,10 @@ class XPUTiled2DMMTemplateConfigHeuristic(
             GemmConfig(32, 512, 128, 1, 16),
         ]
         self.exhaustive_configs = self.mm_configs
+
+    def _num_sms(self) -> int:
+        # Above any reachable tile count, so the grid has one work-group per tile.
+        return 2**30
 
 
 @register_template_heuristic(mm_plus_mm_template.uid, "xpu")
