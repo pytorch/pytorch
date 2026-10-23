@@ -311,7 +311,14 @@ def check_windows_zlibwapi_version() -> None:
     """Fail if the bundled zlibwapi.dll is older than zlib 1.3.1 (see #201626)."""
     dll = Path(torch.__file__).parent / "lib" / "zlibwapi.dll"
     if not dll.exists():
-        print("zlibwapi.dll is not bundled, skipping zlib version check")
+        # cmake/PostBuildSteps.cmake bundles the CUDA DLLs, including zlibwapi.dll,
+        # only into wheels that do not depend on the cuda-toolkit pip package.
+        if find_torch_cuda_toolkit_metadata_version() is None:
+            raise RuntimeError(
+                f"{dll} is missing, but this wheel has no cuda-toolkit requirement "
+                "and is expected to bundle it"
+            )
+        print("zlibwapi.dll is not bundled (cuda-toolkit wheel), skipping version check")
         return
 
     file_version = subprocess.check_output(
