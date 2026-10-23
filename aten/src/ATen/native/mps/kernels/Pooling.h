@@ -9,10 +9,12 @@ C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_rows = 2;
 // maximum allowed pooling dimensions is N-2, because the input may have up to 2
 // leading dimensions that are not pooled. To support up to 3-D pooling, N=5 is
 // the default.
+// tid_offset is the first thread of a chunk, see dispatch_1d_chunks.
 template <unsigned N = 5, typename idx_type_t = int32_t>
 struct PoolingParams {
   int32_t dims;
   int32_t pooling_dims;
+  int64_t tid_offset;
   ::c10::metal::array<idx_type_t, N> input_sizes;
   ::c10::metal::array<int64_t, N> input_strides;
   ::c10::metal::array<idx_type_t, N> output_sizes;
@@ -27,41 +29,45 @@ struct PoolingParams {
   bool adaptive;
 };
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+// stride_t is int64_t for the kernels with 64-bit offsets.
+template <unsigned N = 5, typename stride_t = int32_t>
 struct AvgPoolingParams {
   int32_t dims;
   int32_t pooling_dims;
-  ::c10::metal::array<idx_type_t, N> input_sizes;
-  ::c10::metal::array<idx_type_t, N> input_strides;
-  ::c10::metal::array<idx_type_t, N> output_sizes;
-  ::c10::metal::array<idx_type_t, N> output_strides;
-  ::c10::metal::array<idx_type_t, N - 2> kernel_size;
-  ::c10::metal::array<idx_type_t, N - 2> stride;
-  ::c10::metal::array<idx_type_t, N - 2> padding;
+  int64_t tid_offset;
+  ::c10::metal::array<int32_t, N> input_sizes;
+  ::c10::metal::array<stride_t, N> input_strides;
+  ::c10::metal::array<int32_t, N> output_sizes;
+  ::c10::metal::array<stride_t, N> output_strides;
+  ::c10::metal::array<int32_t, N - 2> kernel_size;
+  ::c10::metal::array<int32_t, N - 2> stride;
+  ::c10::metal::array<int32_t, N - 2> padding;
   int32_t divisor_override;
   bool count_include_pad;
   bool has_divisor_override;
   bool adaptive;
 };
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+template <unsigned N = 5, typename stride_t = int32_t>
 struct PoolingBackwardParams {
   int32_t dims;
   int32_t pooling_dims;
-  ::c10::metal::array<idx_type_t, N> grad_input_sizes;
-  ::c10::metal::array<idx_type_t, N> grad_input_strides;
-  ::c10::metal::array<idx_type_t, N> grad_output_sizes;
-  ::c10::metal::array<idx_type_t, N> grad_output_strides;
-  ::c10::metal::array<idx_type_t, N> indices_strides;
+  int64_t tid_offset;
+  ::c10::metal::array<int32_t, N> grad_input_sizes;
+  ::c10::metal::array<stride_t, N> grad_input_strides;
+  ::c10::metal::array<int32_t, N> grad_output_sizes;
+  ::c10::metal::array<stride_t, N> grad_output_strides;
+  ::c10::metal::array<stride_t, N> indices_strides;
 };
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+template <unsigned N = 5, typename stride_t = int32_t>
 struct MaxUnpoolingParams {
   int32_t dims;
   int32_t pooling_dims;
-  ::c10::metal::array<idx_type_t, N> input_sizes;
-  ::c10::metal::array<idx_type_t, N> input_strides;
-  ::c10::metal::array<idx_type_t, N> output_sizes;
-  ::c10::metal::array<idx_type_t, N> output_strides;
-  ::c10::metal::array<idx_type_t, N> indices_strides;
+  int64_t tid_offset;
+  ::c10::metal::array<int32_t, N> input_sizes;
+  ::c10::metal::array<stride_t, N> input_strides;
+  ::c10::metal::array<int32_t, N> output_sizes;
+  ::c10::metal::array<stride_t, N> output_strides;
+  ::c10::metal::array<stride_t, N> indices_strides;
 };
