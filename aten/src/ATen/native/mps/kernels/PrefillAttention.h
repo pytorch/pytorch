@@ -946,7 +946,8 @@ prefill_attention(
   instantiate_attn_one(dtype, bd, hm, dc, ck, 1, mtype)
 
 // Keep the tiles in sync with kPrefillTiles in Attention.h. Head dims above
-// the widest tile run on kChunkTile, so only it gets the chunked variant.
+// 256 (the widest tile) run on 128 (kChunkTile), so only it gets the chunked
+// variant.
 #define instantiate_attn_tiles(dtype, hm, dc, mtype)     \
   instantiate_attn(dtype, 256, hm, dc, 0, mtype);        \
   instantiate_attn(dtype, 192, hm, dc, 0, mtype);        \

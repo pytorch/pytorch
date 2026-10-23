@@ -58,7 +58,7 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
   uint batchSize = q_.size(0);
   uint num_head = q_.size(1);
   uint headSize = q_.size(3);
-  uint N = k_.size(2);
+  uint N = c10::safe_conv<int32_t>(k_.size(2));
   uint gqa_factor = q_.size(1) / k_.size(1);
   uint q_batch_stride = q_.stride(0);
   uint q_head_stride = q_.stride(1);
@@ -129,7 +129,7 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
   uint num_heads = q_.size(1);
   uint seq_len_q = q_.size(2);
   uint headSize = q_.size(3);
-  uint N = k_.size(2);
+  uint N = c10::safe_conv<int32_t>(k_.size(2));
   const uint blocks = kDecodeBlocks;
   uint B = batchSize * num_heads;
   uint gqa_factor = q_.size(1) / k_.size(1);
@@ -220,8 +220,7 @@ static void sdpa_prefill_mps(const Tensor& q,
   // generations (see MppAttention.h).
   static const bool is_apple10_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
   const int64_t d = q.size(3), dv = v.size(3);
-  const bool mpp_mask = !mask_ || mask_->scalar_type() == kBool || mask_->scalar_type() == q.scalar_type();
-  const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && d == dv && k.size(2) > 0 && mpp_mask &&
+  const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && d == dv && k.size(2) > 0 &&
       std::find(kMppTiles.begin(), kMppTiles.end(), d) != kMppTiles.end();
   const int64_t widest = std::max(d, dv);
   const int64_t bd = use_mpp          ? d
@@ -244,7 +243,10 @@ static void sdpa_prefill_mps(const Tensor& q,
   std::string kname;
   if (use_mpp) {
     const auto mpp_dtype = q.scalar_type() == kHalf ? "float16"sv : "bfloat16"sv;
-    const auto mpp_mask_dtype = mask && mask->scalar_type() == kBool ? "bool_"sv : mpp_dtype;
+    const auto mpp_mask_dtype = !mask   ? mpp_dtype
+        : mask->scalar_type() == kBool  ? "bool_"sv
+        : mask->scalar_type() == kFloat ? "float32"sv
+                                        : mpp_dtype;
     kname = fmt::format("prefill_attention_mpp_{}_{}_bq{}_bk{}_bd{}_wm{}_wn1_hm{:d}_dc{:d}_mask{}",
                         is_apple10_or_newer ? "a10"sv : "a9"sv,
                         mpp_dtype,
@@ -361,10 +363,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   const auto q_ = expand_batch(zero_head_dim ? zero_column(query) : query);
   const auto k_ = expand_batch(zero_head_dim ? zero_column(key_) : key_);
   const auto v_ = expand_batch(value_);
-  // The kernels index with 32-bit sizes (strides stay 64-bit).
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      std::max({q_.numel(), k_.numel(), v_.numel()}) <= std::numeric_limits<int32_t>::max(),
-      "scaled_dot_product_attention for MPS does not support tensors with more than 2^31 elements");
 
   auto out_shape = batch_shape;
   out_shape.append({query.sym_size(-3), query.sym_size(-2), value_.sym_size(-1)});
@@ -384,8 +382,19 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   const int64_t q_len = q_.size(2), d = q_.size(3), dv = v_.size(3);
   const float scale_factor = sdp::calculate_scale(q_, scale).expect_float();
   auto out = at::empty({q_.size(0), q_.size(1), q_len, dv}, q_.options());
-  const int64_t bd = q_len <= kDecodeMaxQueries ? decode_bucket(d, dv) : 0;
-  if (out.numel() > 0 && bd > 0 && k_.size(2) >= kTwoPassMinKeys) {
+  // Decode forms uint32 offsets up to the first 1024 (kTwoPassMinKeys) keys of a head and advances pointers past them,
+  // and pass 1 int32 offsets into its {B, H, qL, kDecodeBlocks, bd} partials; prefill takes 64-bit offsets.
+  const auto fits_u32 = [](const Tensor& t, int64_t key_dim = -1) {
+    int64_t offset = 0;
+    for (const auto i : c10::irange(t.dim())) {
+      offset += (std::min(t.size(i), i == key_dim ? kTwoPassMinKeys : t.size(i)) - 1) * t.stride(i);
+    }
+    return offset <= std::numeric_limits<uint32_t>::max();
+  };
+  const bool u32 = fits_u32(q_) && fits_u32(k_, 2) && fits_u32(v_, 2) && fits_u32(out) && (!mask || fits_u32(*mask, 3));
+  const int64_t bd = q_len <= kDecodeMaxQueries && u32 ? decode_bucket(d, dv) : 0;
+  if (out.numel() > 0 && bd > 0 && k_.size(2) >= kTwoPassMinKeys &&
+      out.numel() / dv * kDecodeBlocks * bd <= std::numeric_limits<int32_t>::max()) {
     sdpa_vector_2pass_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
   } else if (out.numel() > 0 && bd > 0) {
     sdpa_vector_fast_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
