@@ -27,6 +27,8 @@ LICENSE_GLOBS = (
     ":(icase,glob)LICENSE",
     ":(icase,glob)third_party/**/LICENSE*",
     ":(icase,glob)third_party/**/COPYING*",
+    ":(icase,glob)torch/csrc/profiler/kineto/**/LICENSE*",
+    ":(icase,glob)torch/csrc/profiler/kineto/**/COPYING*",
 )
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "license_audit_manifest.toml"
