@@ -2,9 +2,11 @@
 
 import contextlib
 from unittest import skipIf
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
@@ -142,6 +144,22 @@ class ComputeBoundedTests(TestCase):
             T(10, 10),
         )
         self.assertNotZero(calculate_runtime(f, *inp))
+
+    def test_mm_unknown_device_tflops(self):
+        def f(a, b):
+            return torch.mm(a, b)
+
+        # Distinct shape from test_mm so the two never share an FX graph cache key.
+        inp = (
+            T(16, 16),
+            T(16, 16),
+        )
+        # Unknown peak TFLOPS (no datasheet entry, no Triton fallback) must fall
+        # back to a memory-bandwidth estimate and still count flops.
+        counters["inductor"]["flop_count"] = 0
+        with patch("torch._inductor.scheduler.get_device_tflops", return_value=0.0):
+            self.assertNotZero(calculate_runtime(f, *inp))
+        self.assertGreater(counters["inductor"]["flop_count"], 0)
 
     def test_addmm(self):
         def f(a, b, c):
