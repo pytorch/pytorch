@@ -565,7 +565,12 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   ideep::attr_t op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto src_desc = src.get_desc();
+#if defined(__aarch64__)
+  auto wei_desc = dnnl::memory::desc(
+      mat2.sizes().vec(), dnnl::memory::data_type::s8, dnnl::memory::format_tag::any);
+#else
   auto wei_desc = wei.get_desc();
+#endif
   auto dst_desc = dst.get_desc();
   auto prim_desc = dnnl::matmul::primitive_desc(
       engine, src_desc, wei_desc, dst_desc, op_attr);
@@ -639,6 +644,12 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &result) {
   // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
+#if defined(__aarch64__)
+  // On AArch64 the matmul primitive dispatches to jit:int8, which only accepts
+  // a row-major src (other layouts fall back to a much slower kernel).
+  // contiguous() is a no-op when mat1 is already row-major.
+  _mkldnn_matmul_i8i8i32_with_primitive(mat1.contiguous(), mat2, result);
+#else
   // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
   bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
   bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
@@ -652,6 +663,7 @@ void mkldnn_matmul_i8i8i32(
   } else {
     _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }
+#endif
 }
 
 } // namespace at
