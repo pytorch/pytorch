@@ -12036,13 +12036,41 @@ class Scheduler:
 
             return False
 
-        for partition, skip_cudagraph in zip(
-            reversed(partitions), reversed(skip_cudagraphs)
+        def cat_buffers_written(partition: PartitionType) -> OrderedSet[str]:
+            names: OrderedSet[str] = OrderedSet()
+            for node in partition:
+                for buf in node.get_outputs():
+                    layout = buf.node.layout
+                    if isinstance(layout, ir.NonOwningLayout):
+                        cat_buf = self.name_to_buf.get(layout.view.get_name())
+                        if cat_buf is not None and isinstance(cat_buf.node, ir.ConcatKernel):
+                            names.add(cat_buf.get_name())
+            return names
+
+        # cat inputs are written in place into the ConcatKernel buffer through
+        # NonOwningLayout views, possibly in partitions before the ConcatKernel
+        # node. The first partition that writes a cat buffer defines it.
+        cat_writes = [cat_buffers_written(partition) for partition in partitions]
+        cat_owner: dict[str, int] = {}
+        for idx, names in enumerate(cat_writes):
+            for name in names:
+                cat_owner.setdefault(name, idx)
+
+        for idx, partition, skip_cudagraph in zip(
+            reversed(range(len(partitions))),
+            reversed(partitions),
+            reversed(skip_cudagraphs),
         ):
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
                 output_names.update(node.outputs_by_name.keys())
+
+            output_names = OrderedSet(
+                name
+                for name in output_names | cat_writes[idx]
+                if cat_owner.get(name, idx) == idx
+            )
 
             returned_output_names = output_names.intersection(unmet_output_names)
 
@@ -12055,8 +12083,9 @@ class Scheduler:
             # WeakDep is fake dependency on unused buffer. It should not appear
             # in partition_input_names for inputs that are actually read or written.
             partition_input_names = (
-                _real_dep_names(read_writes.reads | read_writes.writes) - output_names
-            )
+                _real_dep_names(read_writes.reads | read_writes.writes)
+                | cat_writes[idx]
+            ) - output_names
 
             partition_input_names = OrderedSet(
                 self.mutation_real_name.get(name, name)
