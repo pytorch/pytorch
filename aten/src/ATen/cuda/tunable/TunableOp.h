@@ -52,6 +52,15 @@ class TunableOp {
       ResultEntry result = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
 
+      // Hoisted so the failure log below can reuse them. TUNABLE_LOG1 expands
+      // to Log(1, ...), which evaluates its arguments before checking the log
+      // level, so recomputing Signature() (a typeid lookup) and
+      // params->Signature() (a sprintf) there would cost every failing call
+      // even at verbosity 0. Empty when TunableOp is disabled, which is how
+      // the log knows there is no resolved solution to name.
+      std::string op_sig;
+      std::string concrete_sig;
+
       // Callers already gate on this; skipping the resolve here avoids
       // params->Signature() and manager init for any caller that does not.
       if (!ctx->IsTunableOpEnabled()) {
@@ -59,8 +68,8 @@ class TunableOp {
       }
       else {
         auto& mgr = ctx->GetTuningResultsManager();
-        const auto op_sig = Signature();
-        const auto concrete_sig = params->Signature();
+        op_sig = Signature();
+        concrete_sig = params->Signature();
         const bool has_dynamic_dim = params->dynamic_dims_mask.any();
 
         result = mgr.Lookup(op_sig, concrete_sig);
@@ -116,15 +125,15 @@ class TunableOp {
       }
       TORCH_CHECK(op != nullptr);
       const auto status = op->Call(params);
-      if (status != OK) {
+      if (status != OK && !op_sig.empty()) {
         // Deliberately no retry on Default here. Every caller -- gemm, bgemm,
         // gemm-and-bias and scaled gemm -- already reads a non-OK status as
         // "use my own non-tunable path", so a retry here would duplicate the
         // one the caller is about to make and mask which candidate failed.
         // The failure is not cached either: a tuned entry that fails is a
         // defect worth seeing on every call.
-        TUNABLE_LOG1("solution ", result, " failed for ", Signature(), "(",
-            params->Signature(), "), returning non-OK for caller fallback");
+        TUNABLE_LOG1("solution ", result, " failed for ", op_sig, "(",
+            concrete_sig, "), returning non-OK for caller fallback");
       }
       return status;
     }
