@@ -435,7 +435,6 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
             model(torch.randn(2, 8, device=device))
         self.assertEqual(get_data_ptrs(), data_ptrs)
 
-    @skip_if_lt_x_gpu(1)
     def test_rank0_offload_full_state_dict(self, device):
         # Construct a reference unsharded model on all ranks
         model_args = ModelArgs(dropout_p=0.0)
