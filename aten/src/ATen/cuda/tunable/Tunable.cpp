@@ -105,124 +105,6 @@ std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
 
 // TuningResultsManager
 
-namespace {
-
-std::vector<std::string> SplitUnderscore(const std::string& s) {
-  std::vector<std::string> out;
-  size_t start = 0;
-  while (true) {
-    const size_t pos = s.find('_', start);
-    if (pos == std::string::npos) {
-      out.push_back(s.substr(start));
-      break;
-    }
-    out.push_back(s.substr(start, pos - start));
-    start = pos + 1;
-  }
-  return out;
-}
-
-// Parsed form of a params signature: ab_M_N_K_[B_<b>_]ld_lda_ldb_ldc[_<suffix...>].
-struct GemmShape {
-  bool ok = false;
-  std::string transab;  // [0]=transa, [1]=transb
-  int64_t m = 0, n = 0, k = 0;
-  bool has_b = false;
-  int64_t b = 0;
-  int64_t lda = 0, ldb = 0, ldc = 0;
-  std::string suffix;  // tail after ldc (e.g. scaled_mm "_rw_1_bias_BFloat16")
-};
-
-GemmShape ParseGemmShape(const std::vector<std::string>& t) {
-  GemmShape s;
-  if (t.size() < 8 || t[0].size() != 2) {
-    return s;
-  }
-  size_t i = 0;
-  try {
-    s.transab = t[i++];
-    s.m = std::stoll(t[i++]);
-    s.n = std::stoll(t[i++]);
-    s.k = std::stoll(t[i++]);
-    if (t[i] == "B") {
-      s.has_b = true;
-      i++;
-      s.b = std::stoll(t[i++]);
-    }
-    if (i >= t.size() || t[i] != "ld") {
-      return s;
-    }
-    i++;
-    if (i + 2 >= t.size()) {
-      return s;
-    }
-    s.lda = std::stoll(t[i++]);
-    s.ldb = std::stoll(t[i++]);
-    s.ldc = std::stoll(t[i++]);
-  } catch (...) {
-    return s;
-  }
-  for (; i < t.size(); i++) {
-    s.suffix += "_" + t[i];
-  }
-  s.ok = true;
-  return s;
-}
-
-// True iff `c` can serve `q` by rounding exactly one of {M, N, B} UP to c's value;
-// `delta` is the gap, so the caller can pick the closest candidate. Which ld's
-// may differ is decided by LdsCompatibleWhen*Varies in GemmLdRules.h, which
-// applies the same transpose and tightness rules as ShouldWildcardLd*: an ld
-// that is padded rather than tight is not a function of m/n/k, so it must match
-// exactly even when the dim it would otherwise track is the one being rounded.
-bool NearestLargerMatch(const GemmShape& q, const GemmShape& c, int64_t& delta) {
-  if (!q.ok || !c.ok) {
-    return false;
-  }
-  if (q.transab != c.transab || q.has_b != c.has_b || q.k != c.k ||
-      q.suffix != c.suffix) {
-    return false;
-  }
-  const bool dm = q.m != c.m;
-  const bool dn = q.n != c.n;
-  const bool db = q.has_b && q.b != c.b;
-  if ((dm ? 1 : 0) + (dn ? 1 : 0) + (db ? 1 : 0) != 1) {
-    return false;
-  }
-  const char ta = q.transab[0];
-  const char tb = q.transab[1];
-  const GemmLeadingDims q_lds{q.lda, q.ldb, q.ldc};
-  const GemmLeadingDims c_lds{c.lda, c.ldb, c.ldc};
-  int64_t qv = 0;
-  int64_t cv = 0;
-  if (dm) {
-    if (!LdsCompatibleWhenMVaries(ta, q_lds, q.m, c_lds, c.m)) {
-      return false;
-    }
-    qv = q.m;
-    cv = c.m;
-  } else if (dn) {
-    if (!LdsCompatibleWhenNVaries(tb, q_lds, q.n, c_lds, c.n)) {
-      return false;
-    }
-    qv = q.n;
-    cv = c.n;
-  } else {  // db: no ld depends on B, so all must match.
-    if (q.lda != c.lda || q.ldb != c.ldb || q.ldc != c.ldc) {
-      return false;
-    }
-    qv = q.b;
-    cv = c.b;
-  }
-  if (cv < qv) {
-    return false;
-  }
-  delta = cv - qv;
-  return true;
-}
-
-} // namespace
-
 KernelMap TuningResultsManager::Lookup(const std::string& op_signature) {
   std::scoped_lock l{lock_};
   auto it = results_.find(op_signature);
@@ -299,24 +181,35 @@ ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     return ResultEntry::Null();
   }
 
-  std::scoped_lock l{lock_};
-  auto kernel_map_it = results_.find(op_signature);
-  if (kernel_map_it == results_.cend()) {
-    return ResultEntry::Null();
-  }
-
   const GemmShape q = ParseGemmShape(SplitUnderscore(params_signature));
   if (!q.ok) {
     TUNABLE_LOG3("unparsable params_signature, no nearest match for ", op_signature, ",", params_signature);
     return ResultEntry::Null();
   }
 
+  // Copy out under the lock, then parse and match without it: per-candidate
+  // parsing allocates and calls stoll, and by design the query is not memoized,
+  // so holding lock_ for the whole scan would serialize every concurrent
+  // Lookup/Add on string parsing.
+  std::vector<std::pair<std::string, ResultEntry>> candidates;
+  {
+    std::scoped_lock l{lock_};
+    auto kernel_map_it = results_.find(op_signature);
+    if (kernel_map_it == results_.cend()) {
+      return ResultEntry::Null();
+    }
+    candidates.reserve(kernel_map_it->second.size());
+    for (const auto& [cand_sig, cand_result] : kernel_map_it->second) {
+      candidates.emplace_back(cand_sig, cand_result);
+    }
+  }
+
   // Deliberately not memoized: the result is unmeasured for this shape, and the
   // caller is expected to validate it and persist the outcome instead.
-  const std::string* best_sig = nullptr;
   const ResultEntry* best = nullptr;
+  std::string best_sig;
   int64_t best_delta = std::numeric_limits<int64_t>::max();
-  for (const auto& [cand_sig, cand_result] : kernel_map_it->second) {
+  for (const auto& [cand_sig, cand_result] : candidates) {
     // Normal tuning records Default when it wins, so Default entries sit in the
     // map alongside specialized ones. Borrowing exists to find a specialized
     // kernel worth validating: a near Default would otherwise mask a farther
@@ -330,9 +223,12 @@ ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     if (!NearestLargerMatch(q, ParseGemmShape(SplitUnderscore(cand_sig)), delta)) {
       continue;
     }
-    if (delta < best_delta) {
+    // Deterministic across builds: the map iterates in hash order, so an
+    // absolute-delta tie between donors rounding different dims must not
+    // depend on it. Lexicographically smallest signature wins ties.
+    if (delta < best_delta || (delta == best_delta && (best == nullptr || cand_sig < best_sig))) {
       best = &cand_result;
-      best_sig = &cand_sig;
+      best_sig = cand_sig;
       best_delta = delta;
     }
   }
@@ -342,7 +238,7 @@ ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     return ResultEntry::Null();
   }
   TUNABLE_LOG3("nearest match for ", op_signature, ",", params_signature, " -> ", *best,
-      " from ", *best_sig, " (delta ", best_delta, ")");
+      " from ", best_sig, " (delta ", best_delta, ")");
   return *best;
 }
 
@@ -913,7 +809,7 @@ void TuningContext::EnableNearestMatch(bool value) {
 
 bool TuningContext::IsNearestMatchEnabled() const {
   // The env var is a force-off override only; the member is what the reuse pass sets.
-  static const bool disabled = c10::utils::get_env("INDUCTOR_ATEN_TUNABLEOP_NEAREST_MATCH") == "0";
+  static const bool disabled = c10::utils::get_env("PYTORCH_TUNABLEOP_NEAREST_MATCH") == "0";
   if (disabled) {
     return false;
   }
@@ -930,6 +826,11 @@ void TuningContext::EnableRecordBorrowed(bool value) {
 }
 
 bool TuningContext::IsRecordBorrowedEnabled() const {
+  // Force-off override mirroring IsNearestMatchEnabled above.
+  static const bool disabled = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_BORROWED") == "0";
+  if (disabled) {
+    return false;
+  }
   return record_borrowed_enable_;
 }
 

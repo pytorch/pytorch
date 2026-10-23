@@ -296,19 +296,20 @@ def wildcard_fallback_is_enabled() -> bool:
 # docs/source/cuda.tunable.md -- promoting them would commit us to a supported
 # contract for what is an internal compile-time mechanism.
 def _nearest_match_enable(val: bool = True) -> None:
-    r"""Allow borrowing a tuned solution from a neighbouring shape.
+    r"""Allow the compile-time reuse pass to borrow a tuned solution.
 
-    When a params signature has no exact entry, reuse the tuned solution identical
-    except in one free dimension (M, N or batch count), rounded up. Compile-time
-    only, and disabled during tuning: the borrowed solution is benchmarked and the
-    winner recorded in C++, so execution only needs exact matches.
+    When enabled (and tuning is off), TuningResultsManager::LookupNearest may
+    return the tuned solution identical except in one free dimension (M, N or
+    batch count), rounded up. This is an explicit manager API for the reuse
+    pass, which benchmarks the borrow and records the winner -- it is not
+    consulted by TunableOp dispatch, so execution only needs exact matches.
     """
-    torch._C._cuda_nearest_match_enable(val)  # type: ignore[attr-defined]
+    torch._C._cuda_tunableop_nearest_match_enable(val)  # type: ignore[attr-defined]
 
 
 def _nearest_match_is_enabled() -> bool:
     r"""Returns whether a nearest-match solution may be borrowed."""
-    return torch._C._cuda_nearest_match_is_enabled()  # type: ignore[attr-defined]
+    return torch._C._cuda_tunableop_nearest_match_is_enabled()  # type: ignore[attr-defined]
 
 
 def _record_borrowed_enable(val: bool = True) -> None:
@@ -317,12 +318,12 @@ def _record_borrowed_enable(val: bool = True) -> None:
     The normal write path only records results during tuning. Enable this so a
     reuse pass can write what it decided.
     """
-    torch._C._cuda_record_borrowed_enable(val)  # type: ignore[attr-defined]
+    torch._C._cuda_tunableop_record_borrowed_enable(val)  # type: ignore[attr-defined]
 
 
 def _record_borrowed_is_enabled() -> bool:
     r"""Returns whether borrowed results are persisted."""
-    return torch._C._cuda_record_borrowed_is_enabled()  # type: ignore[attr-defined]
+    return torch._C._cuda_tunableop_record_borrowed_is_enabled()  # type: ignore[attr-defined]
 
 
 def set_max_tuning_duration(duration: int) -> None:
