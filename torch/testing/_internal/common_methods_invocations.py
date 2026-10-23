@@ -13296,7 +13296,7 @@ op_db: list[OpInfo] = [
            ],
            skips=(
                # Strides are not the same! Original strides were ((4, 2, 1),) and strides are now ((4, 1, 2),)
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', active_if=(not TEST_XPU)),
                # torch._C._LinAlgError: linalg.cholesky: (Batch element 0): The factorization could not be completed
                # because the input is not positive-definite (the leading minor of order 2 is not positive-definite).
                DecorateInfo(
@@ -18314,7 +18314,7 @@ op_db: list[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', active_if=(not TEST_XPU)),
                # Error: The operator 'aten::ormqr' is not currently implemented for the MPS device
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            )),
@@ -19120,7 +19120,7 @@ op_db: list[OpInfo] = [
            ],
            skips=(
                # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', active_if=(not TEST_XPU)),
                # Gradcheck fails
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
@@ -20787,7 +20787,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
-    ),
+           skips=(
+               # AssertionError: RuntimeError not raised
+               # https://github.com/intel/torch-xpu-ops/issues/5847
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='xpu'),
+           )),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
@@ -23854,6 +23858,8 @@ python_ref_db = [
                          dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
                          dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type='xpu',
+                         dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -24990,7 +24996,7 @@ python_ref_db = [
             DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
                          'test_python_ref_executor', device_type='cuda',
                          dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', active_if=(not TEST_XPU)),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
@@ -25224,6 +25230,10 @@ python_ref_db = [
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+            ),
+            # Same tracing tensor error on XPU: https://github.com/intel/torch-xpu-ops/issues/5848
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="xpu"
             ),
         ),
     ),
@@ -25636,7 +25646,7 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), active_if=(not TEST_XPU)
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
@@ -25677,7 +25687,7 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), active_if=(not TEST_XPU)
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -25796,7 +25806,7 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), active_if=(not TEST_XPU)
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
