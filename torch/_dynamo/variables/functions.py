@@ -76,6 +76,7 @@ from ..source import (
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    GenericAttrSource,
     GetItemSource,
     ImportSource,
     TypeMROSource,
@@ -93,6 +94,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    object_has_getattribute,
     unpack_iterable,
 )
 from .base import (
@@ -5804,6 +5806,18 @@ class ClassAttrClassMethodVariable(ClassMethodVariable):
         return AttrSource(owner.source, self.name) if owner.source else None
 
 
+def _descriptor_value_source(
+    obj: VariableTracker, obj_value: object, attr_name: str
+) -> AttrSource | GenericAttrSource | None:
+    # The descriptor reads the value directly; a guard through getattr would
+    # run a __getattribute__ override instead.
+    if not obj.source:
+        return None
+    if object_has_getattribute(obj_value):
+        return GenericAttrSource(obj.source, attr_name)
+    return AttrSource(obj.source, attr_name)
+
+
 class MemberDescriptorVariable(DescriptorVariable):
     """C struct field descriptor (member_descriptor on a type).
 
@@ -5880,7 +5894,7 @@ class MemberDescriptorVariable(DescriptorVariable):
                     f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, attr_name)
+        result_source = _descriptor_value_source(obj, obj_value, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
 
     def tp_descr_set_impl(
@@ -6035,7 +6049,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
                     f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, attr_name)
+        result_source = _descriptor_value_source(obj, obj_value, attr_name)
         if (
             obj.source
             and self.descriptor.__objclass__ is type
