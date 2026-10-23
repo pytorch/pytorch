@@ -67,6 +67,7 @@ namespace lazy_linalg {
 
 #if AT_MAGMA_ENABLED()
 
+#if defined(USE_ROCM)
 template <class scalar_t>
 void magmaLdlHermitian(
     magma_uplo_t uplo,
@@ -80,6 +81,7 @@ void magmaLdlHermitian(
       "LDL decomposition is not available.",
       "Please rebuild with MAGMA 2.5.4+.");
 }
+#endif
 
 #if defined(USE_ROCM)
 template<class scalar_t>
@@ -101,6 +103,7 @@ void magmaEig(
 
 #if AT_MAGMA_VERSION >= 20504
 
+#if defined(USE_ROCM)
 template <>
 void magmaLdlHermitian<double>(
     magma_uplo_t uplo,
@@ -154,6 +157,7 @@ void magmaLdlHermitian<c10::complex<float>>(
       uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
+#endif
 
 #endif // AT_MAGMA_VERSION >= 20504
 
@@ -346,6 +350,7 @@ void _warn_once_magma_deprecation(const std::string& op_name, bool force_cusolve
   }
 }
 
+#if defined(USE_ROCM)
 template <typename scalar_t>
 void apply_ldl_factor_magma(
     const Tensor& A,
@@ -410,6 +415,7 @@ void ldl_factor_magma(
         apply_ldl_factor_magma<scalar_t>(LD, pivots, info, upper);
       });
 }
+#endif
 
 void ldl_factor_kernel(
     const Tensor& LD,
@@ -417,47 +423,40 @@ void ldl_factor_kernel(
     const Tensor& info,
     bool upper,
     bool hermitian) {
+#if !defined(USE_ROCM)
+  _warn_once_magma_deprecation("linalg.ldl_factor");
+#endif
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-       {
-#ifndef USE_ROCM
-         if (hermitian) {
-           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
-         }
-#endif
-         ldl_factor_cusolver(
-          LD, pivots, info, upper, hermitian);
-        return;
-}
-    case at::LinalgBackend::Magma:
-       { ldl_factor_magma(LD, pivots, info, upper, hermitian);
-        return;
-}
-    default:
-#ifndef USE_ROCM
-    // By default the custom kernel takes hermitian=true.
+    case at::LinalgBackend::Cusolver: {
+      #if !defined(USE_ROCM)
       if (hermitian) {
         return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
       }
-#endif
-    // Otherwise use cusolver if available and magma otherwise.
-    // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
-    // call magma for complex inputs
-#ifdef USE_LINALG_SOLVER
-#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
-      if (LD.is_complex() && hermitian) {
-        return ldl_factor_magma(
-            LD, pivots, info, upper, hermitian);
-      }
-#endif
-    { ldl_factor_cusolver(
-      LD, pivots, info, upper, hermitian);
-      return;
+      #endif
+      return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
     }
-#else
+    #if defined(USE_ROCM)
+    case at::LinalgBackend::Magma: {
       return ldl_factor_magma(LD, pivots, info, upper, hermitian);
-#endif
+    }
+    #endif
+    default: {
+      #if defined(USE_ROCM)
+      // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
+      // call magma for complex inputs
+        #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
+        if (LD.is_complex() && hermitian) {
+          return ldl_factor_magma(LD, pivots, info, upper, hermitian);
+        }
+        #endif
+      return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
+      #else
+      // By default, the custom kernel takes hermitian=true
+      return hermitian ? ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian)
+                       : ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
+      #endif
+    }
   }
 }
 
