@@ -9276,8 +9276,8 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
     def test_custom_function_class_changes_after_apply(self):
-        # apply caches class attributes, so changes to the class or its bases
-        # must take effect on the next call.
+        # apply reads class attributes from the class dicts along the MRO, so
+        # changes to the class or its bases must take effect on the next call.
         class Base(Function):
             @staticmethod
             def forward(ctx, x):
@@ -9301,8 +9301,6 @@ for shape in [(1,), ()]:
         Sub.forward = staticmethod(lambda x: x * 5)
         self.assertEqual(Sub.apply(x), x * 5)
 
-        # A saved bound apply skips the attribute lookup that would otherwise
-        # assign Sub a new version tag, so only the cache's tag check applies.
         apply = Sub.apply
         Sub.forward = staticmethod(lambda x: x * 6)
         self.assertEqual(apply(x), x * 6)
@@ -9332,7 +9330,7 @@ for shape in [(1,), ()]:
 
     def test_custom_function_metaclass_getattribute(self):
         # A metaclass __getattribute__ can return a different forward on each
-        # read, so apply must not cache forward.
+        # read, so apply must go through it rather than the class dicts.
         forwards = [lambda ctx, x: x * 3, lambda ctx, x: x * 4]
 
         class Meta(type(Function)):
@@ -9353,80 +9351,6 @@ for shape in [(1,), ()]:
         x = torch.randn(3, requires_grad=True)
         self.assertEqual(MyFn.apply(x), x * 3)
         self.assertEqual(MyFn.apply(x), x * 4)
-
-    @skipIfTorchDynamo("tests eager C++ apply's cache, which Dynamo does not use")
-    def test_custom_function_class_info_cached(self):
-        class MyFn(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x * 2
-
-            @staticmethod
-            def backward(ctx, g):
-                return g
-
-        backward_cls = MyFn._backward_cls
-        apply = MyFn.apply
-        x = torch.randn(3, requires_grad=True)
-        # Reset MyFn's version tag. Calling the saved bound apply doesn't look
-        # up MyFn's attributes, so apply must assign the tag itself to cache.
-        MyFn.unrelated = None
-        self.assertEqual(apply(x), x * 2)
-        self.assertIn("_function_class_info", vars(backward_cls))
-        self.assertEqual(apply(x), x * 2)
-
-    def test_custom_function_forward_reassigned_concurrently(self):
-        # Smoke test: apply must not crash while another thread reassigns
-        # forward, and must use the final forward afterwards.
-        class MyFn(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x * 2
-
-            @staticmethod
-            def backward(ctx, g):
-                return g
-
-        forwards = [
-            staticmethod(lambda ctx, x: x * 2),
-            staticmethod(lambda ctx, x: x * 3),
-        ]
-        x = torch.ones(1, requires_grad=True)
-        done = threading.Event()
-        results = set()
-
-        def apply_loop():
-            while not done.is_set():
-                results.add(MyFn.apply(x).item())
-
-        threads = [threading.Thread(target=apply_loop) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for i in range(2000):
-            MyFn.forward = forwards[i % 2]
-        done.set()
-        for t in threads:
-            t.join()
-        self.assertLessEqual(results, {2.0, 3.0})
-        MyFn.forward = forwards[1]
-        self.assertEqual(MyFn.apply(x), x * 3)
-
-    @skipIfTorchDynamo("gc is unreliable under dynamo-wrapped frames")
-    def test_custom_function_class_not_kept_alive(self):
-        class MyFn(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x.clone()
-
-            @staticmethod
-            def backward(ctx, g):
-                return g
-
-        MyFn.apply(torch.randn(3, requires_grad=True))
-        ref = weakref.ref(MyFn)
-        del MyFn
-        gc.collect()
-        self.assertIsNone(ref())
 
     @unittest.skipIf(
         TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
@@ -13602,7 +13526,7 @@ class TestAutogradDeviceType(TestCase):
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
                 )
@@ -13625,7 +13549,7 @@ class TestAutogradDeviceType(TestCase):
             return torch.aminmax(x)[1]
 
         for f in [torch.amin, torch.amax, amax2, amin2]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
                     device=device,
