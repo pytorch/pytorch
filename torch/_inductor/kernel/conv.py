@@ -11,6 +11,7 @@ from .. import config, ir
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
+    emulate_lowp_output_cast,
     fallback_handler,
     lowerings as L,
     register_lowering,
@@ -560,9 +561,13 @@ def convolution(
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
             # we should not add bias when the output channel is 0
             return result
-        return L[aten.add](
+        result = L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
+        # Eager runs the conv without bias and then adds the bias to the rounded
+        # low-precision output (cudnn/MIOpen order), so fused consumers must see
+        # the rounded sum (https://github.com/pytorch/pytorch/issues/201296).
+        return emulate_lowp_output_cast(result)
 
     x.realize()
     weight.realize()

@@ -1969,6 +1969,87 @@ class CudaReproTests(TestCase):
         self.assertIn(f".to(tl.{lowp_name})", code)
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @parametrize("conv_offset", [0, -100, -1000])
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
+    @config.patch(
+        emulate_precision_casts=False,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_conv_bias_rounds_before_log_softmax(self, lowp_dtype, conv_offset):
+        # https://github.com/pytorch/pytorch/issues/201296
+        # Inductor peels the bias off convolution into a separate add. If that add
+        # is fused into a log_softmax consumer without rounding to the conv output
+        # dtype, log_softmax sees unrounded logits whenever the conv output is not
+        # saved for backward, so equivalent graphs produce different gradients.
+        torch.manual_seed(0)
+        # A 3x3 conv cannot be routed to the 1x1 addmm path, which calculates the
+        # bias in fp32 and is not affected by this issue.
+        conv = nn.Conv2d(48, 48, 3, padding=1).to(device_type)
+        x = torch.randn(8, 48, 16, 16, device=device_type)
+        grad_out = torch.softmax(2 * torch.randn(8, 48, 16, 16, device=device_type), 1)
+
+        def f1(t):
+            with torch.autocast(device_type, dtype=lowp_dtype):
+                return F.log_softmax(conv(t), dim=1)
+
+        def f2(t):
+            with torch.autocast(device_type, dtype=lowp_dtype):
+                q = F.log_softmax(conv(t), dim=1)
+            return q + (q - q).detach()  # same values and gradients as f1
+
+        def run(fn, compiled):
+            torch._dynamo.reset()
+            conv.zero_grad()
+            t = x.clone().requires_grad_()
+            if compiled:
+                fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out = fn(t)
+            (-(grad_out * out.float()).sum()).backward()
+            return (
+                out.detach(),
+                t.grad,
+                conv.weight.grad.clone(),
+                conv.bias.grad.clone(),
+            )
+
+        with torch.no_grad():
+            conv.weight.normal_(0, 0.6)
+            # bf16 ulp is up to 8 at this magnitude, so a dropped rounding shifts
+            # the logits by ~1 ulp and log_softmax's exp amplifies it.
+            conv.bias.fill_(conv_offset)
+
+        f1_out, f1_grad, f1_weight_grad, f1_bias_grad = run(f1, True)
+        f2_out, f2_grad, f2_weight_grad, f2_bias_grad = run(f2, True)
+        self.assertEqual(f1_out, f2_out, atol=1e-3, rtol=1e-3)
+        self.assertEqual(f1_grad, f2_grad, atol=1e-3, rtol=1e-3)
+        # the rounded logits also feed the weight/bias gradients
+        self.assertEqual(f1_weight_grad, f2_weight_grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(f1_bias_grad, f2_bias_grad, atol=1e-3, rtol=1e-3)
+
+        eager_out, eager_grad, _, _ = run(f1, False)
+        # conv grads are not compared against eager: a pre-existing
+        # compiled-vs-eager bias-grad gap applies to f1 and f2 alike
+        self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
+        self.assertEqual(f1_grad, eager_grad, atol=1e-3, rtol=1e-3)
+
+        # The rounding must be emitted even when the numeric checks above
+        # cannot see it: fp16 ulps are too small, and conv_offset=0 rounds to
+        # identical values either way. Restrict to reduction kernels because
+        # the autocast to_copy kernels round-trip their own stores.
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        opt_fn = torch.compile(f1, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
+        code = "\n".join(codes)
+        self.assertIn(
+            f".to(tl.{lowp_name})",
+            "\n".join(
+                kernel
+                for kernel in code.split("def triton_")
+                if kernel.split("(", 1)[0].startswith("per_fused")
+            ),
+        )
+
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype
