@@ -1,9 +1,16 @@
+from __future__ import annotations
+
 import os
 import sys
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
-from torch.types import Storage
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.types import Storage
 
 
 __all__: list[str] = [
@@ -165,31 +172,57 @@ class GdsFile:
         torch._C._gds_deregister_handle(self.handle)
         self.handle = None
 
-    def load_storage(self, storage: Storage, offset: int = 0) -> None:
+    def load_storage(
+        self,
+        storage: Storage,
+        offset: int = 0,
+        *,
+        stream: torch.cuda.Stream | None = None,
+    ) -> None:
         """Loads data from the file into the storage.
 
-        This is a wrapper around ``cuFileRead`` (CUDA) / ``hipFileRead`` (ROCm).
+        This is a wrapper around ``cuFileReadAsync`` (CUDA) / ``hipFileReadAsync`` (ROCm).
         ``storage.nbytes()`` of data will be loaded from the file at ``offset``
         into the storage.
+
+        The load is enqueued on ``stream``, so it is ordered after work
+        previously enqueued on that stream. This function blocks until
+        ``stream`` has completed. Not supported during CUDA graph capture.
 
         Args:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
+            stream (torch.cuda.Stream, optional): Stream to enqueue the load on.
+                Must be on the same device as ``storage``. (Default: the
+                current stream of ``storage``'s device)
         """
         if self.handle is None:
             raise AssertionError("Cannot load data from a file that is not registered.")
-        torch._C._gds_load_storage(self.handle, storage, offset)
+        torch._C._gds_load_storage(self.handle, storage, offset, stream)
 
-    def save_storage(self, storage: Storage, offset: int = 0) -> None:
+    def save_storage(
+        self,
+        storage: Storage,
+        offset: int = 0,
+        *,
+        stream: torch.cuda.Stream | None = None,
+    ) -> None:
         """Saves data from the storage into the file.
 
-        This is a wrapper around ``cuFileWrite`` (CUDA) / ``hipFileWrite`` (ROCm).
+        This is a wrapper around ``cuFileWriteAsync`` (CUDA) / ``hipFileWriteAsync`` (ROCm).
         All bytes of the storage will be written to the file at ``offset``.
+
+        The save is enqueued on ``stream``, so it is ordered after work
+        previously enqueued on that stream. This function blocks until
+        ``stream`` has completed. Not supported during CUDA graph capture.
 
         Args:
             storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to. (Default: 0)
+            stream (torch.cuda.Stream, optional): Stream to enqueue the save on.
+                Must be on the same device as ``storage``. (Default: the
+                current stream of ``storage``'s device)
         """
         if self.handle is None:
             raise AssertionError("Cannot save data to a file that is not registered.")
-        torch._C._gds_save_storage(self.handle, storage, offset)
+        torch._C._gds_save_storage(self.handle, storage, offset, stream)
