@@ -86,6 +86,7 @@ from trymerge import (
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
+    merge_loop_skips_internal_checks,
     MergeRule,
     MergeRuleFailedError,
     post_starting_merge_comment,
@@ -510,6 +511,11 @@ class TestFailureComment(TestCase):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestTryMerge(TestCase):
+    def setUp(self) -> None:
+        # Comment author URLs are remembered per process; don't let one test's
+        # fixtures vouch for another's.
+        _COMMENT_AUTHOR_URLS.clear()
+
     def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
@@ -643,7 +649,6 @@ class TestTryMerge(TestCase):
         self, *args: Any
     ) -> None:
         "merge() refetches the PR on retry; later comments can push its URL out."
-        self.addCleanup(_COMMENT_AUTHOR_URLS.clear)
         first = self._pr_with_merge_comment(
             "meta-codesync", "https://github.com/apps/meta-codesync"
         )
@@ -711,6 +716,20 @@ class TestTryMerge(TestCase):
         bodies = {c.args[2]: c.args[3] for c in mock_post.call_args_list}
         self.assertNotIn("might contain internal changes", bodies[1])
         self.assertIn("might contain internal changes", bodies[2])
+
+    def test_merge_loop_waives_only_meta_codesync(self, *args: Any) -> None:
+        "merge()'s own rule checks keep refusing the older bots' plain merges."
+        codesync = self._pr_with_merge_comment(
+            "meta-codesync", "https://github.com/apps/meta-codesync"
+        )
+        self.assertTrue(merge_loop_skips_internal_checks(codesync, 123))
+        for login, url in (
+            ("facebook-github-bot", None),
+            ("facebook-github-tools", "https://github.com/apps/facebook-github-tools"),
+        ):
+            legacy = self._pr_with_merge_comment(login, url)
+            self.assertTrue(can_skip_internal_checks(legacy, 123), login)
+            self.assertFalse(merge_loop_skips_internal_checks(legacy, 123), login)
 
     def test_legacy_bots_skip_any_internal_check(self, *args: Any) -> None:
         "The older export bots keep their unconditional waiver."
@@ -2837,7 +2856,7 @@ class TestMergeInternalChecksWaiver(TestCase):
             if isinstance(can_skip, list)
             else {"return_value": can_skip}
         )
-        with mock.patch("trymerge.can_skip_internal_checks", **waiver):
+        with mock.patch("trymerge.merge_loop_skips_internal_checks", **waiver):
             merge(pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True)
         return [
             call.kwargs.get("skip_internal_checks") for call in mock_rule.call_args_list

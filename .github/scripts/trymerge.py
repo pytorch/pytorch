@@ -783,6 +783,9 @@ def _unedited_comment_author(
     return comment.author_login, author_url
 
 
+META_CODESYNC_APP_URL = "https://github.com/apps/meta-codesync"
+
+
 def can_skip_internal_checks(
     pr: GitHubPR, comment_id: int | None = None, target: GitHubPR | None = None
 ) -> bool:
@@ -806,12 +809,24 @@ def can_skip_internal_checks(
     # ordinary user could register; a comment never seen in the prefetched window
     # has no URL and keeps the guard.  The comment vouches only for its own PR's
     # diff, so a PR stacked below gets no waiver from it.
-    if author_url == "https://github.com/apps/meta-codesync":
+    if author_url == META_CODESYNC_APP_URL:
         if target is not None and target.pr_num != pr.pr_num:
             return False
         check = pr.get_checkrun_conclusions().get(INTERNAL_CHANGES_CHECKRUN_NAME)
         return check is not None and check.status == "NEUTRAL"
     return False
+
+
+def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bool:
+    """The waiver merge()'s own rule checks pass: meta-codesync's only.  Those checks
+    never waived the guard for the older bots, so a plain (non-force) merge from them
+    is still refused while the internal-changes check is not SUCCESS."""
+    author = _unedited_comment_author(pr, comment_id)
+    return (
+        author is not None
+        and author[1] == META_CODESYNC_APP_URL
+        and can_skip_internal_checks(pr, comment_id)
+    )
 
 
 # Bot identities that auto-merge a co-dev PR once its internal Phabricator diff
@@ -3424,13 +3439,13 @@ def merge(
         )
 
     # Check for approvals.  The rule checks raise on has_internal_changes() unless
-    # told to skip it, so pass the waiver merge_into computes for itself; it reads
-    # the current check conclusions, so the retry loop recomputes it per refetch.
+    # told to skip it; the waiver reads the current check conclusions, so the retry
+    # loop recomputes it per refetch.
     find_matching_merge_rule(
         pr,
         repo,
         skip_mandatory_checks=True,
-        skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+        skip_internal_checks=merge_loop_skips_internal_checks(pr, comment_id),
     )
 
     ensure_mergeable_labels(pr, comment_id, dry_run)
@@ -3481,7 +3496,9 @@ def merge(
                 find_matching_merge_rule(
                     pr,
                     repo,
-                    skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+                    skip_internal_checks=merge_loop_skips_internal_checks(
+                        pr, comment_id
+                    ),
                     ignore_current_checks=ignore_current_checks,
                 )
             except MandatoryChecksMissingError as ex:
