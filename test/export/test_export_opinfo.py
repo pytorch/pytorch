@@ -270,7 +270,7 @@ for op in ops:
     def test_preserve_original_behavior(self, device):
         test_script = f"""\
 import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, maybe_set_fake_device
 
 def accelerator_calls_behavior_unchanged():
     device_module = torch.get_device_module("{device}")
@@ -311,7 +311,7 @@ accelerator_calls_behavior_unchanged()
 cpu_x = torch.randn(2)
 with FakeTensorMode(allow_non_fake_inputs=True) as mode:
     accelerator_x = mode.from_tensor(cpu_x)
-    accelerator_x.fake_device = torch.device("{device}")
+    maybe_set_fake_device(accelerator_x, torch.device("{device}"))
     accelerator_y = accelerator_x + accelerator_x
     assert accelerator_y.device.type == torch.device("{device}").type
 
