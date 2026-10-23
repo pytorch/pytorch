@@ -5042,7 +5042,6 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
 
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x,
-    const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
     const bool upper,
