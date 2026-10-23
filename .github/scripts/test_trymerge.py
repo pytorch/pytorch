@@ -767,7 +767,8 @@ class TestTryMerge(TestCase):
     def test_lookalike_login_keeps_internal_checks(self, *args: Any) -> None:
         "A user account with the App's bare login is not the App."
         pr = self._pr_with_merge_comment(
-            "meta-codesync", "https://github.com/meta-codesync"
+            "meta-codesync",
+            "https://github.com/meta-codesync",  # @lint-ignore
         )
         self.assertFalse(can_skip_internal_checks(pr, 123))
 
