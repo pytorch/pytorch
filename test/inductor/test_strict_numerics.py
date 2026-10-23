@@ -264,7 +264,8 @@ class StrictNumericsCompileTest(TestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("p", (1, 3, 5, 16))
-    def test_mvlgamma_sum_order(self, device, dtype, numerics, p):
+    @parametrize("layout", ("contiguous", "transposed", "strided"))
+    def test_mvlgamma_sum_order(self, device, dtype, numerics, p, layout):
         from torch._native.registry import (
             deregister_op_overrides,
             native_decomp_table,
@@ -275,8 +276,20 @@ class StrictNumericsCompileTest(TestCase):
             overrides_only=True
         ):
             self.skipTest("requires active native inner-tree sum registration")
-        x = torch.linspace(10, 30, 257, device=device, dtype=dtype).requires_grad_()
-        grad = torch.linspace(-1.3, 1.7, x.numel(), device=device, dtype=dtype)
+        if layout == "transposed":
+            x = (
+                torch.linspace(10, 30, 257 * 3, device=device, dtype=dtype)
+                .reshape(3, 257)
+                .t()
+            )
+        elif layout == "strided":
+            x = torch.linspace(10, 30, 257 * 2, device=device, dtype=dtype)[::2]
+        else:
+            x = torch.linspace(10, 30, 257, device=device, dtype=dtype)
+        x.requires_grad_()
+        grad = torch.linspace(-1.3, 1.7, x.numel(), device=device, dtype=dtype).reshape(
+            x.shape
+        )
 
         def fn(x):
             return torch.mvlgamma(x, p)
