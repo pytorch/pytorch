@@ -345,7 +345,7 @@ class ConstantVariable(VariableTracker):
         from .tensor import SymNodeVariable
 
         if name == "format" and istype(self.value, str):
-            return variables.BuiltinVariable(str.format).call_function(
+            return VariableTracker.build(tx, str.format).call_function(
                 tx,
                 [self, *args],
                 kwargs,

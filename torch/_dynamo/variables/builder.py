@@ -37,7 +37,6 @@ import re
 import sys
 import time
 import types
-import typing
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
@@ -5617,6 +5616,14 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
+        elif is_typing(value) or isinstance(value, types.GenericAlias):
+            return TypingVariable(value)
+        elif callable(value) and trace_rules.is_numpy(value):
+            return NumpyVariable(value)
+        elif trace_rules.is_numpy_dtype(value):
+            return NumpyDTypeVariable(value)
+        elif trace_rules.is_numpy_type_info(value):
+            return ConstantLikeVariable(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
@@ -5741,18 +5748,6 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(
-            value,
-            (
-                types.GenericAlias,
-                types.UnionType,
-                # `typing.Any | X` (and `typing.Union[...]`) evaluates to a
-                # `typing._UnionGenericAlias` on Python <= 3.10, not a
-                # `types.UnionType`
-                typing._UnionGenericAlias,  # type: ignore[attr-defined]
-            ),
-        ):
-            return TypingVariable(value)
         elif is_namedtuple(value):
             output = [
                 SourcelessBuilder.create(tx, getattr(value, name))
@@ -5862,6 +5857,8 @@ class SourcelessBuilder:
         def method_descriptor_handler(
             tx: "InstructionTranslatorBase", value: types.MethodDescriptorType
         ) -> VariableTracker:
+            if value is str.format:
+                return BuiltinVariable(value)
             # Torch method descriptors (e.g. torch.Tensor.add) keep their
             # trace-rule path.
             if is_torch_class(value.__objclass__):
