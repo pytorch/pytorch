@@ -43,6 +43,8 @@ from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from torch.distributed._hooks.collective_annotations import CollectiveMetadata
+
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
     # (pid, opaque 32-bit thread id, system thread id) for trace lane naming.
@@ -253,6 +255,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
         pm_metrics: Iterable[str] | None = None,
+        pm_sampling_interval_ms: float | None = None,
+        pm_lookback_window_ms: float | None = None,
         enable_graph_dependencies: bool = False,
         enable_event_node_ids: bool = False,
         pftrace_compression_level: int = 1,
@@ -345,7 +349,12 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
         # a monotonic guard so each sample is enqueued at most once.
         self._pm_last_ns: dict[int, int] = {}
         if self._pm_enabled and self._cuspy is not None:
-            self._cuspy.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
+            self._cuspy.request_pm_sampling(
+                self.on_pm_samples,
+                self._pm_metrics,
+                sampling_interval_ms=pm_sampling_interval_ms,
+                lookback_window_ms=pm_lookback_window_ms,
+            )
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
@@ -464,12 +473,41 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
         self._record_calling_thread()
         with self._lock:
             self._open_start = self._boundary_clock_ns()
+        # Tag c10d collectives' kernels for the window only: warmup collectives would
+        # pay for annotations the window drops.
+        if self.available and torch.distributed.is_available():
+            from torch.distributed._hooks.collective_annotations import (
+                register_collective_annotation_hooks,
+            )
+
+            register_collective_annotation_hooks(
+                self, self._push_collective_kernel_metadata, self.pop_annotation
+            )
+
+    def _push_collective_kernel_metadata(self, metadata: CollectiveMetadata) -> None:
+        """Attach a collective's ``record_param_comms`` fields to the kernels it
+        launches. Cuspy doesn't see ``record_param_comms``, so c10d calls this from a
+        pre-hook (see ``register_collective_annotation_hooks`` in
+        ``torch.distributed._hooks.collective_annotations``) and
+        :meth:`pop_annotation` from the post-hook, while the window is open.
+
+        Pushes a new external correlation id and attaches ``metadata`` to it, so the
+        fields land on every kernel this thread launches until the pop.
+        """
+        self._cuspy.push_external_correlation_id()
+        self._cuspy.add_collective_metadata(**metadata)
 
     def close_window(self) -> int | None:
         """End the open window and queue it for deferred export; snapshots its annotations +
         thread map now. Pair with :meth:`set_export` for the paths. Returns the window id."""
         if not self.available:
             return None
+        if torch.distributed.is_available():
+            from torch.distributed._hooks.collective_annotations import (
+                unregister_collective_annotation_hooks,
+            )
+
+            unregister_collective_annotation_hooks(self)
         with self._lock:
             start = self._open_start if self._open_start is not None else 0
             self._open_start = None
@@ -502,10 +540,9 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Cuspy traces are always gzipped (chrome JSON or .pftrace alike); the writer
-            # keys gzip + format off the suffix.
+            # Default to gzip unless a compression suffix was requested.
             out = os.fspath(output_path)
-            w["out"] = out if out.endswith(".gz") else out + ".gz"
+            w["out"] = out if out.endswith((".gz", ".zst")) else out + ".gz"
         self._maybe_write(window_id)
 
     def join(self, *, force: bool = True, timeout_s: float = 30.0) -> None:
@@ -748,7 +785,10 @@ def _attach_event_node_ids(
     # an installed one may merge a node's annotation list into a single dict). Resolving it
     # here rather than reading the store directly is what lets _annotation_to_args spread the
     # fields into args -- a raw list is re-serialized to an opaque "annotation" string instead.
-    ce["annotation"] = _resolve_annotation_column(resolver, gnid)
+    # These ids come from the recorder's instantiate-time walk, so they are exec ids with no
+    # source counterpart: a graph whose annotations stayed on the capture graph
+    # (annotation_config["key_by"] == "source") resolves its kernels but not its event nodes.
+    ce["annotation"] = _resolve_annotation_column(resolver, gnid, gnid)
 
 
 def _add_graph_event_node_spans(
@@ -853,9 +893,32 @@ def _demangle_column(names: Any) -> Any:
     return out
 
 
-def _resolve_annotation_column(resolver, gnid: Any) -> Any:
+def _source_gnid(cols, cat, gnid: Any) -> Any:
+    """Per-row source (capture-graph) node id, 0 where CUPTI reports none -- either this ABI
+    predates the field or the kind has none of its own (MEMCPY2, GRAPH_HOST_NODE). A node id
+    is never 0 (its graph id occupies the high word and starts at 1), so the column says
+    which rows carry a real source id rather than quietly repeating the exec one."""
+    field = getattr(cat, "SOURCE_GRAPH_NODE_ID", None)
+    col = None if field is None else cols.get(field.id)
+    return np.zeros_like(gnid) if col is None else col.astype(np.int64)
+
+
+def _resolve_node_id(resolver, src: int, exec_id: int) -> Any:
+    """Resolve one node against the registry, source node first, then the exec node id (0
+    source = none reported, so straight to the exec id). Which key a graph's entries are
+    under is that capture's choice (annotation_config["key_by"]: rekeyed to each exec graph,
+    or left on the capture graph for CUPTI's sourceGraphNodeId), and a trace can mix graphs
+    that chose differently, so both are tried. The two key spaces hold different graph ids,
+    so a hit is never ambiguous."""
+    if resolver is None:
+        return None
+    hit = resolver(src) if src else None
+    return hit or (resolver(exec_id) if exec_id != src else None)
+
+
+def _resolve_annotation_column(resolver, gnid: Any, src_gnid: Any) -> Any:
     """Per-row graph annotation as an object column. None resolver -> all-None column, no
-    calls. The resolver is memoized per graph_node_id by the observer (see
+    calls. The resolver is memoized per node id by the observer (see
     CuspyObserver._annotation_resolver), so distinct nodes resolve once for its
     lifetime."""
     n = len(gnid)
@@ -863,8 +926,8 @@ def _resolve_annotation_column(resolver, gnid: Any) -> Any:
     if resolver is None:
         out[:] = None
         return out
-    for i, g in enumerate(gnid.tolist()):
-        out[i] = resolver(g)
+    for i, (g, s) in enumerate(zip(gnid.tolist(), src_gnid.tolist())):
+        out[i] = _resolve_node_id(resolver, s, g)
     return out
 
 
@@ -904,15 +967,20 @@ def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
     Returning the op's own stream number is therefore still a distinct logical lane; None is how
     a resolver says "leave it on its CUDA stream"."""
     gnid = frame["graph_node_id"]
+    src_gnid = frame.get("source_graph_node_id")
+    if src_gnid is None:
+        src_gnid = gnid
     n = len(gnid)
     logical = np.array(
         frame["stream_id"], dtype=np.int64
     )  # default: the op's CUDA stream
     names = np.full(n, None, dtype=object)
-    for i, g in enumerate(gnid.tolist()):
+    for i, (g, s) in enumerate(zip(gnid.tolist(), src_gnid.tolist())):
         if not g:
             continue
-        res = lane_resolver(g)
+        # A lane is read off the node's annotation, so it resolves in whichever key space
+        # that graph kept its annotations in (see _resolve_node_id).
+        res = _resolve_node_id(lane_resolver, s, g)
         if res is not None:
             lane, names[i] = res
             logical[i] = lane + (0 if lane >= LOGICAL_LANE_BASE else LOGICAL_LANE_BASE)
@@ -921,6 +989,7 @@ def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
 
 def _kernel_columns(cols, convert, resolver):
     gnid = cols[Kernel.GRAPH_NODE_ID.id].astype(np.int64)
+    src_gnid = _source_gnid(cols, Kernel, gnid)
     corr = cols[Kernel.CORRELATION_ID.id].astype(np.int64)
     return {
         "start_ns": convert(cols[Kernel.START.id]),
@@ -930,9 +999,10 @@ def _kernel_columns(cols, convert, resolver):
         "stream_id": cols[Kernel.STREAM_ID.id].astype(np.int64),
         "correlation_id": corr,
         "graph_node_id": gnid,
+        "source_graph_node_id": src_gnid,
         "graph_id": cols[Kernel.GRAPH_ID.id].astype(np.int64),
         "name": _demangle_column(cols[Kernel.NAME.id]),
-        "annotation": _resolve_annotation_column(resolver, gnid),
+        "annotation": _resolve_annotation_column(resolver, gnid, src_gnid),
         "grid_x": cols[Kernel.GRID_X.id].astype(np.int64),
         "grid_y": cols[Kernel.GRID_Y.id].astype(np.int64),
         "grid_z": cols[Kernel.GRID_Z.id].astype(np.int64),
@@ -951,6 +1021,7 @@ def _kernel_columns(cols, convert, resolver):
 
 def _memcpy_columns(cols, convert, resolver):
     gnid = cols[Memcpy.GRAPH_NODE_ID.id].astype(np.int64)
+    src_gnid = _source_gnid(cols, Memcpy, gnid)
     corr = cols[Memcpy.CORRELATION_ID.id].astype(np.int64)
     return {
         "start_ns": convert(cols[Memcpy.START.id]),
@@ -960,8 +1031,9 @@ def _memcpy_columns(cols, convert, resolver):
         "stream_id": cols[Memcpy.STREAM_ID.id].astype(np.int64),
         "correlation_id": corr,
         "graph_node_id": gnid,
+        "source_graph_node_id": src_gnid,
         "graph_id": cols[Memcpy.GRAPH_ID.id].astype(np.int64),
-        "annotation": _resolve_annotation_column(resolver, gnid),
+        "annotation": _resolve_annotation_column(resolver, gnid, src_gnid),
         "bytes": cols[Memcpy.BYTES.id].astype(np.int64),
         "copy_kind": cols[Memcpy.COPY_KIND.id].astype(np.int64),
         "src_kind": cols[Memcpy.SRC_KIND.id].astype(np.int64),
@@ -978,6 +1050,7 @@ def _memcpy2_columns(cols, convert, resolver):
     # correlation/graph ids). src/dst device aren't surfaced (the span on the issuing device's
     # lane is what's wanted), but they're available on Memcpy2 if needed later.
     gnid = cols[Memcpy2.GRAPH_NODE_ID.id].astype(np.int64)
+    src_gnid = _source_gnid(cols, Memcpy2, gnid)
     corr = cols[Memcpy2.CORRELATION_ID.id].astype(np.int64)
     return {
         "start_ns": convert(cols[Memcpy2.START.id]),
@@ -987,8 +1060,9 @@ def _memcpy2_columns(cols, convert, resolver):
         "stream_id": cols[Memcpy2.STREAM_ID.id].astype(np.int64),
         "correlation_id": corr,
         "graph_node_id": gnid,
+        "source_graph_node_id": src_gnid,
         "graph_id": cols[Memcpy2.GRAPH_ID.id].astype(np.int64),
-        "annotation": _resolve_annotation_column(resolver, gnid),
+        "annotation": _resolve_annotation_column(resolver, gnid, src_gnid),
         "bytes": cols[Memcpy2.BYTES.id].astype(np.int64),
         "copy_kind": cols[Memcpy2.COPY_KIND.id].astype(np.int64),
         "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
@@ -1001,6 +1075,7 @@ def _memcpy2_columns(cols, convert, resolver):
 
 def _memset_columns(cols, convert, resolver):
     gnid = cols[Memset.GRAPH_NODE_ID.id].astype(np.int64)
+    src_gnid = _source_gnid(cols, Memset, gnid)
     corr = cols[Memset.CORRELATION_ID.id].astype(np.int64)
     return {
         "start_ns": convert(cols[Memset.START.id]),
@@ -1010,8 +1085,9 @@ def _memset_columns(cols, convert, resolver):
         "stream_id": cols[Memset.STREAM_ID.id].astype(np.int64),
         "correlation_id": corr,
         "graph_node_id": gnid,
+        "source_graph_node_id": src_gnid,
         "graph_id": cols[Memset.GRAPH_ID.id].astype(np.int64),
-        "annotation": _resolve_annotation_column(resolver, gnid),
+        "annotation": _resolve_annotation_column(resolver, gnid, src_gnid),
         "bytes": cols[Memset.BYTES.id].astype(np.int64),
         "value": cols[Memset.VALUE.id].astype(np.int64),
         "memory_kind": cols[Memset.MEMORY_KIND.id].astype(np.int64),
@@ -1023,6 +1099,7 @@ def _memset_columns(cols, convert, resolver):
 
 def _graph_host_node_columns(cols, convert, resolver):
     gnid = cols[GraphHostNode.GRAPH_NODE_ID.id].astype(np.int64)
+    src_gnid = _source_gnid(cols, GraphHostNode, gnid)
     return {
         "start_ns": convert(cols[GraphHostNode.START.id]),
         "end_ns": convert(cols[GraphHostNode.END.id]),
@@ -1031,8 +1108,9 @@ def _graph_host_node_columns(cols, convert, resolver):
         "stream_id": cols[GraphHostNode.STREAM_ID.id].astype(np.int64),
         "correlation_id": cols[GraphHostNode.CORRELATION_ID.id].astype(np.int64),
         "graph_node_id": gnid,
+        "source_graph_node_id": src_gnid,
         "graph_id": cols[GraphHostNode.GRAPH_ID.id].astype(np.int64),
-        "annotation": _resolve_annotation_column(resolver, gnid),
+        "annotation": _resolve_annotation_column(resolver, gnid, src_gnid),
         "process_id": cols[GraphHostNode.PROCESS_ID.id].astype(np.int64),
         "thread_id": cols[GraphHostNode.THREAD_ID.id].astype(np.int64),
     }

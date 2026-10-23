@@ -294,6 +294,29 @@ macro(torch_hip_get_arch_list store_var)
 endmacro()
 
 ##############################################################################
+# composable_kernel supports CK GEMM only on these gfx archs. Keep this list in
+# sync with at::Context::ckGemmSupported() (aten/src/ATen/Context.cpp) and the
+# runtime dispatch in aten/src/ATen/native/hip/ck_gemm_{half,bfloat16}.hip.
+# Returns the subset of PYTORCH_ROCM_ARCH that CK GEMM supports, matching on the
+# base arch so feature-suffixed targets (e.g. gfx942:xnack+) are kept, mirroring
+# the substring match in at::cuda::detail::CUDAHooks::isGPUArch.
+# Usage:
+#   torch_filter_ck_gemm_arches(variable_to_store_arches)
+#
+function(torch_filter_ck_gemm_arches out_var)
+  set(_supported "gfx90a;gfx942;gfx950")
+  set(_filtered "")
+  foreach(_arch IN LISTS PYTORCH_ROCM_ARCH)
+    string(REGEX REPLACE ":.*$" "" _base "${_arch}")
+    list(FIND _supported "${_base}" _idx)
+    if(NOT _idx EQUAL -1)
+      list(APPEND _filtered "${_arch}")
+    endif()
+  endforeach()
+  set(${out_var} "${_filtered}" PARENT_SCOPE)
+endfunction()
+
+##############################################################################
 # Get the XPU arch flags specified by TORCH_XPU_ARCH_LIST.
 # Usage:
 #   torch_xpu_get_arch_list(variable_to_store_flags)
@@ -376,11 +399,15 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move -Wpessimizing-move)
       # -Wno-interference-size only exists in GCC 12+
       if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
         list(APPEND private_compile_options -Wno-interference-size)
       endif()
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      # icpx uses the clang frontend but reports its own compiler ID
+      list(APPEND private_compile_options -Wmove)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       if(NOT USE_CUDA)
@@ -493,11 +520,11 @@ include(CheckLinkerFlag)
 
 ##############################################################################
 # Check if given flag is supported and append it to provided outputvar
-# Also define HAS_UPPER_CASE_FLAG_NAME variable
+# Also define HAS_<LANG>_UPPER_CASE_FLAG_NAME variable
 # Usage:
 #   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
 function(append_cxx_flag_if_supported flag outputvar)
-    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(TOUPPER "HAS_CXX${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
     # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -513,7 +540,7 @@ function(append_cxx_flag_if_supported flag outputvar)
 endfunction()
 
 function(append_c_flag_if_supported flag outputvar)
-    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(TOUPPER "HAS_C${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
 
     # GCC silences unknown -Wno-XXX flags, so test the corresponding -WXXX.
@@ -571,6 +598,9 @@ endfunction()
 #
 # When USE_LLVM_BOLT is enabled, original libraries are moved to the
 # prebolt/ subdirectory and bolted libraries are written in their place.
+# Pass the target followed by profile names in priority order:
+# torch_optimize_layout_if_enabled(<target> [<profile>...])
+# Falls back to lib<target>.yaml if specified profiles don't exist.
 function(torch_optimize_layout_if_enabled tgt)
   if(USE_PRIORITIZED_TEXT_FOR_LD)
     if(CMAKE_LINKER_TYPE STREQUAL "LLD")
@@ -586,18 +616,35 @@ function(torch_optimize_layout_if_enabled tgt)
     # BOLT needs --emit-relocs. This flag increases the binary size so we
     # scope it to bolt optimized targets rather than applying globally.
     target_link_options_if_supported(${tgt} "--emit-relocs")
-    set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
-    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_profile}")
+
+    find_file(
+      _bolt_profile
+      NAMES ${ARGN} "lib${tgt}.yaml"
+      PATHS "${LLVM_BOLT_PROFILES_DIR}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
+      NO_CACHE
+    )
+    if(NOT _bolt_profile)
+      message(WARNING
+        "No BOLT profile found for ${tgt} in ${LLVM_BOLT_PROFILES_DIR}. "
+        "Skipping BOLT optimization for this target.")
+      return()
+    endif()
+    message(STATUS "Using BOLT profile for ${tgt}: ${_bolt_profile}")
+    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_bolt_profile}")
+
     set(_logfile "${CMAKE_BINARY_DIR}/logs/llvm-bolt-lib${tgt}.txt")
     set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
     add_custom_command(
       TARGET ${tgt} POST_BUILD
+      BYPRODUCTS "${_logfile}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_logfile}>"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_prebolt}>"
       COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
       COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
               -o "$<TARGET_FILE:${tgt}>"
-              "-data=${_profile}" "-log-file=${_logfile}"
+              "-data=${_bolt_profile}" "-log-file=${_logfile}"
               -lite -infer-stale-profile
               -reorder-blocks=ext-tsp -reorder-functions=cdsort
               -split-functions -split-all-cold -split-eh -dyno-stats
@@ -605,5 +652,9 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
       VERBATIM
     )
+
+    add_dependencies(bolt_profile_quality_summary ${tgt})
+    set_property(TARGET bolt_profile_quality_summary APPEND PROPERTY
+        SCRIPT_ARGS "--profile" "${_bolt_profile}" "${_logfile}")
   endif()
 endfunction()

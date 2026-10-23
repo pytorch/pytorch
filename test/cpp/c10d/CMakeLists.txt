@@ -137,7 +137,7 @@ else()
 endif()
 
 if(USE_MPI AND USE_C10D_MPI)
-  add_definitions(-DMPIEXEC=${MPIEXEC})
+  add_compile_definitions(MPIEXEC=${MPIEXEC})
   # MPI is a private dependency of libtorch, but the tests include some
   # private headers of libtorch, which in turn include MPI. As a hacky
   # alternative to making MPI a public dependency of libtorch, we make it

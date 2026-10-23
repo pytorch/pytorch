@@ -64,6 +64,7 @@ __all__ = [
     "STRING_FIELDS",
     "CORRELATION_FIELD",
     "GRAPH_NODE_FIELD",
+    "SOURCE_GRAPH_NODE_FIELD",
     "RecordLayouts",
 ]
 
@@ -133,6 +134,16 @@ GRAPH_NODE_FIELD: dict[int, int] = {
     kind: cat.GRAPH_NODE_ID.id
     for kind, cat in _CATALOGS.items()
     if hasattr(cat, "GRAPH_NODE_ID")
+}
+
+
+# Per-kind source-graph-node-id field: the node a replayed node was instantiated from, i.e.
+# the capture-graph node an annotation was recorded against. Empty on a pre-13.4 CUPTI ABI,
+# which has no such field -- consumers fall back to GRAPH_NODE_FIELD.
+SOURCE_GRAPH_NODE_FIELD: dict[int, int] = {
+    kind: cat.SOURCE_GRAPH_NODE_ID.id
+    for kind, cat in _CATALOGS.items()
+    if hasattr(cat, "SOURCE_GRAPH_NODE_ID")
 }
 
 

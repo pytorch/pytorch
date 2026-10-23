@@ -32,7 +32,7 @@ class InterpValue {
   }
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
-    throw unsupported_dtype();
+    TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 
 #define VALUE_CTOR(Type, Name)            \
@@ -81,26 +81,23 @@ class InterpValue {
   void* ptr{nullptr};
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)         \
-  template <>                                 \
-  inline Type InterpValue::as<Type>() const { \
-    if (dtype_ != k##Name) {                  \
-      throw unsupported_dtype();              \
-    }                                         \
-    return Name##values[0];                   \
+#define VALUE_AS_DISPATCH(Type, Name)                    \
+  template <>                                            \
+  inline Type InterpValue::as<Type>() const {            \
+    TORCH_CHECK(dtype_ == k##Name, "UNSUPPORTED DTYPE"); \
+    return Name##values[0];                              \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH)
 VALUE_AS_DISPATCH(c10::quint8, QUInt8)
 VALUE_AS_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                             \
-  template <>                                                         \
-  inline const std::vector<Type>& InterpValue::as_vec<Type>() const { \
-    if (dtype_.scalar_type() != ScalarType::Name) {                   \
-      throw unsupported_dtype();                                      \
-    }                                                                 \
-    return Name##values;                                              \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                               \
+  template <>                                                           \
+  inline const std::vector<Type>& InterpValue::as_vec<Type>() const {   \
+    TORCH_CHECK(                                                        \
+        dtype_.scalar_type() == ScalarType::Name, "UNSUPPORTED DTYPE"); \
+    return Name##values;                                                \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH)
 VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8)
@@ -231,7 +228,7 @@ class ExprEval {
         ret_value_ = InterpValue((bool)ret_val_arg[0]);
       } break;
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -256,7 +253,7 @@ class ExprEval {
         ret_value_ = InterpValue((bool)ret_val_arg[0]);
       } break;
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 

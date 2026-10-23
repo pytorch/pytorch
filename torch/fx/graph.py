@@ -661,11 +661,17 @@ class CodeGen:
             else:
                 return blue(repr(arg))
 
+        def _format_kwarg(name: str, value: Argument) -> str:
+            value_repr = _get_repr(value)
+            if name.isidentifier() and not keyword.iskeyword(name):
+                return f"{name} = {value_repr}"
+            return f"**{{{name!r}: {value_repr}}}"
+
         def _format_args(
             args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
             res = [_get_repr(a) for a in args]
-            res.extend([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
+            res.extend(_format_kwarg(k, v) for k, v in kwargs.items())
             return ", ".join(res)
 
         # Run through reverse nodes and record the first instance of a use
@@ -794,6 +800,7 @@ class CodeGen:
                 except ModuleNotFoundError:
                     DTensor = None  # type: ignore[assignment,misc]
                     dtensorspec_format_shard_order_str = None
+                from torch._subclasses.meta_utils import is_sparse_compressed_layout
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -803,7 +810,9 @@ class CodeGen:
                 )
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
-                    stride = stringify_shape(t.stride()) if include_stride else ""
+                    compressed = is_sparse_compressed_layout(t.layout)
+                    want_stride = include_stride and not compressed
+                    stride = stringify_shape(t.stride()) if want_stride else ""
                     device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
@@ -813,10 +822,7 @@ class CodeGen:
                     )
 
                 # use string as annotation, to make it valid python code
-                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
-                    torch.sparse_csc,
-                    torch.sparse_csr,
-                ):
+                if isinstance(meta_val, torch.Tensor):
                     # Fake tensors cause tests to wobble, so do not custom print them.
                     is_plain = type(meta_val) is torch.Tensor or isinstance(
                         meta_val, torch._subclasses.FakeTensor
@@ -985,7 +991,7 @@ class CodeGen:
                     call_args = [_get_repr(arg) for arg in node.args]
                     for i, name in boxed_arg_names.items():
                         call_args[i] = name
-                    call_args.extend(f"{k} = {_get_repr(v)}" for k, v in kwargs)
+                    call_args.extend(_format_kwarg(k, v) for k, v in kwargs)
                     formatted_args_str = ", ".join(call_args)
                 else:
                     formatted_args_str = _format_args(node.args, node.kwargs)

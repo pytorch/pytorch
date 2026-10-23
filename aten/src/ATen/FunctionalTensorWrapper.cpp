@@ -37,6 +37,11 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
+  // Remove Fake when creating the wrapper: the wrapper is not a C++ FakeTensor,
+  // only value_ is (similar to removing python_ks so the wrapper is not treated
+  // as a tensor subclass). This matters because C++ FakeTensor is identified by
+  // the Fake key rather than isinstance(FakeTensor) as with Python FakeTensor.
+  key_set_ = key_set_ - c10::DispatchKeySet(c10::DispatchKey::Fake);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
@@ -725,8 +730,7 @@ bool isFunctionalTensor(const std::optional<Tensor>& t) {
 bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) { return false; }
   auto functional_count = 0;
-  for (const auto i : c10::irange(t_list.size())) {
-    auto const & e= t_list[i];
+  for (const std::optional<Tensor>& e : t_list) {
     if (!e.has_value() || !e->defined()) { continue; }
     if (isFunctionalTensor(e)) {
       ++functional_count;
