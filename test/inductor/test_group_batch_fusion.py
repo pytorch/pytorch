@@ -406,17 +406,6 @@ class _TestDropoutMixedArgs(torch.nn.Module):
 
 @instantiate_parametrized_tests
 class TestGroupBatchFusion(TestCase):
-    def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
-        if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
-            return False
-        for key1 in ref_dict:
-            key2 = "_orig_mod." + key1
-            if key2 not in res_dict:
-                raise AssertionError(f"{key1} does not exist in traced module")
-            if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
-                return False
-        return True
-
     def compare_pred(self, module, traced, input, rtol=1e-3, atol=1e-3):
         ref = module(*input)
         res = traced(*input)
@@ -425,26 +414,27 @@ class TestGroupBatchFusion(TestCase):
     def compare_parameters(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_params = dict(module.named_parameters())
         res_params = dict(traced.named_parameters())
-        self.assertTrue(self.compare_dict_tensors(ref_params, res_params, rtol, atol))
+        self.assertEqual(set(res_params), {"_orig_mod." + key for key in ref_params})
+        for key, ref_param in ref_params.items():
+            self.assertEqual(
+                res_params["_orig_mod." + key],
+                ref_param,
+                rtol=rtol,
+                atol=atol,
+                msg=key,
+            )
 
     def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        if not self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol):
-            missing = [key for key in ref_grad if "_orig_mod." + key not in res_grad]
-            if missing:
-                self.fail(f"missing gradients in traced module: {missing}")
-            worst = max(
-                ref_grad,
-                key=lambda key: (res_grad["_orig_mod." + key] - ref_grad[key])
-                .abs()
-                .max()
-                .item(),
-            )
-            diff = (res_grad["_orig_mod." + worst] - ref_grad[worst]).abs().max().item()
-            self.fail(
-                f"gradient mismatch vs eager (rtol={rtol}, atol={atol}): "
-                f"max_abs_diff={diff:.3e} on {worst}"
+        self.assertEqual(set(res_grad), {"_orig_mod." + key for key in ref_grad})
+        for key, ref_value in ref_grad.items():
+            self.assertEqual(
+                res_grad["_orig_mod." + key],
+                ref_value,
+                rtol=rtol,
+                atol=atol,
+                msg=key,
             )
 
     @requires_gpu()
@@ -599,6 +589,8 @@ class TestGroupBatchFusion(TestCase):
                 gate = self.gate(x)
                 up = self.up(x)
                 out = self.act(gate) * up
+                # Exercise the symbolic batch-size output without preventing
+                # fusion of the two pointwise-consumed projections.
                 return (out, gate.shape[0]) if dynamic else out
 
         module = M().eval()
@@ -665,7 +657,7 @@ class TestGroupBatchFusion(TestCase):
         },
         post_grad_fusion_options={},
     )
-    def test_batch_linear_lhs_keeps_pointwise_fusion(self):
+    def test_batch_linear_lhs_different_width_pointwise_consumers_fuse(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -849,16 +841,19 @@ class TestGroupBatchFusion(TestCase):
         for has_bias in [True, False]:
             counters.clear()
             module = M(z, n, has_bias).to(GPU_TYPE)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(20, z, device=GPU_TYPE)]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
+            self.compare_pred(ref_module, traced, input)
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            # Independent eager and fused FP32 reductions can differ by
+            # summation order; 1e-5 replaces the old exact self-comparison.
+            self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+            self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             counters.clear()
 
     @requires_gpu()
@@ -1248,17 +1243,20 @@ class TestGroupBatchFusion(TestCase):
             orig_fusion_options = dict(config.pre_grad_fusion_options)
             counters.clear()
             module = MyModule4(z, "xpu", has_bias)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(20, z, device="xpu")]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
+            self.compare_pred(ref_module, traced, input)
             self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
             self.assertEqual(ref, res)
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            # Independent eager and fused FP32 reductions can differ by
+            # summation order; 1e-5 replaces the old exact self-comparison.
+            self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+            self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             self.assertEqual(
                 orig_fusion_options,
                 dict(config.pre_grad_fusion_options),
@@ -1348,13 +1346,20 @@ class TestGroupBatchFusion(TestCase):
         class _SubclassWeight(torch.Tensor):
             """Minimal subclass that does not support torch.cat."""
 
+            __torch_function__ = torch._C._disabled_torch_function_impl
+            cat_called = False
+
             @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if func is torch.cat:
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.cat.default:
+                    cls.cat_called = True
                     raise NotImplementedError(
                         "cat is not supported for _SubclassWeight"
                     )
-                return super().__torch_function__(func, types, args, kwargs)
+                if func == torch.ops.aten.slice.Tensor:
+                    with torch._C._DisableTorchDispatch():
+                        return func(*args, **(kwargs or {})).as_subclass(cls)
+                raise AssertionError(f"unexpected dispatch: {func}")
 
         fusion = BatchLinearLHSFusion()
         z = 4
@@ -1377,6 +1382,7 @@ class TestGroupBatchFusion(TestCase):
             result,
             "batch_linear_lhs should skip (return None) when weight is a tensor subclass",
         )
+        self.assertTrue(_SubclassWeight.cat_called)
         w_node.meta["example_value"] = torch.randn(z, z)
         self.assertIsNotNone(fusion.match(linear_node))
 
