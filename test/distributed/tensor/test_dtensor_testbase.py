@@ -9,7 +9,11 @@ import torch
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import HardwareClassification, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor import common_dtensor
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
