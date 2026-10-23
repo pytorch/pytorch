@@ -971,7 +971,7 @@ class AutogradFunctionVariable(VariableTracker):
                 variables.UserFunctionVariable(
                     fn.__func__, source=source and AttrSource(source, "__func__")
                 ),
-                variables.UserDefinedClassVariable(self.fn_cls),
+                VariableTracker.build(tx, self.fn_cls),
                 source=source,
             ).call_function(tx, args, kwargs)
         else:
