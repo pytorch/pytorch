@@ -303,7 +303,10 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("eps", (None, -1.0, 0.0, 0.1, 0.7))
+    @parametrize(
+        "eps",
+        (None, -1.0, -1e-100, -(2.0**-149), -(2.0**-150), 2.0**-150, 0.0, 0.1, 0.7),
+    )
     def test_logit_backward_bounds(self, device, dtype, numerics, eps):
         x = torch.tensor(
             [
