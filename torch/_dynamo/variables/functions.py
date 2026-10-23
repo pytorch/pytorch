@@ -5650,8 +5650,15 @@ class PropertyVariable(VariableTracker):
         bound.update(zip(names, args))
         bound.update(kwargs)
         bound = {name: value.realize() for name, value in bound.items()}
+        side_effects = tx.output.side_effects
+        side_effects.mutation(self)
         self.property_args = [bound[name] for name in names[:3]]
-        tx.output.side_effects.store_attr_mutations.get(self, {}).pop("__name__", None)
+        if (
+            sys.version_info >= (3, 13)
+            and self.lookup_tp_getset_member("__name__")
+            is UserDefinedPropertyVariable.tp_getset["__name__"]
+        ):
+            side_effects.remove_attr_mutation(self, "__name__")
         doc = bound["doc"]
         getter_doc = False
         if doc.is_constant_none() and not bound["fget"].is_constant_none():

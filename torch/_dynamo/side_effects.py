@@ -599,6 +599,11 @@ class SideEffects:
                 del self.attr_mutation_kinds[item][name]
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
 
+    def remove_attr_mutation(self, item: VariableTracker, name: str) -> None:
+        if name in self.store_attr_mutations.get(item, ()):
+            del self.store_attr_mutations[item][name]
+            del self.attr_mutation_kinds[item][name]
+
     def get_attr_mutation_kind(
         self, item: VariableTracker, name: str
     ) -> AttrMutationKind:

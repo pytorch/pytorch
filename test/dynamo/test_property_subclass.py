@@ -527,6 +527,93 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(actual[:2], (x + 1, "getter"))
         self.assertEqual(actual[2].__name__, "getter")
 
+    @parametrize("shadow_name", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
+    def test_reinitialization_preserves_instance_name(self, shadow_name):
+        class NamedProperty(property):
+            __name__ = "class name"
+
+        cls = NamedProperty if shadow_name else PropertyWithoutDoc
+
+        def getter(obj):
+            return obj
+
+        def fn(x):
+            p = cls()
+            p.__name__ = "custom"
+            p.__init__(getter)
+            return x + 1, p.__name__, p
+
+        x = torch.ones(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual[:2], expected[:2])
+        self.assertEqual(actual[2].__name__, expected[2].__name__)
+        self.assertEqual(actual[2].__dict__, expected[2].__dict__)
+
+    @parametrize("slotted", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
+    def test_cond_reinitialization_rejects_outer_mutation(self, slotted):
+        class SlottedProperty(property):
+            __slots__ = ()
+
+        cls = SlottedProperty if slotted else PropertyWithoutDoc
+
+        def getter1(obj):
+            return obj + 1
+
+        def getter2(obj):
+            return obj - 1
+
+        def fn(pred, x):
+            p = cls()
+
+            def true_fn(x):
+                p.__init__(getter1)
+                return x + 1
+
+            def false_fn(x):
+                p.__init__(getter2)
+                return x - 1
+
+            return torch.cond(pred, true_fn, false_fn, (x,)), p
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.tensor(True), torch.ones(2)
+            )
+
+    @parametrize("pred", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
+    def test_cond_branch_local_initialization(self, pred):
+        class SlottedProperty(property):
+            __slots__ = ()
+
+        def getter1(obj):
+            return obj + 1
+
+        def getter2(obj):
+            return obj - 1
+
+        def fn(pred, x):
+            def true_fn(x):
+                p = SlottedProperty(getter1)
+                return p.__get__(x, type(x))
+
+            def false_fn(x):
+                p = SlottedProperty(getter2)
+                return p.__get__(x, type(x))
+
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        x = torch.ones(2)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.tensor(pred), x
+        )
+        self.assertEqual(actual, x + 1 if pred else x - 1)
+
     def test_custom_doc_setter_graph_break(self):
         events = []
 
