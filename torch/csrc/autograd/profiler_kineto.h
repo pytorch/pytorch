@@ -202,6 +202,10 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+// Stops global callbacks and memory reports from touching profiler state. The
+// Python atexit hook calls this before C++ static destructors run.
+TORCH_API void closeGlobalCallbackSession();
+
 using ActivityFilter = std::unordered_map<
     torch::profiler::impl::ActivityType,
     std::unordered_set<std::string>>;

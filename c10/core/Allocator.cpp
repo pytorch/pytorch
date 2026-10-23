@@ -1,11 +1,26 @@
 #include <c10/core/Allocator.h>
 #include <array>
+#include <atomic>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <cstring>
 
 namespace c10 {
+
+static std::atomic<MemoryReportingInfoBase*> global_memory_reporter{nullptr};
+
+// The profiler supports both thread-local (default) and global (via
+// profile_all_threads) modes. Here we check thread-local state as the default,
+// and fall back to global profiling if it's not available.
+static MemoryReportingInfoBase* getMemoryReportingInfo() {
+  MemoryReportingInfoBase* reporter = static_cast<MemoryReportingInfoBase*>(
+      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  if (reporter) {
+    return reporter;
+  }
+  return global_memory_reporter.load(std::memory_order_acquire);
+}
 
 DataPtr Allocator::clone(const void* data, std::size_t n) {
   DataPtr new_data = allocate(n);
@@ -58,9 +73,12 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
 }
 
 bool memoryProfilingEnabled() {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
-  return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
+  MemoryReportingInfoBase* reporter = getMemoryReportingInfo();
+  return reporter && reporter->memoryProfilingEnabled();
+}
+
+void setGlobalMemoryReportingInfo(MemoryReportingInfoBase* reporter) {
+  global_memory_reporter.store(reporter, std::memory_order_release);
 }
 
 void reportMemoryUsageToProfiler(
@@ -69,10 +87,9 @@ void reportMemoryUsageToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
-  if (reporter_ptr) {
-    reporter_ptr->reportMemoryUsage(
+  MemoryReportingInfoBase* reporter = getMemoryReportingInfo();
+  if (reporter) {
+    reporter->reportMemoryUsage(
         ptr, alloc_size, total_allocated, total_reserved, device);
   }
 }
@@ -82,10 +99,9 @@ void reportOutOfMemoryToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
-  if (reporter_ptr) {
-    reporter_ptr->reportOutOfMemory(
+  MemoryReportingInfoBase* reporter = getMemoryReportingInfo();
+  if (reporter) {
+    reporter->reportOutOfMemory(
         alloc_size, total_allocated, total_reserved, device);
   }
 }
