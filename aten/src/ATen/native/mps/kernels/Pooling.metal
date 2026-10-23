@@ -431,8 +431,8 @@ kernel void max_pool2d_s1_nchw(
   const int32_t c0 = ow0 - p.padding[1];
   input += pos.z * IH * IW;
 
-  T acc[kRows][kCols];
-  int32_t first_row[kRows];
+  ::metal::array<::metal::array<T, kCols>, kRows> acc;
+  ::metal::array<int32_t, kRows> first_row;
   for (int u = 0; u < kRows; ++u) {
     for (int v = 0; v < kCols; ++v) {
       acc[u][v] = T(0);
@@ -448,9 +448,9 @@ kernel void max_pool2d_s1_nchw(
   const auto ih_end = min(oh0 + kRows - p.padding[0] + (kh - 1) * dh, IH);
   for (auto ih = ih_begin; ih < ih_end; ++ih) {
     const auto row = input + ih * IW;
-    T row_max[kCols];
+    ::metal::array<T, kCols> row_max;
     if IF_CONSTEXPR (KW > 0) {
-      T vals[kCols + KW - 1];
+      ::metal::array<T, kCols + KW - 1> vals;
       for (int i = 0; i < kCols + KW - 1; ++i) {
         vals[i] = row[clamp(c0 + i, 0, IW - 1)];
       }
