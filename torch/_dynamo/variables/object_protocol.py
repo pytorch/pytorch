@@ -9,12 +9,13 @@ etc.) live in their respective VT files.
 
 import abc
 import collections
+import contextlib
 import enum
-import inspect
 import operator
 import sys
 import types
 import typing
+from collections.abc import Callable, Generator
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
@@ -28,7 +29,7 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedTypeError,
@@ -47,7 +48,12 @@ from ..source import (
     TypeMROSource,
     TypeSource,
 )
-from ..utils import specialize_symnode
+from ..utils import (
+    get_type_mro_no_user_code,
+    iter_mro_static_attrs,
+    iter_mro_static_dicts,
+    specialize_symnode,
+)
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -97,9 +103,12 @@ def vt_identity_compare(
     # A bound method is materialized afresh by every attribute access, so it
     # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
     # read off a tensor: `x.device is x.device` is False there too.
-    from .dicts import ConstDictVariable
+    from .dicts import ConstDictVariable, MappingProxyVariable
     from .exception import ExceptionVariable, TracebackVariable
-    from .functions import UserMethodVariable
+    from .functions import (
+        _WrappedSkipFunctionMethodDescriptorCommonVariable,
+        UserMethodVariable,
+    )
     from .lists import ListVariable
     from .sets import (
         DictKeySetVariable,
@@ -109,21 +118,28 @@ def vt_identity_compare(
     )
     from .tensor import CurrentDeviceVariable
 
-    if isinstance(
-        left,
-        (
-            ConstDictVariable,
-            ListVariable,
-            SetVariable,
-            FrozensetVariable,
-            DictKeySetVariable,
-            OrderedSetVariable,
-            TracebackVariable,
-            ExceptionVariable,
-            UserMethodVariable,
-            CurrentDeviceVariable,
-        ),
+    if (
+        isinstance(left, MappingProxyVariable)
+        and isinstance(right, MappingProxyVariable)
+        and left.source is None
+        and right.source is None
     ):
+        return ConstantVariable.create(False)
+
+    trace_created_types = (
+        ConstDictVariable,
+        ListVariable,
+        SetVariable,
+        FrozensetVariable,
+        DictKeySetVariable,
+        OrderedSetVariable,
+        TracebackVariable,
+        ExceptionVariable,
+        UserMethodVariable,
+        _WrappedSkipFunctionMethodDescriptorCommonVariable,
+        CurrentDeviceVariable,
+    )
+    if isinstance(left, trace_created_types) or isinstance(right, trace_created_types):
         return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.
@@ -456,45 +472,47 @@ def generic_is_true(
 _repr_running: set[int] = set()
 
 
+@contextlib.contextmanager
+def repr_guard(obj: VariableTracker) -> Generator[bool]:
+    """Py_ReprEnter/Py_ReprLeave: yields True if obj's repr is already running.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L2803-L2875
+
+    Like CPython, only the tp_repr of containers that can be self-referential
+    (list, dict, set, ...) use this, writing their own placeholder on a cycle.
+    """
+    key = id(obj)
+    if key in _repr_running:
+        yield True
+        return
+    _repr_running.add(key)
+    try:
+        yield False
+    finally:
+        _repr_running.discard(key)
+
+
 def generic_repr(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
-    """Mirrors PyObject_Repr with Py_ReprEnter/Py_ReprLeave cycle detection.
+    """Mirrors PyObject_Repr.
 
     https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
 
     Resolution order: tp_repr -> TypeError if the result is not str.
     """
-    obj_type = maybe_get_python_type(obj)
+    if obj.tp_repr is None:
+        raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
 
-    tp_repr = obj.tp_repr
-    if tp_repr is not None:
-        obj_id = id(obj)
-        if obj_id in _repr_running:
-            sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
-            if obj_type in sentinel:
-                return ConstantVariable.create(sentinel[obj_type])
-            return ConstantVariable.create(obj.repr_recursive_sentinel())
-        # UserList/UserDict.__repr__ is `repr(self.data)`; PyObject_Repr does not
-        # register it, so the inner list/dict catches the cycle.
-        repr_fn = inspect.getattr_static(obj_type, "__repr__")
-        user_reprs = (collections.UserList.__repr__, collections.UserDict.__repr__)
-        if repr_fn not in user_reprs:
-            _repr_running.add(obj_id)
-        try:
-            result = obj.tp_repr_impl(tx)
-        finally:
-            _repr_running.discard(obj_id)
-        result_type = maybe_get_python_type(result)
-        if not issubclass(result_type, str):
-            if sys.version_info >= (3, 15):
-                err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
-            else:
-                err_str = f"__repr__ returned non-string (type {result_type.__name__})"
-            raise_type_error(tx, err_str)
-        return result
-
-    raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+    result = obj.tp_repr_impl(tx)
+    result_type = maybe_get_python_type(result)
+    if not issubclass(result_type, str):
+        if sys.version_info >= (3, 15):
+            err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not {result.python_qualified_name()}"
+        else:
+            err_str = f"__repr__ returned non-string (type {result_type.__name__})"
+        raise_type_error(tx, err_str)
+    return result
 
 
 def generic_str(
@@ -512,7 +530,7 @@ def generic_str(
         return obj
 
     try:
-        if obj.tp_str and type(obj).tp_str_impl is not VariableTracker.tp_str_impl:
+        if obj.tp_str:
             result = obj.tp_str_impl(tx)
         else:
             result = generic_repr(tx, obj)
@@ -1126,6 +1144,8 @@ def pynumber_invert(
     )
 
 
+# This host-side protocol dispatch and validation has no resumable frame.
+@config.patch(nested_graph_breaks=False)
 def generic_getiter(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
@@ -1888,6 +1908,30 @@ def python_constant_richcompare_impl(
     return ConstantVariable.create(result)
 
 
+def python_constant_repr_impl(
+    self: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    fn: Callable[[object], str] = repr,
+) -> VariableTracker:
+    """Constant-fold tp_repr (or tp_str with fn=str) by calling the real type's slot.
+
+    For VTs wrapping a known Python object whose C repr/str Dynamo does not model.
+    """
+    value = self.get_real_python_backed_value()
+    if value is NO_SUCH_SUBOBJ:
+        unimplemented(
+            gb_type="repr() on object without a known value",
+            context=f"{fn.__name__}() on {self}",
+            explanation=f"Dynamo cannot compute {fn.__name__}() of {self.python_type_name()} "
+            "because the underlying Python object is not known at trace time.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        return ConstantVariable.create(fn(value))
+    except Exception as e:
+        raise_observed_exception(type(e), tx, args=list(e.args))
+
+
 # _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
 _REFLECTED_OP: dict[str, str] = {
     "__lt__": "__gt__",
@@ -2207,9 +2251,8 @@ def mro_lookup(py_type: type, name: str) -> object:
     chain.  Returns the raw descriptor/value from the class __dict__,
     or NO_SUCH_SUBOBJ if not found.
     """
-    for base in py_type.__mro__:
-        if name in base.__dict__:
-            return base.__dict__[name]
+    for value in iter_mro_static_attrs(py_type, name):
+        return value
     return NO_SUCH_SUBOBJ
 
 
@@ -2220,7 +2263,7 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and klass.__mro__[0] is klass:
+    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
 
@@ -2241,16 +2284,16 @@ def mro_attr_source(
     Returns None if *name* is absent from the whole MRO; callers decide whether
     that is an error.
     """
-    mro = klass.__mro__
-    for idx, base in enumerate(mro):
-        if name not in base.__dict__:
+    entries = tuple(iter_mro_static_dicts(klass))
+    for idx, (base, namespace) in enumerate(entries):
+        if name not in namespace:
             continue
 
         # Guard the classes we walked past, so the owner stays the owner if one
         # of them later gains *name*. Deduplicated by (id(klass), name): the
         # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
         for absent_idx in range(idx):
-            absent_key = (id(mro[absent_idx]), name)
+            absent_key = (id(entries[absent_idx][0]), name)
             if absent_key in tx.output.guarded_mro_absent_keys:
                 continue
             tx.output.guarded_mro_absent_keys.add(absent_key)
