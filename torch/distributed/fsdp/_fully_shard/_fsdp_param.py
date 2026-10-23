@@ -30,6 +30,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.utils._inspect import _cached_parameters
 
 from ._fsdp_api import (
     AllGatherInput,
@@ -1162,15 +1163,16 @@ class FSDPParam:
                     sharded_local_tensor = sharded_local_tensor.to(
                         self.device, non_blocking=True
                     )
-                pre_all_gather_signature = inspect.signature(
+                num_fn_params = len(
                     # pyrefly: ignore [missing-attribute]
-                    sharded_local_tensor.fsdp_pre_all_gather
+                    _cached_parameters(sharded_local_tensor.fsdp_pre_all_gather)
                 )
-                num_fn_params = len(pre_all_gather_signature.parameters)
                 # Old signature only passes mesh; keep for BC for now
                 if num_fn_params not in (1, 5):
                     raise AssertionError(
-                        f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
+                        "Invalid fsdp_pre_all_gather: "
+                        # pyrefly: ignore [missing-attribute]
+                        f"{inspect.signature(sharded_local_tensor.fsdp_pre_all_gather)}\n"
                         "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
                         "outer_size: torch.Size, outer_stride: tuple[int, ...], "
                         "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
