@@ -87,7 +87,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import mro_attr_source
+from .object_protocol import mro_attr_source, python_constant_repr_impl
 from .user_defined import (
     call_random_fn,
     is_standard_setattr,
@@ -509,6 +509,9 @@ class SuperVariable(VariableTracker):
             ],
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class UnknownVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """
@@ -698,6 +701,9 @@ class CellVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
             ConstantVariable.create(self_contents is None),
             op,
         )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class NewGlobalVariable(VariableTracker):
@@ -1577,6 +1583,9 @@ class GetAttrVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
             return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
         return super().mp_subscript_impl(tx, key)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class CallMethodVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """A method bound to a VT instance.
@@ -1653,6 +1662,9 @@ class CallMethodVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.method_name))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class PythonModuleVariable(VariableTracker):
     # PyModule_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/moduleobject.c#L1203
@@ -1705,6 +1717,9 @@ class PythonModuleVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class TypingVariable(VariableTracker):
@@ -1825,6 +1840,9 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 @functools.lru_cache(maxsize=1)
@@ -2031,8 +2049,7 @@ class NumpyVariable(VariableTracker):
 
     def as_proxy(self) -> Any:
         if config.trace_numpy:
-            # Can replace with EnumType once we drop 3.10 support
-            if isinstance(self.value, enum.EnumMeta):
+            if isinstance(self.value, enum.EnumType):
                 # This is mostly for np._CopyMode
                 return self.value
             if isinstance(self.value, type):
@@ -2053,16 +2070,6 @@ class NullVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
         return "NullVariable"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if sys.version_info < (3, 11):
-            unimplemented(
-                gb_type="cannot reconstruct NullVariable in Python < 3.11",
-                context="",
-                explanation="Attempted to generate PUSH_NULL instruction in Python < 3.11; "
-                "where this instruction does not exist.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
@@ -2367,6 +2374,9 @@ class LoggingLoggerVariable(VariableTracker):
             ],
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ConstantLikeVariable(VariableTracker):
     """self.value is a compile-time constant, but not a literal"""
@@ -2635,6 +2645,9 @@ class RandomClassVariable(VariableTracker):
             )
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
         return RandomVariable.create_from_seed(seed)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class RandomVariable(VariableTracker):
