@@ -12,7 +12,8 @@ earlier inline findings still on the PR (role ``automated_review``), so the
 replies to them have something to answer. post_review.py deletes superseded
 findings nobody replied or reacted to, so those are not shown. Other bots and
 other users are dropped. A comment's ``reactions`` are the emoji reactions of
-the author and maintainers. Bodies are capped and, if the conversation is too
+the author and maintainers, read for the newest ``MAX_REACTION_LOOKUPS``
+reacted comments. Bodies are capped and, if the conversation is too
 long, the oldest items are dropped first, earlier automated findings before
 anything people wrote, and ``truncated`` is set.
 
@@ -52,6 +53,9 @@ REVIEW_AUTHOR = "github-actions[bot]"
 MARKER = "<!-- hardened-pr-review -->"
 AUTOMATED = "automated_review"
 REACTIONS = {"issue_comment": "issues/comments", "review_comment": "pulls/comments"}
+# Reactions are read for the newest reacted comments only, one page each: every
+# lookup is an API call on a token the repository's other workflows share.
+MAX_REACTION_LOOKUPS = 50
 
 Api = Callable[[str], Any]
 
@@ -120,14 +124,22 @@ def cap_encoded(text: str | None, limit: int) -> str:
     return text if keep == len(text) else text[:keep] + " [truncated]"
 
 
+def reacted(kind: str, obj: dict[str, Any]) -> bool:
+    return kind in REACTIONS and bool((obj.get("reactions") or {}).get("total_count"))
+
+
 def reactions_of(
     api: Api, repo: str, kind: str, obj: dict[str, Any], role_of
 ) -> list[dict[str, Any]]:
-    """The author's and maintainers' reactions to a comment."""
-    if kind not in REACTIONS or not (obj.get("reactions") or {}).get("total_count"):
-        return []
+    """The author's and maintainers' reactions to a comment, from its first
+    page of reactions. NotFound if the comment was deleted since it was listed."""
+    page = api(
+        f"repos/{repo}/{REACTIONS[kind]}/{obj.get('id')}/reactions?per_page={PER_PAGE}"
+    )
+    if not isinstance(page, list):
+        raise ValueError(f"reactions of {kind} {obj.get('id')} are not a list")
     out = []
-    for r in paginate(api, f"repos/{repo}/{REACTIONS[kind]}/{obj.get('id')}/reactions"):
+    for r in page:
         login = human_login(r)
         role = role_of(login) if login else None
         if role:
@@ -162,6 +174,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
         return roles[login]
 
     items = []
+    lookups: dict[int, tuple[str, dict[str, Any]]] = {}
     for kind, raw in sources.items():
         for obj in raw:
             if (
@@ -204,12 +217,22 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
                     "in_reply_to_id": obj.get("in_reply_to_id"),
                     "diff_hunk": cap(obj.get("diff_hunk"), MAX_HUNK),
                 }
-            reactions = reactions_of(api, repo, kind, obj, role_of)
-            if reactions:
-                item["reactions"] = reactions
+            if reacted(kind, obj):
+                lookups[id(item)] = (kind, obj)
             items.append(item)
 
     items.sort(key=lambda i: i["created_at"])
+    deleted = set()
+    newest = [i for i in reversed(items) if id(i) in lookups]
+    for item in newest[:MAX_REACTION_LOOKUPS]:
+        try:
+            reactions = reactions_of(api, repo, *lookups[id(item)], role_of)
+        except NotFound:
+            deleted.add(id(item))
+            continue
+        if reactions:
+            item["reactions"] = reactions
+    items = [i for i in items if id(i) not in deleted]
     kept: list[int] = []
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
@@ -219,7 +242,8 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
         "items": [],
     }
     size = len(dumps(envelope))
-    # Newest first, what people wrote before earlier automated findings.
+    # Newest first, and earlier automated findings only once everything people
+    # wrote fits.
     for automated in (False, True):
         for n in reversed(range(len(items))):
             if (items[n]["role"] == AUTOMATED) != automated:
@@ -229,6 +253,9 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
                 break
             size += grow
             kept.append(n)
+        else:
+            continue
+        break
     omitted = len(items) - len(kept)
     return {
         **head,

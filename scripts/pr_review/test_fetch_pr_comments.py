@@ -53,6 +53,7 @@ class FakeApi:
         }
         self.maintainers = set(maintainers)
         self.unknown = set(unknown)
+        self.deleted = set()
         self.calls = []
 
     def __call__(self, endpoint):
@@ -60,8 +61,10 @@ class FakeApi:
         if endpoint == f"repos/{REPO}/pulls/{PR}":
             return self.pull
         base, _, query = endpoint.partition("?")
+        if base in self.deleted:
+            raise fpc.NotFound(endpoint)
         if base in self.pages:
-            page = int(query.rsplit("page=", 1)[1])
+            page = int(query.split("&page=", 1)[1]) if "&page=" in query else 1
             items = self.pages[base]
             return items[(page - 1) * fpc.PER_PAGE : page * fpc.PER_PAGE]
         login = base.split("/collaborators/", 1)[1].split("/", 1)[0]
@@ -319,6 +322,21 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         times = [i["created_at"] for i in out["items"]]
         self.assertEqual(times, sorted(times))
 
+    def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
+        issue = [
+            comment("maint", body="y" * fpc.MAX_BODY, when=f"2026-01-{i:02d}")
+            for i in range(1, 31)
+        ]
+        api = FakeApi(
+            issue=issue,
+            inline=[finding(when="2026-02-01", body="short")],
+            reviews=[ours()],
+            maintainers={"maint"},
+        )
+        out = fpc.collect(api, REPO, PR)
+        self.assertTrue(out["truncated"])
+        self.assertFalse([i for i in out["items"] if i["role"] == fpc.AUTOMATED])
+
 
 class TestReactions(unittest.TestCase):
     def test_reactions_of_the_author_and_maintainers_are_kept(self):
@@ -361,6 +379,34 @@ class TestReactions(unittest.TestCase):
         out = fpc.collect(api, REPO, PR)
         self.assertFalse([c for c in api.calls if "/reactions" in c])
         self.assertFalse([i for i in out["items"] if "reactions" in i])
+
+    def test_a_comment_deleted_since_listing_is_left_out(self):
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[finding(reactions={"total_count": 1})],
+            issue=[comment("maint", id=20)],
+            maintainers={"maint"},
+        )
+        api.deleted.add(f"repos/{REPO}/pulls/comments/10/reactions")
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [20])
+        self.assertFalse(out["truncated"])
+
+    def test_only_the_newest_reacted_comments_are_looked_up(self):
+        issue = [
+            comment(
+                "maint", id=20 + n, when=f"2026-01-0{n}", reactions={"total_count": 1}
+            )
+            for n in range(1, 4)
+        ]
+        reactions = {
+            f"issues/comments/{20 + n}": [reaction("author", "+1")] for n in range(1, 4)
+        }
+        api = FakeApi(issue=issue, maintainers={"maint"}, reactions=reactions)
+        with mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"] if "reactions" in i], [22, 23])
+        self.assertEqual(len([c for c in api.calls if "/reactions" in c]), 2)
 
     def test_only_drive_by_reactions_leave_no_field(self):
         api = FakeApi(
