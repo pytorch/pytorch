@@ -803,6 +803,26 @@ class _TestBenchmarkRequest(BenchmarkRequest):
         return self.result
 
 
+class _TestTunableMatmulRequest(_TestBenchmarkRequest):
+    """Runs a real small matmul so the child's TunableOp manager tunes/records.
+
+    Defined here (not the test file) so the TuningProcess child can unpickle
+    it. Lets a ROCm-gated test submit a real BenchmarkJob through a real
+    worker and assert on the results file both processes share.
+    """
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
+    ) -> float:
+        a = torch.randn(64, 64, device="cuda")
+        b = torch.randn(64, 64, device="cuda")
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        c = torch.matmul(a, b)
+        torch.cuda.synchronize()
+        return (time.perf_counter() - start) * 1000.0
+
+
 class _TestEnvBenchmarkRequest:
     """
     Supports unit testing subprocess environment propagation.
