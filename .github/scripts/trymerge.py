@@ -810,11 +810,16 @@ def can_skip_internal_checks(
     # has no URL and keeps the guard.  The comment vouches only for its own PR's
     # diff, so a PR stacked below gets no waiver from it.
     if author_url == META_CODESYNC_APP_URL:
-        if target is not None and target.pr_num != pr.pr_num:
-            return False
-        check = pr.get_checkrun_conclusions().get(INTERNAL_CHANGES_CHECKRUN_NAME)
-        return check is not None and check.status == "NEUTRAL"
+        return _meta_codesync_waives(pr, target)
     return False
+
+
+def _meta_codesync_waives(pr: GitHubPR, target: GitHubPR | None) -> bool:
+    """meta-codesync's waiver for `target`, given its merge comment on `pr`."""
+    if target is not None and target.pr_num != pr.pr_num:
+        return False
+    check = pr.get_checkrun_conclusions().get(INTERNAL_CHANGES_CHECKRUN_NAME)
+    return check is not None and check.status == "NEUTRAL"
 
 
 def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bool:
@@ -825,7 +830,7 @@ def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bo
     return (
         author is not None
         and author[1] == META_CODESYNC_APP_URL
-        and can_skip_internal_checks(pr, comment_id)
+        and _meta_codesync_waives(pr, None)
     )
 
 
@@ -2272,7 +2277,7 @@ def check_greenlight_reviewed_head_sha(
     wait_window: GreenlightWaitWindow | None,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
-    skip_internal_checks: Callable[[GitHubPR], bool] | None = None,
+    skip_internal_checks: Callable[[GitHubPR], bool] = lambda _: False,
     ignore_current_checks: set[tuple[int, str]] | None = None,
 ) -> None:
     """Block a merge that only greenlight authorizes and that greenlight has not
@@ -2313,8 +2318,7 @@ def check_greenlight_reviewed_head_sha(
                     stacked,
                     repo,
                     skip_mandatory_checks=skip_mandatory_checks,
-                    skip_internal_checks=skip_internal_checks is not None
-                    and skip_internal_checks(stacked),
+                    skip_internal_checks=skip_internal_checks(stacked),
                     ignore_current_checks=ignore_current_checks,
                 ),
             )
