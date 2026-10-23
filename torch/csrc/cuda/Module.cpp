@@ -2063,13 +2063,13 @@ PyObject* THCPModule_cuda_tunableop_wildcard_fallback_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_nearest_match_enable(
+PyObject* THCPModule_cuda_tunableop_nearest_match_enable(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkBool(arg),
-      "cuda_nearest_match_enable expects a bool, but got ",
+      "cuda_tunableop_nearest_match_enable expects a bool, but got ",
       THPUtils_typename(arg));
   at::cuda::tunable::getTuningContext()->EnableNearestMatch(
       THPUtils_unpackBool(arg));
@@ -2077,7 +2077,7 @@ PyObject* THCPModule_cuda_nearest_match_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_nearest_match_is_enabled(
+PyObject* THCPModule_cuda_tunableop_nearest_match_is_enabled(
     PyObject* _unused,
     PyObject* noarg) {
   HANDLE_TH_ERRORS
@@ -2089,13 +2089,13 @@ PyObject* THCPModule_cuda_nearest_match_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_record_borrowed_enable(
+PyObject* THCPModule_cuda_tunableop_record_borrowed_enable(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkBool(arg),
-      "cuda_record_borrowed_enable expects a bool, but got ",
+      "cuda_tunableop_record_borrowed_enable expects a bool, but got ",
       THPUtils_typename(arg));
   at::cuda::tunable::getTuningContext()->EnableRecordBorrowed(
       THPUtils_unpackBool(arg));
@@ -2103,7 +2103,7 @@ PyObject* THCPModule_cuda_record_borrowed_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_record_borrowed_is_enabled(
+PyObject* THCPModule_cuda_tunableop_record_borrowed_is_enabled(
     PyObject* _unused,
     PyObject* noarg) {
   HANDLE_TH_ERRORS
@@ -2765,20 +2765,20 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_wildcard_fallback_is_enabled,
      METH_NOARGS,
      nullptr},
-    {"_cuda_nearest_match_enable",
-     THCPModule_cuda_nearest_match_enable,
+    {"_cuda_tunableop_nearest_match_enable",
+     THCPModule_cuda_tunableop_nearest_match_enable,
      METH_O,
      nullptr},
-    {"_cuda_nearest_match_is_enabled",
-     THCPModule_cuda_nearest_match_is_enabled,
+    {"_cuda_tunableop_nearest_match_is_enabled",
+     THCPModule_cuda_tunableop_nearest_match_is_enabled,
      METH_NOARGS,
      nullptr},
-    {"_cuda_record_borrowed_enable",
-     THCPModule_cuda_record_borrowed_enable,
+    {"_cuda_tunableop_record_borrowed_enable",
+     THCPModule_cuda_tunableop_record_borrowed_enable,
      METH_O,
      nullptr},
-    {"_cuda_record_borrowed_is_enabled",
-     THCPModule_cuda_record_borrowed_is_enabled,
+    {"_cuda_tunableop_record_borrowed_is_enabled",
+     THCPModule_cuda_tunableop_record_borrowed_is_enabled,
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_set_max_tuning_duration",
