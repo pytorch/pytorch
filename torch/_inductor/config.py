@@ -1917,6 +1917,15 @@ provenance_profiler_markers: bool = (
     os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
 )
 
+# Log the runtime value of every symbol that appears as a bare dimension of a
+# compiled graph's inputs or outputs as "inductor_runtime_symbol_values"
+# artifacts, and under the profiler mark each call with a zero-length
+# "inductor_runtime_call:<fx_graph_cache_key>:<call>" range so per-call kernel
+# times can be joined with that call's sizes. Part of the FX graph cache key.
+runtime_symbol_values: bool = (
+    os.environ.get("TORCHINDUCTOR_RUNTIME_SYMBOL_VALUES", "0") == "1"
+)
+
 # Enable caching codegen of triton templates.
 enable_caching_generated_triton_templates: bool = True
 
