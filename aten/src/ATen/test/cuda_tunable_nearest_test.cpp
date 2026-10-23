@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/util/tempfile.h>
 
 // Manager-level coverage for LookupNearest / RecordBorrowed. Unlike
 // cuda_tunable_ld_rules_test.cpp (header-only, no ATen), this drives the real
@@ -172,8 +173,8 @@ TEST(TunableNearest, RecordBorrowedPersistsToFile) {
   FlagGuard g;
   auto* ctx = getTuningContext();
   const std::string prev_file = ctx->GetFilename();
-  const std::string tmp = std::tmpnam(nullptr);
-  ctx->SetFilename(tmp, /*insert_device_ordinal=*/false);
+  auto tmp = c10::make_tempfile("tunableop-borrowed-");
+  ctx->SetFilename(tmp.name, /*insert_device_ordinal=*/false);
   ctx->EnableTuning(false);
   ctx->EnableNearestMatch(true);
   ctx->EnableRecordBorrowed(true);
@@ -183,20 +184,20 @@ TEST(TunableNearest, RecordBorrowedPersistsToFile) {
     mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
     EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
   }
-  const std::string content = ReadFile(tmp);
+  const std::string content = ReadFile(tmp.name);
   EXPECT_NE(content.find(kQSig), std::string::npos);
-  std::remove(tmp.c_str());
   ctx->SetFilename(prev_file, /*insert_device_ordinal=*/false);
 }
 
 TEST(TunableNearest, NoPersistWithoutBorrowOrTuning) {
   // Tuning off and record-borrowed off writes nothing: the verdict lives only
-  // in the calling manager's map.
+  // in the calling manager's map. The tmp file exists (created by
+  // make_tempfile) but must stay empty.
   FlagGuard g;
   auto* ctx = getTuningContext();
   const std::string prev_file = ctx->GetFilename();
-  const std::string tmp = std::tmpnam(nullptr);
-  ctx->SetFilename(tmp, /*insert_device_ordinal=*/false);
+  auto tmp = c10::make_tempfile("tunableop-nopersist-");
+  ctx->SetFilename(tmp.name, /*insert_device_ordinal=*/false);
   ctx->EnableTuning(false);
   ctx->EnableNearestMatch(true);
   ctx->EnableRecordBorrowed(false);
@@ -207,7 +208,6 @@ TEST(TunableNearest, NoPersistWithoutBorrowOrTuning) {
     mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
     EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
   }
-  std::ifstream in(tmp);
-  EXPECT_FALSE(in.good());
+  EXPECT_TRUE(ReadFile(tmp.name).empty());
   ctx->SetFilename(prev_file, /*insert_device_ordinal=*/false);
 }
