@@ -49,6 +49,7 @@ struct PrefillAttnParams {
   int Dv; // V/O columns per slab, <= the tile width
   int n_splits; // threadgroups sharing a Q block along kL; > 1 writes partials
   int n_slabs; // Dv-wide V/O column slabs, the outermost factor of the grid's z
+  int n_score_splits; // splits of the staged scores pass (P @ V merges them)
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
   // 64-bit: a batch/head stride is a product of the other dimensions and
   // overflows 32 bits on large inputs, and the mask qL stride is multiplied
