@@ -2,7 +2,7 @@
 // Adapted from kernels-community/metal-flash-sdpa, which is itself
 // adapted from MLX.
 // Uses simdgroup-matrix MMA for high throughput; supports causal mask,
-// optional additive/bool mask, GQA/MQA and softcapping.
+// optional additive/bool mask, GQA/MQA.
 // Operates on PyTorch's dense [B, H, L, D] layout via per-tensor strides.
 //
 // Included from Attention.metal — no top-level includes / `using` here so the
@@ -526,7 +526,6 @@ struct PrefillAttnParams {
   int kL; // key sequence length
   int gqa_factor; // num_q_heads / num_kv_heads
   float scale;
-  float softcapping;
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
   // 64-bit: a batch/head stride is a product of the other dimensions and
   // overflows 32 bits on large inputs, and the mask qL stride is multiplied
@@ -632,15 +631,10 @@ prefill_attention(
   KBlockLoader loader_k(K, k_seq_stride, Ks, simd_group_id, simd_lane_id);
   VBlockLoader loader_v(V, v_seq_stride, Vs, simd_group_id, simd_lane_id);
 
-  // Apply softcapping by scaling the inputs before tanh.
-  float adjusted_scale = params->scale;
-  if (params->softcapping != 1.0f) {
-    adjusted_scale = params->scale / params->softcapping;
-  }
   // 1.44269504089 = 1 / ln(2) so we can use exp2 instead of exp. Scale the
   // scores in AccumType, not Q in T: rounding the scale and the scaled Q to
   // the input dtype compounds into a visible error at large scales.
-  const AccumType scale2 = adjusted_scale * 1.44269504089f;
+  const AccumType scale2 = params->scale * 1.44269504089f;
 
   constexpr short kFragSize = 8;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
@@ -834,25 +828,6 @@ prefill_attention(
             } else {
               Stile.frag_at(i, j)[jj] += selem_t(mfrag[jj]) * kLog2E;
             }
-          }
-        }
-      }
-    }
-
-    // Softcapping (tanh-based).
-    if (params->softcapping != 1.0f) {
-      using stile_t = decltype(Stile);
-      using selem_t = typename stile_t::elem_type;
-      const selem_t softcapping_val = static_cast<selem_t>(params->softcapping);
-
-      PREFILL_PRAGMA_UNROLL
-      for (short i = 0; i < stile_t::kTileRows; i++) {
-        PREFILL_PRAGMA_UNROLL
-        for (short j = 0; j < stile_t::kTileCols; j++) {
-          PREFILL_PRAGMA_UNROLL
-          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
-            Stile.frag_at(i, j)[jj] =
-                metal::tanh(Stile.frag_at(i, j)[jj]) * softcapping_val;
           }
         }
       }
