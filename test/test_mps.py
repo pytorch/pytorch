@@ -10532,11 +10532,15 @@ class TestLargeTensors(TestCaseMPS):
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
         a = torch.rand(1, 1024, 1024, dtype=torch.float16, device='mps')
         b = torch.rand(5000, 1, 1, dtype=torch.float16, device='mps')
-        rc = (a + b).sin()
+        # In-place, so only one 10 GB tensor is alive; two exceed the GPU working set of a 24 GB Mac
+        rc = (a + b).sin_()
         slice_idx = -2
         rc_slice = rc[slice_idx:]
         rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
         self.assertEqual(rc_slice, rc_slice_cpu)
+        del a, b, rc, rc_slice
+        gc.collect()
+        torch.mps.empty_cache()
 
     def test_64bit_index_select(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
