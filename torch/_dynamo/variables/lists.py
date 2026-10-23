@@ -2155,11 +2155,7 @@ class ByteArrayVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
-            return ByteArrayVariable(
-                bytearray(self.data[index]),
-                source=None,
-                mutation_type=ValueMutationNew() if self.mutation_type else None,
-            )
+            return VariableTracker.build(tx, bytearray(self.data[index]))
         else:
             raise_type_error(
                 tx,
@@ -2205,7 +2201,7 @@ class ByteArrayVariable(VariableTracker):
             new_data = self.data * n
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return ByteArrayVariable(new_data, mutation_type=ValueMutationNew())
+        return VariableTracker.build(tx, new_data)
 
     def sq_inplace_repeat_impl(
         self,
@@ -2250,10 +2246,7 @@ class ByteArrayVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # bytearray_concat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        return ByteArrayVariable(
-            self.data + self._concat_operand(tx, other),
-            mutation_type=ValueMutationNew(),
-        )
+        return VariableTracker.build(tx, self.data + self._concat_operand(tx, other))
 
     def sq_inplace_concat_impl(
         self,
@@ -2298,9 +2291,7 @@ class ByteArrayVariable(VariableTracker):
                 result = self.data % other.as_python_constant()
             except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-            return ByteArrayVariable(
-                bytearray(result), mutation_type=ValueMutationNew()
-            )
+            return VariableTracker.build(tx, bytearray(result))
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.operator.mod),
             [self, other],
