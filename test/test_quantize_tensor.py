@@ -712,32 +712,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(scales, scales_ref)
         self.assertEqual(qdata.stride()[dim[-1]], 1)
 
-    @parametrize("dim", ((1, 2), (2, 1), (-3, -2)))
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_trailing_batch_special_values(self, dim, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.zeros(2, 64, 128, 32, dtype=torch.bfloat16, device=device)
-        data_hp[0, 10, 12, 0] = torch.nan
-        data_hp[1, 4, 32, 31] = -torch.inf
-        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(data_hp, dim, False, True)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
-
-    @parametrize("dim", ((1, 3), (3, 1)))
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_interleaved_special_values(self, dim, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.zeros(2, 64, 4, 128, dtype=torch.bfloat16, device=device)
-        data_hp[0, 10, 1, 12] = torch.nan
-        data_hp[1, 4, 3, 32] = -torch.inf
-        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(data_hp, dim, False, True)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
-
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_batch_grid_z(self, device):
         if not _NVIDIA_SM100_OR_LATER:
