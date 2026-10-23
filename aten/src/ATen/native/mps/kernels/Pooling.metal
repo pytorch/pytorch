@@ -71,6 +71,18 @@ IterBounds<int32_t> get_pool_input_iter_bounds(
       geom.dilation);
 }
 
+// Replaces max_value with val if val is greater or NaN, which matches CPU
+// behavior, and returns whether it was replaced
+template <typename T>
+inline bool update_max(thread T& max_value, T val) {
+  bool take = val > max_value;
+  if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+    take = take || val != val;
+  }
+  max_value = take ? val : max_value;
+  return take;
+}
+
 // Iterates through all the input elements that this kernel needs to
 // apply max to. Specialized for 3 pooling dimensions.
 // TODO: Support any number of pooling dims
@@ -108,12 +120,8 @@ void max_pool_3d_input_iter(
 
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2 += d2) {
         auto offset2 = stride2 * i2;
-        auto input_value = input[offset0 + offset1 + offset2];
-        // Matches CPU: NaN wins, (val != val) is false for integral types
-        bool is_greater = input_value > max_value || input_value != input_value;
-
-        max_value = is_greater ? input_value : max_value;
-
+        const bool is_greater =
+            update_max(max_value, input[offset0 + offset1 + offset2]);
         if (return_indices) {
           auto input_index = i0 * size12 + i1 * geom.input_sizes[2] + i2;
           max_index = is_greater ? input_index : max_index;
@@ -151,12 +159,7 @@ void max_pool_2d_input_iter(
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1 += d1) {
       auto offset1 = stride1 * i1;
 
-      auto input_value = input[offset0 + offset1];
-      // Matches CPU: NaN wins, (val != val) is false for integral types
-      bool is_greater = input_value > max_value || input_value != input_value;
-
-      max_value = is_greater ? input_value : max_value;
-
+      const bool is_greater = update_max(max_value, input[offset0 + offset1]);
       if IF_CONSTEXPR (return_indices) {
         auto input_index = idx_t(i0) * geom.input_sizes[1] + i1;
         max_index = is_greater ? input_index : max_index;
@@ -350,6 +353,26 @@ kernel void max_pool(
   }
 }
 
+// Returns the offsets of the input image (NHWC) or plane (NCHW) and of the
+// output element for max_pool2d_dense, given the input and output [C, H, W]
+// sizes. Only those offsets need 64-bit math.
+template <bool channels_last>
+inline long2 max_pool2d_dense_offsets(
+    uint3 pos,
+    constant int32_t* in_sizes,
+    constant int32_t* out_sizes) {
+  const auto C = in_sizes[0];
+  if IF_CONSTEXPR (channels_last) {
+    return long2(
+        int64_t(pos.z / out_sizes[1]) * (in_sizes[1] * in_sizes[2] * C) + pos.x,
+        int64_t(pos.z) * (out_sizes[2] * C) + (pos.y * C + pos.x));
+  }
+  return long2(
+      int64_t(pos.z) * (in_sizes[1] * in_sizes[2]),
+      int64_t(pos.z) * (out_sizes[1] * out_sizes[2]) +
+          (pos.y * out_sizes[2] + pos.x));
+}
+
 // Specialization of max_pool for 2D pooling of dense NCHW or NHWC tensors that
 // ignores strides. The grid maps directly to output coordinates, which avoids
 // most of the div/mod by runtime sizes that find_pool_offsets needs.
@@ -362,28 +385,16 @@ kernel void max_pool2d_dense(
     uint3 pos [[thread_position_in_grid]]) {
   const int32_t C = p.input_sizes[p.dims - 3];
   const int32_t IH = p.input_sizes[p.dims - 2], IW = p.input_sizes[p.dims - 1];
-  const int32_t OH = p.output_sizes[p.dims - 2],
-                OW = p.output_sizes[p.dims - 1];
-  int32_t oh, ow, stride_h, stride_w;
-  // Only the base offset of the image (NHWC) or plane (NCHW) needs 64 bits
-  int64_t in_base, out_offset;
-  if IF_CONSTEXPR (channels_last) {
-    // pos = (c, ow, n * OH + oh)
-    oh = pos.z % OH;
-    ow = pos.y;
-    stride_w = C;
-    stride_h = IW * C;
-    in_base = int64_t(pos.z / OH) * (IH * stride_h) + pos.x;
-    out_offset = int64_t(pos.z) * (OW * C) + (ow * C + pos.x);
-  } else {
-    // pos = (ow, oh, n * C + c)
-    oh = pos.y;
-    ow = pos.x;
-    stride_w = 1;
-    stride_h = IW;
-    in_base = int64_t(pos.z) * (IH * IW);
-    out_offset = int64_t(pos.z) * (OH * OW) + (oh * OW + ow);
-  }
+  const int32_t OH = p.output_sizes[p.dims - 2];
+  // pos is (c, ow, n * OH + oh) for channels_last, else (ow, oh, n * C + c)
+  const int32_t oh = channels_last ? pos.z % OH : pos.y;
+  const int32_t ow = channels_last ? pos.y : pos.x;
+  const int32_t stride_w = channels_last ? C : 1;
+  const int32_t stride_h = IW * stride_w;
+  const auto offsets = max_pool2d_dense_offsets<channels_last>(
+      pos,
+      p.input_sizes.data() + p.dims - 3,
+      p.output_sizes.data() + p.dims - 3);
   const auto dh = p.dilation[0], dw = p.dilation[1];
   auto h_start = oh * p.stride[0] - p.padding[0];
   auto w_start = ow * p.stride[1] - p.padding[1];
@@ -396,23 +407,21 @@ kernel void max_pool2d_dense(
     w_start += dw * ((dw - 1 - w_start) / dw);
   }
 
-  input += in_base;
+  input += offsets.x;
   T max_value = input[h_start * stride_h + w_start * stride_w];
   int32_t max_index = h_start * IW + w_start;
   for (auto ih = h_start; ih < h_end; ih += dh) {
     for (auto iw = w_start; iw < w_end; iw += dw) {
-      const auto val = input[ih * stride_h + iw * stride_w];
-      // Matches CPU: NaN wins, (val != val) is false for integral types
-      const bool take = val > max_value || val != val;
-      max_value = take ? val : max_value;
+      const bool take =
+          update_max(max_value, input[ih * stride_h + iw * stride_w]);
       if IF_CONSTEXPR (return_indices) {
         max_index = take ? ih * IW + iw : max_index;
       }
     }
   }
-  output[out_offset] = max_value;
+  output[offsets.y] = max_value;
   if IF_CONSTEXPR (return_indices) {
-    indices[out_offset] = max_index;
+    indices[offsets.y] = max_index;
   }
 }
 
@@ -467,10 +476,7 @@ kernel void max_pool2d_s1_nchw(
       for (int v = 0; v < kCols; ++v) {
         row_max[v] = vals[v];
         for (int j = 1; j < KW; ++j) {
-          // Matches CPU: NaN wins, (val != val) is false for integral types
-          const bool take =
-              vals[v + j] > row_max[v] || vals[v + j] != vals[v + j];
-          row_max[v] = take ? vals[v + j] : row_max[v];
+          update_max(row_max[v], vals[v + j]);
         }
       }
     } else {
@@ -479,9 +485,7 @@ kernel void max_pool2d_s1_nchw(
       }
       for (int32_t j = 1; j < kw; ++j) {
         for (int v = 0; v < kCols; ++v) {
-          const T val = row[clamp(c0 + v + j, 0, IW - 1)];
-          const bool take = val > row_max[v] || val != val;
-          row_max[v] = take ? val : row_max[v];
+          update_max(row_max[v], row[clamp(c0 + v + j, 0, IW - 1)]);
         }
       }
     }
@@ -492,9 +496,8 @@ kernel void max_pool2d_s1_nchw(
       }
       const bool first = ih == first_row[u];
       for (int v = 0; v < kCols; ++v) {
-        const bool take =
-            first || row_max[v] > acc[u][v] || row_max[v] != row_max[v];
-        acc[u][v] = take ? row_max[v] : acc[u][v];
+        acc[u][v] = first ? row_max[v] : acc[u][v];
+        update_max(acc[u][v], row_max[v]);
       }
     }
   }
