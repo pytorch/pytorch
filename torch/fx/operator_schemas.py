@@ -462,25 +462,26 @@ def normalize_function(
         if not callable(target):
             raise AssertionError(f"target must be callable, got {type(target)}")
         torch_op_schemas = get_signature_for_torch_op(target)
-        matched_schemas: list[inspect.Signature] = []
+        matched: list[tuple[inspect.Signature, inspect.BoundArguments]] = []
         if torch_op_schemas:
             # Iterate through all of the schema until we find one that matches
             # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    _fast_bind(candidate_signature, *args, **kwargs)
-                    matched_schemas.append(candidate_signature)
+                    bound = _fast_bind(candidate_signature, *args, **kwargs)
+                    matched.append((candidate_signature, bound))
                 except TypeError:
                     continue
 
-            if len(matched_schemas) == 0:
+            if len(matched) == 0:
                 # Did not match any schema. Cannot normalize
                 pass
-            elif len(matched_schemas) == 1:
+            elif len(matched) == 1:
                 # Matched exactly one schema, unambiguous
+                sig, bound = matched[0]
                 new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
-                    matched_schemas[0], args, kwargs, normalize_to_only_use_kwargs
+                    sig, args, kwargs, normalize_to_only_use_kwargs, bound
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
@@ -512,9 +513,7 @@ def normalize_function(
                 else:
                     # Matched more than one schema. In this situation, the caller must provide the types of
                     # the arguments of the overload they expect.
-                    schema_printouts = "\n".join(
-                        str(schema) for schema in matched_schemas
-                    )
+                    schema_printouts = "\n".join(str(sig) for sig, _ in matched)
                     raise RuntimeError(
                         f"Tried to normalize arguments to {torch.typename(target)} but "
                         f"the schema match was ambiguous! Please provide argument types to "
@@ -576,6 +575,7 @@ def _args_kwargs_to_normalized_args_kwargs(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
+    bound_args: inspect.BoundArguments | None = None,
 ) -> ArgsKwargsPair | None:
     """
     Given a call target, args, and kwargs, return the arguments normalized into
@@ -588,6 +588,8 @@ def _args_kwargs_to_normalized_args_kwargs(
         args (Tuple): Arguments that appear at the callsite for `target`
         kwargs (Dict): Keyword arguments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
+        bound_args (Optional[inspect.BoundArguments]): ``_fast_bind(sig, *args, **kwargs)``,
+            if the caller already computed it.
 
     Returns:
 
@@ -609,7 +611,8 @@ def _args_kwargs_to_normalized_args_kwargs(
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
 
-    bound_args = _fast_bind(sig, *args, **kwargs)
+    if bound_args is None:
+        bound_args = _fast_bind(sig, *args, **kwargs)
     bound_args.apply_defaults()
 
     new_kwargs: dict[str, Any] = {}
