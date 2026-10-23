@@ -12061,6 +12061,19 @@ class TestGroupedMM(TestCase):
         with mock.patch.dict(os.environ, {env_var: "1"}):
             self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.bfloat16)
+    def test_grouped_gemm_ck_tile_large_stride_fallback(self, device, dtype):
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        # A stride ck_tile can't hold in int32 must fall back rather than error; the size-one dim avoids huge storage.
+        a = torch.randn(16, device=device, dtype=dtype).as_strided((1, 1, 16), (16, 2**32, 1))
+        b = self._make_grouped_mm_matrix((17, 16), True, device, dtype)
+        offs = torch.tensor([17], device=device, dtype=torch.int32)
+        with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
+            self.grouped_mm_helper(a, b, offs, backward=False)
+
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
         subtest(((25, 8192), (1, 1024, 8192), [25], True, False), name="rows_bn128"),

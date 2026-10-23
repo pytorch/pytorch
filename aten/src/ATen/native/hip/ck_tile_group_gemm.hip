@@ -604,11 +604,12 @@ namespace at::hip::detail {
 			TORCH_CHECK(offs->size(0) == group_count, "ck_tile group gemm: expected offs to have ", group_count,
 					" entries (one per group), got ", offs->size(0));
 		}
-		// ck_tile stores sizes and leading dims as 32-bit index_t; per-group pointers are computed in 64 bits.
+		// ck_tile stores sizes and leading dims as 32-bit index_t. Only a 3D tensor's group stride is exempt: it feeds the
+		// 64-bit per-group pointers. A 2D tensor's stride(0) is a leading dim.
 		constexpr int64_t index_max = std::numeric_limits<index_t>::max();
 		for (const at::Tensor* t : {&mat_a, &mat_b, &out}) {
 			for (int64_t d = 0; d < t->dim(); ++d) {
-				TORCH_CHECK(t->size(d) <= index_max && (d == 0 || t->stride(d) <= index_max),
+				TORCH_CHECK(t->size(d) <= index_max && (d < t->dim() - 2 || t->stride(d) <= index_max),
 						"ck_tile group gemm: sizes and leading dimensions must fit in int32, got sizes ", t->sizes(),
 						" strides ", t->strides());
 			}

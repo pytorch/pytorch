@@ -747,6 +747,13 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
   if (group_count > 1024) {
     return false;
   }
+  // group_gemm_ck_tile stores sizes and leading dims in 32 bits; a 3D operand's group stride may be wider.
+  constexpr int64_t int32_max = std::numeric_limits<int32_t>::max();
+  for (const Tensor* t : {&mat_a, &mat_b}) {
+    if (t->size(-2) > int32_max || t->size(-1) > int32_max || t->stride(-2) > int32_max || t->stride(-1) > int32_max) {
+      return false;
+    }
+  }
   // After group_gemm_ck_tile's layout canonicalization, the contiguous dim of A and B must be 16-byte aligned.
   const int64_t M = mat_a.size(-2), K = mat_a.size(-1), N = mat_b.size(-1);
   bool a_row_major = !check_valid_strides_and_return_transposed(mat_a);
