@@ -25,8 +25,14 @@ from torch.distributed._shard.sharding_spec._internals import (
     validate_non_overlapping_shards_metadata,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TestCase,
@@ -552,6 +558,27 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, "overlap"):
             validate_non_overlapping_shards_metadata(shards)
 
+    def test_custom_sharding_spec(self):
+        ranks = [
+            "rank:0/cpu:0",
+            "rank:1/cpu:1",
+            "rank:2/cpu:2",
+            "rank:3/cpu:3",
+        ]
+
+        grid_spec = GridShardingSpec(grid_size=4, placements=ranks)
+
+        tensor_properties = TensorProperties(
+            dtype=torch.get_default_dtype(),
+            layout=torch.strided,
+            requires_grad=False,
+            memory_format=torch.contiguous_format,
+            pin_memory=False,
+        )
+
+        meta = grid_spec.build_metadata(torch.Size((8, 8)), tensor_properties)
+        check_tensor(meta.shards_metadata, torch.Size((8, 8)))
+
 
 # Custom ShardingSpec, an simple example to do grid sharding
 @dataclass
@@ -612,40 +639,21 @@ class GridShardingSpec(ShardingSpec):
 
 
 class TestCustomShardingSpec(ShardedTensorTestBase):
-    def test_custom_sharding_spec(self):
-        ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
-        ]
-
-        grid_spec = GridShardingSpec(grid_size=4, placements=ranks)
-
-        tensor_properties = TensorProperties(
-            dtype=torch.get_default_dtype(),
-            layout=torch.strided,
-            requires_grad=False,
-            memory_format=torch.contiguous_format,
-            pin_memory=False,
-        )
-
-        meta = grid_spec.build_metadata(torch.Size((8, 8)), tensor_properties)
-        check_tensor(meta.shards_metadata, torch.Size((8, 8)))
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_custom_sharding_spec_tensor_ctor(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_custom_sharding_spec_tensor_ctor(self, device):
         """Test sharded_tensor.ones(...) with the custom
         grid sharding spec.
         """
-
+        device_type = torch.device(device).type
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{device_type}:0",
+            f"rank:1/{device_type}:1",
+            f"rank:2/{device_type}:2",
+            f"rank:3/{device_type}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)
@@ -656,29 +664,34 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        self.assertEqual(torch.device(f"{device_type}:{self.rank}"), local_shard.device)
         self.assertEqual((2, 2), local_shard.size())
         self.assertEqual(local_shard, torch.ones(2, 2))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_custom_sharding_spec_shard_tensor(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_custom_sharding_spec_shard_tensor(self, device):
         """Test custom spec can be invoked from the
         _shard_tensor callsite.
         """
-
+        device_type = torch.device(device).type
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{device_type}:0",
+            f"rank:1/{device_type}:1",
+            f"rank:2/{device_type}:2",
+            f"rank:3/{device_type}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)
 
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             _shard_tensor(torch.randn(8, 8), grid_spec)
+
+
+instantiate_device_type_tests(
+    TestCustomShardingSpec, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
