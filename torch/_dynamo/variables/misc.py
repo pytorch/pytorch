@@ -135,7 +135,11 @@ class SuperVariable(VariableTracker):
         return builtins.super
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
+        from .builder import SourcelessBuilder
+
+        codegen.add_push_null(
+            lambda: codegen(SourcelessBuilder.create_internal_builtin(super))
+        )
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
