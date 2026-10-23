@@ -1838,7 +1838,7 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 
-  # Kineto's own unit tests, vendored under third_party/kineto. The binaries
+  # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then

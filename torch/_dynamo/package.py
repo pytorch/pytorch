@@ -87,6 +87,7 @@ class SerializedCode:
     co_linetable: bytes | None = None
     co_qualname: str | None = None
     co_exceptiontable: bytes | None = None
+    co_lnotab: str | None = None
 
     @classmethod
     @_code_cache
@@ -766,7 +767,7 @@ def _get_code_source(
 
     toplevel: Any = module
     search_module_tree = code_module is None
-    if not search_module_tree:
+    if sys.version_info >= (3, 11) and not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
@@ -836,7 +837,7 @@ def _get_code_source(
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if search_module_tree:
+        if sys.version_info < (3, 11) or search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
