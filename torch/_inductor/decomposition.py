@@ -44,7 +44,10 @@ from torch._prims_common import (
     suggest_memory_format,
     type_to_dtype,
 )
-from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs import (
+    logaddexp2 as decomp_logaddexp2,
+    native_layer_norm as decomp_native_layer_norm,
+)
 from torch._refs.nn.functional import (
     _aten_hardtanh as decomp_hardtanh,
     gelu as decomp_gelu,
@@ -144,6 +147,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.hardtanh.default,  # inductor preserves NaN payloads under strict numerics
     aten.hardswish_backward.default,
     aten.mish_backward.default,
+    aten.logaddexp2.default,
     aten.sigmoid_backward.default,
     aten.silu_backward.default,
     aten.softplus.default,
@@ -555,7 +559,7 @@ def softplus(
     return torch.where(scaled > threshold, a, result)
 
 
-def _strict_activation_inputs(
+def _strict_pointwise_inputs(
     grad_output: torch.Tensor, self: torch.Tensor, dtype: torch.dtype | None = None
 ) -> tuple[torch.Tensor, torch.Tensor, torch.dtype] | None:
     if not is_strict_cuda_triton(self.device):
@@ -571,12 +575,27 @@ def _strict_activation_inputs(
     )
 
 
+@register_decomposition(aten.logaddexp2.default)
+def logaddexp2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_pointwise_inputs(a, b)
+    if inputs is None:
+        return decomp_logaddexp2(a, b)
+    a, b, dtype = inputs
+    mask = a >= b
+    maximum = torch.where(mask, a, b)
+    minimum = torch.where(mask, b, a)
+    result = torch.add(
+        maximum, torch.log1p(torch.exp2(minimum - maximum)), alpha=1 / math.log(2)
+    )
+    return torch.where(torch.isinf(a) & (a == b), a, result).to(dtype)
+
+
 @register_decomposition(aten.gelu_backward.default)
 def gelu_backward(
     grad_output: torch.Tensor, self: torch.Tensor, approximate: str = "none"
 ) -> torch.Tensor:
     inputs = (
-        _strict_activation_inputs(grad_output, self) if approximate == "tanh" else None
+        _strict_pointwise_inputs(grad_output, self) if approximate == "tanh" else None
     )
     if inputs is None:
         return decomp_gelu_backward(grad_output, self, approximate)
@@ -594,7 +613,7 @@ def gelu_backward(
 
 @register_decomposition(aten.hardswish_backward.default)
 def hardswish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
-    inputs = _strict_activation_inputs(grad_output, self)
+    inputs = _strict_pointwise_inputs(grad_output, self)
     if inputs is None:
         return decomp_hardswish_backward(grad_output, self)
     grad_output, self, dtype = inputs
@@ -610,7 +629,7 @@ def hardswish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.T
 @register_decomposition(aten.mish_backward.default)
 def mish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
     # Unlike the other backwards, eager allocates Mish's output in self.dtype.
-    inputs = _strict_activation_inputs(grad_output, self, dtype=self.dtype)
+    inputs = _strict_pointwise_inputs(grad_output, self, dtype=self.dtype)
     if inputs is None:
         return decomp_mish_backward(grad_output, self)
     grad_output, self, dtype = inputs
@@ -623,7 +642,7 @@ def mish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor
 
 @register_decomposition(aten.silu_backward.default)
 def silu_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
-    inputs = _strict_activation_inputs(grad_output, self)
+    inputs = _strict_pointwise_inputs(grad_output, self)
     if inputs is None:
         return decomp_silu_backward(grad_output, self)
     grad_output, self, dtype = inputs
@@ -634,7 +653,7 @@ def silu_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor
 
 @register_decomposition(aten.tanh_backward.default)
 def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-    inputs = _strict_activation_inputs(grad_output, output)
+    inputs = _strict_pointwise_inputs(grad_output, output)
     if inputs is None:
         return decomp_tanh_backward(grad_output, output)
     grad_output, output, dtype = inputs
@@ -649,7 +668,7 @@ def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tens
 
 @register_decomposition(aten.sigmoid_backward.default)
 def sigmoid_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-    inputs = _strict_activation_inputs(grad_output, output)
+    inputs = _strict_pointwise_inputs(grad_output, output)
     if inputs is None:
         return decomp_sigmoid_backward(grad_output, output)
     grad_output, output, dtype = inputs
