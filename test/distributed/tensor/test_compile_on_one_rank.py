@@ -377,6 +377,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_to_copy_explicit_device_replaced(self, device):
         device_type = torch.device(device).type
+
         # An explicit-device dtype cast (the SimpleFSDP mixed-precision pattern,
         # aten._to_copy with a device= kwarg) also gets its baked device rewired to
         # the current_device() node, alongside the factory-op path.
@@ -393,6 +394,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_unindexed_accelerator_device_replaced(self, device):
         device_type = torch.device(device).type
+
         # A bare device=device_type (index None) matching the current accelerator is also
         # replaced by the current_device() node.
         def f(x):
@@ -407,6 +409,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_device_left_alone(self, device):
         device_type = torch.device(device).type
+
         # cpu is portable on every rank, so a cpu factory is not rewritten.
         def f(x):
             return torch.zeros(4, x.shape[1], device="cpu")
@@ -482,6 +485,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_factory_without_matching_input_succeeds(self, device):
         device_type = torch.device(device).type
+
         # Unlike provenance-following, matching the current accelerator needs no input
         # on that device: a cuda factory in a cpu-input graph is now rewritten, not
         # rejected.
@@ -496,6 +500,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_wrong_index_raises(self, device):
         device_type = torch.device(device).type
+
         # A cuda index that is not the current device's index cannot be made SPMD, so
         # the rewrite refuses it (raised during tracing before the fake op runs, so
         # this needs only the current device to exist).
@@ -514,6 +519,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_noncurrent_device_tensor_rejected(self, device):
         device_type = torch.device(device).type
+
         # CooR rejects a device *operand* that isn't the current accelerator (see
         # test_wrong_index_raises), but its single-device invariant also requires the
         # graph's *tensors* to be on the current device: the inductor wrapper collapses
@@ -533,6 +539,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_graph_code_identical_across_devices(self, device):
         device_type = torch.device(device).type
+
         # The functional FX graph text (.code) must be byte-identical across ranks: the
         # device operand is the current_device() node, never a baked cuda:N. (.code
         # carries no per-tensor device annotations, so it stays clean while the tensor meta
@@ -659,6 +666,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_noncurrent_device_input_refused_under_coor(self, device) -> None:
         device_type = torch.device(device).type
+
         # A graph whose input is on an accelerator other than the current one cannot be
         # made rank-portable, so CooR refuses it while tracing. The make_fx backends
         # already do (_coor_check_current_accelerator); Dynamo has to as well, or an
@@ -1239,6 +1247,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def test_current_device_context_preserves_type_under_coor(self, device):
         device_type = torch.device(device).type
         device_module = torch.get_device_module(device_type)
+
         def f(x):
             ctx = device_module.device(x.device)
             return x + (1 if isinstance(ctx, device_module.device) else 2)
@@ -1335,6 +1344,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def test_current_device_context_reconstruct_is_rank_relative(self, device):
         device_type = torch.device(device).type
         device_module = torch.get_device_module(device_type)
+
         # Pinning target_values to the compiling rank (torch.device("cuda:0")) passes
         # every test that only ever resumes on device 0, so resolve the reconstructed
         # context's index on a device that did not compile the frame.
@@ -1565,6 +1575,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_stream_equality_under_coor(self, device):
         device_type = torch.device(device).type
+
         def f(x, stream):
             return x + (1 if stream == torch.accelerator.current_stream() else 2)
 
@@ -1584,6 +1595,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     ):
         device_type = torch.device(device).type
         device_module = torch.get_device_module(device_type)
+
         class SubStream(torch.Stream):
             pass
 
@@ -1612,6 +1624,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_current_stream_ordering_raises_under_coor(self, device):
         device_type = torch.device(device).type
+
         def f(x, stream):
             try:
                 return x + (1 if stream < torch.accelerator.current_stream() else 2)
@@ -1833,6 +1846,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_predicate_is_data_dependent_under_coor(self, device):
         device_type = torch.device(device).type
+
         def f(x):
             return x + (1 if x.device.index == 0 else 2)
 
@@ -1852,6 +1866,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     def test_get_device_predicate_is_data_dependent_under_coor(self, device):
         device_type = torch.device(device).type
+
         # Branching on the index is the one thing that cannot be honoured. The value
         # is unknown until the artifact runs, so under fullgraph=True there is no
         # answer to fold and the data-dependent error is the correct outcome -- an
@@ -2238,7 +2253,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 class TestCompileOnOneRankCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
     _rng_fn = staticmethod(TestCompileOnOneRankDeviceAsParameter._rng_fn)
-    _assert_no_baked_device = TestCompileOnOneRankDeviceAsParameter._assert_no_baked_device
+    _assert_no_baked_device = (
+        TestCompileOnOneRankDeviceAsParameter._assert_no_baked_device
+    )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @parametrize("align_random_eager", (False, True))
