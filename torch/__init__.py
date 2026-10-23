@@ -312,7 +312,16 @@ if sys.platform == "win32":
                 ).strip()
             )
 
+        # Test-only libraries installed with INSTALL_TEST=ON; tests load them on
+        # demand via torch.ops.load_library, so a load failure must not break import.
+        test_dlls = {
+            "aoti_custom_ops.dll",
+            "backend_with_compiler.dll",
+            "jitbackend_test.dll",
+            "torchbind_test.dll",
+        }
         dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
+        dlls = [d for d in dlls if os.path.basename(d) not in test_dlls]
         path_patched = False
         for dll in dlls:
             is_loaded = False
