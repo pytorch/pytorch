@@ -5,7 +5,7 @@ import itertools
 import json
 import math
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 import torch._dynamo
@@ -21,6 +21,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1524,6 +1525,18 @@ class TestStorageManifest(TestCase):
         self.assertEqual(loaded_second, second)
         self.assertEqual(loaded_view, torch.full_like(view, 3))
 
+    def test_storage_is_read_on_the_serialized_device(self):
+        device = torch.device("cuda:7")
+        reader = InputReader()
+        reader.store = Mock()
+        reader.store.read_storage.return_value = Mock(device=device)
+        reader.store.read_storage.return_value.nbytes.return_value = 4
+        self.assertIs(
+            reader.storage("hash", 4, device=device),
+            reader.store.read_storage.return_value,
+        )
+        reader.store.read_storage.assert_called_once_with("hash", device=device)
+
     def test_load_args_without_inputs(self):
         writer = InputWriter(None)
         namespace: dict[str, object] = {}
@@ -1536,6 +1549,60 @@ class TestStorageManifest(TestCase):
 
 
 instantiate_parametrized_tests(TestStorageManifest)
+
+
+class TestStorageManifestDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("compression", [None, "zstd"])
+    def test_cpu_storage_replays_on_cuda(self, device, compression):
+        if compression == "zstd" and not zstd_available():
+            self.skipTest("zstandard is not available")
+        expected = torch.ones(4096)
+        with TemporaryDirectoryName() as root:
+            bundle = os.path.join(root, "bundle")
+            store = ContentStoreWriter(
+                os.path.join(root, "store"), stable_hash=True, compression=compression
+            )
+            writer = InputWriter(bundle, content_store=store)
+            writer.tensor("arg0", expected)
+            writer.write_storage_manifest()
+            (h,) = writer.storage_hashes
+            self.assertEqual(store.storage_metadata[h]["codec"], compression or "none")
+            reader = InputReader(bundle)
+            nbytes = expected.untyped_storage().nbytes()
+            first = reader.storage(h, nbytes, device=device)
+            second = reader.storage(h, nbytes, device=device)
+            loaded_first = reader.tensor(first, expected.shape, is_leaf=True)
+            loaded_second = reader.tensor(second, expected.shape, is_leaf=True)
+            view = expected[2::2]
+            loaded_view = reader.tensor(
+                first,
+                view.shape,
+                view.stride(),
+                storage_offset=view.storage_offset(),
+                is_leaf=True,
+            )
+        for loaded, original in (
+            (loaded_first, expected),
+            (loaded_second, expected),
+            (loaded_view, view),
+        ):
+            self.assertEqual(loaded.device, torch.device(device))
+            self.assertEqual(loaded.cpu(), original)
+        self.assertNotEqual(first.data_ptr(), second.data_ptr())
+        self.assertEqual(loaded_view.untyped_storage().data_ptr(), first.data_ptr())
+        self.assertEqual(loaded_view.stride(), view.stride())
+        self.assertEqual(loaded_view.storage_offset(), view.storage_offset())
+        loaded_view.add_(3)
+        mutated = expected.clone()
+        mutated[2::2] += 3
+        self.assertEqual(loaded_first.cpu(), mutated)
+        self.assertEqual(loaded_second.cpu(), expected)
+        self.assertEqual(loaded_view.cpu(), view + 3)
+
+
+instantiate_device_type_tests(TestStorageManifestDevice, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
