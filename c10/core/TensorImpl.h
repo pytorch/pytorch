@@ -2159,7 +2159,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * One TensorImpl can be copied to another TensorImpl if
    * - They have the same DispatchKeySet.
    * - Or both have DispatchKey::Dense and a supported dense backend
-   *   (CPU, CUDA, MPS, HIP, XPU, HPU, MTIA)
+   *   (CPU, CUDA, MPS, HIP, XPU, HPU)
    * - Or both have DispatchKey::Sparse and a supported sparse backend
    *   (CPU, CUDA, MPS, HIP, XPU)
    * - Or both have DispatchKey::SparseCsr
@@ -2175,8 +2175,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit,
-           BackendComponent::HPUBit,
-           BackendComponent::MTIABit});
+           BackendComponent::HPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };

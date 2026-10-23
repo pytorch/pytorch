@@ -44,7 +44,6 @@ namespace c10 {
   _(HPU, extra)                                 \
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
-  _(MTIA, extra)                                \
   _(MAIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
@@ -332,7 +331,6 @@ enum class DispatchKey : uint16_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
-  AutocastMTIA,
   AutocastMAIA,
   AutocastXPU,
   AutocastIPU,
@@ -475,7 +473,19 @@ enum class DispatchKey : uint16_t {
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
   Autocast = AutocastCUDA,
+  // MTIA is implemented as a PrivateUse1 backend
+  MTIA = PrivateUse1,
+  AutogradMTIA = AutogradPrivateUse1,
+  AutocastMTIA = AutocastPrivateUse1,
+  QuantizedMTIA = QuantizedPrivateUse1,
+  SparseMTIA = SparsePrivateUse1,
+  SparseCsrMTIA = SparseCsrPrivateUse1,
+  NestedTensorMTIA = NestedTensorPrivateUse1,
 };
+
+// Lets code built against several PyTorch versions detect that
+// DispatchKey::MTIA aliases PrivateUse1.
+#define C10_MTIA_IS_PRIVATEUSE1 1
 
 // Note [Private use DispatchKey]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~

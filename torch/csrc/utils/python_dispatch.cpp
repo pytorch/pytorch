@@ -1252,7 +1252,17 @@ void initDispatchBindings(PyObject* module) {
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-          ;
+      // MTIA is a PrivateUse1 backend; these alias the PrivateUse1 keys
+      // clang-format off
+      DEF_ONE(MTIA)
+      DEF_ONE(AutogradMTIA)
+      DEF_ONE(AutocastMTIA)
+      DEF_ONE(QuantizedMTIA)
+      DEF_ONE(SparseMTIA)
+      DEF_ONE(SparseCsrMTIA)
+      DEF_ONE(NestedTensorMTIA)
+      // clang-format on
+      ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
