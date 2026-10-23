@@ -2010,9 +2010,7 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=AttributeMutationExisting(),
             )
-        elif value is sys.exc_info or (
-            sys.version_info >= (3, 11) and value is sys.exception
-        ):
+        elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
