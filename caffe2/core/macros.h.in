@@ -49,6 +49,7 @@
   {"USE_MPI", "${USE_MPI}"}, \
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \
   {"USE_GLOG", "${USE_GLOG}"}, \
+  {"USE_ABSL_LOG", "${USE_ABSL_LOG}"}, \
   {"USE_GLOO", "${USE_GLOO}"}, \
   {"USE_NNPACK", "${USE_NNPACK}"}, \
   {"USE_OPENMP", "${USE_OPENMP}"}, \

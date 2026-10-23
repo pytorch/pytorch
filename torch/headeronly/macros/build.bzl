@@ -25,5 +25,8 @@ def define_targets(rules):
         }) + rules.select({
             "//c10:using_glog": ["C10_USE_GLOG"],
             "//conditions:default": [],
+        }) + rules.select({
+            "//c10:using_absl_log": ["C10_USE_ABSL_LOG"],
+            "//conditions:default": [],
         }),
     )
