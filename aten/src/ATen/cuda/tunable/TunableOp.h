@@ -119,10 +119,10 @@ class TunableOp {
       if (status != OK) {
         // Deliberately no retry on Default here. Every caller -- gemm, bgemm,
         // gemm-and-bias and scaled gemm -- already reads a non-OK status as
-        // "use my own non-tunable path", so retrying would run the default
-        // twice and mask which candidate failed. Call() returns FAIL before
-        // writing any output, so the caller's retry is safe. Not cached either:
-        // a tuned entry that fails is a defect worth seeing on every call.
+        // "use my own non-tunable path", so a retry here would duplicate the
+        // one the caller is about to make and mask which candidate failed.
+        // The failure is not cached either: a tuned entry that fails is a
+        // defect worth seeing on every call.
         TUNABLE_LOG1("solution ", result, " failed for ", Signature(), "(",
             params->Signature(), "), returning non-OK for caller fallback");
       }
