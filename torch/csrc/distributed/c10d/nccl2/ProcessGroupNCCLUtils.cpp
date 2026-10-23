@@ -115,6 +115,67 @@ void createPreMulSum(
       "NCCL redOpCreatePreMulSum failed");
 }
 
+// This utility function gets a stream that is guaranteed not to be
+// part of another stream capture. This is intended to prevent
+// problems cited in #185836, due to pytorch's current fixed size pool
+// of 32 streams. This will return the currently capturing internal
+// stream for current_stream's capture if one already exists.
+//
+// We maintain a process-lifetime stream pool because destruction
+// allocator recordStream() calls can make a cudaStream_t outlive the
+// ProcessGroupNCCL instance.
+cudaStream_t getStreamForThisCapture(
+    const at::cuda::CUDAStream& current_stream,
+    int priority,
+    at::cuda::CUDAEvent& dependency_event) {
+  const auto capture_info =
+      c10::cuda::captureInfoMayInitCtx(current_stream.stream());
+  TORCH_INTERNAL_ASSERT(
+      capture_info.status == c10::cuda::CaptureStatus::Active,
+      "getStreamForThisCapture requires a capturing stream");
+  const auto capture_id = capture_info.id;
+  const auto device = current_stream.device_index();
+  auto sync_stream = [&](const at::cuda::CUDAStream& stream) {
+    dependency_event.record(current_stream);
+    dependency_event.block(stream);
+    return stream.stream();
+  };
+
+  static std::mutex pool_mutex;
+  using StreamPool = std::vector<at::cuda::CUDAStream>;
+  using StreamPoolKey = std::pair<c10::DeviceIndex, int>;
+  static ska::flat_hash_map<StreamPoolKey, StreamPool, c10::hash<StreamPoolKey>>
+      pools;
+  std::lock_guard<std::mutex> lock(pool_mutex);
+  auto& streams = pools[{device, priority}];
+  std::optional<at::cuda::CUDAStream> idle_stream;
+  // Scanning the pool makes N nested captures take O(N^2) queries.
+
+  // We cannot use a hash table keyed on capture id because we have no
+  // way to know when a stream exits stream capture. If we could
+  // register a callback here that runs when cudaStreamEndCapture()
+  // runs, we could fix the quadratic growth.
+  for (const auto& stream : streams) {
+    auto info = c10::cuda::captureInfoMayInitCtx(stream.stream());
+    if (info.status == c10::cuda::CaptureStatus::Active &&
+        info.id == capture_id) {
+      return sync_stream(stream);
+    }
+    if (info.status == c10::cuda::CaptureStatus::None && !idle_stream) {
+      idle_stream = stream;
+    }
+  }
+  if (!idle_stream) {
+    cudaStream_t raw_stream = nullptr;
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
+        &raw_stream, cudaStreamNonBlocking, priority));
+    idle_stream = at::cuda::getStreamFromExternal(raw_stream, device);
+    streams.push_back(*idle_stream);
+  }
+  // Join before unlocking so another capture cannot take the same idle stream.
+  return sync_stream(*idle_stream);
+}
+
 } // namespace
 
 ProcessGroupNCCL::RedOpRAII::RedOpRAII(ncclRedOp_t op) : ncclRedOp_(op) {}
@@ -536,7 +597,7 @@ void ProcessGroupNCCL::drainRetiredGraphWork() {
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   c10::cuda::CUDAGuard gpuGuard(device_);
-  const auto device = device_.index();
+  auto device = device_.index();
   auto current_stream = at::cuda::getCurrentCUDAStream(device);
   if (!async_op) {
     return current_stream.stream();
@@ -544,58 +605,36 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   TORCH_CHECK(
       dependency_event_.has_value() && internal_stream_.has_value(),
       "NCCL stream resources are not initialized");
+  auto& dependency_event = dependency_event_.value();
+  const auto& internal_stream = internal_stream_.value();
   auto sync_stream = [&](const at::cuda::CUDAStream& stream) {
-    auto& dependency_event = dependency_event_.value();
     dependency_event.record(current_stream);
     dependency_event.block(stream);
     return stream.stream();
   };
 
-  const auto& internal_stream = internal_stream_.value();
-  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device))) {
+  // If there is no capturing going on whatsoever (happy path we want
+  // to keep fast), don't bother checking any stream capture states.
+  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device)) ||
+      !c10::cuda::isStreamCapturingMayInitCtx(current_stream.stream())) {
     return sync_stream(internal_stream);
   }
+
+  // Otherwise, current stream is capturing. Put the internal stream
+  // into capture mode if it isn't already in capture mode for this
+  // capture.
   auto cur_info = c10::cuda::captureInfoMayInitCtx(current_stream.stream());
-  if (cur_info.status != c10::cuda::CaptureStatus::Active) {
-    return sync_stream(internal_stream);
-  }
   auto nccl_info = c10::cuda::captureInfoMayInitCtx(internal_stream.stream());
   if (nccl_info.status != c10::cuda::CaptureStatus::Active ||
       nccl_info.id == cur_info.id) {
     return sync_stream(internal_stream);
   }
 
-  // Dedicated, process-lifetime streams avoid both the 32-stream pool limit
-  // and destruction while allocator recordStream references still exist.
-  static std::mutex pool_mutex;
-  using StreamPool = std::vector<at::cuda::CUDAStream>;
-  using StreamPoolKey = std::pair<c10::DeviceIndex, int>;
-  static ska::flat_hash_map<StreamPoolKey, StreamPool, c10::hash<StreamPoolKey>>
-      pools;
-  const auto priority = internal_stream.priority();
-  std::lock_guard<std::mutex> lock(pool_mutex);
-  auto& streams = pools[{device, priority}];
-  std::optional<at::cuda::CUDAStream> idle_stream;
-  for (const auto& stream : streams) {
-    auto info = c10::cuda::captureInfoMayInitCtx(stream.stream());
-    if (info.status == c10::cuda::CaptureStatus::Active &&
-        info.id == cur_info.id) {
-      return sync_stream(stream);
-    }
-    if (info.status == c10::cuda::CaptureStatus::None && !idle_stream) {
-      idle_stream = stream;
-    }
-  }
-  if (!idle_stream) {
-    cudaStream_t raw_stream = nullptr;
-    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
-        &raw_stream, cudaStreamNonBlocking, priority));
-    idle_stream = at::cuda::getStreamFromExternal(raw_stream, device);
-    streams.push_back(*idle_stream);
-  }
-  // Join this capture before unlocking so another capture cannot take the
-  // same idle stream. This also establishes the per-operation dependency.
-  return sync_stream(*idle_stream);
+  // We reach this point only if more than one stream capture is
+  // happening at once. See getStreamForThisCapture() comment for
+  // details.
+  return getStreamForThisCapture(
+      current_stream, internal_stream.priority(), dependency_event);
 }
 
 void ProcessGroupNCCL::ensureTensorContiguous(const at::Tensor& tensor) {

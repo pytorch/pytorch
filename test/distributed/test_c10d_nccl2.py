@@ -197,7 +197,7 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
         depths = (40, 0, 1, 20, 39, 40)
         capture_stream = torch.cuda.Stream(device=self.rank)
         capture_stream.wait_stream(torch.cuda.current_stream())
-        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        graphs = []
         python_recursion_limit = sys.getrecursionlimit()
         try:
             # Capturing 40 nested HOPs needs a deeper Python dispatch stack.
@@ -206,23 +206,30 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
                 leaf(tensor)
                 false_branch(tensor)
             torch.cuda.synchronize()
-            with (
-                torch.cuda.graph(graph, stream=capture_stream),
-                CUDAGraphCaptureControlFlowOpDispatchMode(),
-            ):
-                output = forward(tensor)
+            outputs = []
+            # Reuse ended capture streams while the first graph is still alive.
+            for _ in range(2):
+                graph = torch.cuda.CUDAGraph(keep_graph=True)
+                graphs.append(graph)
+                with (
+                    torch.cuda.graph(graph, stream=capture_stream),
+                    CUDAGraphCaptureControlFlowOpDispatchMode(),
+                ):
+                    outputs.append(forward(tensor))
+                graph.instantiate()
 
-            graph.instantiate()
-            for offset, depth in enumerate(depths):
-                tensor.fill_(self.rank + 1 + offset)
-                predicates.copy_(levels < depth)
-                graph.replay()
-                torch.cuda.synchronize()
-                expected = world_size * (world_size + 1) // 2 + world_size * offset
-                expected += 2 * depth + 1
-                self.assertEqual(output, torch.full_like(output, expected))
+            for graph, output in zip(graphs, outputs):
+                for offset, depth in enumerate(depths):
+                    tensor.fill_(self.rank + 1 + offset)
+                    predicates.copy_(levels < depth)
+                    graph.replay()
+                    torch.cuda.synchronize()
+                    expected = world_size * (world_size + 1) // 2 + world_size * offset
+                    expected += 2 * depth + 1
+                    self.assertEqual(output, torch.full_like(output, expected))
         finally:
-            graph.reset()
+            for graph in graphs:
+                graph.reset()
             sys.setrecursionlimit(python_recursion_limit)
             dist.destroy_process_group()
 
