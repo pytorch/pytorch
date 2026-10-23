@@ -572,6 +572,24 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeFloat:
+    """
+    A template kwarg whose symbolic value is computed on the host instead of
+    being baked in, so it does not specialize the kernel. Triton templates
+    receive it as a scalar kernel arg, cast to an fp32 local instead of a
+    tl.constexpr; CuteDSL templates render it as a host-side Python float. A
+    numeric value is baked in as a plain constant, as before. The template
+    buffer counts the value's size symbols as uses, e.g. for graph partitions.
+    """
+
+    value: sympy.Expr | float
+
+    def unwrap_if_number(self) -> "RuntimeFloat | float":
+        value = sympy.sympify(self.value)
+        return float(value) if value.is_number else self
+
+
 class TritonTemplateKernel(TritonKernel):
     """
     A specialized kernel class for Triton templates that handles code generation
@@ -1045,7 +1063,9 @@ class TritonTemplateKernel(TritonKernel):
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
 
-        inductor_meta["config_args"] = self.meta
+        inductor_meta["config_args"] = {
+            k: v for k, v in self.meta.items() if not isinstance(v, RuntimeFloat)
+        }
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -1152,6 +1172,15 @@ class TritonTemplateKernel(TritonKernel):
                 continue
 
             self.args.input(input_node.get_name())
+
+        # The wrapper computes runtime floats on the host and passes them as
+        # scalar args; register them before the arg list is built. Templates must
+        # call def_kernel before any helper uses gen_defines().
+        for name, val in self.meta.items():
+            if isinstance(val, RuntimeFloat):
+                arg = V.graph.sizevars.lookup_precomputed_float(val.value)
+                arg_name = self.rename_indexing(arg)
+                self.defines += f"{name} = tl.full([], {arg_name}, tl.float32)\n"
 
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
@@ -2083,6 +2112,8 @@ class TritonTemplateKernel(TritonKernel):
             if V.graph.cpp_wrapper:
                 raise AssertionError("cpp_wrapper requires SymbolicGridFn")
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+            if any(isinstance(v, RuntimeFloat) for v in self.meta.values()):
+                raise AssertionError("RuntimeFloat requires a SymbolicGridFn")
             meta = wrapper.add_meta_once(self.meta)
             fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
             call_args.append(
@@ -3101,7 +3132,8 @@ class TritonTemplate(KernelTemplate):
         defines = StringIO()
 
         for name, val in kwargs.items():
-            defines.write(f"{name} : tl.constexpr = {val}\n")
+            if not isinstance(val, RuntimeFloat):
+                defines.write(f"{name} : tl.constexpr = {val}\n")
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
@@ -3329,6 +3361,10 @@ class TritonTemplate(KernelTemplate):
         # for one example issue with this problem.
         if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
+        kwargs = {
+            k: v.unwrap_if_number() if isinstance(v, RuntimeFloat) else v
+            for k, v in kwargs.items()
+        }
 
         if call_sizes is None:
             call_sizes = layout.size
@@ -3385,10 +3421,7 @@ class TritonTemplate(KernelTemplate):
         )
 
         extra_args = tuple(
-            V.graph.sizevars.optimization_hint_with_override(
-                sympy.expand(e),
-                hint_override=hint_override,
-            )
+            V.graph.sizevars.size_arg_hint(sympy.expand(e), hint_override=hint_override)
             for e in result.kernel_args_sizevars_keys
         )
 
@@ -3537,6 +3570,11 @@ class TritonTemplate(KernelTemplate):
                 result.store_output_fusion_allowed_inputs
             ),
             hint_override=hint_override,
+            runtime_float_values=[
+                sympy.sympify(v.value)
+                for v in kwargs.values()
+                if isinstance(v, RuntimeFloat)
+            ],
         )
 
 
@@ -3682,10 +3720,12 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
         self.bmreq: TritonBenchmarkRequest = bmreq
+        self.runtime_float_values = list(runtime_float_values)
         if log_info is None:
             log_info = {}
         self.log_info: dict[str, Any] = log_info
@@ -3757,6 +3797,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 self.store_output_fusion_allowed_inputs
             ),
         )
+        buffer.runtime_float_values = self.runtime_float_values
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
