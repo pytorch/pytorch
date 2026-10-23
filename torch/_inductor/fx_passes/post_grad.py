@@ -1252,7 +1252,7 @@ def eager_digamma_sum(match: Match, x, dim):
 
     def repl(t):
         terms = [t.select(-1, i).to(acc) for i in range(extent)]
-        return _cuda_trailing_sum(terms).to(val.dtype)
+        return _cuda_trailing_sum(terms, val).to(val.dtype)
 
     match.nodes = [match.output_node()]
     match.replace_by_example(repl, [x])
