@@ -4059,7 +4059,8 @@ class TestCase(expecttest.TestCase):
     def _run_custom(self, result=None):
         # unittest reports static skips without running setUp; skip the Dynamo
         # setup below too, which costs ~40ms per test.
-        if getattr(getattr(self, self._testMethodName, None), "__unittest_skip__", False):
+        test_method = getattr(self, self._testMethodName, None)
+        if getattr(type(self), "__unittest_skip__", False) or getattr(test_method, "__unittest_skip__", False):
             return super().run(result)
 
         using_unittest = isinstance(result, unittest.TestResult)
