@@ -5888,6 +5888,95 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("form", ("r_minus_xw", "xw_minus_r", "affine"))
+    def test_mm_local_reduce_feeds_main_through_scaled_source(self, form):
+        # A 2-point Hadamard per column pair: y0 = (x0 + x1) / sqrt(2) and
+        # y1 = (x0 - x1) / sqrt(2) = (r - 2 * x1) / sqrt(2), with r the pair sum.
+        # The grouped source meets the reduced value only after a capture scale.
+        m, n, k = 256, 256, 64
+        odd = (torch.arange(n, device="cuda") % 2).float()[None, :]
+        scale = 2**-0.5
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, 2)
+            r = x.sum(-1, keepdim=True)
+            w = (2 * odd).view(1, -1, 2)
+            if form == "r_minus_xw":
+                y = (r - x * w) * scale
+            elif form == "xw_minus_r":
+                y = (x * w - r) * -scale
+            else:
+                y = r * scale + x * (-w * scale)
+            return y.view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        FileCheck().check("feeds_main=True").check("combine='add'").run(code)
+
+        pairs = (a.double() @ b.double()).view(m, -1, 2)
+        hadamard = torch.stack(
+            (pairs[..., 0] + pairs[..., 1], pairs[..., 0] - pairs[..., 1]), -1
+        ).view(m, n)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b), hadamard * scale, k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feeds_main_through_scaled_source(self):
+        m, n, k, group = 256, 128, 64, 8
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            r = x.sum(1, keepdim=True)
+            return (x * 2.0 - r).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b), epilogue_fn(a.double() @ b.double()), k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_reduce_feed_main_rejects_source_mixing_grouped_views(self):
+        m, n = 128, 128
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, 2)
+            r = x.sum(-1, keepdim=True)
+            # The operand multiplies two grouped views; neither is "the" source.
+            return (r - x * acc.float().view(m, -1, 2).exp()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(Exception, "grouped reductions|local-reduce"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("group", (2, 4, 8, 16, 32))
     def test_mm_local_m_reduce_result_feeds_main_output(self, group):
         m = 128
