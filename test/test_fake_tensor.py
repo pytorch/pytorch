@@ -1905,6 +1905,24 @@ def forward(self, x_1):
             self.assertEqual(r.size(), f.size())
             self.assertEqual(r.device, f.device)
 
+    def test_weight_int4pack_mm(self):
+        # XPU packs w as 2D [N, K // 8], other devices as 4D [N // 8, ...].
+        for device, w_shape, n in [("cuda", (8, 2, 32, 4), 64), ("xpu", (8, 8), 8)]:
+            with self.subTest(device=device), FakeTensorMode() as mode:
+
+                def fake(shape, dtype):
+                    meta = torch.empty(shape, dtype=dtype, device="meta")
+                    return mode.fake_tensor_converter.from_meta_and_device(
+                        mode, meta, torch.device(device)
+                    )
+
+                x = fake((4, 64), torch.bfloat16)
+                w = fake(w_shape, torch.int32)
+                q_scale_and_zeros = fake((2, n, 2), torch.bfloat16)
+                out = torch.ops.aten._weight_int4pack_mm(x, w, 32, q_scale_and_zeros)
+                self.assertEqual(out.shape, (4, n))
+                self.assertEqual(out.device.type, device)
+
     def test_embedding_meta_indices(self):
         with FakeTensorMode():
             weight = torch.empty(20, 8)

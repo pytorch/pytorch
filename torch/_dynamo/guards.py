@@ -5231,6 +5231,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = torch._subclasses.fake_tensor.is_fake_tensor(obj)
             # A fake answers empty_like with another fake, and that fake would
             # drag the mode and its converters into the pickle, so build the
             # template as a plain meta tensor. no_dispatch stops a Python
@@ -5245,7 +5246,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
                 template_ctx = no_dispatch()
-            elif torch._subclasses.fake_tensor.is_fake_tensor(obj):
+            elif is_fake:
                 is_param = isinstance(obj, torch.nn.Parameter)
                 pytype = torch.nn.Parameter if is_param else torch.Tensor
                 fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
