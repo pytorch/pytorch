@@ -135,6 +135,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_exception_from_constant_folded_call(self):
+        # torch.iinfo is constant folded; its TypeError must reach the user's handler.
+        def fn(x):
+            try:
+                return torch.full_like(x, torch.iinfo(x.dtype).max)
+            except TypeError:
+                return torch.full_like(x, float("nan"))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for x in (torch.randn(4), torch.ones(4, dtype=torch.int32)):
+            self.assertEqual(fn(x), opt_fn(x), equal_nan=True)
+
     @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
     def test_exception_target_cleanup(self):
         def fn(x):
