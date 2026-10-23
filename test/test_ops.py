@@ -756,7 +756,6 @@ class TestCommon(TestCase):
 
     @onlyAccelerator
     @skipIfMPS
-    @skipXPU
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
@@ -1065,7 +1064,6 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype

@@ -1531,6 +1531,13 @@ optim_db: list[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_defaults_changed_to_foreach",
             ),
+            # GPU segfault on XPU in Module.to() while moving the test model.
+            DecorateInfo(
+                unittest.skip("Segfaults on XPU, see intel/torch-xpu-ops#6235"),
+                "TestOptimRenewed",
+                "test_can_load_from_to_named_state_dict",
+                device_type="xpu",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1932,6 +1939,13 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_step_is_noop_for_zero_grads",
+            ),
+            # GPU segfault on XPU in Module.to() while moving the test model.
+            DecorateInfo(
+                unittest.skip("Segfaults on XPU, see intel/torch-xpu-ops#6235"),
+                "TestOptimRenewed",
+                "test_can_load_from_to_named_state_dict",
+                device_type="xpu",
             ),
         ),
     ),
