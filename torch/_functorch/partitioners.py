@@ -44,7 +44,7 @@ from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
-from torch._subclasses.fake_tensor import extract_tensor_metadata, is_fake_tensor
+from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -1700,7 +1700,9 @@ def default_partition(
     distributed_enabled = torch.distributed.is_available()
 
     def is_tensor(node: fx.Node) -> bool:
-        return "tensor_meta" in node.meta or is_fake_tensor(node.meta.get("val"))
+        return "tensor_meta" in node.meta or isinstance(
+            node.meta.get("val"), torch._subclasses.FakeTensor
+        )
 
     def is_multi_output(node: fx.Node) -> bool:
         return (
@@ -2588,12 +2590,6 @@ def solve_min_cut(
             return None
         if node.target is operator.getitem:
             return None
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return "marked MUST_SAVE"
-        if config.recompute_views and op_types.is_view(node):
-            return None
-        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
-            return None
         if isinstance(node.meta.get("val"), torch.device):
             # A device-valued node (e.g. the coor::current_device() node
             # compile_on_one_rank substitutes for a baked device) has no tensor to
@@ -2602,7 +2598,15 @@ def solve_min_cut(
             # leaving min-cut unable to place it at all once a backward op needs it.
             # Recomputing is both free and correct: the op only reads the current
             # accelerator, and doing so on the backward side is what makes the graph
-            # follow each rank's own device.
+            # follow each rank's own device. This precedes the MUST_SAVE check because
+            # selective AC tags the node MUST_SAVE when it is created inside a
+            # checkpointed region, and saving it is just as impossible then.
+            return None
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
+            return "marked MUST_SAVE"
+        if config.recompute_views and op_types.is_view(node):
+            return None
+        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -3468,6 +3472,8 @@ def estimate_runtime(node: fx.Node) -> float:
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
             return True
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.device):
+            return x.meta["val"]
         else:
             return x
 

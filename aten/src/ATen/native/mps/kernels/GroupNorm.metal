@@ -8,22 +8,22 @@ using namespace metal;
 using namespace c10::metal;
 
 template <typename T>
-inline float load_affine_scale(constant T* ptr, uint idx) {
+inline float load_affine_scale(device const T* ptr, uint idx) {
   return float(ptr[idx]);
 }
 
 template <>
-inline float load_affine_scale(constant void*, uint) {
+inline float load_affine_scale(device const void*, uint) {
   return 1;
 }
 
 template <typename T>
-inline float load_affine_bias(constant T* ptr, uint idx) {
+inline float load_affine_bias(device const T* ptr, uint idx) {
   return float(ptr[idx]);
 }
 
 template <>
-inline float load_affine_bias(constant void*, uint) {
+inline float load_affine_bias(device const void*, uint) {
   return 0;
 }
 
@@ -37,15 +37,15 @@ kernel void group_norm(
     device T* Y [[buffer(0)]],
     device stat_T* mean [[buffer(1)]],
     device stat_T* rstd [[buffer(2)]],
-    constant T* X [[buffer(3)]],
-    constant gamma_T* gamma [[buffer(4)]],
-    constant beta_T* beta [[buffer(5)]],
+    device const T* X [[buffer(3)]],
+    device const gamma_T* gamma [[buffer(4)]],
+    device const beta_T* beta [[buffer(5)]],
     constant GroupNormParams<idx_T>& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]]) {
   idx_T group_offset = tgid * params.elements_per_group;
-  constant T* x = X + group_offset;
+  device const T* x = X + group_offset;
   device T* y = Y + group_offset;
 
   // Divide the elements of the group between each thread in the threadgroup.
@@ -118,10 +118,10 @@ kernel void group_norm(
       device T * Y [[buffer(0)]],                                            \
       device stat_T * mean [[buffer(1)]],                                    \
       device stat_T * rstd [[buffer(2)]],                                    \
-      constant T * X [[buffer(3)]],                                          \
-      constant gamma_T * gamma [[buffer(4)]],                                \
-      constant beta_T * beta [[buffer(5)]],                                  \
-      constant GroupNormParams<idx_T> & params [[buffer(6)]],                \
+      device const T* X [[buffer(3)]],                                       \
+      device const gamma_T* gamma [[buffer(4)]],                             \
+      device const beta_T* beta [[buffer(5)]],                               \
+      constant GroupNormParams<idx_T>& params [[buffer(6)]],                 \
       uint tg_id [[threadgroup_position_in_grid]],                           \
       uint tid [[thread_position_in_threadgroup]],                           \
       uint tptg [[threads_per_threadgroup]]);
@@ -151,18 +151,18 @@ REGISTER_GROUP_NORM_AFFINE_TYPES(bfloat, bfloat);
 template <typename T, typename stat_T, typename gamma_T, typename idx_T>
 kernel void group_norm_backward_x(
     device T* dX [[buffer(0)]],
-    constant T* dY [[buffer(1)]],
-    constant T* X [[buffer(2)]],
-    constant stat_T* mean [[buffer(3)]],
-    constant stat_T* rstd [[buffer(4)]],
-    constant gamma_T* gamma [[buffer(5)]],
+    device const T* dY [[buffer(1)]],
+    device const T* X [[buffer(2)]],
+    device const stat_T* mean [[buffer(3)]],
+    device const stat_T* rstd [[buffer(4)]],
+    device const gamma_T* gamma [[buffer(5)]],
     constant GroupNormParams<idx_T>& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]]) {
   idx_T group_offset = tgid * params.elements_per_group;
-  constant T* x = X + group_offset;
-  constant T* dy = dY + group_offset;
+  device const T* x = X + group_offset;
+  device const T* dy = dY + group_offset;
   device T* dx = dX + group_offset;
 
   auto mean_val = float(mean[tgid]);
@@ -223,12 +223,12 @@ kernel void group_norm_backward_x(
                        "_" #idx_T)]]                                        \
   kernel void group_norm_backward_x<T, stat_T, gamma_T, idx_T>(             \
       device T * dX [[buffer(0)]],                                          \
-      constant T * dY [[buffer(1)]],                                        \
-      constant T * X [[buffer(2)]],                                         \
-      constant stat_T * mean [[buffer(3)]],                                 \
-      constant stat_T * rstd [[buffer(4)]],                                 \
-      constant gamma_T * gamma [[buffer(5)]],                               \
-      constant GroupNormParams<idx_T> & params [[buffer(6)]],               \
+      device const T* dY [[buffer(1)]],                                     \
+      device const T* X [[buffer(2)]],                                      \
+      device const stat_T* mean [[buffer(3)]],                              \
+      device const stat_T* rstd [[buffer(4)]],                              \
+      device const gamma_T* gamma [[buffer(5)]],                            \
+      constant GroupNormParams<idx_T>& params [[buffer(6)]],                \
       uint tgid [[threadgroup_position_in_grid]],                           \
       uint tid [[thread_position_in_threadgroup]],                          \
       uint tptg [[threads_per_threadgroup]]);
@@ -253,10 +253,10 @@ template <typename T, typename stat_T, typename affine_T, typename idx_T>
 kernel void group_norm_backward_affine(
     device affine_T* dgamma [[buffer(0)]],
     device affine_T* dbeta [[buffer(1)]],
-    constant T* dY [[buffer(2)]],
-    constant T* X [[buffer(3)]],
-    constant stat_T* mean [[buffer(4)]],
-    constant stat_T* rstd [[buffer(5)]],
+    device const T* dY [[buffer(2)]],
+    device const T* X [[buffer(3)]],
+    device const stat_T* mean [[buffer(4)]],
+    device const stat_T* rstd [[buffer(5)]],
     constant GroupNormParams<idx_T>& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
@@ -305,11 +305,11 @@ kernel void group_norm_backward_affine(
   kernel void group_norm_backward_affine<T, stat_T, affine_T, idx_T>(   \
       device affine_T * dgamma [[buffer(0)]],                           \
       device affine_T * dbeta [[buffer(1)]],                            \
-      constant T * dY [[buffer(2)]],                                    \
-      constant T * X [[buffer(3)]],                                     \
-      constant stat_T * mean [[buffer(4)]],                             \
-      constant stat_T * rstd [[buffer(5)]],                             \
-      constant GroupNormParams<idx_T> & params [[buffer(6)]],           \
+      device const T* dY [[buffer(2)]],                                 \
+      device const T* X [[buffer(3)]],                                  \
+      device const stat_T* mean [[buffer(4)]],                          \
+      device const stat_T* rstd [[buffer(5)]],                          \
+      constant GroupNormParams<idx_T>& params [[buffer(6)]],            \
       uint tgid [[threadgroup_position_in_grid]],                       \
       uint tid [[thread_position_in_threadgroup]],                      \
       uint tptg [[threads_per_threadgroup]]);
