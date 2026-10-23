@@ -1388,45 +1388,61 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(res, ref, atol=0, rtol=0)
 
     @onlyCUDA
-    def test_float32_division_by_scalar_is_correctly_rounded(self, device):
+    @parametrize("s", (3.0, 6.0, 7.0, 13.0, 255.0, 448.0, 2688.0, 0.1, 2.0, 0.25))
+    def test_float32_division_by_scalar_is_correctly_rounded(self, device, s):
         # x * (1/s) is one ulp off for many x when s is not a power of two,
         # e.g. 49 / 7 gave 7.0000005. Block quantizers computing amax / 6.0 then
         # round exact ties of the FP4 grid the wrong way.
         x = torch.randn(1 << 16, device=device) * 100
         x = torch.cat([x, torch.tensor([49.0, 169.0, 318.75], device=device)])
-        for s in (3.0, 6.0, 7.0, 13.0, 255.0, 448.0, 2688.0, 0.1, 2.0, 0.25):
-            s_float = torch.tensor(s).item()
-            expect = (x.cpu().double() / s_float).float().to(device)
-            self.assertEqual(x / s, expect, atol=0, rtol=0)
-            self.assertEqual(x.clone().div_(s), expect, atol=0, rtol=0)
+        s_float = torch.tensor(s).item()
+        expect = (x.cpu().double() / s_float).float().to(device)
+        self.assertEqual(x / s, expect, atol=0, rtol=0)
+        self.assertEqual(x.clone().div_(s), expect, atol=0, rtol=0)
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
-    def test_division_by_scalar_without_finite_normal_reciprocal(self, device, dtype):
+    @parametrize("divisor", ("tiny/8", "-tiny/5", "max/2", "-max"))
+    @parametrize("rounding_mode", (None, "trunc", "floor"))
+    def test_division_by_scalar_without_finite_normal_reciprocal(
+        self, device, dtype, divisor, rounding_mode
+    ):
         # 1/s overflows or is subnormal in opmath, so CUDA must divide by s
         # instead of multiplying by 1/s; this matches CPU exactly.
         opmath = torch.finfo(torch.double if dtype == torch.double else torch.float)
+        s = {
+            "tiny/8": opmath.tiny / 8,
+            "-tiny/5": -opmath.tiny / 5,
+            "max/2": opmath.max / 2,
+            "-max": -opmath.max,
+        }[divisor]
         a = torch.tensor([0.0, 1.0, -2.5, 3.0, 30.0], dtype=torch.double) * opmath.tiny
         a = torch.cat([a, torch.tensor([1.0, -7.5, 100.0], dtype=torch.double)])
         a = a.to(dtype)
-        for s in (opmath.tiny / 8, -opmath.tiny / 5, opmath.max / 2, -opmath.max):
-            for rounding_mode in (None, "trunc", "floor"):
-                expect = torch.div(a, s, rounding_mode=rounding_mode)
-                actual = torch.div(a.to(device), s, rounding_mode=rounding_mode)
-                self.assertEqual(actual, expect, atol=0, rtol=0)
+        expect = torch.div(a, s, rounding_mode=rounding_mode)
+        actual = torch.div(a.to(device), s, rounding_mode=rounding_mode)
+        self.assertEqual(actual, expect, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_complex_division_by_huge_scalar(self, device):
+        # 1/s has subnormal parts, but dividing by s in complex64 overflows an
+        # intermediate and returns 0, so complex keeps the reciprocal.
+        a = torch.tensor([1e38 + 1e38j], dtype=torch.complex64, device=device)
+        actual = a / (2e38 + 2e38j)
+        self.assertEqual(actual.cpu(), torch.tensor([0.5 + 0j]), atol=1e-6, rtol=0)
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
-    def test_div_trunc_by_scalar_matches_cpu(self, device, dtype):
+    @parametrize("s", (7.0, 49.0))
+    def test_div_trunc_by_scalar_matches_cpu(self, device, dtype, s):
         # trunc(a * (1/s)) can be off by a whole integer, e.g. -17373096 / 7.
         # Large magnitudes make the quotient's fractional part coarse.
         scale = 2**29 if dtype == torch.double else 1
         a = torch.arange(-(2**22), 2**22, 997, dtype=dtype) * 7 * scale
         a = torch.cat([a, torch.tensor([-17373096.0], dtype=dtype)])
-        for s in (7.0, 49.0):
-            expect = torch.div(a, s, rounding_mode="trunc")
-            actual = torch.div(a.to(device), s, rounding_mode="trunc")
-            self.assertEqual(actual, expect, atol=0, rtol=0)
+        expect = torch.div(a, s, rounding_mode="trunc")
+        actual = torch.div(a.to(device), s, rounding_mode="trunc")
+        self.assertEqual(actual, expect, atol=0, rtol=0)
 
     # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message
