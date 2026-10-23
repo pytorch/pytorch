@@ -1514,10 +1514,12 @@ def gather_m_get_copy_fn(
             mA_row = cute.tiled_divide(
                 cute.append_ones(mA_cur[m_idx[m], None], up_to_rank=2), (elems_per_load, 1)
             )[None, None, 0]
-            if const_expr(is_even_m_smem) or tApA_m[m]:
-                # There's only 1 load per row
-                assert cute.size(tAcA.shape, mode=[2]) == 1
-                ki = tAcA[0, 0, 0][1] // elems_per_load
+            # There's only 1 load per row
+            assert cute.size(tAcA.shape, mode=[2]) == 1
+            ki = tAcA[0, 0, 0][1] // elems_per_load
+            if const_expr(is_even_m_smem):
+                cute.copy(thr_copy_A, mA_row[None, ki], tAsA[(None, m), dst_idx], pred=tApA_k)
+            elif tApA_m[m]:
                 cute.copy(thr_copy_A, mA_row[None, ki], tAsA[(None, m), dst_idx], pred=tApA_k)
 
     return copy_fn
