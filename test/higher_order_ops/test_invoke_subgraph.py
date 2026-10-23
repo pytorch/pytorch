@@ -3649,12 +3649,14 @@ class TestInvokeSubgraphAliases(TestCase):
         x = torch.randn(8, 8, device=device, requires_grad=True)
         y = torch.randn(8, 8, device=device, requires_grad=True)
         _, (code, *_) = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
-        operand = re.search(r"_args = \[\w+, (buf\d+)\]", code).group(1)
-        fresh = re.search(r"(buf\d+) = buf\d+\[0\]", code).group(1)
+        operand = re.search(r"_args = \[\w+, (buf\d+)\]", code)
+        fresh = re.search(r"(buf\d+) = buf\d+\[0\]", code)
+        self.assertIsNotNone(operand, code)
+        self.assertIsNotNone(fresh, code)
         # The saved operand stays alive for backward, while the fresh output is
         # free to be reused once it is dead.
-        self.assertNotRegex(code, rf"\bdel {operand}\b")
-        self.assertIn(f"= {fresh}; del {fresh}  # reuse", code)
+        self.assertNotRegex(code, rf"\bdel {operand.group(1)}\b")
+        self.assertIn(f"= {fresh.group(1)}; del {fresh.group(1)}  # reuse", code)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")

@@ -11354,19 +11354,17 @@ class InvokeSubgraph(ExternKernel):
         # its fresh outputs, so aliases are tracked per output: the operands and
         # sibling outputs that share its storage.
         if self.subgraph is None or self.subgraph.graph is None or self.outputs is None:
-            raise AssertionError("Expected a lowered invoke_subgraph")
+            raise AssertionError("Expected a lowered invoke_subgraph body")
         storages = self._output_storages()
-        aliases = [
-            self.input_name(i)
-            for i, name in enumerate(self.subgraph.graph.graph_input_names)
-            if name in storages[index]
-        ]
+        storage = storages[index]
+        names = self.subgraph.graph.graph_input_names
+        aliases = [self.input_name(i) for i, n in enumerate(names) if n in storage]
         aliases.extend(
             output.get_name()
             for i, output in enumerate(self.outputs)
             if i != index
             and isinstance(output, MultiOutput)
-            and not storages[index].isdisjoint(storages[i])
+            and not storage.isdisjoint(storages[i])
         )
         return aliases
 
