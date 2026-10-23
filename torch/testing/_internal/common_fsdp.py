@@ -399,7 +399,7 @@ class TransformerWithSharedParams(FSDPTestModel):
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(fsdp_kwargs.get("device_id", DEVICE_TYPE))
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
@@ -496,7 +496,7 @@ class NestedWrappedModule(FSDPTestModel):
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(fsdp_kwargs.get("device_id", DEVICE_TYPE))
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
