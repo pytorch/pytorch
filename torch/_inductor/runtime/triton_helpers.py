@@ -871,6 +871,29 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 
 @triton.jit
+def eager_unary_nan(x, result):
+    # CUDA abs, neg and frexp canonicalize NaNs except float64, which only quiets them.
+    if result.dtype == tl.float64:
+        bits = x.to(tl.int64, bitcast=True)
+        is_nan = (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000
+        result = tl.where(
+            is_nan, bits | 0x0008000000000000, result.to(tl.int64, bitcast=True)
+        ).to(tl.float64, bitcast=True)
+    elif (
+        result.dtype == tl.float32
+        or result.dtype == tl.float16
+        or result.dtype == tl.bfloat16
+    ):
+        width: tl.constexpr = result.dtype.primitive_bitwidth
+        idtype = tl.core.get_int_dtype(bitwidth=width, signed=True)
+        nan_bits = tl.full((), (1 << (width - 1)) - 1, idtype)
+        result = tl.where(x != x, nan_bits, result.to(idtype, bitcast=True)).to(
+            result.dtype, bitcast=True
+        )
+    return result
+
+
+@triton.jit
 def frexp(x):
     # Decompose the IEEE-754 bit pattern with integer ops rather than calling
     # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
