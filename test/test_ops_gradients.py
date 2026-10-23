@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     run_tests,
+    skipIfTorchInductor,
     TestCase,
     TestGradients,
     unMarkDynamoStrictTest,
@@ -72,7 +73,7 @@ class TestBwdGradients(TestGradients):
         if dtype not in op.supported_backward_dtypes(torch.device(device).type):
             self.skipTest("Skipped! Dtype is not in supported backward dtypes!")
         else:
-            self._grad_test_helper(device, dtype, op, op.get_op())
+            self._grad_test_helper(device, dtype, op, op)
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
@@ -130,6 +131,7 @@ class TestBwdGradients(TestGradients):
         }
     )
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
+    @skipIfTorchInductor("torch.compile doesn't support double backward")
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
@@ -142,6 +144,7 @@ class TestBwdGradients(TestGradients):
     # Test that gradients of gradients are properly raising
     @skipOps(_bwd_grad_all | {skip("sparse.mm", variant_name="reduce")})
     @_gradcheck_ops(op_db + custom_op_db)
+    @skipIfTorchInductor("torch.compile doesn't support double backward")
     def test_fn_fail_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if op.supports_gradgrad:
@@ -167,6 +170,7 @@ class TestBwdGradients(TestGradients):
         }
     )
     @_gradcheck_ops(op_db)
+    @skipIfTorchInductor("torch.compile doesn't support double backward")
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:

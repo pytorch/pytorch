@@ -45,7 +45,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from itertools import product, chain
+from itertools import chain, islice, product
 from pathlib import Path
 from statistics import mean
 from typing import (
@@ -562,6 +562,11 @@ def clear_tracked_input() -> None:
         return
     test_fn.tracked_input = None  # type: ignore[attr-defined]
 
+# Compiling every input is costly, and some ops generate over a thousand. Under
+# Inductor, TrackedInputIter yields only the first this many.
+INDUCTOR_MAX_INPUTS = 32
+
+
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
@@ -574,6 +579,8 @@ class TrackedInputIter:
         set_seed=True,
         restrict_to_index=None
     ):
+        if TEST_WITH_TORCHINDUCTOR and restrict_to_index is None:
+            child_iter = islice(child_iter, INDUCTOR_MAX_INPUTS)
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
@@ -2100,6 +2107,9 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+        # For all Inductor tests: OpInfo inputs may each need their own graph,
+        # and past the limit they'd silently run eagerly.
+        torch._dynamo.config.recompile_limit = INDUCTOR_MAX_INPUTS
     else:
         # only dynamo for now
         torch._dynamo.config.compiled_autograd = not TEST_WITHOUT_COMPILED_AUTOGRAD
@@ -2247,17 +2257,17 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             def wrapper(*args, **kwargs):
                 if TEST_WITH_TORCHDYNAMO:
                     raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
+                fn(*args, **kwargs)
+        else:
+            wrapper = fn
 
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
+        # Also skip statically, so TestCase.run doesn't set up Dynamo just to
+        # raise SkipTest. The wrapper still skips where the marker is dropped.
         if TEST_WITH_TORCHDYNAMO:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
+            wrapper.__unittest_skip__ = True  # type: ignore[attr-defined]
+            wrapper.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
-        return fn
+        return wrapper
 
     return decorator
 
@@ -2269,17 +2279,16 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
             def wrapper(*args, **kwargs):
                 if condition:
                     raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
+                fn(*args, **kwargs)
+        else:
+            wrapper = fn
 
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
+        # See skipIfTorchDynamo.
         if condition:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
+            wrapper.__unittest_skip__ = True  # type: ignore[attr-defined]
+            wrapper.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
-        return fn
+        return wrapper
 
     return decorator
 
@@ -4058,6 +4067,12 @@ class TestCase(expecttest.TestCase):
         return torch._dynamo.optimize(backend, nopython=nopython)(fn)
 
     def _run_custom(self, result=None):
+        # unittest reports static skips without running setUp; skip the Dynamo
+        # setup below too, which costs ~40ms per test.
+        test_method = getattr(self, self._testMethodName, None)
+        if getattr(type(self), "__unittest_skip__", False) or getattr(test_method, "__unittest_skip__", False):
+            return super().run(result)
+
         using_unittest = isinstance(result, unittest.TestResult)
 
         super_run = super().run
@@ -4084,15 +4099,12 @@ class TestCase(expecttest.TestCase):
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
+                    strict_default = True
                     if TEST_WITH_TORCHINDUCTOR:
-                        from .dynamo_test_failures import FIXME_inductor_non_strict
-                        strict_default = filename not in FIXME_inductor_non_strict
                         should_reset_dynamo = True
 
                         if filename == "test_ops":
                             should_disable_size_asserts = True
-                    else:
-                        strict_default = True
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass
@@ -6406,11 +6418,12 @@ class TestGradients(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
     def _get_safe_inplace(self, inplace_variant):
+        # Dynamo compiles this by name; see torch/_dynamo/trace_rules.py.
         @wraps(inplace_variant)
-        def _fn(t, *args, **kwargs):
+        def _safe_inplace_variant(t, *args, **kwargs):
             return inplace_variant(t.clone(), *args, **kwargs)
 
-        return _fn
+        return _safe_inplace_variant
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
                       check_batched_grad=None, check_batched_forward_grad=False):
@@ -6500,15 +6513,22 @@ class TestGradients(TestCase):
             if check == 'gradcheck':
                 if check_batched_grad is None:
                     check_batched_grad = op.check_batched_grad
-                self.assertTrue(gradcheck(fn, gradcheck_args,
-                                          check_batched_grad=check_batched_grad,
-                                          check_grad_dtypes=True,
-                                          nondet_tol=op.gradcheck_nondet_tol,
-                                          fast_mode=op.gradcheck_fast_mode,
-                                          check_forward_ad=check_forward_ad,
-                                          check_backward_ad=check_backward_ad,
-                                          check_undefined_grad=True,
-                                          check_batched_forward_grad=check_batched_forward_grad))
+                # vmap batches the backward, which compiled code can't run on, and
+                # gradcheck retains the backward graph, which donated buffers forbid.
+                no_donation = contextlib.nullcontext()
+                if TEST_WITH_TORCHINDUCTOR:
+                    check_batched_grad = False
+                    no_donation = torch._functorch.config.patch(donated_buffer=False)
+                with no_donation:
+                    self.assertTrue(gradcheck(fn, gradcheck_args,
+                                              check_batched_grad=check_batched_grad,
+                                              check_grad_dtypes=True,
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode,
+                                              check_forward_ad=check_forward_ad,
+                                              check_backward_ad=check_backward_ad,
+                                              check_undefined_grad=True,
+                                              check_batched_forward_grad=check_batched_forward_grad))
             elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 for gen_non_contig_grad_outputs in (False, True):

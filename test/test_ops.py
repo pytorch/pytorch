@@ -203,6 +203,15 @@ meta_consistency_out_dtype_mismatch_xfails = {
 }
 
 
+def eager_reference(op):
+    """Returns op, but uncompiled under Inductor, where calling an OpInfo compiles it."""
+    return torch._dynamo.disable(op.get_op()) if TEST_WITH_TORCHINDUCTOR else op
+
+
+_UNDER_DISPATCH_MODE = "Dynamo skips TorchDispatchMode frames; op runs eagerly"
+_COMPOSITE_COMPLIANCE = "Checks eager composite compliance, not Inductor"
+
+
 # Tests that apply to all operators and aren't related to any particular
 #   system
 @unMarkDynamoStrictTest
@@ -502,11 +511,12 @@ class TestCommon(TestCase):
             return arg
 
         samples = op.reference_inputs(device, dtype)
+        eager = eager_reference(op)
 
         for sample in samples:
             cpu_sample = sample.transform(to_cpu)
             device_results = op(sample.input, *sample.args, **sample.kwargs)
-            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+            cpu_results = eager(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
             # output_process_fn_grad has a very unfortunate name
             # We use this function in linalg extensively to postprocess the inputs of functions
@@ -772,6 +782,7 @@ class TestCommon(TestCase):
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @skipIfTorchInductor("Checks eager error messages, not Inductor")
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
@@ -796,6 +807,7 @@ class TestCommon(TestCase):
             torch.sparse_coo,
         ),
     )
+    @skipIfTorchInductor("torch.compile doesn't support sparse tensors")
     def test_errors_sparse(self, device, op, layout):
         for ei in op.error_inputs_sparse(device, layout):
             si = ei.sample_input
@@ -841,6 +853,7 @@ class TestCommon(TestCase):
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
+        eager = eager_reference(op)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = (
                 sample_input.input,
@@ -855,7 +868,7 @@ class TestCommon(TestCase):
             )
 
             # validates forward
-            expected = op(t_inp, *t_args, **t_kwargs)
+            expected = eager(t_inp, *t_args, **t_kwargs)
             actual = op(n_inp, *n_args, **n_kwargs)
 
             self.assertEqual(actual, expected)
@@ -948,9 +961,10 @@ class TestCommon(TestCase):
             op.op = _maybe_remove_out_wrapper(op.op)
 
         samples = op.sample_inputs(device, dtype)
+        eager = eager_reference(op)
         for sample in samples:
             # calls it normally to get the expected result
-            expected = op(sample.input, *sample.args, **sample.kwargs)
+            expected = eager(sample.input, *sample.args, **sample.kwargs)
             op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
 
             # Short-circuits if output is not a single tensor or an
@@ -1078,9 +1092,10 @@ class TestCommon(TestCase):
             op = copy.copy(op)
             op.op = _maybe_remove_out_wrapper(op.op)
 
+        eager = eager_reference(op)
         for sample in samples:
             # calls it normally to get the expected result
-            expected = op(sample.input, *sample.args, **sample.kwargs)
+            expected = eager(sample.input, *sample.args, **sample.kwargs)
             op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
 
             # Short-circuits if output is not a single tensor or an
@@ -1284,7 +1299,7 @@ class TestCommon(TestCase):
 
         # Call op to get prototype for out arguments
         with maybe_skip_size_asserts(op):
-            expect = op(sample.input, *sample.args, **sample.kwargs)
+            expect = eager_reference(op)(sample.input, *sample.args, **sample.kwargs)
         any_requires_grad = False
 
         def set_requires_grad(x):
@@ -1536,6 +1551,7 @@ class TestCommon(TestCase):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
 
+        eager = eager_reference(op)
         for sample in op.sample_inputs(device, dtype):
             # MPS doesn't support float64
             if torch.float64 in (
@@ -1553,7 +1569,7 @@ class TestCommon(TestCase):
                 and x.dtype in (torch.complex32, torch.bcomplex32)
                 else x
             )
-            expected = op(
+            expected = eager(
                 transformed_sample.input,
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
@@ -1593,8 +1609,9 @@ class TestCommon(TestCase):
             self.assertEqual(ret, x)
             return ret
 
+        eager = eager_reference(op)
         for sample in op.sample_inputs(device, dtype):
-            expect = op(sample.input, *sample.args, **sample.kwargs)
+            expect = eager(sample.input, *sample.args, **sample.kwargs)
 
             transformed = sample.transform(convert_boolean_tensors)
             actual = op(transformed.input, *transformed.args, **transformed.kwargs)
@@ -1941,6 +1958,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipIfTorchInductor(_COMPOSITE_COMPLIANCE)
     def test_operator(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
 
@@ -1973,6 +1991,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipIfTorchInductor(_COMPOSITE_COMPLIANCE)
     def test_backward(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
@@ -2007,6 +2026,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipIfTorchInductor(_COMPOSITE_COMPLIANCE)
     def test_forward_ad(self, device, dtype, op):
         if torch.float not in op.supported_backward_dtypes(device):
             raise unittest.SkipTest("Does not support autograd")
@@ -2034,6 +2054,7 @@ class TestCompositeCompliance(TestCase):
     )
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipIfTorchInductor("Inductor-generated kernels materialize COW inputs")
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
 
@@ -2221,6 +2242,7 @@ class TestCompositeCompliance(TestCase):
         }
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipIfTorchInductor("Checks eager view replay, not Inductor")
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
             self.assertEqual(a.size(), b.size())
@@ -2368,6 +2390,7 @@ class TestMathBits(TestCase):
                 out[0] = clone_and_perform_view(out[0])
                 return tuple(out)
 
+        eager = eager_reference(op)
         for sample in samples:
             tensor = (
                 sample.input
@@ -2378,7 +2401,7 @@ class TestMathBits(TestCase):
 
             # Computes function forward value with a physically conjugated/negated tensor and
             # a conj/neg view tensor and verifies that the output in both case are equal.
-            expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+            expected_forward = eager(sample.input, *sample.args, **sample.kwargs)
             forward_with_mathview = op(cloned1, *sample.args, **sample.kwargs)
             self.assertEqual(expected_forward, forward_with_mathview)
 
@@ -2561,6 +2584,7 @@ class TestTags(TestCase):
         }
     )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
+    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
     def test_tags(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
@@ -3081,6 +3105,7 @@ class TestFakeTensor(TestCase):
         }
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
+    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
         if op.variant_test_name:
@@ -3142,6 +3167,7 @@ class TestFakeTensor(TestCase):
         | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
+    @skipIfTorchInductor("Checks FakeTensor metadata, not Inductor")
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
@@ -3154,6 +3180,7 @@ class TestFakeTensor(TestCase):
         | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
+    @skipIfTorchInductor("Checks FakeTensor metadata, not Inductor")
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
         if op.name in fake_autocast_device_skips[device_type]:
@@ -3204,6 +3231,7 @@ class TestFakeTensor(TestCase):
     @skipOps(
         fake_backward_xfails | fake_backward_mps_xfails | {skip("sparse.sampled_addmm")}
     )
+    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
@@ -3212,12 +3240,14 @@ class TestFakeTensor(TestCase):
     @skipOps(
         fake_backward_xfails | fake_autocast_backward_xfails | fake_backward_mps_xfails
     )
+    @skipIfTorchInductor(_UNDER_DISPATCH_MODE)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(
             device, dtype, op, partial(torch.amp.autocast, device_type=device)
         )
 
     @ops([op for op in ops_and_refs if op.is_factory_function])
+    @skipIfTorchInductor("Checks factory functions' output layout, not Inductor")
     def test_strided_layout(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         for sample in samples:

@@ -1484,7 +1484,8 @@ def skipOps(to_skip):
 # what the operator supports. If given "allowed_dtypes" then test variants
 # are instantiated only for the intersection of allowed_dtypes and the dtypes
 # they would otherwise be instantiated with. That is, allowed_dtypes composes
-# with the options listed above and below.
+# with the options listed above and below. "allowed_dtypes" may also be a
+# callable that maps an OpInfo to its allowed dtypes.
 #
 # The "dtypes" argument can also accept additional values (see OpDTypes above):
 #   OpDTypes.supported - the test is instantiated for all dtypes the operator
@@ -1512,13 +1513,17 @@ class ops(_TestParametrizer):
         op_list,
         *,
         dtypes: OpDTypes | Sequence[torch.dtype] = OpDTypes.supported,
-        allowed_dtypes: Sequence[torch.dtype] | None = None,
+        allowed_dtypes: Sequence[torch.dtype]
+        | Callable[[Any], Iterable[torch.dtype]]
+        | None = None,
         skip_if_dynamo=True,
     ):
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = (
-            set(allowed_dtypes) if allowed_dtypes is not None else None
+            set(allowed_dtypes)
+            if allowed_dtypes is not None and not callable(allowed_dtypes)
+            else allowed_dtypes
         )
         self.skip_if_dynamo = skip_if_dynamo
 
@@ -1582,7 +1587,9 @@ class ops(_TestParametrizer):
             else:
                 raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
 
-            if self.allowed_dtypes is not None:
+            if callable(self.allowed_dtypes):
+                dtypes = dtypes.intersection(self.allowed_dtypes(op))
+            elif self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
             # Construct the test name; device / dtype parts are handled outside.

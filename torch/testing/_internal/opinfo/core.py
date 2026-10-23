@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
-from itertools import product
+from itertools import islice, product
 from typing import Any, TypeVar
 
 import torch
@@ -31,11 +31,13 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     extract_test_fn,
+    INDUCTOR_MAX_INPUTS,
     IS_FBCODE,
     is_iterable_of_tensors,
     noncontiguous_like,
     OPINFO_SAMPLE_INPUT_INDEX,
     TEST_WITH_ROCM,
+    TEST_WITH_TORCHINDUCTOR,
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
     USE_PYTEST,
@@ -1424,6 +1426,9 @@ def test_foo(self, device, dtype, op):
             conj_samples = self.conjugate_sample_inputs(
                 device, dtype, requires_grad, **kwargs
             )
+            if TEST_WITH_TORCHINDUCTOR:
+                # Leave room for the conjugates within TrackedInputIter's cap.
+                samples = islice(samples, INDUCTOR_MAX_INPUTS // 2)
             samples_list = list(samples)
             samples_list.extend(conj_samples)
             samples = tuple(samples_list)
@@ -3285,7 +3290,9 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     output = op(input, *args, **kwargs)
     mask = kwargs.get("mask")
     if mask is not None:
-        output_mask = torch.masked._output_mask(op, input, *args, **kwargs)
+        # _output_mask identifies the operation by its function's name.
+        fn = op.get_op() if isinstance(op, OpInfo) else op
+        output_mask = torch.masked._output_mask(fn, input, *args, **kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
