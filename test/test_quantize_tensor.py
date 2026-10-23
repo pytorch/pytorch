@@ -115,12 +115,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", False, swizzled)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        self.assertEqual(scales.shape, scales_ref.shape)
+        self.assertEqual(scales, scales_ref)
         if swizzled:
-            scale_bytes = scales.view(torch.uint8).flatten()
-            self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
             scales = from_blocked(qdata, scales.flatten(), 32)
-        else:
-            self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
         dequantized = from_blocked_format(qdata, scales).float()
         sqnr = compute_error(data_hp.float(), dequantized)
         self.assertGreater(sqnr.item(), 18.0)
@@ -141,8 +139,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_m", False, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        scale_bytes = scales.view(torch.uint8).flatten()
-        self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
+        self.assertEqual(scales, scales_ref)
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     @parametrize(
@@ -160,9 +157,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_m", False, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        self.assertEqual(
-            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
-        )
+        self.assertEqual(scales, scales_ref)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
@@ -186,10 +181,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         self.assertEqual(qdata_k.view(torch.uint8), qdata_k_ref.view(torch.uint8))
         self.assertEqual(qdata_m.view(torch.uint8), qdata_m_ref.view(torch.uint8))
-        scale_k_bytes = scales_k.view(torch.uint8).flatten()
-        scale_m_bytes = scales_m.view(torch.uint8).flatten()
-        self.assertEqual(scale_k_bytes, scales_k_ref.view(torch.uint8))
-        self.assertEqual(scale_m_bytes, scales_m_ref.view(torch.uint8))
+        self.assertEqual(scales_k, scales_k_ref)
+        self.assertEqual(scales_m, scales_m_ref)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
@@ -205,9 +198,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", True, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        self.assertEqual(
-            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
-        )
+        self.assertEqual(scales, scales_ref)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @skipIfNoCuteDSL
@@ -219,9 +210,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", True, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        self.assertEqual(
-            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
-        )
+        self.assertEqual(scales, scales_ref)
         expected_nan = torch.zeros((64, 64), device=device, dtype=torch.bool)
         expected_nan[:32, :32] = True
         self.assertEqual(torch.isnan(qdata), expected_nan)
@@ -255,11 +244,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape
         scale_k_shape = (
-            ((M + 127) // 128, (K + 127) // 128, 32, 16)
+            (1, ((M + 127) // 128) * ((K + 127) // 128) * 32 * 16)
             if is_scale_swizzled
             else (M, K // 32)
         )
-        scale_m_shape = ((K + 127) // 128, (M + 127) // 128, 32, 16)
+        scale_m_shape = (1, ((K + 127) // 128) * ((M + 127) // 128) * 32 * 16)
         expected_shapes = {
             "dim_k": ((M, K), scale_k_shape),
             "dim_m": ((K, M), scale_m_shape),
