@@ -1005,7 +1005,8 @@ ldl_diagonal_panel_fused_kernel(
   int* __restrict__ dpart_idx
 ) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
-  const real_t ALPHA = (1 + ::sqrt(17)) / 8;
+  // ALPHA = (1 + sqrt(17)) / 8
+  constexpr real_t ALPHA = (1 + 4.1231056256176606) / 8;
   const int tid = threadIdx.x;
   const int gtid = blockIdx.x * BS + tid;
   const int nthreads = gridDim.x * BS;
