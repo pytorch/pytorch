@@ -530,8 +530,8 @@ class BatchLinearLHSFusion(BatchFusion):
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
             weight_val = weight.meta["example_value"]
-            # A zero-width split inherits the fused output's row stride, which
-            # differs from eager when grouped with non-empty projections.
+            # An empty projection adds no GEMM columns or fusion benefit, but
+            # grouping it with non-empty projections can change its eager stride.
             if not statically_known_true(weight_val.shape[0] > 0):
                 return None
             # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
