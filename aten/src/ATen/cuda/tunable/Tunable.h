@@ -121,6 +121,17 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     // solution, or Default when the default kernel benchmarked faster. Unlike Add()
     // this writes while tuning is disabled. Also unconditional, for the same
     // reason as LookupNearest.
+    //
+    // Known limitation, accepted deliberately: the entry goes into the ordinary
+    // results file in the ordinary format, with nothing marking it as borrowed.
+    // So an entry no longer implies "the tuner measured this exact shape", and a
+    // reader cannot tell the two apart. Because the write path is first-write-wins
+    // (AddImpl try_emplaces, ReadFile emplaces), a later tuning run that loads the
+    // file skips these shapes, which makes a Default recorded here permanent.
+    // Anyone sharing or re-tuning from a results file produced by a reuse pass
+    // needs to know that. Marking them -- a separate file, a tagged column, or the
+    // untuned log -- is follow-up work, and is a format change once such files
+    // exist in the wild.
     void RecordBorrowed(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry entry);
