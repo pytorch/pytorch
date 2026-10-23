@@ -523,23 +523,21 @@ Tensor _weight_int4pack_mm_xpu(
     int64_t qGroupSize,
     const Tensor& qScale,
     const Tensor& qZeros) {
-  const Tensor A_contiguous = A.contiguous();
-  auto M = A_contiguous.size(0); // M
+  const Tensor A_ = A.contiguous();
+  auto M = A_.size(0); // M
   auto N = B.size(0); // N1=LCM(N, K)
   TORCH_CHECK(
-      A_contiguous.dtype() == kBFloat16 || A_contiguous.dtype() == kHalf ||
-          A_contiguous.dtype() == kFloat,
+      A_.dtype() == kBFloat16 || A_.dtype() == kHalf || A_.dtype() == kFloat,
       __func__,
       " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(
-      A_contiguous.dim() == 2, __func__, " : expect A to be 2D tensor.");
+  TORCH_CHECK(A_.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
   TORCH_CHECK(
-      qScale.dtype() == A_contiguous.dtype() || qScale.dtype() == kFloat,
+      qScale.dtype() == A_.dtype() || qScale.dtype() == kFloat,
       __func__,
       " : expect qScale dtype to match A dtype (",
-      A_contiguous.dtype(),
+      A_.dtype(),
       ") or be float32, got ",
       qScale.dtype());
   TORCH_CHECK(
@@ -567,12 +565,11 @@ Tensor _weight_int4pack_mm_xpu(
       N,
       "]");
 
-  auto C = at::empty({M, N}, A_contiguous.options());
+  auto C = at::empty({M, N}, A_.options());
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N]
-  at::native::onednn::woq_matmul_int4(
-      C, A_contiguous, B, qScale, qZeros, qGroupSize);
+  at::native::onednn::woq_matmul_int4(C, A_, B, qScale, qZeros, qGroupSize);
 
   return C;
 }
