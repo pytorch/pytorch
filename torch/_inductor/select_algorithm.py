@@ -4716,9 +4716,9 @@ class AlgorithmSelectorCache(PersistentCache):
             if non_fallback_choices:
                 best_choice = min(non_fallback_choices, key=lambda c: timings[c])
 
-        _maybe_pretune_tunableop(choice)
         choice = best_choice
         node = choice.output_node()
+        _maybe_pretune_tunableop(choice)
 
         log.debug("Autotuning selected choice: %s", node)
         return node, choice

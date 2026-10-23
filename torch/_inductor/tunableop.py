@@ -41,7 +41,7 @@ _mode_warned = False
 def _mode() -> str:
     """The configured mode, warning once on values that silently mean "off".
 
-    config.aten_tunableop_mode accepts any string from INDUCTOR_ATEN_TUNABLEOP_MODE,
+    config.aten_tunableop_mode accepts any string from TORCHINDUCTOR_ATEN_TUNABLEOP_MODE,
     so a typo like "Tune" or "on" would otherwise disable both passes silently.
     """
     global _mode_warned
@@ -49,7 +49,7 @@ def _mode() -> str:
     if mode not in _valid_modes and not _mode_warned:
         _mode_warned = True
         log.warning(
-            "Unknown INDUCTOR_ATEN_TUNABLEOP_MODE=%r (expected one of %s); "
+            "Unknown TORCHINDUCTOR_ATEN_TUNABLEOP_MODE=%r (expected one of %s); "
             'treating as "off"',
             mode,
             ", ".join(_valid_modes),
@@ -83,6 +83,10 @@ class BenchmarkJob:
         self.bmreq = bmreq
         self.tuning = tuning
         self.nearest_match = nearest_match
+        # Stamped by submit() with the parent's tuning knobs (see
+        # snapshot_settings): the worker is a long-lived fresh process that
+        # would otherwise tune with defaults.
+        self.settings: dict[str, Any] = {}
         # Stamped by submit() with the submitting process's logical device.
         self.device = 0
         # Stamped by submit() with the resolved results filename (see
@@ -106,6 +110,12 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
+        # Re-enter the parent's tuning knobs (snapshot_settings): process-global
+        # C++ state, not env vars, so the worker would otherwise silently use
+        # defaults. Numerical-check tolerances have no getter and are not
+        # propagated -- documented in snapshot_settings.
+        for name, value in self.settings.items():
+            getattr(tunable, name)(value)
         # TunableOp cannot tune under graph capture.
         self.bmreq.benchmark_with_cudagraphs = False
         return self.bmreq.benchmark()
@@ -154,7 +164,7 @@ def get_worker(key: tuple[int, str]) -> Any:
     from .autotune_process import TuningProcess
 
     if _worker is not None and _worker_key != key:
-        shutdown_worker()
+        _shutdown_locked()
     if _worker is None:
         # device=None on purpose. TuningProcess.start() *replaces* the inherited
         # CUDA_VISIBLE_DEVICES with str(device), so handing it a logical ordinal
@@ -174,6 +184,13 @@ def get_worker(key: tuple[int, str]) -> Any:
 
 
 def shutdown_worker() -> None:
+    """Shut down the worker. Callers holding _worker_lock use _shutdown_locked."""
+    with _worker_lock:
+        _shutdown_locked()
+
+
+def _shutdown_locked() -> None:
+    """Assumes _worker_lock is held (get_worker calls it on key change)."""
     global _worker, _worker_key
     if _worker is not None:
         try:
@@ -193,6 +210,36 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
     if dot != -1:
         return filename[:dot] + ordinal + filename[dot:]
     return filename + ordinal
+
+
+# Tuning knobs propagated to the worker: (parent getter, worker setter) pairs.
+# Numerical-check tolerances are deliberately absent -- set_numerical_check_-
+# tolerances has no getter, so there is nothing to snapshot. Documented here so
+# a reader does not assume full propagation.
+_TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
+    ("get_max_tuning_duration", "set_max_tuning_duration"),
+    ("get_max_tuning_iterations", "set_max_tuning_iterations"),
+    ("get_rotating_buffer_size", "set_rotating_buffer_size"),
+    ("get_cublaslt_requested_algo_count", "set_cublaslt_requested_algo_count"),
+)
+
+
+def snapshot_settings() -> dict[str, Any]:
+    """Read the parent's tuning knobs for stamping onto the job.
+
+    The worker is long-lived and keyed only on (device, filename), so it never
+    sees settings changed after it starts; stamping per job keeps it in sync.
+    Best-effort per knob: a getter failure leaves that knob at the worker's
+    default rather than failing the submission.
+    """
+    tunable = torch.cuda.tunable
+    settings: dict[str, Any] = {}
+    for getter, setter in _TUNABLE_SETTINGS:
+        try:
+            settings[setter] = getattr(tunable, getter)()
+        except Exception:
+            log.debug("TunableOp setting snapshot failed for %s", getter)
+    return settings
 
 
 def resolve_filename(device: int) -> str:
@@ -241,33 +288,68 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         # the worker is a fresh process and would otherwise lazily initialize
         # its manager from the env/default file, not the parent's file.
         job.filename = resolve_filename(device)
+        # Stamp the parent's tuning knobs for the same reason: process-global
+        # C++ state does not cross the pipe.
+        job.settings = snapshot_settings()
+    except Exception as e:  # resolve before the worker: no restart
+        # Failed before the worker was involved (no device, no filename): report
+        # without touching it. Shutting down here would kill a healthy worker
+        # another thread is using, and -- worse -- write the None sentinel into
+        # the pipe mid-stream after _worker_lock is released.
+        log.debug("TunableOp benchmark setup failed: %s", e)
+        return Outcome(None, "error")
+    try:
         with _worker_lock:
             worker = get_worker((device, job.filename))
-            worker.put(job)
-            return Outcome(worker.get(timeout=timeout), "ok")
-    except TimeoutError:
-        return Outcome(None, "timeout")
-    except EOFError:
-        return Outcome(None, "crash")
-    except Exception as e:  # a failed benchmark must not fail the compile
-        log.debug("TunableOp benchmark failed: %s", e)
-        # A catchable exception can leave a sticky fault behind (e.g. an illegal
-        # address corrupting the GPU context): the worker stays alive, so every
-        # later GEMM would fail the same way. Restart it so the next submission
-        # gets a clean process; recorded solutions survive via the results file.
-        shutdown_worker()
+            try:
+                worker.put(job)
+                return Outcome(worker.get(timeout=timeout), "ok")
+            except TimeoutError:
+                return Outcome(None, "timeout")
+            except EOFError:
+                return Outcome(None, "crash")
+            except Exception as e:  # a failed benchmark must not fail the compile
+                log.debug("TunableOp benchmark failed: %s", e)
+                # A catchable exception can leave a sticky fault behind (e.g. an
+                # illegal address corrupting the GPU context): the worker stays
+                # alive, so every later GEMM would fail the same way. Restart it
+                # here, inside the lock, so no other thread observes the dead
+                # worker or interleaves on the pipe; recorded solutions survive
+                # via the results file.
+                _shutdown_locked()
+                return Outcome(None, "error")
+    except Exception as e:  # lock/restart machinery itself failed
+        log.debug("TunableOp worker machinery failed: %s", e)
         return Outcome(None, "error")
 
 # Per-process record of laddered GEMMs: (kernel name, traced input/output meta
-# signatures). A transformer with N identical layers would otherwise run the
-# whole ladder N times, and again on every recompile; TunableOp turns repeat
-# signatures into lookups, but each submission still pickles a job, materializes
-# full-size tensors in the worker and runs the benchmark loop.
-_pretuned_gemms: set[Any] = set()
+# signatures, worker scope). A transformer with N identical layers would
+# otherwise run the whole ladder N times, and again on every recompile;
+# TunableOp turns repeat signatures into lookups, but each submission still
+# pickles a job, materializes full-size tensors in the worker and runs the
+# benchmark loop. Cleared with the other inductor caches (fresh_cache).
+class _PretunedGemms:
+    def __init__(self) -> None:
+        self.seen: set[Any] = set()
+
+    def cache_clear(self) -> None:
+        self.seen.clear()
+
+
+try:
+    from torch._inductor.utils import clear_on_fresh_cache
+
+    _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
+except Exception:
+    _pretuned_gemms = _PretunedGemms()
 
 # ExternKernelChoice names (winner.choice.name) the ladder covers. Matched by
 # string so a double import of the kernel modules cannot break the match.
 # _int_mm / sparse semi-structured variants are not hipBLASLt-tunable.
+# bias_addmm is excluded: it is only chosen for broadcast (stride-0) bias
+# (kernel/mm.py), which the density guard below rejects -- and correctly so,
+# since rebuilding its metas densely would tune a layout runtime never asks
+# for.
 _TUNABLEOP_GEMM_CHOICES = frozenset(
     {
         "mm",
@@ -277,7 +359,6 @@ _TUNABLEOP_GEMM_CHOICES = frozenset(
         "bmm",
         "bmm_dtype",
         "baddbmm",
-        "bias_addmm",
         "_scaled_mm",
         "_scaled_mm_v2",
     }
@@ -316,8 +397,6 @@ def maybe_range_pretune(winner) -> None:
     entries are always recorded concrete -- the mask is deliberately not carried
     into the jobs.
     """
-    import copy
-
     import torch._inductor.select_algorithm as sa
 
     if not is_tune_mode():
@@ -328,12 +407,13 @@ def maybe_range_pretune(winner) -> None:
         return
     if not isinstance(winner, sa.ExternKernelCaller):
         return
-    # Match on the underlying ExternKernelChoice name (not the caller: the
-    # caller has no call_name of its own). Compared by string so a double
-    # import of the kernel modules cannot break the match. Covers the _dtype
-    # out-variants, bias_addmm and _scaled_mm_v2, which the old op-name
-    # allowlist missed; _int_mm / sparse variants are not hipBLASLt-tunable.
-    choice_name = getattr(getattr(winner, "choice", None), "name", winner.name)
+    # Match on the underlying ExternKernelChoice name. ExternKernelCaller
+    # always sets self.choice (and its own name from it). Compared by string
+    # so a double import of the kernel modules cannot break the match. Covers
+    # the _dtype out-variants and _scaled_mm_v2, which the old
+    # op-name allowlist missed; _int_mm / sparse variants are not
+    # hipBLASLt-tunable.
+    choice_name = winner.choice.name
     if choice_name not in _TUNABLEOP_GEMM_CHOICES:
         return
     if getattr(winner, "bmreq", None) is None:
@@ -357,12 +437,7 @@ def maybe_range_pretune(winner) -> None:
         # mat1/mat2 first (scaled variants trail scale/bias tensors after).
         # Resolved from the choice, not the caller name, so _dtype / v2 / bias
         # variants route correctly.
-        bias_first = choice_name in (
-            "addmm",
-            "addmm_dtype",
-            "baddbmm",
-            "bias_addmm",
-        )
+        bias_first = choice_name in ("addmm", "addmm_dtype", "baddbmm")
         a, b = (
             (nodes[1], nodes[2])
             if bias_first
@@ -411,16 +486,32 @@ def maybe_range_pretune(winner) -> None:
 
     # Skip repeat GEMMs: identical layers in one model (and recompiles) share
     # traced metas, so the first ladder already recorded every bucket. Keyed on
-    # hinted sizes/dtypes -- symbolic expressions hint to the traced values, so
-    # equal programs hash equal. Strides excluded: padded layouts are skipped
-    # below by the density check, and equal sizes imply equal dense strides.
+    # the SYMBOLIC sizes and strides (not hints: mm([s,256],[256,512]) and
+    # mm([512,256],[256,s]) hint identically at 512 but ladder different dims,
+    # as do s and 200*s), the dtypes, and the (device, resolved filename) the
+    # worker is keyed on -- a second compile targeting another device or file
+    # must not skip. Strides included: mm(A,B) and mm(A,B_colmajor) are both
+    # dense with different TunableOp signatures (NN vs NT).
     def _node_sig(n: Any) -> Any:
         try:
             dtype = n.get_dtype() if hasattr(n, "get_dtype") else n.dtype
             size = n.get_size() if hasattr(n, "get_size") else n.size
+            stride = n.get_stride() if hasattr(n, "get_stride") else None
+            if stride is None:
+                try:
+                    from torch._inductor.select_algorithm import (
+                        get_strides_with_layout_constraints,
+                    )
+
+                    stride = sizevars.optimization_hints(
+                        get_strides_with_layout_constraints(n)
+                    )
+                except Exception:
+                    stride = ()
             return (
                 str(dtype),
-                tuple(int(x) for x in sizevars.optimization_hints(size)),
+                tuple(str(x) for x in size),
+                tuple(str(x) for x in stride),
             )
         except Exception:
             return None
@@ -429,15 +520,21 @@ def maybe_range_pretune(winner) -> None:
         sigs = [_node_sig(n) for n in winner.input_nodes] + [
             _node_sig(winner.layout)
         ]
+        try:
+            scope = (torch.cuda.current_device(), resolve_filename(0))
+        except Exception:
+            scope = (None, "")
         memo_key: Any = (
-            (winner.name, tuple(sigs)) if all(x is not None for x in sigs) else None
+            (winner.name, tuple(sigs), scope)
+            if all(x is not None for x in sigs)
+            else None
         )
     except Exception:
         memo_key = None
     if memo_key is not None:
-        if memo_key in _pretuned_gemms:
+        if memo_key in _pretuned_gemms.seen:
             return
-        _pretuned_gemms.add(memo_key)
+        _pretuned_gemms.seen.add(memo_key)
 
     def _declared(expr: Any) -> tuple[int | None, int | None]:
         """(lower, upper) from ShapeEnv, each None when unbounded or symbolic."""
@@ -701,8 +798,10 @@ def maybe_range_pretune(winner) -> None:
             # Per-bucket cost, which nothing else records: only failures are
             # logged today, so the cost of the buckets that SUCCEED -- and
             # whether it falls as the worker warms up -- is invisible. That
-            # curve is what a per-bucket budget has to be sized against.
-            log.debug(
+            # curve is what a per-bucket budget has to be sized against. Info,
+            # not debug: the flag alone must suffice, without also raising the
+            # logger level.
+            log.info(
                 "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d "
                 "wall=%.2fs status=%s",
                 winner.name,
