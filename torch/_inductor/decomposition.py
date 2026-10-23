@@ -24,6 +24,8 @@ from torch._decomp.decompositions import (
     adaptive_max_pool3d as decomp_adaptive_max_pool3d,
     embedding_dense_backward as decomp_embedding_dense_backward,
     gelu_backward as decomp_gelu_backward,
+    hardsigmoid as decomp_hardsigmoid,
+    hardswish as decomp_hardswish,
     hardswish_backward as decomp_hardswish_backward,
     mish_backward as decomp_mish_backward,
     pw_cast_for_opmath,
@@ -146,6 +148,8 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.gelu_backward.default,
     aten.hardtanh.default,  # inductor preserves NaN payloads under strict numerics
     aten.hardswish_backward.default,
+    aten.hardswish.default,
+    aten.hardsigmoid.default,
     aten.mish_backward.default,
     aten.logaddexp2.default,
     aten.sigmoid_backward.default,
@@ -774,8 +778,26 @@ def convolution_backward(
     return (grad_inp, grad_weight, grad_bias)
 
 
+@register_decomposition(aten.hardswish.default)
+@pw_cast_for_opmath
+def hardswish(self: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(self.device):
+        return self * torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
+    return decomp_hardswish(self)
+
+
+@register_decomposition(aten.hardsigmoid.default)
+@pw_cast_for_opmath
+def hardsigmoid(self: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(self.device):
+        return torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
+    return decomp_hardsigmoid(self)
+
+
 @register_decomposition([aten.round.decimals])
 def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
+    if is_strict_cuda_triton(x.device):
+        return NotImplemented
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
