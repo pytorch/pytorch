@@ -65,6 +65,7 @@ from torch._refs.special import (
 )
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
+    has_free_unbacked_symbols,
     statically_known_true,
     sym_eq,
 )
@@ -300,6 +301,7 @@ def mvlgamma(self: torch.Tensor, p: int) -> torch.Tensor:
         or self.is_complex()
         or not isinstance(p, int)
         or not 1 <= p <= 16
+        or has_free_unbacked_symbols((self.shape, self.stride()))
     ):
         return decomp_multigammaln(self, p)
     if not self.dtype.is_floating_point:
@@ -722,17 +724,21 @@ def logit_backward(
         return decomp_logit_backward(grad_output, self, eps)
     grad_output, self, dtype = inputs
     formula = grad_output / (self * (1.0 - self))
-    if eps is None or eps < 0:
-        outside = (self < 0) | (self > 1)
-        bits = 0x7FC00000 if dtype == torch.float32 else 0x7FFFFFFF
-        fill = torch.full((), bits, dtype=torch.int32, device=self.device).view(
-            torch.float32
-        )
-    else:
-        # CUDA rounds both epsilon and its complement to opmath precision.
-        lo = torch.ones((), dtype=torch.float32, device=self.device) * eps
-        outside = (self < lo) | (self > 1.0 - lo)
-        fill = 0.0
+    # CUDA tests the sign after rounding epsilon to opmath precision.
+    lo = torch.ones((), dtype=torch.float32, device=self.device) * (
+        -1.0 if eps is None else eps
+    )
+    unclipped = lo < 0
+    outside = torch.where(
+        unclipped,
+        (self < 0) | (self > 1),
+        (self < lo) | (self > 1.0 - lo),
+    )
+    bits = 0x7FC00000 if dtype == torch.float32 else 0x7FFFFFFF
+    nan = torch.full((), bits, dtype=torch.int32, device=self.device).view(
+        torch.float32
+    )
+    fill = torch.where(unclipped, nan, 0.0)
     return torch.where(outside, fill, formula).to(dtype)
 
 
