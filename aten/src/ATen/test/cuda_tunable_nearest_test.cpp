@@ -103,12 +103,16 @@ class TunableNearestTest : public ::testing::Test {
   }
 };
 
-TEST_F(TunableNearestTest, LookupNearestIgnoresGlobalFlags) {
+TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
   // Calling LookupNearest is itself the opt-in: TunableOp dispatch resolves
   // through Lookup and never reaches it, so it answers the question asked
-  // rather than re-deciding from process-global state. Whether borrowing
-  // applies at all -- including "never while tuning" -- is the reuse pass's
-  // call, and it only reaches here on its non-tuning path.
+  // rather than re-deciding from the reuse pass's mutable policy flags.
+  // Whether borrowing applies at all -- including "never while tuning" -- is
+  // the pass's call, and it only reaches here on its non-tuning path.
+  //
+  // This is about the policy flags only. PYTORCH_TUNABLEOP_NEAREST_MATCH=0 is
+  // a hard kill switch and IS honoured here; it is read once at startup, so
+  // covering it needs a subprocess.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TuningResultsManager mgr;
@@ -185,9 +189,11 @@ TEST_F(TunableNearestTest, RecordBorrowedBecomesExactHit) {
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
 }
 
-TEST_F(TunableNearestTest, RecordBorrowedIgnoresGlobalFlags) {
+TEST_F(TunableNearestTest, RecordBorrowedIgnoresPolicyFlags) {
   // Same opt-in-by-calling contract as LookupNearest: the reuse pass decides
-  // whether to record, and RecordBorrowed records what it is handed.
+  // whether to record, and RecordBorrowed records what it is handed. As
+  // above, this covers the mutable policy flag only --
+  // PYTORCH_TUNABLEOP_RECORD_BORROWED=0 does suppress the write.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TempResultsFile results("tunableop-flags-");
@@ -210,6 +216,32 @@ TEST_F(TunableNearestTest, RecordBorrowedPersistsWhileTuningIsOff) {
     mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
   }
   EXPECT_NE(results.Contents().find(kQSig), std::string::npos);
+}
+
+TEST_F(TunableNearestTest, RecordBorrowedFirstWriteWins) {
+  // A recorded verdict is final. AddImpl try_emplaces, and the realtime append
+  // only fires for a key that was new, so a second RecordBorrowed for the same
+  // shape -- or one for a shape Add() already populated -- must change neither
+  // the map nor the file. This is what makes the reuse pass idempotent, and
+  // what makes a recorded Default irreversible.
+  FlagGuard g;
+  TempResultsFile results("tunableop-first-write-");
+  auto* ctx = getTuningContext();
+  ctx->EnableTuning(false);
+  TuningResultsManager mgr;
+
+  mgr.RecordBorrowed(kOp, kQSig, Donor("first"));
+  mgr.RecordBorrowed(kOp, kQSig, Donor("second"));
+  EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("first"));
+
+  mgr.Add(kOp, kCSig, Donor("k64"));
+  mgr.RecordBorrowed(kOp, kCSig, Donor("usurper"));
+  EXPECT_EQ(mgr.Lookup(kOp, kCSig), Donor("k64"));
+
+  const std::string content = results.Contents();
+  EXPECT_NE(content.find("first"), std::string::npos);
+  EXPECT_EQ(content.find("second"), std::string::npos);
+  EXPECT_EQ(content.find("usurper"), std::string::npos);
 }
 
 TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
@@ -359,8 +391,11 @@ TEST(TunableNearestParse, ParsesRealScaledGemmSignature) {
   EXPECT_EQ(s.k, 256);
   EXPECT_EQ(s.lda, 32);
   EXPECT_EQ(s.ldc, 32);
-  // The scaled suffix carries dtype names that themselves contain underscores
-  // (Float8_e4m3fn), the case most likely to confuse a token-based parser.
+  // Both branches of ScaledGemmParams::Signature must survive the
+  // split/rejoin, and they differ: ROCm emits "_rw_<0|1>_bias_<dtype>"
+  // (plus "_swz_<a>_<b>" when swizzled), while CUDA spells out every dtype,
+  // so its suffix carries names that themselves contain underscores
+  // (Float8_e4m3fn) -- the case most likely to confuse a token-based parser.
   EXPECT_FALSE(s.suffix.empty());
   EXPECT_EQ(Rebuild(s), sig);
 }
