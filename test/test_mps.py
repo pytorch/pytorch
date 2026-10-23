@@ -1838,6 +1838,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res2, res2_cpu)
         [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
 
+    def test_linalg_cross_mixed_dtypes_raise(self):
+        # Regression: MPS used to accept mixed floating dtypes and read the
+        # second operand as the first's dtype, returning wrong values (#201629).
+        a = torch.randn(4, 3, device="mps")
+        b = torch.randn(4, 3, device="mps", dtype=torch.float16)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, b)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(b, a)
+        out = torch.empty(4, 3, device="mps")
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, b, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, a, out=out.half())
+
     def test_bmm_conj(self):
         # bmm must respect the conjugate bit on input tensors.
         # See https://github.com/pytorch/pytorch/issues/177474
@@ -5146,6 +5161,18 @@ class TestMPS(TestCaseMPS):
         x_cpu[2:4] = update_mps  # implicit device moving and copy
         self.assertEqual(x_cpu, x_mps)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/119367
+    @parametrize("dtype", [torch.int8, torch.int16])
+    @parametrize("src_off,dst_off", [(0, 1), (1, 0), (1, 1), (3, 2), (0, 2)])
+    def test_copy_unaligned_offsets_mps_to_cpu(self, dtype, src_off, dst_off):
+        n = 37
+        src_cpu = torch.arange(1, n + 1, dtype=dtype)
+        backing = torch.zeros(n + dst_off, dtype=dtype)
+        dst = backing[dst_off:dst_off + n - src_off]
+        dst.copy_(src_cpu.to("mps")[src_off:])
+        self.assertEqual(dst, src_cpu[src_off:])
+        self.assertEqual(backing[:dst_off], torch.zeros(dst_off, dtype=dtype))
+
     def test_copy_broadcasting(self):
         def helper(src_shape, dst_shape, src_dtype, dst_dtype):
             cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
@@ -5639,8 +5666,7 @@ class TestMPS(TestCaseMPS):
             if dtype.is_floating_point and dtype != torch.float8_e4m3fn:
                 self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
                 continue
-            error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
-            self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
@@ -16176,7 +16202,8 @@ class TestConsistency(TestCaseMPS):
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
         # MPSGraph matrixMultiplication produces incorrect results with stride-0
-        # inputs on macOS < 26.4 (only every 16th row is correct).
+        # inputs on macOS < 26.4 and on macOS 27.0.0 (only every 16th row is correct);
+        # mm contiguifies such inputs on those versions.
         expanded = torch.ones(1, 1, device="mps").expand(64, 1)
         w = torch.randn(1, 16, device="mps")
         result = expanded.mm(w)

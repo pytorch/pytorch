@@ -834,9 +834,11 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
     closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
     def, which a user kernel's closure emits (``from triton.language import exp as
     op``). The imports above it are the common kernel header, the same in every
-    kernel. A name is renamed only where it refers to the global, so a parameter or
-    local that shares it keeps its name: autotune configs and launches pass parameters
-    by name.
+    kernel, and a repeat of one of them after the first def keeps its name: a
+    template that defines ``@triton.jit`` helpers above ``def_kernel`` gets the header
+    again where ``def_kernel`` is. A name is renamed only where it refers to the
+    global, so a parameter or local that shares it keeps its name: autotune configs
+    and launches pass parameters by name.
     """
     defs = re.findall(r"^def (\w+)\(", src, re.MULTILINE)
     assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
@@ -848,6 +850,7 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
     tree = ast.parse(src)
     renames: dict[str, str] = {}
     aliases: list[ast.alias] = []
+    header: OrderedSet[str] = OrderedSet()
     seen_def = False
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef):
@@ -856,12 +859,16 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
         elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             renames.update((t.id, "") for t in targets if isinstance(t, ast.Name))
-        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and seen_def:
-            # `import a.b` binds `a`, which cannot be renamed in place; the closure
-            # only emits aliased imports (`from a import b as c`, `import a.b as c`).
-            bound = [a for a in stmt.names if a.asname or "." not in a.name]
-            aliases += bound
-            renames.update((a.asname or a.name, "") for a in bound)
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            if not seen_def:
+                header.add(ast.unparse(stmt))
+            elif ast.unparse(stmt) not in header:
+                # `import a.b` binds `a`, which cannot be renamed in place; the
+                # closure only emits aliased imports (`from a import b as c`,
+                # `import a.b as c`).
+                bound = [a for a in stmt.names if a.asname or "." not in a.name]
+                aliases += bound
+                renames.update((a.asname or a.name, "") for a in bound)
     for name in renames:
         renames[name] = kernel_name if name == subs_name else f"{name}_{kernel_name}"
     # ast column offsets are in UTF-8 bytes, so edit the lines as bytes.
@@ -4299,9 +4306,8 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
-        The default form hands the kernel to AsyncCompile as a source string, which is
-        what lets compilation fan out to the worker pool. When
-        ``defines_triton_kernels_as_code()`` the kernel is defined as code instead.
+        The python wrapper defines the kernel as code. Wrappers that consume a kernel's
+        ``async_compile.triton(...)`` source themselves get that string form instead.
         """
         if not self.defines_triton_kernels_as_code():
             self.define_kernel(
@@ -4310,6 +4316,10 @@ class PythonWrapperCodegen(CodeGen):
                 metadata,
             )
             return
+        if "\\" in src_code:
+            # The string form compiles what its ''' literal decodes to, and codegen
+            # escapes for that (inline asm doubles its backslashes), so decode it here.
+            src_code = ast.literal_eval(f"'''{src_code}'''")
         # When inductor loads this module, the def binds the kernel AsyncCompile built
         # from this source rather than compiling itself in process, so the worker pool
         # can start on it now, as it does for a string kernel. It gets the source the
@@ -4337,14 +4347,15 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_harness_modules.append(kernel_key)
         if "if __name__ == '__main__':" in src_code:
             raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
-        # The string form passes filename=__file__ from its own module, which is named by
-        # the hash of this source, and the autotune cache keys on that basename. Here
-        # __file__ is the wrapper, which every kernel shares, so name the module the
-        # string form would have used, in the wrapper's directory.
+        # The string form passes filename=__file__ from its own module, which
+        # AsyncCompile writes to cache_dir()/<hash[1:3]>/<hash>.py for this source's
+        # hash, and the autotune cache keeps the kernel's .best_config beside it. Here
+        # __file__ is the wrapper, which a loader may put anywhere, so name that file.
         if "filename=__file__" in src_code:
-            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            path = f"os.path.join(cache_dir(), {kernel_file[1:3]!r}, {kernel_file!r})"
             src_code = src_code.replace("filename=__file__", f"filename={path}")
-            src_code = f"import os\n{src_code}"
+            runtime_utils = "torch._inductor.runtime.runtime_utils"
+            src_code = f"import os\nfrom {runtime_utils} import cache_dir\n{src_code}"
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
@@ -4369,8 +4380,7 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def defines_triton_kernels_as_code(self) -> bool:
-        # Off until module-level kernels compile as fast as string ones; tests patch it.
-        return False
+        return True
 
     @staticmethod
     def async_compile_triton_body(
@@ -4694,10 +4704,7 @@ class PythonWrapperCodegen(CodeGen):
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
-        as_code = self.defines_triton_kernels_as_code()
         compile_wrapper = IndentedBuffer()
-        if not as_code:
-            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
@@ -4734,15 +4741,21 @@ class PythonWrapperCodegen(CodeGen):
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
-        if as_code:
-            compile_wrapper.splice(kernel_src)
+        compile_wrapper.splice(kernel_src)
+        # The string form compiles what its ''' literal decodes to, and
+        # emit_triton_kernel_definition decodes a module-level kernel the same way, so
+        # both take the whole source escaped: the meta reprs as well as the kernel.
+        src_code = _escape_triton_kernel_source_for_wrapper(compile_wrapper.getvalue())
+        if self.defines_triton_kernels_as_code():
             self.emit_triton_kernel_definition(
-                name, subs_name, compile_wrapper.getvalue(), device_type, metadata
+                name, subs_name, src_code, device_type, metadata
             )
         else:
-            compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
-            compile_wrapper.writeline(f"''', device_str='{device_type}')")
-            self.define_kernel(name, compile_wrapper.getvalue(), metadata)
+            string_form = IndentedBuffer()
+            string_form.writeline(f"async_compile.triton({subs_name!r}, '''")
+            string_form.splice(src_code)
+            string_form.writeline(f"''', device_str='{device_type}')")
+            self.define_kernel(name, string_form.getvalue(), metadata)
         # Add to the cache for the next use
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
