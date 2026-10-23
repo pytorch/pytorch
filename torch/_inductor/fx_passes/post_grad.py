@@ -1217,7 +1217,9 @@ def eager_digamma_sum_check(match: Match) -> bool:
     val = x.meta.get("val")
     if not isinstance(val, torch.Tensor) or not is_strict_cuda_triton(val.device):
         return False
-    if val.ndim == 0:
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+    if val.ndim == 0 or has_free_unbacked_symbols((val.shape, val.stride())):
         return False
     dim = match.kwargs["dim"]
     if not isinstance(dim, (list, tuple)) or list(dim) not in ([-1], [val.ndim - 1]):
