@@ -59,6 +59,53 @@ def _quantize_mxfp8_reference_nd(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ):
+    r"""_quantize_mxfp8_reference_nd(input, dim, is_square_scaling, is_scale_swizzled) -> tuple[Tensor, Tensor]
+
+    Args:
+        input (Tensor): Tensor containing the matrices to quantize.
+        dim (tuple[int, int]): Row and quantized axes, in that order.
+        is_square_scaling (bool): Compute scales per square block before expansion.
+          Requires ``is_scale_swizzled=True``.
+        is_scale_swizzled (bool): Return packed, swizzled scales when true.
+
+    Returns:
+        tuple[Tensor, Tensor]: MXFP8 qdata and E8M0 scales. Each matrix is
+        stored with its quantized axis contiguous, including for batched dim-M.
+
+    Examples::
+
+        # Shape @ stride; is_square_scaling=False in every example.
+        # Compact means is_scale_swizzled=False; swizzled means True.
+        # L = 512 * ceil(M / 128) * ceil(K / 128).
+        input (M, K), dim=(-2, -1):
+            qdata             (M, K) @ (K, 1)
+            scales compact    (M, K//32) @ (K//32, 1)
+            scales swizzled   (1, L) @ (L, 1)
+
+        input (M, K), dim=(-1, -2):
+            qdata             (M, K) @ (1, M)
+            scales compact    (M//32, K) @ (1, M//32)
+            scales swizzled   (L, 1) @ (1, L)
+
+        input (B, M, K), dim=(-2, -1):
+            qdata             (B, M, K) @ (M*K, K, 1)
+            scales compact    (B, M, K//32) @ (M*(K//32), K//32, 1)
+            scales swizzled   (B, 1, L) @ (L, L, 1)
+
+        input (B, M, K), dim=(-1, -2):
+            qdata             (B, M, K) @ (M*K, 1, M)
+            scales compact    (B, M//32, K) @ ((M//32)*K, 1, M//32)
+            scales swizzled   (B, L, 1) @ (L, 1, L)
+
+        input (B0, M, B1, K, B2), dim=(1, 3):
+            qdata             (B0, M, B1, K, B2)
+                              @ (B1*B2*M*K, K, B2*M*K, 1, M*K)
+            scales compact    (B0, M, B1, K//32, B2)
+                              @ (B1*B2*M*(K//32), K//32, B2*M*(K//32), 1,
+                                 M*(K//32))
+            scales swizzled   (B0, 1, B1, L, B2)
+                              @ (B1*B2*L, L, B2*L, 1, L)
+    """
     # canonicalize quantization axes to positive
     # for example, if ndim == 3 then dim = (-2, -1) is canonicalized to dim = (1, 2)
     axes = tuple(axis % input.ndim for axis in dim)
@@ -84,13 +131,18 @@ def _quantize_mxfp8_reference_nd(
         for matrix in matrices
     ]
     if batch_shape:
-        qdata = torch.stack([result[0] for result in outputs]).reshape(
-            *batch_shape, *outputs[0][0].shape
-        )
-        scales = torch.stack([result[1].view(torch.uint8) for result in outputs])
-        scales = scales.view(torch.float8_e8m0fnu).reshape(
-            *batch_shape, *outputs[0][1].shape
-        )
+        if matrix_dim == -2:
+            qdata = torch.stack([result[0].t() for result in outputs]).transpose(-2, -1)
+            scales = torch.stack(
+                [result[1].t().view(torch.uint8) for result in outputs]
+            ).transpose(-2, -1)
+        else:
+            qdata = torch.stack([result[0] for result in outputs])
+            scales = torch.stack([result[1].view(torch.uint8) for result in outputs])
+        if len(batch_shape) > 1:
+            qdata = qdata.unflatten(0, batch_shape)
+            scales = scales.unflatten(0, batch_shape)
+        scales = scales.view(torch.float8_e8m0fnu)
     else:
         qdata, scales = outputs[0]
     # undo the axis order permutation
@@ -223,11 +275,13 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), False, True)
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(qdata.shape, shape)
+        self.assertEqual(qdata.stride(), qdata_ref.stride())
         M, K = shape[-2:]
         self.assertEqual(qdata.stride(), (M * K, 1, M) if len(shape) == 3 else (1, M))
         self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales.shape[-1], 1)
         self.assertEqual(scales, scales_ref)
+        self.assertEqual(scales.stride(), scales_ref.stride())
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     @parametrize(
