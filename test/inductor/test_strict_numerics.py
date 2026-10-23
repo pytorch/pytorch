@@ -199,6 +199,72 @@ class StrictNumericsConfigTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize("operation", ("mul", "div", "cancel", "roundtrip", "sqrt"))
+    def test_subnormal_boundaries(self, device, dtype, numerics, upcast, operation):
+        x = _subnormal_values(dtype, device)
+        if operation == "sqrt":
+            x = x[: x.numel() // 2]
+        y = torch.nextafter(x, torch.zeros_like(x))
+
+        def fn(a, b):
+            if operation == "mul":
+                return a * 0.5, a * 2.0
+            if operation == "div":
+                return a / 2.0
+            if operation == "cancel":
+                return a - b
+            if operation == "roundtrip":
+                result = a * 0.5
+                return result, result * 2.0, result.double()
+            return a.sqrt()
+
+        actual, code = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+            y,
+        )
+        self.assertIn("@triton.jit", "\n".join(code))
+        expected = fn(x, y)
+        actual = actual if isinstance(actual, tuple) else (actual,)
+        expected = expected if isinstance(expected, tuple) else (expected,)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in expected),
+        )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_subnormal_gradients(self, device, dtype, numerics, upcast):
+        int_dtype = _BIT_VIEW[dtype]
+        grad = _subnormal_values(dtype, device)
+        x = torch.ones_like(grad, requires_grad=True)
+
+        def fn(a):
+            return a * a
+
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": numerics,
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )
+        expected = torch.autograd.grad(fn(x), x, grad)[0]
+        actual = torch.autograd.grad(compiled(x), x, grad)[0]
+        self.assertEqual(actual.view(int_dtype), expected.view(int_dtype))
+
     @ops(
         [op for op in op_db if op.name in ("byte", "char", "short")],
         allowed_dtypes=(
@@ -786,6 +852,21 @@ def _exhaustive_16bit(dtype, device):
     )
 
 
+def _subnormal_values(dtype, device):
+    int_dtype = _BIT_VIEW[dtype]
+    normal = {
+        torch.float16: 0x0400,
+        torch.bfloat16: 0x0080,
+        torch.float32: 0x00800000,
+    }[dtype]
+    bits = torch.tensor(
+        [0, 1, 2, 3, normal - 2, normal - 1, normal, normal + 1, normal + 2],
+        device=device,
+        dtype=int_dtype,
+    )
+    return torch.cat((bits, bits | torch.iinfo(int_dtype).min)).view(dtype)
+
+
 def _substitute(t, y, n, parity=0):
     r"""Substitute data vectors and resize masks, preserving scalar operands."""
     if not isinstance(t, torch.Tensor):
@@ -816,6 +897,9 @@ _BIT_VIEW = {
     torch.float32: torch.int32,
     torch.float64: torch.int64,
 }
+
+
+_SPECIALS = torch.cat((_SPECIALS, _subnormal_values(torch.float32, "cpu")))
 
 
 def _diff_kind(a, b):
