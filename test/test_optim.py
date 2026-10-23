@@ -100,6 +100,37 @@ def _bf16_state_init_hook(optimizer, args, kwargs):
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
+    @dtypes(torch.float64, torch.complex128)
+    @parametrize("optimizer_cls", [torch.optim.Adadelta, torch.optim.Adamax])
+    @parametrize("maximize", [False, True])
+    @parametrize("weight_decay", [0.0, 0.1])
+    def test_adadelta_adamax_differentiable_lr(
+        self, device, dtype, optimizer_cls, maximize, weight_decay
+    ):
+        values = [0.7 + 0.2j, -0.4 + 0.1j] if dtype.is_complex else [0.7, -0.4]
+        initial = torch.tensor(values, device=device, dtype=dtype, requires_grad=True)
+
+        def train(lr):
+            parameter = initial.clone()
+            optimizer = optimizer_cls(
+                [parameter],
+                lr=lr,
+                differentiable=True,
+                foreach=False,
+                maximize=maximize,
+                weight_decay=weight_decay,
+            )
+            for _ in range(2):
+                loss = parameter.clone().abs().square().sum()
+                parameter.grad = torch.autograd.grad(
+                    loss, parameter, create_graph=True
+                )[0]
+                optimizer.step()
+            return parameter
+
+        lr = torch.tensor(0.15, device=device, dtype=torch.float64, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(train, (lr,)))
+
     """
     This test class validates the core optimizers and is structured as the correctness of:
     - The update algorithms (forloop implementation)
