@@ -133,22 +133,11 @@ def _canonicalize_matrix_input(
         )
         batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
         permutation = (*batch_axes, *physical_matrix_axes)
-        if inner_batch != 1:
+        if batch_axes:
             matrix_input = physical_input.view(
                 outer_batch, input.shape[slow_axis], inner_batch, input.shape[fast_axis]
             )
             single_dim: _SingleQuantDim = (1, 3) if physical_dim_k else (3, 1)
-        elif batch_axes:
-            matrix_input = (
-                physical_input
-                if len(batch_axes) == 1 and ndim == 3
-                else physical_input.view(
-                    prod(input.shape[axis] for axis in batch_axes),
-                    input.shape[slow_axis],
-                    input.shape[fast_axis],
-                )
-            )
-            single_dim = (-2, -1) if physical_dim_k else (-1, -2)
         else:
             matrix_input = physical_input
             single_dim = (-2, -1) if physical_dim_k else (-1, -2)
@@ -163,9 +152,14 @@ def _canonicalize_matrix_input(
         ).contiguous()
         if batch_axes:
             matrix_input = matrix_input.view(
-                prod(input.shape[axis] for axis in batch_axes), *matrix_input.shape[-2:]
+                prod(input.shape[axis] for axis in batch_axes),
+                matrix_input.shape[-2],
+                1,
+                matrix_input.shape[-1],
             )
-        single_dim = (-2, -1) if normalized[0] == matrix_axes else (-1, -2)
+            single_dim = (1, 3) if normalized[0] == matrix_axes else (3, 1)
+        else:
+            single_dim = (-2, -1) if normalized[0] == matrix_axes else (-1, -2)
         swap_dual_outputs = False
     if len(normalized) == 2:
         canonical_dim: _QuantDim = (
@@ -223,9 +217,9 @@ def _validate_and_normalize_blockscaled_tma(
     """Validate public arguments and return their canonical host-side form."""
 
     ndim = input.dim()
-    if ndim not in (2, 3, 4):
+    if ndim not in (2, 4):
         raise ValueError(
-            f"blockscaled TMA requires a 2D, 3D, or normalized 4D input; got {ndim} dimensions"
+            f"blockscaled TMA requires a 2D or normalized 4D input; got {ndim} dimensions"
         )
     if not isinstance(dim, tuple) or len(dim) != 2:
         raise ValueError(f"unsupported quantization dim: {dim}")
@@ -276,11 +270,7 @@ def _validate_and_normalize_blockscaled_tma(
             raise ValueError("square scaling currently supports only dim-k output")
     tma_input = input.transpose(-2, -1) if input_transposed else input
     M, K = (input.shape[1], input.shape[3]) if ndim == 4 else tma_input.shape[-2:]
-    B = (
-        input.shape[0] * input.shape[2]
-        if ndim == 4
-        else (input.shape[0] if ndim == 3 else 1)
-    )
+    B = input.shape[0] * input.shape[2] if ndim == 4 else 1
     if is_square_scaling and M % 32 != 0:
         raise ValueError("32x32 requires M % 32 == 0")
     if do_dim_m:
@@ -314,7 +304,7 @@ def _validate_and_normalize_blockscaled_tma(
         M=M,
         K=K,
         B=B,
-        is_batched=ndim > 2,
+        is_batched=ndim == 4,
         quant_orientation_id=quant_orientation_id,
         do_dim_k=do_dim_k,
         do_dim_m=do_dim_m,
@@ -548,7 +538,7 @@ def _blockscaled_tma_impl_on_current_device(
         input.ndim - 2,
     )
     output_k, output_m = launch.output_k, launch.output_m
-    if input.ndim == 4:
+    if spec.is_batched:
         B0, _, B1, _ = tma_input.shape
         tma_input = tma_input.permute(1, 3, 2, 0)
         output_k = (
@@ -561,10 +551,6 @@ def _blockscaled_tma_impl_on_current_device(
             if output_m is not None
             else None
         )
-    elif spec.is_batched:
-        tma_input = tma_input.permute(1, 2, 0)
-        output_k = output_k.permute(1, 2, 0) if output_k is not None else None
-        output_m = output_m.permute(1, 2, 0) if output_m is not None else None
     fn(
         tma_input,
         output_k,

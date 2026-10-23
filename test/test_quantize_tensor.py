@@ -518,6 +518,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             "interleaved_trailing_batch",
             "interleaved_batch",
             "interleaved_rank3",
+            "interleaved_singleton",
             "interleaved_multi_batch",
             "permuted_interleaved_batch",
             "transposed_interleaved_batch",
@@ -555,6 +556,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             axes = (1, 3)
         elif layout == "interleaved_rank3":
             data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device=device)
+            axes = (0, 2)
+        elif layout == "interleaved_singleton":
+            data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device=device)
             axes = (0, 2)
         elif layout == "interleaved_multi_batch":
             data_hp = torch.randn(
@@ -615,6 +619,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             "trailing_batch_tile",
             "interleaved_batch",
             "interleaved_rank3",
+            "interleaved_singleton",
             "interleaved_multi_batch",
             "permuted_interleaved_batch",
             "transposed_interleaved_batch",
@@ -640,6 +645,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             axes = (1, 3)
         elif layout == "interleaved_rank3":
             data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device=device)
+            axes = (0, 2)
+        elif layout == "interleaved_singleton":
+            data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device=device)
             axes = (0, 2)
         elif layout == "interleaved_multi_batch":
             data_hp = torch.randn(
