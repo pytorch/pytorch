@@ -95,6 +95,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
 )
 
 call :install_zlib
+if errorlevel 1 exit /b 1
 
 goto cuda_common
 
@@ -250,6 +251,7 @@ xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
 call :install_zlib
+if errorlevel 1 exit /b 1
 
 echo Cleaning temp files
 rd /s /q "%SRC_DIR%\temp_build" || ver > nul
@@ -267,7 +269,15 @@ goto :eof
 @REM cuDNN 8.3+ requires zlib to be installed on the path
 :install_zlib
 echo Installing ZLIB dlls
-curl -k -L "http://s3.amazonaws.com/ossci-windows/zlib123dllx64.zip" --output "%SRC_DIR%\temp_build\zlib123dllx64.zip"
-7z x "%SRC_DIR%\temp_build\zlib123dllx64.zip" -o"%SRC_DIR%\temp_build\zlib"
+set "ZLIB_ZIP=zlib131dllx64.zip"
+set "ZLIB_SHA256=D09BE2E08B6519B89882CE89941936F2AE7190B038A711087384B80D05362ED9"
+curl --retry 3 --retry-all-errors -L "https://ossci-windows.s3.us-east-1.amazonaws.com/%ZLIB_ZIP%" --output "%SRC_DIR%\temp_build\%ZLIB_ZIP%"
+if errorlevel 1 exit /b 1
+for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%SRC_DIR%\temp_build\%ZLIB_ZIP%').Hash"') do set "ZLIB_ACTUAL_SHA256=%%H"
+if /I not "%ZLIB_ACTUAL_SHA256%"=="%ZLIB_SHA256%" (
+    echo ZLIB checksum mismatch: got %ZLIB_ACTUAL_SHA256%, expected %ZLIB_SHA256%
+    exit /b 1
+)
+7z x "%SRC_DIR%\temp_build\%ZLIB_ZIP%" -o"%SRC_DIR%\temp_build\zlib"
 xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
 goto :eof
