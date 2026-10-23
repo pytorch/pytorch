@@ -9036,6 +9036,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    Meta: eq_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: eq_tensor_nested
   tags: [core, pointwise]
 
