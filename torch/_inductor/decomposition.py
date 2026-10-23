@@ -531,6 +531,9 @@ def addmm(
     # to the tuned_addmm lowering.
     if out_dtype is not None:
         return NotImplemented
+    # The pointwise rewrites form the matrix product before applying alpha.
+    if statically_known_true(alpha == 0):
+        return NotImplemented
 
     def add_input(out: torch.Tensor) -> torch.Tensor:
         # Unconditional: `if alpha != 1` would guard on an unbacked alpha.
