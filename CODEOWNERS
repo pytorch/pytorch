@@ -620,7 +620,7 @@
 # label: module: mta
 /test/test_foreach.py @janeyx99
 # label: oncall: pt2, module: higher order operators
-/test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+/test/test_hop_infra.py @aorenste @bohnstingl
 # label: module: autograd
 /test/test_ops_fwd_gradients.py @soulitzer
 /test/test_ops_gradients.py @soulitzer
@@ -636,7 +636,6 @@
 # label: module: cuda
 /aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
-# /test/test_cow.py
 # /test/test_cuda.py
 # /test/test_cuda_compatibility.py
 # /test/test_cuda_expandable_segments.py
@@ -1159,7 +1158,7 @@
 # /torch/testing/_internal/common_device_type.py
 /test/run_test.py @pytorch/pytorch-dev-infra
 # label: oncall: pt2, module: testing, module: higher order operators
-/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @ydwu4 @aorenste @bohnstingl
 #
 # [benchmark_operator_runtime]
 # label: module: benchmark
@@ -1220,7 +1219,7 @@
 /torch/fx/proxy.py @zou3519
 # label: oncall: pt2, module: higher order operators
 # /test/higher_order_ops/
-/torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+/torch/_higher_order_ops/ @aorenste @bohnstingl
 # label: oncall: pt2, module: dynamic shapes
 /torch/fx/experimental/symbolic_shapes.py @laithsakka
 /torch/fx/experimental/sym_node.py @laithsakka
@@ -1245,7 +1244,7 @@
 # label: oncall: pt2, module: dynamo, module: onnx
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
 # label: oncall: pt2, module: dynamo, module: higher order operators
-/torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+/torch/_dynamo/variables/higher_order_ops.py @aorenste @bohnstingl
 # label: oncall: pt2, module: dynamo, module: pytree
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
 #

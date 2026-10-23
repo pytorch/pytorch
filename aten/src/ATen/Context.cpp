@@ -147,6 +147,7 @@ std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
 
 #ifdef USE_ROCM
 static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
+static constexpr const auto rocm_allow_group_gemm_ck_tile = "ROCM_ALLOW_GROUP_GEMM_CK_TILE";
 #endif
 
 Context::Context() = default;
@@ -304,6 +305,10 @@ bool Context::allowTF32OneDNN() const {
 bool Context::rocmAllowGroupGemmCk() const {
     const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
     return allow_group_gemm_ck;
+}
+bool Context::rocmAllowGroupGemmCkTile() const {
+    const auto allow_group_gemm_ck_tile = c10::utils::check_env(rocm_allow_group_gemm_ck_tile) == true;
+    return allow_group_gemm_ck_tile;
 }
 #endif
 
@@ -661,6 +666,9 @@ bool Context::ckSDPASupported() {
 bool Context::ckGemmSupported() {
 #ifdef USE_ROCM
   // CK GEMM support is broader than CK SDPA.
+  // Keep in sync with torch_filter_ck_gemm_arches (cmake/public/utils.cmake),
+  // which restricts the ck_gemm build to these archs, and the runtime dispatch
+  // in aten/src/ATen/native/hip/ck_gemm_{half,bfloat16}.hip.
   static const std::vector<std::string> supported_archs = {
       "gfx90a",
       "gfx942",
