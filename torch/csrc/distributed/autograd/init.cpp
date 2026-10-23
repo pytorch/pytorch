@@ -11,7 +11,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
+PyObject* dist_autograd_init(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   auto autograd_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.autograd"));
   TORCH_CHECK_PYTHON(autograd_module);
