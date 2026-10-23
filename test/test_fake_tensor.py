@@ -2656,13 +2656,10 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
 
 make_propagate_real_tensors_cls(TestFakeTensorDevice)
-instantiate_device_type_tests(
-    TestFakeTensorDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestFakeTensorDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorDevice,  # noqa: F821
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 
@@ -2932,13 +2929,12 @@ make_propagate_real_tensors_cls(TestFakeTensorOpInfoDevice)
 instantiate_device_type_tests(
     TestFakeTensorOpInfoDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorOpInfoDevice,  # noqa: F821
     globals(),
-    only_for=("cpu",),
+    except_for=("cuda", "xpu"),
 )
 
 
@@ -3499,7 +3495,7 @@ make_propagate_real_tensors_cls(TestFakeTensorOperatorInvariants)
 
 
 class TestFakeTensorOperatorInvariantsDevice(TestCase):
-    """Accelerator-only TestFakeTensorOperatorInvariants cases (see only_for below)."""
+    r"""Accelerator-only TestFakeTensorOperatorInvariants cases (see except_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3613,13 +3609,13 @@ make_propagate_real_tensors_cls(TestFakeTensorOperatorInvariantsDevice)
 instantiate_device_type_tests(
     TestFakeTensorOperatorInvariantsDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorOperatorInvariantsDevice,  # noqa: F821
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -3819,7 +3815,7 @@ make_propagate_real_tensors_cls(TestFakeTensorProp)
 
 
 class TestFakeTensorPropDevice(TestCase):
-    """Accelerator-only TestFakeTensorProp cases (see only_for below)."""
+    r"""Accelerator-only TestFakeTensorProp cases (see except_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3909,12 +3905,12 @@ class TestFakeTensorPropDevice(TestCase):
 
 make_propagate_real_tensors_cls(TestFakeTensorPropDevice)
 instantiate_device_type_tests(
-    TestFakeTensorPropDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestFakeTensorPropDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorPropDevice,  # noqa: F821
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -4636,7 +4632,7 @@ def forward(self, dummy_1):
 
 @skipIfCppFakeTensor("no Python dispatch cache support")
 class TestFakeTensorDispatchCacheDevice(_TestFakeTensorDispatchCacheHelpers, TestCase):
-    """Accelerator-only TestFakeTensorDispatchCache cases (see only_for below)."""
+    r"""Accelerator-only TestFakeTensorDispatchCache cases (see except_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4764,7 +4760,7 @@ class TestFakeTensorDispatchCacheDevice(_TestFakeTensorDispatchCacheHelpers, Tes
 instantiate_device_type_tests(
     TestFakeTensorDispatchCacheDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -4789,7 +4785,7 @@ class TestFakeTensorPreferDeviceType(TestCase):
 
 
 class TestFakeTensorPreferDeviceTypeDevice(TestCase):
-    """Accelerator-only TestFakeTensorPreferDeviceType cases (see only_for below)."""
+    r"""Accelerator-only TestFakeTensorPreferDeviceType cases (see except_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4861,7 +4857,7 @@ class TestFakeTensorPreferDeviceTypeDevice(TestCase):
 instantiate_device_type_tests(
     TestFakeTensorPreferDeviceTypeDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -4881,7 +4877,6 @@ class TestFakeTensorMetaDevicePropagationDevice(TestCase):
 instantiate_device_type_tests(
     TestFakeTensorMetaDevicePropagationDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 
