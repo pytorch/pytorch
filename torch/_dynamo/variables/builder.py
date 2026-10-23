@@ -78,7 +78,6 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
-    maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -3179,7 +3178,7 @@ class VariableBuilder:
         return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
-        if maybe_get_fake_mode(value) is self.tx.fake_mode:
+        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
@@ -3887,11 +3886,10 @@ class VariableBuilder:
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        fake_mode = maybe_get_fake_mode(fake_tensor_value)
-        if fake_mode is not self.tx.fake_mode:
+        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
             raise AssertionError(
-                f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
-                f"({self.tx.fake_mode}) from InstructionTranslator"
+                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                "({self.tx.fake_mode}) from InstructionTranslator"
             )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
@@ -3993,11 +3991,10 @@ class VariableBuilder:
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            fake_mode = maybe_get_fake_mode(fake_tensor_value)
-            if fake_mode is not self.tx.fake_mode:
+            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
-                    f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
-                    f"({self.tx.fake_mode}) from InstructionTranslator"
+                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                    "({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
             proxy.node.meta["grapharg"] = GraphArg(
@@ -5468,8 +5465,8 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and is_fake_tensor(fake_e)
-            and (sym_val := maybe_get_item_memo(fake_e)) is not None
+            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+            and (sym_val := fake_e.item_memo) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
@@ -5479,8 +5476,6 @@ def _wrap_to_fake_tensor_and_record_impl(
                 item_source = source.base
             else:
                 item_source = CallMethodItemSource(source)
-            # Typed like FakeTensor.item_memo (SymNumberMemoDescriptor.__get__)
-            sym_val = cast(torch.SymInt | torch.SymFloat, sym_val)
             tx.output.tracked_fakes.append(
                 TrackedFake(sym_val, item_source, symbolic_context)
             )
