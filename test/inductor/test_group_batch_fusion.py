@@ -998,7 +998,10 @@ class TestGroupBatchFusion(TestCase):
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(ref_module, traced)
-            self.compare_gradients(ref_module, traced, rtol=1e-8, atol=1e-8)
+            # Independent fused/eager FP32 GEMM reductions differ by up to
+            # 5e-5 on ROCm and 5.7e-6 on CPU; gradients reach ~2e1, and a
+            # dropped projection would differ by O(1).
+            self.compare_gradients(ref_module, traced, rtol=1e-4, atol=1e-4)
             counters.clear()
 
     @requires_gpu()
