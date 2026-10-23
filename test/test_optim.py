@@ -1291,7 +1291,6 @@ class TestOptimRenewed(TestCase):
             optim_cls([ref], fused=True, **optim_input.kwargs).step()
             self.assertEqual(params[0][0], ref[0])
 
-    @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
