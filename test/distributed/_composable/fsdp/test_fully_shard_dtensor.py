@@ -18,12 +18,10 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
-
-
-device_type = torch.device(get_devtype())
+from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 def _tp_partition_fn(name, module, device_mesh):
@@ -55,6 +53,8 @@ def _tp_shard_fn(param):
 
 
 class TestFullyShardDTensor(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         if torch.accelerator.is_available():
@@ -68,7 +68,7 @@ class TestFullyShardDTensor(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         torch.manual_seed(42 + dp_pg.rank() + 1)
         for i in range(num_iters):
-            inp = torch.randn((2, mlp_dim), device=device_type)
+            inp = torch.randn((2, mlp_dim), device=self.device_type)
             ref_optim.zero_grad(set_to_none=(i % 2 == 0))
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
@@ -97,11 +97,11 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_dtensor_train_parity(self):
+    def test_dtensor_train_parity(self, device):
         """Train parity for FSDP/HSDP/DDP with DTensors on SPMD meshes."""
         ws = self.world_size
         world_mesh = init_device_mesh(
-            device_type.type, (ws,), mesh_dim_names=("world",)
+            self.device_type, (ws,), mesh_dim_names=("world",)
         )
         # (sizes, names, dp_dims, use_tp, reshard, dp_pg_source, use_rep_fsdp)
         cases = [
@@ -219,7 +219,7 @@ class TestFullyShardDTensor(FSDPTest):
                 mesh = world_mesh._unflatten(0, sizes, names)
 
                 torch.manual_seed(42)
-                model = MLP(mlp_dim, device=device_type)
+                model = MLP(mlp_dim, device=self.device_type)
                 ref_model = copy.deepcopy(model)
 
                 partition_fn = _tp_partition_fn if use_tp else None
@@ -246,7 +246,7 @@ class TestFullyShardDTensor(FSDPTest):
 
                 replicate(
                     ref_model,
-                    device_ids=[self.rank] if device_type.type != "cpu" else None,
+                    device_ids=[self.rank] if self.device_type != "cpu" else None,
                     process_group=dp_pg,
                 )
 
@@ -256,13 +256,13 @@ class TestFullyShardDTensor(FSDPTest):
             dist.barrier()
 
     @skip_if_lt_x_gpu(2)
-    def test_sharded_param_correctness_1d(self):
+    def test_sharded_param_correctness_1d(self, device):
         """Verify sharded param mesh and placements for FSDP on 1D mesh."""
         mesh = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
 
-        model = MLP(16, device=device_type)
+        model = MLP(16, device=self.device_type)
         distribute_module(model, mesh)
         fully_shard(
             model,
@@ -277,18 +277,18 @@ class TestFullyShardDTensor(FSDPTest):
             self.assertIsInstance(param.placements[0], Shard)
 
     @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_dtensor_sharded_params(self):
+    def test_fsdp_tp_dtensor_sharded_params(self, device):
         """Verify sharded param mesh and placements for FSDP+TP on 2D mesh."""
         dp_size = 2
         tp_size = self.world_size // dp_size
         mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (dp_size, tp_size),
             mesh_dim_names=("fsdp", "tp"),
         )
 
         mlp_dim = 16
-        model = MLP(mlp_dim, device=device_type)
+        model = MLP(mlp_dim, device=self.device_type)
 
         def partition_fn(name, module, device_mesh):
             if not isinstance(module, nn.Linear):
@@ -344,12 +344,12 @@ class TestFullyShardDTensor(FSDPTest):
                 self.assertIsInstance(param.placements[1], Replicate)
 
     @skip_if_lt_x_gpu(4)
-    def test_reduce_scatter_unused_dtensor_param(self):
+    def test_reduce_scatter_unused_dtensor_param(self, device):
         class TwoExpertParams(nn.Module):
-            def __init__(self, ep_mesh) -> None:
+            def __init__(self, ep_mesh, device) -> None:
                 super().__init__()
-                used = torch.randn(8, 4, device=device_type)
-                unused = torch.randn(8, 4, device=device_type)
+                used = torch.randn(8, 4, device=device)
+                unused = torch.randn(8, 4, device=device)
                 self.register_parameter(
                     "used",
                     nn.Parameter(distribute_tensor(used, ep_mesh, [Shard(0)])),
@@ -363,17 +363,17 @@ class TestFullyShardDTensor(FSDPTest):
                 return self.used.to_local().float().sum() + (x.float().sum() * 0)
 
         mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (self.world_size // 2, 2),
             mesh_dim_names=("dp", "ep"),
         )
-        model = TwoExpertParams(mesh["ep"])
+        model = TwoExpertParams(mesh["ep"], self.device_type)
         fully_shard(model, mesh=mesh["dp"], reshard_after_forward=True)
         model.set_reduce_scatter_unused_params(True)
 
-        loss = model(torch.ones(1, device=device_type))
+        loss = model(torch.ones(1, device=self.device_type))
         loss.backward()
-        torch.get_device_module(device_type).synchronize()
+        torch.get_device_module(self.device_type).synchronize()
 
         unused_grad = model.unused.grad
         self.assertIsNotNone(unused_grad)
@@ -383,12 +383,12 @@ class TestFullyShardDTensor(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_non_replicate_dp_placement(self):
+    def test_validation_non_replicate_dp_placement(self, device):
         """Error when a param has non-Replicate placement on the DP shard dim."""
         mesh = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
-        model = nn.Linear(16, 32, device=device_type)
+        model = nn.Linear(16, 32, device=self.device_type)
         # Distribute weight with Shard(0) on the FSDP dim
         model.weight = nn.Parameter(
             distribute_tensor(model.weight.data, mesh, [Shard(0)]),
@@ -406,12 +406,12 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_invalid_dim_names(self):
+    def test_validation_invalid_dim_names(self, device):
         """Error when dp_mesh_dims references nonexistent mesh dim names."""
         mesh = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
-        model = MLP(16, device=device_type)
+        model = MLP(16, device=self.device_type)
         distribute_module(model, mesh)
         with self.assertRaisesRegex(ValueError, "not found in mesh.mesh_dim_names"):
             fully_shard(
@@ -421,15 +421,15 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_mesh_mismatch(self):
+    def test_validation_mesh_mismatch(self, device):
         """Error when param DTensor mesh differs from the mesh passed to fully_shard."""
         mesh1 = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
         mesh2 = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
-        model = nn.Linear(16, 32, device=device_type)
+        model = nn.Linear(16, 32, device=self.device_type)
         # Distribute params on mesh1 but pass mesh2 to fully_shard
         model.weight = nn.Parameter(
             distribute_tensor(model.weight.data, mesh1, [Replicate()]),
@@ -446,18 +446,18 @@ class TestFullyShardDTensor(FSDPTest):
                 dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
             )
 
-    def test_validation_at_least_one_required(self):
+    def test_validation_at_least_one_required(self, device):
         """Error when neither shard nor replicate is set."""
         with self.assertRaisesRegex(ValueError, "At least one of shard or replicate"):
             DataParallelMeshDims()
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_spmd_mesh_non_dtensor_params(self):
+    def test_validation_spmd_mesh_non_dtensor_params(self, device):
         """Error when dp_mesh_dims is provided but params are not DTensors."""
         mesh = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
-        model = MLP(16, device=device_type)
+        model = MLP(16, device=self.device_type)
         # Do NOT call distribute_module -- params are plain tensors
         with self.assertRaisesRegex(ValueError, "must be DTensors"):
             fully_shard(
@@ -467,12 +467,12 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_reshard_after_forward_int_spmd(self):
+    def test_validation_reshard_after_forward_int_spmd(self, device):
         """Error when reshard_after_forward is int with SPMD mesh."""
         mesh = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
-        model = MLP(16, device=device_type)
+        model = MLP(16, device=self.device_type)
         distribute_module(model, mesh)
         with self.assertRaisesRegex(
             NotImplementedError, "reshard_after_forward as int"
@@ -484,6 +484,13 @@ class TestFullyShardDTensor(FSDPTest):
                 dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
             )
 
+
+instantiate_device_type_tests(
+    TestFullyShardDTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
