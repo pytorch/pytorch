@@ -9275,6 +9275,83 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_custom_function_class_changes_after_apply(self):
+        # apply reads class attributes from the class dicts along the MRO, so
+        # changes to the class or its bases must take effect on the next call.
+        class Base(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        class Sub(Base):
+            pass
+
+        x = torch.randn(3, requires_grad=True)
+        self.assertEqual(Sub.apply(x), x * 2)
+        Base.forward = staticmethod(lambda ctx, x: x * 3)
+        self.assertEqual(Sub.apply(x), x * 3)
+        Sub.forward = staticmethod(lambda ctx, x: x * 4)
+        self.assertEqual(Sub.apply(x), x * 4)
+
+        Sub.setup_context = staticmethod(lambda ctx, inputs, output: None)
+        Sub.forward = staticmethod(lambda x: x * 5)
+        self.assertEqual(Sub.apply(x), x * 5)
+
+        apply = Sub.apply
+        Sub.forward = staticmethod(lambda x: x * 6)
+        self.assertEqual(apply(x), x * 6)
+
+    @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
+    def test_custom_function_clear_saved_tensors_set_after_apply(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x)
+        y.grad_fn.saved_tensors
+        y.grad_fn.saved_tensors
+
+        MyFn.clear_saved_tensors_on_access = True
+        y = MyFn.apply(x)
+        y.grad_fn.saved_tensors
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            y.grad_fn.saved_tensors
+
+    def test_custom_function_metaclass_getattribute(self):
+        # A metaclass __getattribute__ can return a different forward on each
+        # read, so apply must go through it rather than the class dicts.
+        forwards = [lambda ctx, x: x * 3, lambda ctx, x: x * 4]
+
+        class Meta(type(Function)):
+            def __getattribute__(cls, name):
+                if name == "forward":
+                    return forwards.pop(0)
+                return super().__getattribute__(name)
+
+        class MyFn(Function, metaclass=Meta):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x = torch.randn(3, requires_grad=True)
+        self.assertEqual(MyFn.apply(x), x * 3)
+        self.assertEqual(MyFn.apply(x), x * 4)
+
     @unittest.skipIf(
         TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
     )
