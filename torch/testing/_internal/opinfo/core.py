@@ -1395,8 +1395,7 @@ def test_foo(self, device, dtype, op):
             tensor = tensor.conj()
             return tensor.requires_grad_(_requires_grad)
 
-        for i, sample in enumerate(samples):
-            sample = conj_samples[i]
+        for sample in conj_samples:
             # Note: it is assumed that the input here is either a tensor or tensorlist
             if isinstance(sample.input, torch.Tensor):
                 sample.input = conjugate(sample.input)
