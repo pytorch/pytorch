@@ -917,6 +917,37 @@ static bool use_graph_for_max_pool2d(IntArrayRef kernel_size, IntArrayRef stride
   return (stride[0] == 1) && (stride.size() == 1 || stride[1] == 1);
 }
 
+// MPSGraph's max pooling returns 0 for a window whose values are all -inf
+// (CPU/CUDA return -inf). Detect those windows by pooling a 0/1 mask of the
+// non-(-inf) positions through the same descriptor and patch the pooled values
+// back to -inf (#200789).
+static MPSGraphTensor* mpsMaxPool2dFixNegInfWindows(MPSGraph* mpsGraph,
+                                                    MPSGraphTensor* pooled,
+                                                    MPSGraphTensor* input,
+                                                    MPSGraphPooling2DOpDescriptor* desc) {
+  MPSGraphTensor* negInf = [mpsGraph constantWithScalar:-INFINITY shape:@[ @1 ] dataType:input.dataType];
+  MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:MPSDataTypeFloat32];
+  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:MPSDataTypeFloat32];
+  MPSGraphTensor* isNotNegInf = [mpsGraph selectWithPredicateTensor:[mpsGraph equalWithPrimaryTensor:input
+                                                                                     secondaryTensor:negInf
+                                                                                                name:nil]
+                                                truePredicateTensor:zero
+                                               falsePredicateTensor:one
+                                                               name:nil];
+  // The shared descriptor may carry a returnIndicesMode from the caller; the
+  // mask pass is a plain max pool.
+  MPSGraphPooling2DOpDescriptor* maskDesc = [desc copy];
+  maskDesc.returnIndicesMode = MPSGraphPoolingReturnIndicesNone;
+  MPSGraphTensor* anyReal = [mpsGraph maxPooling2DWithSourceTensor:isNotNegInf descriptor:maskDesc name:nil];
+  MPSGraphTensor* windowHasReal = [mpsGraph greaterThanWithPrimaryTensor:anyReal secondaryTensor:zero name:nil];
+  return [mpsGraph selectWithPredicateTensor:windowHasReal
+                         truePredicateTensor:pooled
+                        falsePredicateTensor:[mpsGraph constantWithScalar:-INFINITY
+                                                                    shape:@[ @1 ]
+                                                                 dataType:pooled.dataType]
+                                        name:nil];
+}
+
 Tensor mps_max_pool2d(const Tensor& input,
                       IntArrayRef kernel_size,
                       IntArrayRef stride,
@@ -928,7 +959,8 @@ Tensor mps_max_pool2d(const Tensor& input,
   if (use_graph) {
     mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
       MPSGraph* mpsGraph = cachedGraph.graph();
-      return [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+      MPSGraphTensor* pooled = [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+      return mpsMaxPool2dFixNegInfWindows(mpsGraph, pooled, cachedGraph.inputTensor, desc);
     };
     mps::pool2d_template(input,
                          output,
@@ -1010,7 +1042,7 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
       NSArray<MPSGraphTensor*>* poolOutputs =
           [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
       cachedGraph.indicesTensor = mps::castMPSTensor(mpsGraph, poolOutputs[1], ScalarType::Long);
-      return poolOutputs[0];
+      return mpsMaxPool2dFixNegInfWindows(mpsGraph, poolOutputs[0], cachedGraph.inputTensor, desc);
     };
     mps::pool2d_template(input,
                          output,

@@ -2666,6 +2666,28 @@ class TestMPS(TestCaseMPS):
             helper((1, 1000, 1, 4), ks=(1, 4), ceil_mode=True,
                    return_indices=True, test_ties=test_ties)  # test for max_pool1d
 
+    def test_max_pool_neg_inf_windows(self):
+        # Regression test for #200789: the MPSGraph path used for stride-1
+        # max pooling returned 0 for windows whose values are all -inf.
+        def helper(x, pool_fn):
+            ref = pool_fn(x.cpu())
+            out = pool_fn(x.to('mps'))
+            self.assertEqual(out.cpu(), ref)
+
+        x = torch.tensor([[[[float("-inf")] * 4 + [-1.0, -2.0]]]])
+        for return_indices in [False, True]:
+            for stride in [1, 2]:
+                helper(x, lambda t: F.max_pool2d(t, (1, 2), stride, return_indices=return_indices)[0]
+                       if return_indices else F.max_pool2d(t, (1, 2), stride))
+        # A real zero in the window must stay 0 (no false -inf patching), and
+        # negative finite values must survive untouched.
+        mixed = torch.tensor([[[[0.0, float("-inf"), 0.0, float("-inf"), 0.0]]]])
+        helper(mixed, lambda t: F.max_pool2d(t, (1, 2), 1))
+        neg = torch.tensor([[[[-1.0, -2.0, -3.0, -4.0]]]])
+        helper(neg, lambda t: F.max_pool2d(t, (1, 2), 1))
+        # 1D API surface routes through the same graph path for stride=1.
+        helper(x.view(1, 1, 6), lambda t: F.max_pool1d(t, 2, 1))
+
     def test_adaptive_avg_pool2d_output_size_one(self):
         def helper(size, memory_format):
             x = torch.randint(1, 10, size, dtype=torch.float, device='mps', requires_grad=True)
