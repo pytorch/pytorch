@@ -2735,6 +2735,7 @@ class TensorDescriptorPoolGateTest(InductorTestCase):
         )
         self.assertEqual(pins(cuda._replace(cc=80, major=8)), [])
         self.assertEqual(pins(cuda._replace(type="hip")), [])
+        self.assertEqual(pins(cuda._replace(type="xpu")), [])
         with config.patch({"triton.autotune_tensor_descriptor": "all"}):
             self.assertEqual(len(pins(cuda)), 3)
         for patches in (
@@ -2745,6 +2746,7 @@ class TensorDescriptorPoolGateTest(InductorTestCase):
             {"batch_invariant": True},
             {"triton.multi_kernel": 2},
             {"cpp_wrapper": True},
+            {"fx_wrapper": True},
         ):
             with config.patch(patches):
                 self.assertEqual(pins(cuda), [], msg=str(patches))
@@ -2764,19 +2766,29 @@ class TensorDescriptorPoolGateTest(InductorTestCase):
     }
 )
 class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
-    def test_pool_benchmarks_pointer_loads_against_host_side_tma(self):
+    def test_pool_benchmarks_pointer_loads_against_tma(self):
         def fn(x):
             return torch.nn.functional.silu(x)
 
         x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
-        result, (code,) = run_and_get_code(torch.compile(fn), x)
-        self.assertEqual(result, fn(x), exact_device=True)
-        # Both choices are emitted, and only the TMA one is marked to skip the baseline's tuning.
-        FileCheck().check_count("@triton.jit", 2, exactly=True).run(code)
-        FileCheck().check_count("'tma_variant': True", 1, exactly=True).run(code)
-        FileCheck().check("async_compile.multi_kernel").run(code)
 
-    def test_dynamic_shapes_use_pointer_loads(self):
+        def check_pool(pool, num_kernels, num_tma):
+            torch._dynamo.reset()
+            with config.patch({"triton.autotune_tensor_descriptor": pool}):
+                result, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(result, fn(x), exact_device=True)
+            FileCheck().check_count("@triton.jit", num_kernels, exactly=True).run(
+                code
+            )
+            FileCheck().check_count(
+                "'tma_variant': True", num_tma, exactly=True
+            ).run(code)
+            FileCheck().check("async_compile.multi_kernel").run(code)
+
+        check_pool("auto", 2, 1)
+        check_pool("all", 3, 2)
+
+    def test_dynamic_shapes_preserve_supported_tma_mode(self):
         def rmsnorm(x, weight):
             x_float = x.float()
             scale = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + 1e-6)
@@ -2784,13 +2796,25 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
 
         x = torch.randn(1024, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
         weight = torch.randn(4096, device=GPU_TYPE, dtype=torch.bfloat16)
-        result, (code,) = run_and_get_code(
-            torch.compile(rmsnorm, dynamic=True), x, weight
-        )
-        self.assertEqual(result, rmsnorm(x, weight), exact_device=True)
-        FileCheck().check_not("'tma_variant': True").check_not(
-            "host_tma_descriptor_args"
-        ).check_not("tl.make_tensor_descriptor").run(code)
+
+        def compile_with_host_side_tma(enabled):
+            torch._dynamo.reset()
+            with config.patch({"triton.enable_host_side_tma": enabled}):
+                return run_and_get_code(
+                    torch.compile(rmsnorm, dynamic=True), x, weight
+                )
+
+        device_result, (device_code,) = compile_with_host_side_tma(False)
+        self.assertEqual(device_result, rmsnorm(x, weight), exact_device=True)
+        FileCheck().check_not("host_tma_descriptor_args").check(
+            "tl.make_tensor_descriptor"
+        ).run(device_code)
+
+        pointer_result, (pointer_code,) = compile_with_host_side_tma(True)
+        self.assertEqual(pointer_result, rmsnorm(x, weight), exact_device=True)
+        FileCheck().check_not("host_tma_descriptor_args").check_not(
+            "tl.make_tensor_descriptor"
+        ).run(pointer_code)
 
     @config.patch(
         {

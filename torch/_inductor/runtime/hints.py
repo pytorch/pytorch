@@ -368,6 +368,7 @@ class InductorMeta(typing.TypedDict, total=False):
     uses_tma: bool
     uses_device_tma: bool
     tma_variant: bool
+    tma_variant_sm100: bool
     host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
     tiling_scores: typing.Any
     min_xblock: int

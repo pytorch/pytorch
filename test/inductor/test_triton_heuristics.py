@@ -55,6 +55,7 @@ from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
     _find_names,
+    _maybe_filter_configs_for_tma_restrictions,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -152,6 +153,18 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_tma_filter_keeps_valid_first_config_once(self):
+        configs = [
+            triton.Config({"XBLOCK": 16}, num_warps=4),
+            triton.Config({"XBLOCK": 32}, num_warps=4),
+        ]
+
+        result = _maybe_filter_configs_for_tma_restrictions(
+            {"tma_min_block_sizes": {"XBLOCK": 16}}, configs
+        )
+
+        self.assertEqual(result, configs)
 
     @parametrize("cc,xblock,num_warps", [(90, 1024, 4), (100, 2048, 2)])
     def test_tma_pointwise_config_is_sm100_specific(self, cc, xblock, num_warps):

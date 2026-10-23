@@ -2476,11 +2476,11 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
-    # "auto" is the default: with use_tensor_descriptor and max_autotune(_pointwise), these kernels race TMA variants instead of forcing TMA.
-    # "all" also adds device-side TMA; "off" leaves use_tensor_descriptor to decide alone.
+    # With use_tensor_descriptor and max_autotune(_pointwise), "auto" races host-side TMA against pointer loads for pointwise/reduction kernels.
+    # "all" also adds device-side TMA; the default "off" preserves use_tensor_descriptor behavior.
     # pyrefly: ignore [bad-assignment]
     autotune_tensor_descriptor: Literal["off", "auto", "all"] = os.environ.get(
-        "TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR", "auto"
+        "TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR", "off"
     )  # type: ignore[assignment]
 
     # Whether FlexAttention forward/decode may select AMD TDM descriptors on

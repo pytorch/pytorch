@@ -9336,7 +9336,8 @@ class TritonScheduling(SIMDScheduling):
             or kernel_features.reduction_numel.free_symbols
         ):
             # Host-side descriptors cannot materialize dynamic shapes.
-            kernel_kwargs = {**kernel_kwargs, **pins[0]}
+            if config.triton.enable_host_side_tma:
+                kernel_kwargs = {**kernel_kwargs, **pins[0]}
             pins = []
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         choices = self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
@@ -9348,6 +9349,8 @@ class TritonScheduling(SIMDScheduling):
         choices = [
             kernel_type(*kernel_args, **{**kernel_kwargs, **pin}) for pin in pins
         ]
+        for choice in choices:
+            choice._in_multi_kernel = True
         for choice in choices[1:]:
             choice.optional = True
             # Shared, not copied: it fills during codegen, and MultiKernel needs identical call args.
@@ -9365,22 +9368,20 @@ class TritonScheduling(SIMDScheduling):
             or not config.triton.use_tensor_descriptor
             or not (config.max_autotune or config.max_autotune_pointwise)
             or not has_triton_stable_tma_api()
-            or device_props.type == "hip"
+            or device_props.type != "cuda"
             or (
-                device_props.type == "cuda"
-                and (
-                    device_props.major is None
-                    or device_props.major < 9
-                    or not config.assume_aligned_inputs
-                )
+                device_props.major is None
+                or device_props.major < 9
+                or not config.assume_aligned_inputs
             )
             # Picking by measured time is what these forbid.
             or config.deterministic
             or config.batch_invariant
             # These force a sub-kernel by index into multi_kernel's own order.
             or config.triton.multi_kernel in (2, 3)
-            # JIT cpp-wrapper codegens in one pass, so lookup_choice would find no pick.
+            # These wrappers do not support runtime multi-kernel dispatch.
             or config.cpp_wrapper
+            or config.fx_wrapper
         ):
             return []
         # Device-side TMA is opt-in: #187175 and #188823 measure it behind the baseline everywhere.
