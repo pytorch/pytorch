@@ -860,14 +860,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 }
             else:
                 annotation_dict = annotation.as_python_constant()
-            return FxTracebackAnnotateVariable(annotation_dict)
+            return FxTracebackAnnotateVariable.create(annotation_dict)
         elif self.value in (
             torch.fx.traceback._dynamo_annotate,
             torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
             if len(args) != 1 or kwargs:
                 raise AssertionError("_dynamo_annotate expects one positional argument")
-            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
+            return FxTracebackAnnotateVariable.create(
+                dict(args[0].as_python_constant())
+            )
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
@@ -882,7 +884,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"expected a float budget, got {type(budget).__name__}"
                 )
-            return FxTracebackAnnotateVariable(
+            return FxTracebackAnnotateVariable.create(
                 {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
@@ -917,7 +919,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return ProfilerContextVariable()
+            return ProfilerContextVariable()  # noqa: RAW_VT_CONSTRUCTION
         elif (
             self.value is torch._C.DisableTorchFunctionSubclass
             or self.value is torch._C.DisableTorchFunction
@@ -2811,8 +2813,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> FuncTorchInterpreterVariable:
             # pyrefly: ignore[missing-attribute]
             cinterpreter = args[0].value
-            return FuncTorchInterpreterVariable(
-                torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
+            return VariableTracker.build(
+                tx, torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
             )
 
         @register(torch.tensor)

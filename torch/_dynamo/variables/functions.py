@@ -954,7 +954,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 changes = torch._dynamo.patch_dynamo_config(
                     *args_const, **kwargs_const
                 ).changes
-                return variables.DynamoConfigPatchVariable(changes)
+                return variables.DynamoConfigPatchVariable(changes)  # noqa: RAW_VT_CONSTRUCTION
             except AsPythonConstantNotImplementedError as e:
                 raise RuntimeError(
                     "Cannot convert patch_dynamo_config args/kwargs to constants. "
@@ -971,6 +971,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     raise AssertionError(
                         f"error_on_graph_break must be a bool, got {type(error_on_graph_break)}"
                     )
+                # noqa: RAW_VT_CONSTRUCTION
                 return variables.ErrorOnGraphBreakVariable(error_on_graph_break)
             except Exception as e:
                 raise RuntimeError(
@@ -987,7 +988,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     fwd = fwd.as_python_constant()
                 if isinstance(bwd, VariableTracker):
                     bwd = bwd.as_python_constant()
-                return variables.CudagraphOverrideVariable(fwd, bwd)
+                return variables.CudagraphOverrideVariable(fwd, bwd)  # noqa: RAW_VT_CONSTRUCTION
             except Exception as e:
                 raise RuntimeError(
                     "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
@@ -1198,7 +1199,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if tree_map_callable is None:
             return None
 
-        wrapped_map_fn = TreeMapOnlyFunctionVariable(
+        wrapped_map_fn = TreeMapOnlyFunctionVariable(  # noqa: RAW_VT_CONSTRUCTION
             allowed_types,
             map_fn,
             source=getattr(map_fn, "source", None),
@@ -1737,6 +1738,12 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         This is a wrapper around (Nested)UserFunctionVariable
     """
 
+    @classmethod
+    def create(
+        cls, vt: BaseUserFunctionVariable, **kwargs: Any
+    ) -> "LocalGeneratorFunctionVariable":
+        return cls(vt, **kwargs)
+
     def python_type(self) -> type:
         return types.FunctionType
 
@@ -1850,7 +1857,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(BaseUserFunctionVariable):
+class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RAW_VT_CONSTRUCTION
     """Some unsupported user-defined method"""
 
     # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
@@ -3339,6 +3346,15 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
 
     _cpython_type = types.MethodType
 
+    @staticmethod
+    def create(
+        fn: WrapperUserFunctionVariable,
+        self_obj: VariableTracker,
+        *,
+        source: Source | None = None,
+    ) -> "WrapperUserMethodVariable":
+        return WrapperUserMethodVariable(fn, self_obj, source=source)
+
     def __init__(
         self,
         fn: WrapperUserFunctionVariable,
@@ -3561,10 +3577,14 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         source: Source,
         **options: Any,
     ) -> "CollectiveFunctionRewriteVariable":
+        from .builder import VariableBuilder
+
         new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(tx, old_fn)
         return CollectiveFunctionRewriteVariable(
             old_fn,
-            replacement_var=UserFunctionVariable(new_fn, source=new_source, **options),
+            replacement_var=VariableBuilder.create_internal_user_function(
+                new_fn, source=new_source, **options
+            ),
             source=source,
             **options,
         )
@@ -3737,10 +3757,7 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
                     tx,
                     args=list(exc.args),
                 )
-            return variables.UserDefinedClassVariable(
-                value,
-                mutation_type=ValueMutationNew(),
-            )
+            return variables.UserDefinedClassVariable.create_new(value)
         unimplemented(
             gb_type="namedtuple construction",
             context=f"{args=}, {kwargs=}",
@@ -4499,7 +4516,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         if not isinstance(ptr, variables.DataPtrVariable):
             raise AssertionError(f"ptr must be a DataPtrVariable, got {type(ptr)}")
 
-        return TMADescriptorExperimentalVariable(
+        return TMADescriptorExperimentalVariable(  # noqa: RAW_VT_CONSTRUCTION
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
@@ -4625,7 +4642,7 @@ class CreateTMADescriptorStableVariable(VariableTracker):
             else:
                 default_source = DefaultsSource(factory_source, default_index)
             install_guard(default_source.make_guard(GuardBuilder.CONSTANT_MATCH))
-        return TMADescriptorStableVariable(
+        return TMADescriptorStableVariable(  # noqa: RAW_VT_CONSTRUCTION
             tensor=cast("TensorVariable", tensor),
             block_shape=cast("ListVariable", block_shape),
             descriptor_module=descriptor_module,
@@ -4712,9 +4729,10 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         # Optimize the case where is_leaf is None
         # return _get_node_type(tree) not in SUPPORTED_NODES
         tree = args[0]
-        node_type_var = PyTreeGetNodeTypeFunctionVariable(
-            torch.utils._pytree._get_node_type
-        ).call_function(tx, [tree], {})
+        from .builder import SourcelessBuilder
+
+        node_type_var = SourcelessBuilder.create_internal_pytree_get_node_type()
+        node_type_var = node_type_var.call_function(tx, [tree], {})
 
         # If the SUPPORTED_NODES was seen earlier and mutated, there would be a
         # source and that will give us the mutated SUPPORTED_NODES.
@@ -5019,7 +5037,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(VariableTracker):
+class MethodWrapperVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
@@ -5272,7 +5290,7 @@ def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
     return descriptor.__get__(obj, type(obj))
 
 
-class BoundBuiltinMethodVariable(VariableTracker):
+class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """Bound builtin_function_or_method (PyCFunction_Type).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
@@ -5622,6 +5640,10 @@ class StaticMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "StaticMethodVariable":
+        return StaticMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -5699,6 +5721,10 @@ class ClassMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "ClassMethodVariable":
+        return ClassMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -5712,7 +5738,7 @@ class ClassMethodVariable(VariableTracker):
         # as `owner.<name>`, so build the VT that can source it.
         # A classmethod may wrap any callable, so let the builder pick the VT;
         # tp_descr_get_impl rejects the ones it cannot bind.
-        return ClassAttrClassMethodVariable(
+        return ClassAttrClassMethodVariable(  # noqa: RAW_VT_CONSTRUCTION
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
             source=source,

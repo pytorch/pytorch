@@ -230,6 +230,20 @@ class ExceptionVariable(VariableTracker):
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
 
+    @staticmethod
+    def create(  # noqa: RAW_VT_CONSTRUCTION
+        exc_type: type[BaseException],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "ExceptionVariable":
+        if exc_type is StopIteration:
+            return StopIterationVariable(exc_type, args, kwargs)
+        elif exc_type is AttributeError:
+            return AttributeErrorVariable(exc_type, args, kwargs)
+        elif exc_type is NameError:
+            return NameErrorVariable(exc_type, args, kwargs)
+        return ExceptionVariable(exc_type, args, kwargs)
+
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
