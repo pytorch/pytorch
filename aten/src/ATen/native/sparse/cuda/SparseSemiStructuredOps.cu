@@ -828,7 +828,7 @@ namespace at::native {
 // at the moment.
 template <typename Element, typename LayoutDest, typename LayoutSrc>
 static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
-                         cutlass::TensorRef<Element, LayoutSrc> src,
+                         cutlass::TensorRef<const Element, LayoutSrc> src,
                          const int problem_size_m, const int problem_size_k) {
   for (int m = 0; m < problem_size_m; m++) {
     for (int k = 0; k < problem_size_k; k++) {
@@ -912,7 +912,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
   auto meta_cpu = dense_cpu.new_empty({meta_nrows, meta_ncols},
                                       at::TensorOptions().dtype(meta_dtype));
 
-  auto* mask_cpu_ptr = mask_cpu.mutable_data_ptr<bool>();
+  const auto* mask_cpu_ptr = mask_cpu.const_data_ptr<bool>();
   for (auto i = 0; i < meta_nrows; ++i) {
     for (auto j = 0; j < meta_ncols; ++j) {
       uint64_t meta_val = 0;
@@ -961,8 +961,8 @@ _to_sparse_semi_structured(const Tensor& dense) {
   if (meta_dtype == at::kShort) {
     using MetaElement = int16_t;
     auto meta_cpu_ref =
-      cutlass::TensorRef<MetaElement, MetaLayout>(
-          meta_cpu.mutable_data_ptr<MetaElement>(),
+      cutlass::TensorRef<const MetaElement, MetaLayout>(
+          meta_cpu.const_data_ptr<MetaElement>(),
           MetaLayout::packed({meta_nrows, meta_ncols}));
     auto meta_reordered_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaReorderedLayout>(
@@ -972,8 +972,8 @@ _to_sparse_semi_structured(const Tensor& dense) {
   } else if (meta_dtype == at::kInt) {
     using MetaElement = int32_t;
     auto meta_cpu_ref =
-      cutlass::TensorRef<MetaElement, MetaLayout>(
-          meta_cpu.mutable_data_ptr<MetaElement>(),
+      cutlass::TensorRef<const MetaElement, MetaLayout>(
+          meta_cpu.const_data_ptr<MetaElement>(),
           MetaLayout::packed({meta_nrows, meta_ncols}));
     auto meta_reordered_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaReorderedLayout>(

@@ -122,9 +122,9 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
       values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.mutable_data_ptr<int64_t>(),
-          origIndices.mutable_data_ptr<int64_t>(),
-          values.mutable_data_ptr<scalar_t>(),
+          uniqueOffsets.const_data_ptr<int64_t>(),
+          origIndices.const_data_ptr<int64_t>(),
+          values.const_data_ptr<scalar_t>(),
           newValues.mutable_data_ptr<scalar_t>(),
           nnz,
           newNnz,
@@ -139,9 +139,9 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
       values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.mutable_data_ptr<int64_t>(),
-          origIndices.mutable_data_ptr<int64_t>(),
-          values.mutable_data_ptr<scalar_t>(),
+          uniqueOffsets.const_data_ptr<int64_t>(),
+          origIndices.const_data_ptr<int64_t>(),
+          values.const_data_ptr<scalar_t>(),
           newValues.mutable_data_ptr<scalar_t>(),
           nnz,
           newNnz,
