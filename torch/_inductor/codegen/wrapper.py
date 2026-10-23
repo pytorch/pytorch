@@ -914,53 +914,6 @@ def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
     return src.replace("'''", "\\'\\'\\'")
 
 
-class _LineIfNamesUsed(DeferredLineBase):
-    """A preamble import or binding that is emitted only if the module uses its names.
-
-    Which bindings a graph needs is not known when write_header runs, before anything
-    is lowered, and several are only ever emitted by interpolation
-    (``empty_strided_{device.type}``) or via ``repr()`` (``device(...)``, ``inf``), so
-    the question is asked of the finished module rather than at each use site.
-    """
-
-    def __init__(
-        self, line: str, names: tuple[str, ...], wrapper: PythonWrapperCodegen
-    ) -> None:
-        super().__init__(line)
-        self.names = names
-        self.wrapper = wrapper
-
-    def __call__(self) -> str | None:
-        if self.wrapper.scanning_for_uses:
-            # Absent from the text being scanned, so that `aten = torch.ops.aten` is
-            # not a use of aten.
-            return None
-        used = self.wrapper.used_names
-        return self.line if used is None or not used.isdisjoint(self.names) else None
-
-    def _new_line(self, line: str) -> _LineIfNamesUsed:
-        return _LineIfNamesUsed(line, self.names, self.wrapper)
-
-
-class _OmittedFromScan(DeferredLineBase):
-    """A block of the module that is not looked at for uses of the preamble's names: a
-    module-level kernel, which brings its own imports."""
-
-    def __init__(self, line: str, wrapper: PythonWrapperCodegen) -> None:
-        super().__init__(line)
-        self.wrapper = wrapper
-
-    def __call__(self) -> str | None:
-        return None if self.wrapper.scanning_for_uses else self.line
-
-    def _new_line(self, line: str) -> _OmittedFromScan:
-        # IndentedBuffer re-indents or slices a line as a whole, which would apply to
-        # only the first line of the block.
-        if line != self.line:
-            raise AssertionError("a block omitted from the scan must stay at indent 0")
-        return _OmittedFromScan(line, self.wrapper)
-
-
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: sympy.Symbol
@@ -2237,14 +2190,6 @@ class PythonWrapperCodegen(CodeGen):
         # Cache keys of the kernel modules whose benchmark harness
         # emit_triton_kernel_definition cut from the module-level kernel.
         self.kernel_harness_modules: list[str] = []
-        # The names the finished module uses, which decide each _LineIfNamesUsed; None
-        # until _generate scans the module, and until then every such line is emitted.
-        self.used_names: OrderedSet[str] | None = None
-        self.scanning_for_uses = False
-        # The lines write_if_used wrote; _generate scans only if there are any. The FX
-        # wrapper writes this header too but has its own _generate, which never scans,
-        # so it keeps every line.
-        self.conditional_lines: list[_LineIfNamesUsed] = []
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -2376,120 +2321,6 @@ class PythonWrapperCodegen(CodeGen):
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
-    def _preamble_imports(self) -> tuple[str, ...]:
-        return (
-            "from ctypes import c_void_p, c_long, c_int",
-            "import torch",
-            "import math",
-            "import random",
-            "import os",
-            "import tempfile",
-            "from math import inf, nan",
-            "from cmath import nanj",
-            "from torch._inductor.hooks import run_intermediate_hooks",
-            "from torch._inductor.utils import maybe_profile",
-            "from torch._inductor.codegen.memory_planning import _align as align",
-            "from torch import device, empty_strided",
-            "from torch._inductor.select_algorithm import extern_kernels",
-        )
-
-    def _preamble_bindings(self) -> tuple[str, ...]:
-        guards = "torch._C._dynamo.guards"
-        return (
-            "aten = torch.ops.aten",
-            "inductor_ops = torch.ops.inductor",
-            "_quantized = torch.ops._quantized",
-            f"assert_size_stride = {guards}.assert_size_stride",
-            f"assert_size_stride_grouped = {guards}.assert_size_stride_grouped",
-            f"assert_alignment = {guards}.assert_alignment",
-            f"empty_strided_cpu = {guards}._empty_strided_cpu",
-            f"empty_strided_cpu_pinned = {guards}._empty_strided_cpu_pinned",
-            f"empty_strided_cuda = {guards}._empty_strided_cuda",
-            f"empty_strided_xpu = {guards}._empty_strided_xpu",
-            f"empty_strided_mtia = {guards}._empty_strided_mtia",
-            f"reinterpret_tensor = {guards}._reinterpret_tensor",
-            "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
-            "async_compile = AsyncCompile()",
-        )
-
-    def write_if_used(self, buf: IndentedBuffer, line: str) -> None:
-        """Write an import or binding that is kept only if the module uses a name it
-        binds."""
-        names = self._names_bound_by(line)
-        if "torch" in names:
-            # The rest of the preamble is written in terms of it.
-            buf.writeline(line)
-            return
-        self.conditional_lines.append(_LineIfNamesUsed(line, names, self))
-        buf.writeline(self.conditional_lines[-1])
-
-    @staticmethod
-    def _names_bound_by(line: str) -> tuple[str, ...]:
-        """The names bound by ``line``: ``x = ...``, ``import a.b[ as c], ...`` or
-        ``from m import a[ as b], ...`` on a single line."""
-        if m := re.fullmatch(r"(\w+) = .+", line):
-            return (m.group(1),)
-        if m := re.fullmatch(r"(import|from [\w.]+ import) ([\w., ]+)", line):
-            names = []
-            for item in m.group(2).split(","):
-                target, _, alias = item.strip().partition(" as ")
-                # `import a.b` binds `a`.
-                name = alias or target.split(".")[0]
-                if re.fullmatch(r"\w+", name):
-                    names.append(name)
-            if len(names) == m.group(2).count(",") + 1:
-                return tuple(names)
-        raise AssertionError(
-            f"cannot tell what {line!r} binds; write it in a form _names_bound_by reads"
-        )
-
-    def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
-        """Splice ``code`` into ``buf`` as one line, so that leaving it out of the scan
-        costs nothing per line of it."""
-        block = IndentedBuffer()
-        block.splice(code)
-        text = block.getvalue().rstrip("\n")
-        # Written as lines of their own: splice takes a line's leading whitespace,
-        # newlines included, as its indent.
-        code_start = len(text) - len(text.lstrip("\n"))
-        buf.writelines([""] * code_start)
-        if text:
-            buf.writeline(_OmittedFromScan(text[code_start:], self))
-
-    def scan_for_used_names(self, module: IndentedBuffer) -> None:
-        """Record which names ``module``, the finished wrapper, uses."""
-        self.scanning_for_uses = True
-        try:
-            text = module.getvalue()
-        finally:
-            self.scanning_for_uses = False
-        # Each kernel's provenance comment names its source ops ("Original ATen:
-        # [aten.mul, ...]"), so whole-line comments are not uses. Trailing comments and
-        # strings still count, which can only keep a line.
-        used = OrderedSet(
-            word
-            for line in text.splitlines()
-            if not line.lstrip().startswith("#")
-            for word in re.findall(r"\w+", line)
-        )
-        # A kept binding uses the names its right-hand side starts from, which another
-        # line may bind: `async_compile = AsyncCompile()`.
-        rhs_words = [
-            (line.names, re.findall(r"(?<![.\w])\w+", line.line.partition(" = ")[2]))
-            for line in self.conditional_lines
-        ]
-        while (
-            new := OrderedSet(
-                word
-                for names, words in rhs_words
-                if not used.isdisjoint(names)
-                for word in words
-            )
-            - used
-        ):
-            used |= new
-        self.used_names = used
-
     def write_header(self) -> None:
         """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
@@ -2500,27 +2331,59 @@ class PythonWrapperCodegen(CodeGen):
         if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
             inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
-            inductor_debug_utils = (
-                "from torch._inductor.runtime.debug_utils import tracked_empty_strided"
-            )
+            inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
 
-        if aot_config_comment:
-            self.imports.writeline(aot_config_comment)
-        for line in self._preamble_imports():
-            self.write_if_used(self.imports, line)
-        async_compile_import = f"from {async_compile.__name__} import AsyncCompile"
-        self.write_if_used(self.imports, async_compile_import)
-        if inductor_debug_utils:
-            self.imports.writeline(inductor_debug_utils)
-        for line in self._preamble_bindings():
-            self.write_if_used(self.header, line)
+        self.imports.splice(
+            f"""
+                {aot_config_comment}
+                from ctypes import c_void_p, c_long, c_int
+                import torch
+                import math
+                import random
+                import os
+                import tempfile
+                from math import inf, nan
+                from cmath import nanj
+                from torch._inductor.hooks import run_intermediate_hooks
+                from torch._inductor.utils import maybe_profile
+                from torch._inductor.codegen.memory_planning import _align as align
+                from torch import device, empty_strided
+                from {async_compile.__name__} import AsyncCompile
+                from torch._inductor.select_algorithm import extern_kernels
+                {inductor_debug_utils}
+            """,
+            strip=True,
+        )
+        self.header.splice(
+            """
+                aten = torch.ops.aten
+                inductor_ops = torch.ops.inductor
+                _quantized = torch.ops._quantized
+                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
+                assert_alignment = torch._C._dynamo.guards.assert_alignment
+                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+                alloc_from_pool = torch.ops.inductor._alloc_from_pool
+                async_compile = AsyncCompile()
+            """,
+            strip=True,
+        )
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
             from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
 
-            p2p = "torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p"
-            self.write_if_used(self.header, f"empty_strided_p2p = {p2p}")
+            self.header.splice(
+                """
+                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+                """,
+                strip=True,
+            )
         except (AttributeError, ImportError):
             pass
         if config.annotate_training:
@@ -2606,17 +2469,18 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        graph_utils = f"from {triton_heuristics.__name__} import start_graph, end_graph"
-        triton_imports = ("import triton", "import triton.language as tl", graph_utils)
+        import_str = f"""
+            import triton
+            import triton.language as tl
+            from {triton_heuristics.__name__} import start_graph, end_graph
+            """
         if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline("")
-            self.kernel_autotune_calls.writelines(triton_imports)
+            self.kernel_autotune_calls.splice(import_str)
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
         if not V.graph.cpp_wrapper:
-            for line in triton_imports:
-                self.write_if_used(self.imports, line)
+            self.imports.splice(import_str, strip=True)
             self.imports.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
@@ -3578,8 +3442,6 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
-        if self.conditional_lines:
-            self.scan_for_used_names(result)
 
         return (
             result.getvaluewithlinemap(),
@@ -4432,10 +4294,7 @@ class PythonWrapperCodegen(CodeGen):
         body = self._format_kernel_definition(
             kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
-        if not standalone:
-            self.header.splice(body)
-            return
-        self.write_omitted_from_scan(self.header, body)
+        self.header.splice(body)
 
     def emit_triton_kernel_definition(
         self,
