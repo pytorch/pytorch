@@ -26,20 +26,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace {
 
-// thread_position_in_grid is 32-bit, so dispatch at most 2^31 threads at a time;
-// bind_base passes each chunk's first element index to the kernel.
-template <typename F>
-void dispatch_1d_chunks(id<MTLComputeCommandEncoder> encoder,
-                        id<MTLComputePipelineState> pso,
-                        int64_t numel,
-                        F bind_base) {
-  constexpr int64_t max_chunk = int64_t(1) << 31;
-  for (int64_t base = 0; base < numel; base += max_chunk) {
-    bind_base(base);
-    mps::mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(std::min(max_chunk, numel - base)));
-  }
-}
-
 void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& result) {
   using namespace mps;
   const auto steps = result.numel();
