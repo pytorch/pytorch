@@ -754,10 +754,9 @@ inline void {{kernel_name}}_transpose_b_kernel(
     //   which introduces an additional vector reduction of [M, N] compared to the non-transpose version.
     // Therefore, when M * N / (K * N) is large, the first implementation has better performance.
     {%- if tail_n %}
-    if (K % Vectorized::size() == 0 && N == BLOCK_N && 24 * BLOCK_M > K) {
+    // The tail kernel is only called with N < BLOCK_N, which the first implementation cannot handle
     {%- else %}
     if (K % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
-    {%- endif %}
         // First implementation:
         constexpr auto VLEN = Vectorized::size();
         constexpr auto ROWS = BLOCK_M;
@@ -818,6 +817,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         };
         c10::ForcedUnroll<ROWS * COLS>{}(storec);
     } else {
+    {%- endif %}
         // Second implementation
     {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
         constexpr auto VLEN = VectorizedIn::size();
@@ -936,7 +936,9 @@ inline void {{kernel_name}}_transpose_b_kernel(
                 }
             }
         }
+    {%- if not tail_n %}
     }
+    {%- endif %}
 {%- endif %}
 }
 """
