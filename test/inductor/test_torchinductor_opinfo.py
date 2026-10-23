@@ -96,10 +96,11 @@ i16 = torch.int16  # not tested
 i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
-u8 = torch.uint8  # not tested except upsampling and interpolate ops
-u16 = torch.uint16  # not tested
-u32 = torch.uint32  # not tested
-u64 = torch.uint64  # not tested
+# Unsigned dtypes are tested only for _unsigned_ops.
+u8 = torch.uint8
+u16 = torch.uint16
+u32 = torch.uint32
+u64 = torch.uint64
 
 NEXTAFTER_DTYPE_CONFIG = {
     torch.float16: (torch.int16, 0x7C00, 0x0200),
