@@ -1485,6 +1485,211 @@ bool launch_fwd(const Tensor& X, const Tensor& gamma, int64_t M, int64_t N, floa
   return true;
 }
 
+// One pass per row computes dX from registers. When dw_partial is set, each thread also
+// accumulates dy * x * rstd in fp32 for its fixed columns over all rows its block visits; the
+// grid is persistent, so each block writes a single row of dw_partial.
+template <typename T, int kVecs>
+__global__ void __launch_bounds__(kMaxThreads) bwd_kernel(
+    const T* __restrict__ dY,
+    const T* __restrict__ X,
+    const float* __restrict__ rstd,
+    const T* __restrict__ gamma,
+    T* __restrict__ dX,
+    float* __restrict__ dw_partial,
+    int64_t M,
+    int N,
+    int tpr) {
+  constexpr int V = kVecElems<T>;
+  // Reduction scratch, then a [rows_per_block, N] staging area for dw_partial.
+  extern __shared__ float smem[];
+  const int rows_per_block = blockDim.x / tpr;
+  const int lane = threadIdx.x % tpr;
+  const int row_in_block = threadIdx.x / tpr;
+  const int nvec = N / V;
+  float w[kVecs][V];
+  if (gamma != nullptr) {
+    load_row<T, kVecs>(gamma, lane, tpr, nvec, w);
+  } else {
+#pragma unroll
+    for (int i = 0; i < kVecs; ++i) {
+#pragma unroll
+      for (int k = 0; k < V; ++k) {
+        w[i][k] = 1.f;
+      }
+    }
+  }
+  float dw[kVecs][V] = {};
+  // The next tile's raw vectors are loaded before the current tile's reduction so two tiles
+  // of loads are in flight per thread.
+  vec_t<T> xv[kVecs], dyv[kVecs];
+  float r_next = 0;
+  auto prefetch = [&](int64_t tile) {
+    const int64_t row = tile * rows_per_block + row_in_block;
+    const bool active = row < M;
+    r_next = active ? rstd[row] : 0.f;
+    const int64_t offset = (active ? row : 0) * N;
+    load_vecs<T, kVecs>(X + offset, lane, tpr, active ? nvec : 0, xv);
+    load_vecs<T, kVecs>(dY + offset, lane, tpr, active ? nvec : 0, dyv);
+  };
+  const int64_t num_tiles = ceil_div<int64_t>(M, rows_per_block);
+  prefetch(blockIdx.x);
+  for (int64_t tile = blockIdx.x; tile < num_tiles; tile += gridDim.x) {
+    const int64_t row = tile * rows_per_block + row_in_block;
+    const bool active = row < M;
+    float x[kVecs][V], dy[kVecs][V];
+#pragma unroll
+    for (int i = 0; i < kVecs; ++i) {
+      to_float<T>(xv[i], x[i]);
+      to_float<T>(dyv[i], dy[i]);
+    }
+    const float r = r_next;
+    if (tile + gridDim.x < num_tiles) {
+      prefetch(tile + gridDim.x);
+    }
+    // Scale x to x_hat = x * rstd in place: it is O(1), so large finite x and dy cannot overflow
+    // a product or the sum, and x_hat is reused for dX and dW.
+#pragma unroll
+    for (int i = 0; i < kVecs; ++i) {
+#pragma unroll
+      for (int k = 0; k < V; ++k) {
+        x[i][k] *= r;
+      }
+    }
+    // sum = sum(gamma * dy * x_hat) over the row
+    float sum = 0;
+#pragma unroll
+    for (int i = 0; i < kVecs; ++i) {
+      float s0 = 0, s1 = 0;
+#pragma unroll
+      for (int k = 0; k < V; k += 2) {
+        s0 += w[i][k] * dy[i][k] * x[i][k];
+        s1 += w[i][k + 1] * dy[i][k + 1] * x[i][k + 1];
+      }
+      sum += s0 + s1;
+    }
+    sum = row_sum(sum, tpr, smem);
+    if (!active) {
+      continue;
+    }
+    // dX = rstd * (gamma * dy - x_hat * sum / N)
+    const float c = sum / N;
+#pragma unroll
+    for (int i = 0; i < kVecs; ++i) {
+      const int col = lane + i * tpr;
+      if (col < nvec) {
+        if (dX != nullptr) {
+          float dx[V];
+#pragma unroll
+          for (int k = 0; k < V; ++k) {
+            dx[k] = r * (w[i][k] * dy[i][k] - x[i][k] * c);
+          }
+          reinterpret_cast<vec_t<T>*>(dX + row * N)[col] = from_float<T>(dx);
+        }
+        if (dw_partial != nullptr) {
+#pragma unroll
+          for (int k = 0; k < V; ++k) {
+            dw[i][k] += dy[i][k] * x[i][k];
+          }
+        }
+      }
+    }
+  }
+  if (dw_partial == nullptr) {
+    return;
+  }
+  float* s_dw = smem + kMaxThreads / C10_WARP_SIZE;
+  float* out_row = dw_partial + static_cast<int64_t>(blockIdx.x) * N;
+  float* dst = rows_per_block == 1 ? out_row : s_dw + row_in_block * N;
+#pragma unroll
+  for (int i = 0; i < kVecs; ++i) {
+    const int c = lane + i * tpr;
+    if (c < nvec) {
+#pragma unroll
+      for (int k = 0; k < V; ++k) {
+        dst[c * V + k] = dw[i][k];
+      }
+    }
+  }
+  if (rows_per_block > 1) {
+    __syncthreads();
+    for (int j = threadIdx.x; j < N; j += blockDim.x) {
+      float acc = 0;
+      for (int rr = 0; rr < rows_per_block; ++rr) {
+        acc += s_dw[rr * N + j];
+      }
+      out_row[j] = acc;
+    }
+  }
+}
+
+// dw[j] = sum_r partial[r, j], summed in a fixed order so the result is deterministic.
+template <typename T>
+__global__ void dw_finalize_kernel(const float* __restrict__ partial, int64_t rows, int N, T* __restrict__ dw) {
+  __shared__ float s[C10_WARP_SIZE][C10_WARP_SIZE];
+  const int col = blockIdx.x * C10_WARP_SIZE + threadIdx.x;
+  float acc = 0;
+  if (col < N) {
+#pragma unroll 4
+    for (int64_t r = threadIdx.y; r < rows; r += blockDim.y) {
+      acc += partial[r * N + col];
+    }
+  }
+  s[threadIdx.y][threadIdx.x] = acc;
+  __syncthreads();
+  if (threadIdx.y == 0 && col < N) {
+    float total = 0;
+    for (int i = 0; i < blockDim.y; ++i) {
+      total += s[i][threadIdx.x];
+    }
+    dw[col] = total;
+  }
+}
+
+template <typename T>
+bool launch_bwd(const Tensor& dY, const Tensor& X, const Tensor& rstd, const Tensor& gamma, int64_t M, int64_t N, Tensor* dX, Tensor* dgamma) {
+  const T* dY_data = dY.const_data_ptr<T>();
+  const T* X_data = X.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  T* dX_data = dX->defined() ? dX->data_ptr<T>() : nullptr;
+  // About 16 (16-bit) or 32 (fp32) elements per thread measured best on GB300; wider 16-bit
+  // fragments spill once the prefetched copy is counted.
+  constexpr int kTargetVecs = sizeof(T) == 4 ? 8 : 2;
+  constexpr int kMaxVecs = sizeof(T) == 4 ? 8 : 4;
+  const Config cfg = pick_config<T>(N, kTargetVecs, kMaxVecs);
+  if (cfg.tpr == 0 || !aligned(dY_data) || !aligned(X_data) || !aligned(gamma_data) || !aligned(dX_data)) {
+    return false;
+  }
+  const bool compute_dw = dgamma->defined();
+  if (dX_data == nullptr && !compute_dw) {
+    return true;
+  }
+  const int rows_per_block = cfg.rows_per_block();
+  const size_t smem = (kMaxThreads / C10_WARP_SIZE + (compute_dw && rows_per_block > 1 ? rows_per_block * N : 0)) * sizeof(float);
+  const int64_t num_tiles = ceil_div<int64_t>(M, rows_per_block);
+  const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  dispatch_vecs<kMaxVecs>(cfg.vecs, [&](auto vecs) {
+    auto kernel = bwd_kernel<T, decltype(vecs)::value>;
+    int blocks_per_sm = 0;
+    C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, kernel, cfg.threads, smem));
+    const int64_t blocks = std::min<int64_t>(num_tiles, static_cast<int64_t>(std::max(blocks_per_sm, 1)) * sm_count);
+    Tensor partial;
+    if (compute_dw) {
+      partial = at::empty({blocks, N}, X.options().dtype(kFloat));
+    }
+    kernel<<<blocks, cfg.threads, smem, stream>>>(
+        dY_data, X_data, rstd.const_data_ptr<float>(), gamma_data, dX_data,
+        compute_dw ? partial.data_ptr<float>() : nullptr, M, static_cast<int>(N), cfg.tpr);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    if (compute_dw) {
+      dw_finalize_kernel<T><<<ceil_div<int64_t>(N, C10_WARP_SIZE), dim3(C10_WARP_SIZE, C10_WARP_SIZE), 0, stream>>>(
+          partial.const_data_ptr<float>(), blocks, static_cast<int>(N), dgamma->data_ptr<T>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  });
+  return true;
+}
+
 } // namespace rms_rows
 #endif
 
@@ -2120,8 +2325,19 @@ void RMSNormBackwardKernelImpl(
       X.scalar_type(),
       "LayerNormBackwardKernelImpl",
       [&]() {
+        const Tensor dY_contig = dY.contiguous();
+#ifndef USE_ROCM
+        if constexpr (!std::is_same_v<scalar_t, double>) {
+          // The generic path checks these too, but the row kernels would read out of bounds.
+          TORCH_CHECK(dY_contig.numel() == M * N);
+          TORCH_CHECK(rstd.numel() == M);
+          if (rms_rows::launch_bwd<scalar_t>(dY_contig, X, rstd, gamma, M, N, dX, dgamma)) {
+            return;
+          }
+        }
+#endif
         LayerNormBackwardKernelImplInternal<scalar_t, true>(
-            dY.contiguous(), X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
+            dY_contig, X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
       });
 }
 
