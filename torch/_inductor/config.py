@@ -302,8 +302,9 @@ memory_pool: Literal["none", "intermediates", "outputs", "combined"] = os.enviro
 )  # type: ignore[assignment]
 
 # Compile-time TunableOp integration for ROCm hipBLASLt GEMMs. "tune" tunes GEMMs
-# during autotuning and records the solutions, including a range of sizes of the
-# dynamic dim; "reuse" instead borrows the nearest recorded shape, benchmarks it
+# during autotuning and records the solutions; with aten_tunableop_ladder it also
+# tunes a range of sizes of each GEMM's dynamic dim, otherwise only the traced
+# shape. "reuse" instead borrows the nearest recorded shape, benchmarks it
 # against the default kernel, and records the winner. Run as separate passes:
 # "tune" builds the results file, "reuse" consumes it.
 # pyrefly: ignore [bad-assignment]
@@ -323,6 +324,13 @@ aten_tunableop_timeout: float = float(
 # the heavier merge nets, the difference between minutes and hours.
 aten_tunableop_ladder: bool = (
     os.environ.get("INDUCTOR_ATEN_TUNABLEOP_LADDER", "1") == "1"
+)
+
+# Per-bucket pre-tune timing for the ladder above. One line per bucket is noise
+# in a normal compile but is the only record of what a bucket costs when it
+# SUCCEEDS; the ladder's other logs report failures only.
+aten_tunableop_pretune_debug: bool = (
+    os.environ.get("INDUCTOR_ATEN_TUNABLEOP_PRETUNE_DEBUG", "0") == "1"
 )
 
 # codegen benchmark harness

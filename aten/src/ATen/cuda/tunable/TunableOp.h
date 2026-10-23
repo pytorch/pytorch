@@ -219,14 +219,24 @@ class TunableOp {
         if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
           borrowed = ResultEntry::Null();
         }
+        // No usable nearest donor: consult the wildcard entry as a second
+        // donor before Default. Otherwise the worker measures Default while
+        // runtime (nearest match off) runs the wildcard kernel, and autotune
+        // ranks a kernel that will never run. Validated like any borrow.
+        if (borrowed == ResultEntry::Null() && ctx->IsWildcardFallbackEnabled()) {
+          auto wildcard = mgr.LookupWildcardFallback(op_sig, concrete_sig);
+          if (wildcard != ResultEntry::Null() && DonorIsUsable(wildcard, params)) {
+            borrowed = wildcard;
+          }
+        }
       }
       const bool will_validate = (borrowed != ResultEntry::Null());
 
-      // Only a validated borrow persists this shape as an exact entry, leaving
-      // offline tuning nothing to find. Every other path here records nothing
-      // -- no donor, or the wildcard fallback, which reuses a kernel tuned for
-      // a different concrete shape -- so the shape must still be reported, and
-      // before the lookup rather than after it.
+      // Only a validated donor persists this shape as an exact entry, leaving
+      // offline tuning nothing to find -- whether the donor came from nearest
+      // match or the wildcard entry. Every other path here records nothing --
+      // no donor at all -- so the shape must still be reported, and before
+      // the lookup rather than after it.
       if (ctx->IsRecordUntunedEnabled() &&
           !(will_validate && ctx->IsRecordBorrowedEnabled())) {
         mgr.RecordUntuned(
@@ -235,19 +245,38 @@ class TunableOp {
       }
 
       if (will_validate) {
-        auto result = FindFastestAmong(
-            params, {ResultEntry::Default().GetKey(), borrowed.GetKey()});
-        if (ctx->IsRecordBorrowedEnabled()) {
-          // Persist whichever won, including Default: the shape becomes an
-          // exact hit, so neither the search nor this comparison is repeated.
-          // That verdict is final -- tuning it properly means tuning from a
-          // results file that does not carry these entries.
-          mgr.RecordBorrowed(op_sig, concrete_sig, result);
+        // Tuning under stream capture is forbidden (see the tuning path
+        // above): FindFastestAmong allocates, memcpys and synchronizes events,
+        // any of which invalidates the capture. While capturing, fall through
+        // to Default below -- the parent process retries outside capture.
+        bool can_validate = true;
+#ifndef USE_ROCM
+        can_validate =
+            c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+            c10::cuda::CaptureStatus::None;
+#endif
+        if (can_validate) {
+          auto result = FindFastestAmong(
+              params, {ResultEntry::Default().GetKey(), borrowed.GetKey()});
+          if (ctx->IsRecordBorrowedEnabled()) {
+            // Persist whichever won, including Default: the shape becomes an
+            // exact hit, so neither the search nor this comparison is repeated.
+            // That verdict is final -- tuning it properly means tuning from a
+            // results file that does not carry these entries.
+            mgr.RecordBorrowed(op_sig, concrete_sig, result);
+          } else {
+            // Cache the verdict in memory only: Add() does not reach the file
+            // with tuning off and record-borrowed off, so later calls in this
+            // process skip the re-benchmark without persisting anything.
+            mgr.Add(op_sig, concrete_sig, result);
+          }
+          return result;
         }
-        return result;
+        return ResultEntry::Default();
       }
-      // Nearest match takes precedence: once it is on, a miss is a miss rather
-      // than a reason to fall back to an unvalidated wildcard hint.
+      // Nearest match takes precedence: once it is on, a miss with no usable
+      // donor of either kind (nearest or wildcard) is a miss rather than a
+      // reason to return an unvalidated wildcard hint.
       if (ctx->IsNearestMatchEnabled()) {
         return ResultEntry::Default();
       }

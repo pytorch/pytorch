@@ -11958,6 +11958,78 @@ class TestLinalgCudaOnly(TestCase):
 
     @onlyCUDA
     @dtypes(torch.float)
+    def test_borrow_verdict_cached_without_record_tunableop(self, device, dtype):
+        # Nearest match without record-borrowed must still cache the verdict in
+        # memory: the second call of the same shape is an exact hit, not a
+        # second FindFastestAmong. Count "finding fastest for" lines in a
+        # subprocess (VERBOSE is sticky per-process) -- exactly one validation
+        # for two identical calls.
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        results_dir = tempfile.mkdtemp(prefix="tunableop_borrow_cache_")
+        results_filename = os.path.join(results_dir, "results.csv")
+
+        script = textwrap.dedent(
+            """
+            import torch
+
+            results_filename = {results_filename!r}
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                torch.cuda.tunable.set_numerical_check_tolerances(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+
+                device = {device!r}
+                dtype = {dtype}
+                K = 64
+                A = torch.randn(64, K, device=device, dtype=dtype)
+                B = torch.randn(K, 32, device=device, dtype=dtype)
+                torch.matmul(A, B)
+
+                torch.cuda.tunable.tuning_enable(False)
+                torch.cuda.tunable._nearest_match_enable(True)
+                torch.cuda.tunable._record_borrowed_enable(False)
+
+                # Same borrow shape twice: only the first may validate.
+                A2 = torch.randn(32, K, device=device, dtype=dtype)
+                torch.matmul(A2, B)
+                torch.matmul(A2, B)
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        ).format(results_filename=results_filename, device=device, dtype=dtype)
+
+        env = os.environ.copy()
+        env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+        env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            )
+        finally:
+            shutil.rmtree(results_dir, ignore_errors=True)
+
+        validations = result.stdout.count("finding fastest for")
+        self.assertEqual(validations, 1, result.stdout)
+
+    @onlyCUDA
+    @dtypes(torch.float)
     def test_nearest_match_off_by_default_tunableop(self, device, dtype):
         # Execution must never borrow, since a borrowed solution is unmeasured for
         # the shape it is applied to. Off unless a compile-time pass turns it on.

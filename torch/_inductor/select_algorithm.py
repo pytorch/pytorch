@@ -3868,8 +3868,16 @@ class ExternKernelCaller(ChoiceCaller):
 
         # is_enabled() reports only that the process has CUDA and a mode set;
         # submit() pins the worker to the current CUDA device, so a CPU extern
-        # candidate must not be routed there.
-        if tunableop.is_enabled() and out.is_cuda:
+        # candidate must not be routed there. Route only GEMMs TunableOp tunes
+        # (same set the ladder uses): other extern kernels -- convolutions,
+        # grouped/sparse GEMMs, custom-op fallbacks -- would tune GEMMs they
+        # call internally into the results file, and their bmreqs build inputs
+        # (rand_strided, zero-filled integer tensors) that mis-time them.
+        if (
+            tunableop.is_enabled()
+            and out.is_cuda
+            and tunableop.is_tunableop_gemm(self.choice.name)
+        ):
             # Extern kernels are otherwise benchmarked inline, assuming they do not
             # crash (see benchmark_in_sub_process); hipBLASLt tuning can abort the
             # process or hang, so run this candidate in the TunableOp worker. In
@@ -3889,14 +3897,30 @@ class ExternKernelCaller(ChoiceCaller):
             )
             if outcome.status == "ok":
                 return outcome.time
-            # Time the untuned kernel inline rather than dropping the candidate:
-            # TunableOp is not enabled in this process, so the fault cannot recur.
+            # Time the untuned kernel inline rather than dropping the candidate.
+            # TunableOp must be off while doing so: PYTORCH_TUNABLEOP_ENABLED=1
+            # or a user enable(True) would otherwise tune hipBLASLt inline in
+            # the parent -- exactly the abort or hang the worker contains.
+            # Restored afterwards so later compiles see the caller's setting.
+            tunable = torch.cuda.tunable
+            was_enabled = tunable.is_enabled()
+            was_tuning = tunable.tuning_is_enabled()
             log.warning(
                 "TunableOp benchmark of %s hit %s; timing the default kernel instead.",
                 self.name,
                 outcome.status,
             )
+            try:
+                tunable.enable(False)
+                tunable.tuning_enable(False)
+                return self._benchmark_inline(args, out)
+            finally:
+                tunable.enable(was_enabled)
+                tunable.tuning_enable(was_tuning)
 
+        return self._benchmark_inline(args, out)
+
+    def _benchmark_inline(self, args, out):
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         mask = self.tunable_dyn_dims_mask
@@ -4356,6 +4380,22 @@ def _classify_kernel_operation(
     return "other"
 
 
+def _maybe_pretune_tunableop(choice: ChoiceCaller) -> None:
+    """Widen TunableOp coverage when an extern (aten) kernel wins autotune.
+
+    Fires on every concrete extern-winner path (single-choice, deterministic,
+    empty-timings fallback, best-choice) so all of them are covered, not just
+    the deferred multi-template path handled by
+    Scheduler.finalize_multi_template_buffers. Function-local tunableop import:
+    select_algorithm is imported widely and must not gain a module-level edge.
+    """
+    if not isinstance(choice, ExternKernelCaller):
+        return
+    from . import tunableop
+
+    tunableop.maybe_range_pretune(choice)
+
+
 class AlgorithmSelectorCache(PersistentCache):
     """
     A persistent cache for algorithm selection results used in autotuning of GEMMs
@@ -4479,11 +4519,13 @@ class AlgorithmSelectorCache(PersistentCache):
             if not isinstance(choices[0], CUTLASSTemplateCaller):
                 # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
                 node = choices[0].output_node()
+                _maybe_pretune_tunableop(choices[0])
                 return node, choices[0]
 
         if config.deterministic:
             choice = self.pick_deterministic_choice(choices)
             node = choice.output_node()
+            _maybe_pretune_tunableop(choice)
             return node, choice
 
         inputs_key = create_inputs_key(input_nodes)
@@ -4664,6 +4706,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
                         node,
                     )
+                    _maybe_pretune_tunableop(choice)
                     return node, choice
             node = choices[0].output_node()
             choice = choices[0]
@@ -4671,6 +4714,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "Autotuning returned empty timings, falling back to first choice: %s",
                 node,
             )
+            _maybe_pretune_tunableop(choice)
             return node, choice
 
         # if we got any timings at all, pick the best of those
@@ -4730,6 +4774,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if non_fallback_choices:
                 best_choice = min(non_fallback_choices, key=lambda c: timings[c])
 
+        _maybe_pretune_tunableop(choice)
         choice = best_choice
         node = choice.output_node()
 

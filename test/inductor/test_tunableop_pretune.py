@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 
-"""Unit tests for the TunableOp bucket ladder in Scheduler.
+"""Unit tests for the TunableOp bucket ladder in tunableop.
 
 The ladder decides which GEMMs get pre-tuned and at which sizes. Everything up to
 the point of benchmarking is pure logic over tensor sizes, so it is tested here
@@ -20,7 +20,7 @@ import sympy
 import torch
 from torch._inductor import config, ir
 from torch._inductor import select_algorithm as sa
-from torch._inductor.scheduler import Scheduler
+from torch._inductor import tunableop
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -82,8 +82,16 @@ class _FakeWinner(sa.ExternKernelCaller):
     the base __init__ is deliberately not called.
     """
 
-    def __init__(self, name, input_nodes, out_sizes):
+    def __init__(self, name, input_nodes, out_sizes, choice_name=None):
+        from types import SimpleNamespace
+
         self.name = name
+        # The ladder matches on winner.choice.name (the ExternKernelChoice),
+        # falling back to the caller name. Pass choice_name to exercise the
+        # _dtype / v2 / bias variants whose caller and choice names agree but
+        # differ from the classic five.
+        if choice_name is not None:
+            self.choice = SimpleNamespace(name=choice_name)
         self.input_nodes = input_nodes
         self.layout = ir.FixedLayout(
             DEVICE, DTYPE, out_sizes, _contiguous_strides(out_sizes)
@@ -127,7 +135,7 @@ def _run(winner, **kwargs):
     """Drive the ladder; `self` is unused by the method so None suffices."""
     sym = kwargs.pop("sym")
     with _ladder(sym, **kwargs) as submitted:
-        Scheduler._maybe_range_pretune_tunableop(None, winner)
+        tunableop.maybe_range_pretune(winner)
     return submitted
 
 
@@ -222,7 +230,7 @@ class TestTunableOpPretune(TestCase):
         s = sympy.Symbol("s_off", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         with _ladder(s, ladder=False) as submitted:
-            Scheduler._maybe_range_pretune_tunableop(None, winner)
+            tunableop.maybe_range_pretune(winner)
         self.assertEqual(submitted, [])
 
     def _bmm_winner(self, name, s):
@@ -285,6 +293,236 @@ class TestTunableOpPretune(TestCase):
         )
         self.assertEqual(_run(padded, sym=s), [])
 
+    def test_choice_variants_produce_buckets(self):
+        # The old op-name allowlist missed the _dtype out-variants, bias_addmm
+        # and _scaled_mm_v2. Matching runs on winner.choice.name.
+        from types import SimpleNamespace
+
+        for choice_name in (
+            "mm_dtype",
+            "addmm_dtype",
+            "bmm_dtype",
+            "bias_addmm",
+            "_scaled_mm_v2",
+        ):
+            # Clear the cross-GEMM memo: every variant below reuses the same
+            # traced shapes by design (the point is the choice gate, not the
+            # sizes), so without this only the first variant would submit.
+            tunableop._pretuned_gemms.clear()
+            s = sympy.Symbol(f"s_{choice_name}", positive=True, integer=True)
+            m, k, n = s, 256, 512
+            if choice_name in ("addmm_dtype", "bias_addmm"):
+                # Bias-first like addmm: [bias, mat1, mat2].
+                winner = _FakeWinner(
+                    choice_name,
+                    [
+                        _buffer("bias", [m, n], [n, 1]),
+                        _buffer("mat1", [m, k], [k, 1]),
+                        _buffer("mat2", [k, n], [n, 1]),
+                    ],
+                    [m, n],
+                    choice_name=choice_name,
+                )
+            else:
+                winner = self._mm_winner("mm", s)
+                winner.choice = SimpleNamespace(name=choice_name)
+            submitted = _run(winner, sym=s)
+            self.assertTrue(submitted, f"{choice_name} produced no buckets")
+
+    def test_traced_hint_is_always_tuned(self):
+        # The traced shape is the size actually served: it must be a rung even
+        # when it is not a power of two and neither endpoint.
+        s = sympy.Symbol("s_hint", positive=True, integer=True)
+        submitted = _run(self._mm_winner("mm", s), sym=s, hint=3000)
+        dims = set()
+        for bmreq in submitted:
+            dims.add(bmreq.input_tensor_meta[0].sizes[0])
+        self.assertIn(3000, dims, f"traced hint missing from {sorted(dims)}")
+
+    def test_largest_first_order(self):
+        s = sympy.Symbol("s_order", positive=True, integer=True)
+        submitted = _run(self._mm_winner("mm", s), sym=s)
+        dims = [bmreq.input_tensor_meta[0].sizes[0] for bmreq in submitted]
+        self.assertEqual(dims, sorted(dims, reverse=True))
+
+    def test_deadline_skips_remaining_buckets(self):
+        # Patch time.monotonic so the first bucket sees a healthy budget and
+        # every later check sees an expired one; assert the surviving submit
+        # got the remaining budget as its timeout.
+        import time as _time
+
+        s = sympy.Symbol("s_budget", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        timeouts = []
+        submit_calls = {"n": 0}
+
+        def _fake_submit(job, timeout=None):
+            timeouts.append(timeout)
+            submit_calls["n"] += 1
+            return mock.Mock(status="ok", time=1.0)
+
+        real_monotonic = _time.monotonic
+        t0 = real_monotonic()
+        mono_calls = {"n": 0}
+
+        def _fake_monotonic():
+            # Call 1 computes the deadline; call 2 (first budget check) is
+            # healthy; everything after is expired.
+            mono_calls["n"] += 1
+            if mono_calls["n"] <= 2:
+                return t0
+            return t0 + 10**6
+
+        with _ladder(s):
+            with (
+                mock.patch(
+                    "torch._inductor.tunableop.submit", side_effect=_fake_submit
+                ),
+                mock.patch(
+                    "torch._inductor.tunableop.time.monotonic",
+                    side_effect=_fake_monotonic,
+                ),
+            ):
+                tunableop.maybe_range_pretune(winner)
+        # Exactly one bucket submitted with a positive remaining budget; the
+        # rest were skipped by the expired deadline.
+        self.assertEqual(submit_calls["n"], 1)
+        self.assertGreater(timeouts[0], 0)
+
+    def test_non_ok_outcome_continues(self):
+        s = sympy.Symbol("s_cont", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        statuses = ["timeout"]
+
+        def _flaky_submit(job, timeout=None):
+            submitted.append(job.bmreq)
+            status = statuses.pop(0) if statuses else "ok"
+            return mock.Mock(status=status, time=1.0)
+
+        submitted = []
+        with _ladder(s) as _:
+            with mock.patch(
+                "torch._inductor.tunableop.submit", side_effect=_flaky_submit
+            ):
+                tunableop.maybe_range_pretune(winner)
+        # First bucket faulted, the rest still submitted.
+        self.assertGreater(len(submitted), 1)
+
+    def test_repeat_gemm_is_skipped(self):
+        tunableop._pretuned_gemms.clear()
+        try:
+            s = sympy.Symbol("s_memo", positive=True, integer=True)
+            first = _run(self._mm_winner("mm", s), sym=s)
+            self.assertTrue(first)
+            second = _run(self._mm_winner("mm", s), sym=s)
+            self.assertEqual(second, [])
+        finally:
+            tunableop._pretuned_gemms.clear()
+
+    def test_oversize_bucket_is_dropped(self):
+        # Batch 16384 of 4096x4096 fp16 is 512 GiB per operand -- over the cap.
+        s = sympy.Symbol("s_oom", positive=True, integer=True)
+        b, m, k, n = 16384, 32, 4096, 4096
+        mat1 = _buffer("mat1", [b, m, k], _contiguous_strides([b, m, k]))
+        mat2 = _buffer("mat2", [b, k, n], _contiguous_strides([b, k, n]))
+        winner = _FakeWinner("bmm", [mat1, mat2], [b, m, n])
+        # Declared range forces the huge batch into the walk.
+        submitted = _run(winner, sym=s, hint=16384, declared=(16384, 16384))
+        for bmreq in submitted:
+            for meta in [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]:
+                numel = 1
+                for d in meta.sizes:
+                    numel *= int(d)
+                self.assertLessEqual(
+                    numel * meta.dtype.itemsize, tunableop._TUNABLEOP_MAX_LADDER_BYTES
+                )
+
+    def test_select_algorithm_hook_fires_on_extern(self):
+        # The select_algorithm hook covers concrete extern winners; triton
+        # winners are ignored by the isinstance gate.
+        from torch._inductor import select_algorithm as _sa
+
+        s = sympy.Symbol("s_hook", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        with mock.patch(
+            "torch._inductor.tunableop.maybe_range_pretune"
+        ) as pretune:
+            _sa._maybe_pretune_tunableop(winner)
+            pretune.assert_called_once_with(winner)
+            pretune.reset_mock()
+            _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
+            pretune.assert_not_called()
+
+    def test_finalize_hook_routes_extern_winners(self):
+        # finalize_multi_template_buffers sends the chosen extern winner through
+        # the ladder. Spec'd mocks so the isinstance gates pass.
+        import torch._inductor.ir as _ir
+        from torch._inductor.scheduler import Scheduler, SchedulerNode
+
+        s = sympy.Symbol("s_fin", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        multi = mock.Mock(spec=_ir.MultiTemplateBuffer)
+        multi.choices = [winner]
+        multi.get_min_choice.return_value = (winner, None)
+        multi.origins = set()
+        multi.layout = winner.layout
+        multi.origin_node = None
+        sched_node = mock.Mock(spec=SchedulerNode)
+        sched_node.node = multi
+        sched = mock.Mock(spec=Scheduler)
+        sched.nodes = [sched_node]
+        sched._has_layout_conflict_for_template.return_value = True
+        # The finalizer calls output_node() after the ladder hook and then
+        # replaces the node -- deep IR machinery this test does not cover.
+        # Raise a sentinel there: reaching it proves the hook already fired.
+        class _Stop(Exception):
+            pass
+
+        winner.output_node = mock.Mock(side_effect=_Stop)
+        with mock.patch(
+            "torch._inductor.tunableop.maybe_range_pretune"
+        ) as pretune:
+            with self.assertRaises(_Stop):
+                Scheduler.finalize_multi_template_buffers(sched)
+            pretune.assert_called_once_with(winner)
+
 
 if __name__ == "__main__":
     run_tests()
+
+if __name__ == "__main__":
+    run_tests()
+
+    def test_zz_debug_gate(self):
+        from types import SimpleNamespace
+
+        s = sympy.Symbol("s_zz", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.choice = SimpleNamespace(name="bmm_dtype")
+        cn = getattr(getattr(winner, "choice", None), "name", winner.name)
+        submitted = _run(winner, sym=s)
+        self.fail(
+            f"GATE name={cn!r} in_set={cn in tunableop._TUNABLEOP_GEMM_CHOICES} "
+            f"memosize={len(tunableop._pretuned_gemms)} submitted={len(submitted)}"
+        )
+
+
+
+if __name__ == "__main__":
+    run_tests()
+
+    def test_zz_debug_gate(self):
+        from types import SimpleNamespace
+
+        s = sympy.Symbol("s_zz", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.choice = SimpleNamespace(name="bmm_dtype")
+        cn = getattr(getattr(winner, "choice", None), "name", winner.name)
+        with open("/tmp/zz_gate.txt", "w") as f:
+            f.write(f"GATE name={cn!r} in_set={cn in tunableop._TUNABLEOP_GEMM_CHOICES}\n")
+            f.write(f"MEMO size={len(tunableop._pretuned_gemms)}\n")
+            for k in tunableop._pretuned_gemms:
+                f.write(f"KEY {k}\n")
+        submitted = _run(winner, sym=s)
+        with open("/tmp/zz_gate.txt", "a") as f:
+            f.write(f"SUBMITTED={len(submitted)}\n")
