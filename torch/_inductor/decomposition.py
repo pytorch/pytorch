@@ -27,6 +27,7 @@ from torch._decomp.decompositions import (
     hardsigmoid as decomp_hardsigmoid,
     hardswish as decomp_hardswish,
     hardswish_backward as decomp_hardswish_backward,
+    logit_backward as decomp_logit_backward,
     mish_backward as decomp_mish_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -156,6 +157,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.hardsigmoid.default,
     aten.mish_backward.default,
     aten.logaddexp2.default,
+    aten.logit_backward.default,
     aten.sigmoid_backward.default,
     aten.silu_backward.default,
     aten.softplus.default,
@@ -596,6 +598,29 @@ def logaddexp2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         maximum, torch.log1p(torch.exp2(minimum - maximum)), alpha=1 / math.log(2)
     )
     return torch.where(torch.isinf(a) & (a == b), a, result).to(dtype)
+
+
+@register_decomposition(aten.logit_backward.default)
+def logit_backward(
+    grad_output: torch.Tensor, self: torch.Tensor, eps: float | None = None
+) -> torch.Tensor:
+    inputs = _strict_pointwise_inputs(grad_output, self)
+    if inputs is None:
+        return decomp_logit_backward(grad_output, self, eps)
+    grad_output, self, dtype = inputs
+    formula = grad_output / (self * (1.0 - self))
+    if eps is None or eps < 0:
+        outside = (self < 0) | (self > 1)
+        bits = 0x7FC00000 if dtype == torch.float32 else 0x7FFFFFFF
+        fill = torch.full((), bits, dtype=torch.int32, device=self.device).view(
+            torch.float32
+        )
+    else:
+        # CUDA rounds both epsilon and its complement to opmath precision.
+        lo = torch.ones((), dtype=torch.float32, device=self.device) * eps
+        outside = (self < lo) | (self > 1.0 - lo)
+        fill = 0.0
+    return torch.where(outside, fill, formula).to(dtype)
 
 
 @register_decomposition(aten.gelu_backward.default)
