@@ -11887,9 +11887,14 @@ class TestLinalgCudaOnly(TestCase):
         # PYTORCH_TUNABLEOP_NEAREST_MATCH=0 and PYTORCH_TUNABLEOP_RECORD_BORROWED=0
         # force borrowing off for the whole process, overriding the enable call.
         # Both are read into a function-local static, so a fresh process is the
-        # only way to exercise them. This covers the same *DisabledByEnv()
-        # helpers that LookupNearest and RecordBorrowed consult, so it stands in
-        # for the C++ side too.
+        # only way to exercise them.
+        #
+        # Scope: this covers the query accessors only. LookupNearest and
+        # RecordBorrowed apply the same env check at their own call sites, and
+        # that is NOT covered here -- deleting either one would leave this test
+        # green. They share a helper with the accessors, but sharing a helper is
+        # not evidence the call site invokes it. Asserting the behaviour needs a
+        # C++ test in a subprocess with the env set.
         import os
         import subprocess
         import sys
