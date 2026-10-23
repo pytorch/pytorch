@@ -75,6 +75,7 @@ from trymerge import (
     IGNORABLE_FAILED_CHECKS_THESHOLD,
     IMPORT_STATUS_CHECKRUN_NAME,
     INTERNAL_CHANGES_CHECKRUN_NAME,
+    INTERNAL_ONLY_PATHS_TITLE,
     is_ai_not_related,
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
@@ -572,6 +573,7 @@ class TestTryMerge(TestCase):
         diff_revision: str | None = "D123456",
         editor_login: str | None = None,
         internal_check: str | None = "NEUTRAL",
+        internal_check_title: str | None = INTERNAL_ONLY_PATHS_TITLE,
     ) -> Any:
         pr = mock.MagicMock()
         pr.get_diff_revision.return_value = diff_revision
@@ -590,7 +592,7 @@ class TestTryMerge(TestCase):
                     status=internal_check,
                     classification=None,
                     job_id=None,
-                    title=None,
+                    title=internal_check_title,
                     summary=None,
                 )
             }
@@ -686,6 +688,15 @@ class TestTryMerge(TestCase):
         legacy = self._pr_with_merge_comment("facebook-github-bot")
         legacy.pr_num = 2
         self.assertTrue(can_skip_internal_checks(legacy, 123, target=below))
+
+    def test_meta_codesync_merge_keeps_other_neutral_titles(self, *args: Any) -> None:
+        "Only the internal-only-paths NEUTRAL state is the post-land race."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync",
+            "https://github.com/apps/meta-codesync",
+            internal_check_title="Some future NEUTRAL state",
+        )
+        self.assertFalse(can_skip_internal_checks(pr, 123))
 
     def test_meta_codesync_merge_keeps_failed_internal_check(self, *args: Any) -> None:
         "CodeSync reports a reopened or out-of-sync PR as FAILURE; that still blocks."
@@ -3518,6 +3529,14 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
                 "ignore_current_checks": waivers,
             },
         )
+        self.top.merge_native_stack_into.assert_called_once_with(
+            self.repo,
+            NATIVE_STACK,
+            [(self.lower, *NATIVE_LANDING[0]), (self.top, *NATIVE_LANDING[1])],
+            None,
+            False,
+        )
+        self.assertEqual(self.repo.mock_calls, [])
 
     def test_lower_prs_get_their_own_internal_checks_waiver(self) -> None:
         def waiver(pr: Any, comment_id: Any, target: Any = None) -> bool:
@@ -3532,14 +3551,6 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             ],
             [(self.top, False), (self.lower, True)],
         )
-        self.top.merge_native_stack_into.assert_called_once_with(
-            self.repo,
-            NATIVE_STACK,
-            [(self.lower, *NATIVE_LANDING[0]), (self.top, *NATIVE_LANDING[1])],
-            None,
-            False,
-        )
-        self.assertEqual(self.repo.mock_calls, [])
 
     def test_reads_the_stack_again_for_every_attempt(self) -> None:
         current = replace(NATIVE_STACK)

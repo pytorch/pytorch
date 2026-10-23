@@ -469,6 +469,9 @@ INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
+# CodeSync's only NEUTRAL conclusion for pytorch: the diff touches paths the export
+# doesn't, and it is not yet marked landed.
+INTERNAL_ONLY_PATHS_TITLE = "Pull Request must be landed through the Diffs tool!"
 # Meta CodeSync creates this check-run in the queued state on every new head commit
 # of a PR it tracks internally, and only ever completes it once someone imports that
 # exact revision, so on a PR that has been rebased -- or was never imported -- it just
@@ -831,7 +834,11 @@ def _meta_codesync_waives(pr: GitHubPR, target: GitHubPR | None) -> bool:
     if target is not None and target.pr_num != pr.pr_num:
         return False
     check = pr.get_checkrun_conclusions().get(INTERNAL_CHANGES_CHECKRUN_NAME)
-    return check is not None and check.status == "NEUTRAL"
+    return (
+        check is not None
+        and check.status == "NEUTRAL"
+        and check.title == INTERNAL_ONLY_PATHS_TITLE
+    )
 
 
 def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bool:
@@ -3451,8 +3458,9 @@ def merge(
             native_stack=native_stack,
         )
 
-    # Remember the merge comment's author URL now, while it is the newest comment:
-    # a retry may refetch the PR after newer comments push it out of the window.
+    # Remember the merge comment's author URL now, while it is normally still among
+    # the prefetched comments: a retry may refetch the PR after newer comments push
+    # it out of that window.
     remember_comment_author(pr, comment_id)
     # Check for approvals.  The rule checks raise on has_internal_changes() unless
     # told to skip it; the waiver reads the current check conclusions, so the retry
