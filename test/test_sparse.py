@@ -21,7 +21,8 @@ from typing import Any
 from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, precisionOverride,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS,
+     dtypesIfXPU, onlyCPU, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
@@ -4336,9 +4337,8 @@ class TestSparse(TestSparseBase):
             run_test(shape, shape[0] * shape[1])
 
     @coalescedonoff
-    # adding a graph break before self.assertFalse(weight._indices().is_contiguous())
-    # makes the test pass so some existent sparse related bug
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfXPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_sspaddmm(self, device, dtype, coalesced):
 
         def test_shape(di, dj, dk, nnz):
@@ -4388,6 +4388,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfXPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_sspaddmm_wrong_mat_types_error_messages(self, device, dtype):
         m, k, n = 2, 2, 2
         self_sp = self._gen_sparse(2, 4, [m, n], dtype, device, True)[0]
@@ -4404,6 +4405,7 @@ class TestSparse(TestSparseBase):
                 RuntimeError,
                 "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
             self_sp.sspaddmm(mat1_sparse, mat2_sparse)
+
 
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
