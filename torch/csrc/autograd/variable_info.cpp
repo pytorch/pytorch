@@ -23,7 +23,7 @@ VariableInfo::VariableInfo(const Variable& var, bool use_zeros_like)
 
 VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 
-Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+Variable VariableInfo::zeros(at::OptionalDeviceGuard& /*device_guard*/) const {
   if (is_empty) {
     // Return undefined tensor.
     return at::Tensor();

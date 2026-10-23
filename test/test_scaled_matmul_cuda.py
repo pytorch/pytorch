@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI4_ARCH,
     NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
@@ -137,23 +138,27 @@ def tensor_to_scale_block(
     float8_dtype: torch.dtype,
     block_outer: int,
     block_inner: int,
+    scale_dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
     amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
-    scale = torch.finfo(float8_dtype).max / amax
-    # if amax == 0, entire block = 0, set scale = 0 to ensure elements are
-    # zero'd out correctly (and remove bad effects of / 0)
-    scale[amax == 0] = 0
+    fp8_max = torch.finfo(float8_dtype).max
+    scale = amax / fp8_max
 
-    # Scale x, noting that blocks where amax == 0 are explicitly 0 now.
-    x = x.mul(scale).to(float8_dtype)
-
-    # if amax == 0, all values in the block are 0, scale=0
-    # but we need scale.reciprocal later, which breaks when scale=0...
-    # So. Replace 0 -> 1 in the scale so we don't break things later.
-    # Elements are already zeroed, so don't actually care what the scale
-    # is, as long as it's not inf/nan.
-    scale[scale == 0] = 1.
+    if scale_dtype == torch.float32:
+        # Zero blocks: amax==0 => scale==0.  Set to 1 so x/scale = 0/1 = 0
+        scale[amax == 0] = 1.
+        x = (x / scale).to(float8_dtype)
+    elif scale_dtype == torch.float8_e8m0fnu:
+        # Reuse data_to_mx_scale()'s scale derivation.
+        outer_blocks, inner_blocks = x.shape[0], x.shape[2]
+        block_size = block_outer * block_inner
+        x_for_scale = x.permute(0, 2, 1, 3).reshape(-1, block_size)
+        scale = data_to_mx_scale(x_for_scale, block_size, "fp8")
+        scale = scale.reshape(outer_blocks, inner_blocks, 1, 1).permute(0, 2, 1, 3)
+        x = (x / scale.float()).clamp(min=-fp8_max, max=fp8_max).to(float8_dtype)
+    else:
+        raise ValueError(f"Unsupported scale_dtype: {scale_dtype}")
 
     x = x.flatten(2, 3).flatten(0, 1)
     scale = scale.flatten(2, 3).flatten(0, 1)
@@ -163,17 +168,16 @@ def hp_from_128x128(x_lp, x_scale):
     orig_shape = x_lp.shape
     M, K = orig_shape
     x_lp = x_lp.view(M // 128, 128, K // 128, 128)
-    x_scale = x_scale.unsqueeze(1).unsqueeze(-1)
-    x_hp = x_lp.to(torch.float32)
-    x_hp = x_hp / x_scale
+    x_scale_fp = x_scale.to(torch.float).unsqueeze(1).unsqueeze(-1)
+    x_hp = x_lp.to(torch.float32) * x_scale_fp
     return x_hp.reshape(orig_shape).to(torch.bfloat16)
 
 def hp_to_128x128(x, x_scale):
     orig_shape = x.shape
     M, K = orig_shape
     x = x.view(M // 128, 128, K // 128, 128)
-    x_scale = x_scale.unsqueeze(1).unsqueeze(-1)
-    x_lp = x * x_scale
+    x_scale_fp = x_scale.to(torch.float).unsqueeze(1).unsqueeze(-1)
+    x_lp = x / x_scale_fp
 
     return x_lp.reshape(orig_shape).to(torch.float8_e4m3fn)
 
@@ -181,13 +185,13 @@ def hp_from_1x128(x_lp, x_scale):
     orig_shape = x_lp.shape
     x_lp = x_lp.reshape(x_lp.shape[0], x_lp.shape[-1] // 128, 128)
     x_hp = x_lp.to(torch.float32)
-    x_hp = x_hp / x_scale.unsqueeze(-1)
+    x_hp = x_hp * x_scale.to(torch.float).unsqueeze(-1)
     return x_hp.reshape(orig_shape).to(torch.bfloat16)
 
 def hp_to_1x128(x, x_scale):
     orig_shape = x.shape
     x = x.reshape(x.shape[0], x.shape[-1] // 128, 128)
-    x_lp = x * x_scale.unsqueeze(-1)
+    x_lp = x / x_scale.to(torch.float).unsqueeze(-1)
     return x_lp.reshape(orig_shape).to(torch.float8_e4m3fn)
 
 
@@ -364,8 +368,8 @@ def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: torch.Tensor | N
 def mm_float8_emulated_block(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     x = x.unflatten(1, (x_scale.shape[1], -1)).unflatten(0, (x_scale.shape[0], -1))
     y = y.unflatten(1, (y_scale.shape[1], -1)).unflatten(0, (y_scale.shape[0], -1))
-    x_fp32 = x.to(torch.float) / x_scale[:, None, :, None]
-    y_fp32 = y.to(torch.float) / y_scale[:, None, :, None]
+    x_fp32 = x.to(torch.float) * x_scale.to(torch.float)[:, None, :, None]
+    y_fp32 = y.to(torch.float) * y_scale.to(torch.float)[:, None, :, None]
     x_fp32 = x_fp32.flatten(2, 3).flatten(0, 1)
     y_fp32 = y_fp32.flatten(2, 3).flatten(0, 1)
     out_fp32 = torch.mm(x_fp32, y_fp32)
@@ -510,7 +514,7 @@ FP4_MAX_VAL = 6.0
 def data_to_mx_scale(x, block_size, recipe):
     # simple implementation of https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
     # section 6.3, not all edge cases (such as NaN) are handled/tested
-    if recipe == "mxfp8":
+    if recipe in ("mxfp8", "fp8"):
         largest_pow2 = F8E4M3_LARGEST_POW2
     elif recipe == "mxfp4":
         largest_pow2 = FP4E2M1FN_LARGEST_POW2
@@ -2192,7 +2196,8 @@ class TestFP8Matmul(TestCase):
         "data_random_scales_one",
         "data_random_calc_scales",
     ])
-    def test_scaled_mm_block_wise_numerics(self, output_dtype, lhs_block, rhs_block, M, N, K, test_case, device):
+    @parametrize("scale_dtype", [torch.float32, torch.float8_e8m0fnu])
+    def test_scaled_mm_block_wise_numerics(self, output_dtype, lhs_block, rhs_block, M, N, K, test_case, scale_dtype, device):
         """
         subsume test_scaled_mm_vs_emulated_block_wise for random inputs, random scales,
         do some other functional tests as well.
@@ -2220,6 +2225,8 @@ class TestFP8Matmul(TestCase):
         torch.manual_seed(42)
 
         is_xpu = "xpu" in str(device)
+        if scale_dtype == torch.float8_e8m0fnu and not is_xpu:
+            self.skipTest("e8m0fnu blockwise scales only supported on XPU")
 
         def _adjust_lhs_scale(x_fp8, x_scales, lhs_block):
             M, K = x_fp8.shape
@@ -2282,7 +2289,7 @@ class TestFP8Matmul(TestCase):
         def _build_lhs(x, lhs_block):
             M, K = x.shape
 
-            x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
+            x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128, scale_dtype=scale_dtype)
             x_scales_original = x_scales
 
             x_hp, x_recipe, x_scales, x_scales_original = _adjust_lhs_scale(x_fp8, x_scales, lhs_block)
@@ -2292,7 +2299,7 @@ class TestFP8Matmul(TestCase):
         def _build_rhs(y, rhs_block):
             N, K = y.shape
 
-            y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+            y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128, scale_dtype=scale_dtype)
             y_hp, y_recipe, y_scales, y_scales_original = _adjust_rhs_scale(y_fp8, y_scales, rhs_block)
 
             return y_hp, y_recipe, y_fp8, y_scales, y_scales_original
@@ -2304,10 +2311,9 @@ class TestFP8Matmul(TestCase):
             out_scaled_mm = scaled_mm_wrap(
                 x_fp8,
                 y_fp8.t(),
-                scale_a=x_scales.reciprocal(),
+                scale_a=x_scales,
                 scale_recipe_a=x_recipe,
-                # Note: No more .t() on scale_b, not necessary.
-                scale_b=y_scales.reciprocal(),
+                scale_b=y_scales,
                 scale_recipe_b=y_recipe,
                 out_dtype=output_dtype,
             )
@@ -2353,7 +2359,7 @@ class TestFP8Matmul(TestCase):
             else:
                 scale_shape = M // 128, K // 128
 
-            scale = torch.full(scale_shape, val, device=device)
+            scale = torch.full(scale_shape, val, device=device, dtype=scale_dtype)
 
             return scale
 
@@ -2431,22 +2437,25 @@ class TestFP8Matmul(TestCase):
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 128, 256), (256, 256, 128)])
+    @parametrize("scale_dtype", [torch.float32, torch.float8_e8m0fnu])
     def test_scaled_mm_vs_emulated_block_wise_verify_small_shapes(
-        self, output_dtype, lhs_block, rhs_block, M, N, K, device
+        self, output_dtype, lhs_block, rhs_block, M, N, K, scale_dtype, device
     ):
+        is_xpu = "xpu" in str(device)
+        if scale_dtype == torch.float8_e8m0fnu and not is_xpu:
+            self.skipTest("e8m0fnu blockwise scales only supported on XPU")
+
         torch.manual_seed(42)
 
         x = torch.randn(M, K, device=device, dtype=output_dtype).pow(3)
         y = torch.randn(N, K, device=device, dtype=output_dtype).pow(3)
 
-        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
-        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128, scale_dtype=scale_dtype)
+        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128, scale_dtype=scale_dtype)
 
         x_scales_original = x_scales
         y_scales_original = y_scales
         # 1x128 blocks need scales to be outer-dim-major
-
-        is_xpu = "xpu" in str(device)
 
         if lhs_block == 1:
             lhs_recipe = ScalingType.BlockWise1x128
@@ -2514,7 +2523,7 @@ class TestFP8Matmul(TestCase):
         not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @runOnRocmArch(MI350_ARCH)
+    @runOnRocmArch(MI350_ARCH + NAVI4_ARCH)
     @parametrize("output_dtype", [torch.bfloat16, ])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
@@ -2806,9 +2815,12 @@ class TestFP8Matmul(TestCase):
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
 
-        if torch.version.hip:
-            if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
-                raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
+        if torch.version.hip and recipe in ("mxfp8", "mxfp4"):
+            mat_dtype = torch.float4_e2m1fn_x2 if recipe == "mxfp4" else torch.float8_e4m3fn
+            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below.
+            # NO_SWIZZLE requires M and N multiples of 16 and K a multiple of 128.
+            if not rocm_mx_swizzle(mat_dtype) and not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
+                raise unittest.SkipTest("M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -3492,6 +3504,60 @@ class TestFP8Matmul(TestCase):
             use_fast_accum=False,
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(not torch.version.hip, "MX alignment checks are ROCm-only")
+    @parametrize("recipe", ["mxfp8", "mxfp4"])
+    def test_rocm_mx_alignment(self, device, recipe) -> None:
+        # Scales are all ones, so only the element count has to match the kernel.
+        fp4 = recipe == "mxfp4"
+        mat_dtype = torch.float4_e2m1fn_x2 if fp4 else torch.float8_e4m3fn
+
+        def scale_numel(rows, k, swizzle):
+            if swizzle == SwizzleType.SWIZZLE_32_8:
+                return round_up(rows, 32) * round_up(ceil_div(k, 32), 8)
+            stored_k = k // 2 if fp4 else k
+            rows_eff = rows * 2 if fp4 else rows
+            return ceil_div(rows_eff, 32) * stored_k
+
+        def ones_mm(m, k, n, swizzle):
+            a_ref = torch.ones(m, k, device=device, dtype=torch.bfloat16)
+            b_ref = torch.ones(n, k, device=device, dtype=torch.bfloat16)
+            if fp4:
+                a = _bfloat16_to_float4_e2m1fn_x2(a_ref)
+                b = _bfloat16_to_float4_e2m1fn_x2(b_ref)
+            else:
+                a = a_ref.to(mat_dtype)
+                b = b_ref.to(mat_dtype)
+            scale_a = torch.ones(scale_numel(m, k, swizzle), device=device, dtype=torch.float8_e8m0fnu)
+            scale_b = torch.ones(scale_numel(n, k, swizzle), device=device, dtype=torch.float8_e8m0fnu)
+            return scaled_mm_wrap(
+                a, b.t(), scale_a, scale_b,
+                scale_recipe_a=ScalingType.BlockWise1x32,
+                scale_recipe_b=ScalingType.BlockWise1x32,
+                swizzle_a=swizzle, swizzle_b=swizzle,
+                out_dtype=torch.bfloat16, use_fast_accum=False,
+            )
+
+        with self.subTest(swizzle="NO_SWIZZLE", mkn=(32, 64, 32)):
+            with self.assertRaisesRegex(ValueError, "K must be a multiple of 128 for NO_SWIZZLE"):
+                ones_mm(32, 64, 32, SwizzleType.NO_SWIZZLE)
+        with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
+            got = ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
+            self.assertEqual(got, torch.full((16, 16), 128, device=device, dtype=torch.bfloat16))
+
+        if not rocm_mx_swizzle(mat_dtype):
+            return
+        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(32, 16, 32)):
+            with self.assertRaisesRegex(ValueError, "K must be a multiple of 32 for SWIZZLE_32_8"):
+                ones_mm(32, 16, 32, SwizzleType.SWIZZLE_32_8)
+        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(8, 32, 16)):
+            # N stays a multiple of 16: _scaled_mm_v2 requires that of mat2
+            # regardless of swizzle. M is not.
+            got = ones_mm(8, 32, 16, SwizzleType.SWIZZLE_32_8)
+            self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
 
 
     @onlyAccelerator

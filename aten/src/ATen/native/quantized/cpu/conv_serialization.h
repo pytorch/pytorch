@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
