@@ -48,10 +48,12 @@ bool is_usable_reciprocal(T inv_b) {
   return inv_b == T(0) || std::isnormal(inv_b);
 }
 
+// Complex keeps the reciprocal: dividing by a huge complex b in opmath can
+// overflow the intermediate c + d * (d / c) and return 0, which is worse than
+// the precision a subnormal reciprocal loses.
 template <typename T>
-bool is_usable_reciprocal(c10::complex<T> inv_b) {
-  return is_usable_reciprocal(inv_b.real()) &&
-      is_usable_reciprocal(inv_b.imag());
+bool is_usable_reciprocal(c10::complex<T>) {
+  return true;
 }
 
 void div_true_kernel_cuda(TensorIteratorBase& iter);
