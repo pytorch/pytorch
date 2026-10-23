@@ -10,22 +10,27 @@ Kept: issue comments, reviews and inline review comments written by the PR
 author or by a user with triage access or above, and this workflow's own
 earlier inline findings still on the PR (role ``automated_review``), so the
 replies to them have something to answer. post_review.py deletes superseded
-findings nobody replied or reacted to, so those are not shown. Other bots and
-other users are dropped. A comment's ``reactions`` are the emoji reactions of
-the author and maintainers, read for the newest ``MAX_REACTION_LOOKUPS``
-reacted comments, and ``reactions_truncated`` is set when a limit may have
-left some out. Bodies are capped and, if the conversation is too long, the
-oldest items are dropped first, earlier automated findings before anything
-people wrote, and ``truncated`` is set.
+findings nobody replied or reacted to, so those are normally not shown. Each
+inline comment's ``original_commit_id`` is the commit it was written against,
+and ``head_sha``, passed in by the caller, is the commit under review. Other
+bots and other users are dropped. A comment's ``reactions`` are the emoji
+reactions of the author and maintainers, read for the newest
+``MAX_REACTION_LOOKUPS`` reacted comments, and ``reactions_truncated`` is set
+when a limit or a failed lookup may have left some out. Bodies are capped and,
+if the conversation is too long, the oldest items are dropped first, earlier
+automated findings before anything people wrote, and ``truncated`` is set.
 
-Every failure is fatal. A review that silently saw no comments would approve a
-PR whose maintainer feedback it was never shown.
+Every failure is fatal except a 404: a user with no permission record is not
+a maintainer, and a comment whose reactions are not found is kept with
+``reactions_truncated`` set. A review that silently saw no comments would
+approve a PR whose maintainer feedback it was never shown.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -49,7 +54,8 @@ NON_HUMAN_LOGINS = frozenset(
     {"facebook-github-bot", "pytorch-bot", "pytorchbot", "pytorchmergebot"}
 )
 # How post_review.py marks this workflow's reviews: their author and the first
-# line of their body. Pinned to post_review.py's values by a test.
+# line of their body. Pinned to post_review.py's values by a test; the author
+# can be overridden by the same REVIEW_AUTHOR environment variable.
 REVIEW_AUTHOR = "github-actions[bot]"
 MARKER = "<!-- hardened-pr-review -->"
 AUTOMATED = "automated_review"
@@ -136,8 +142,7 @@ def reactions_of(
     api: Api, repo: str, kind: str, obj: dict[str, Any], role_of
 ) -> tuple[list[dict[str, Any]], bool]:
     """The author's and maintainers' reactions to a comment, from its first
-    page of reactions, and whether that page was full, so more may exist.
-    NotFound if the comment was deleted since it was listed."""
+    page of reactions, and whether that page was full, so more may exist."""
     page = api(
         f"repos/{repo}/{REACTIONS[kind]}/{obj.get('id')}/reactions?per_page={PER_PAGE}"
     )
@@ -152,20 +157,26 @@ def reactions_of(
     return out, len(page) >= PER_PAGE
 
 
-def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
+def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     pull = api(f"repos/{repo}/pulls/{pr}")
     author = human_login(pull)
     body = cap_encoded(pull.get("body"), MAX_PR_BODY_BYTES)
-    head = {"pr_author": author, "title": pull.get("title") or "", "body": body}
+    head = {
+        "pr_author": author,
+        "head_sha": head_sha,
+        "title": pull.get("title") or "",
+        "body": body,
+    }
     sources = {
         "issue_comment": paginate(api, f"repos/{repo}/issues/{pr}/comments"),
         "review": paginate(api, f"repos/{repo}/pulls/{pr}/reviews"),
         "review_comment": paginate(api, f"repos/{repo}/pulls/{pr}/comments"),
     }
+    bot = os.environ.get("REVIEW_AUTHOR", REVIEW_AUTHOR)
     ours = {
         r.get("id")
         for r in sources["review"]
-        if (r.get("user") or {}).get("login") == REVIEW_AUTHOR
+        if (r.get("user") or {}).get("login") == bot
         and (r.get("body") or "").startswith(MARKER)
     }
     roles: dict[str, str | None] = {}
@@ -197,10 +208,10 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
         for obj in raw:
             if (
                 kind == "review_comment"
-                and (obj.get("user") or {}).get("login") == REVIEW_AUTHOR
+                and (obj.get("user") or {}).get("login") == bot
                 and obj.get("pull_request_review_id") in ours
             ):
-                login, role = REVIEW_AUTHOR, AUTOMATED
+                login, role = bot, AUTOMATED
             else:
                 login = human_login(obj)
                 if login is None:
@@ -233,6 +244,8 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
                     "line": obj.get("line"),
                     "original_line": obj.get("original_line"),
                     "in_reply_to_id": obj.get("in_reply_to_id"),
+                    "pull_request_review_id": obj.get("pull_request_review_id"),
+                    "original_commit_id": obj.get("original_commit_id"),
                     "diff_hunk": cap(obj.get("diff_hunk"), MAX_HUNK),
                 }
             if reacted(kind, obj):
@@ -240,7 +253,6 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
             items.append(item)
 
     items.sort(key=lambda i: i["created_at"])
-    deleted = set()
     newest = [i for i in reversed(items) if id(i) in lookups]
     # Items whose reactions some limit may have left out.
     partial = {id(i) for i in newest[MAX_REACTION_LOOKUPS:]}
@@ -249,13 +261,13 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
         try:
             reactions, full = reactions_of(api, repo, *lookups[id(item)], reactor_role)
         except NotFound:
-            deleted.add(id(item))
-            continue
+            # Deleted since it was listed, or not found for some other reason:
+            # keep the comment and report its reactions as unknown.
+            reactions, full = [], True
         if full or unchecked:
             partial.add(id(item))
         if reactions:
             item["reactions"] = reactions
-    items = [i for i in items if id(i) not in deleted]
     kept: list[int] = []
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
@@ -294,10 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", required=True, type=int)
+    parser.add_argument("--head-sha", required=True, help="the commit under review")
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        result = collect(gh_api, args.repo, args.pr)
+        result = collect(gh_api, args.repo, args.pr, args.head_sha)
     except (RuntimeError, ValueError) as e:
         print(f"::error::could not fetch the PR conversation: {e}", file=sys.stderr)
         return 1

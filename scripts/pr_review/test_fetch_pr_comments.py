@@ -26,6 +26,7 @@ from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F4
 
 REPO = "o/r"
 PR = 7
+ARGV = ["--repo", REPO, "--pr", str(PR), "--head-sha", "abc"]
 
 
 def user(login, kind="User"):
@@ -298,6 +299,35 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(fpc.MARKER, post_review.MARKER)
         self.assertEqual(fpc.REVIEW_AUTHOR, post_review.DEFAULT_AUTHOR)
 
+    def test_the_author_follows_post_reviews_override(self):
+        app = "review-app[bot]"
+        api = FakeApi(
+            reviews=[ours(), {**ours(rid=60), "user": user(app, "Bot")}],
+            inline=[
+                finding(),
+                comment(app, kind="Bot", id=11, pull_request_review_id=60),
+            ],
+        )
+        with mock.patch.dict(os.environ, {"REVIEW_AUTHOR": app}):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual(
+            [(i["id"], i["author"], i["role"]) for i in out["items"]],
+            [(11, app, fpc.AUTOMATED)],
+        )
+
+    def test_inline_comments_say_which_commit_and_review_they_belong_to(self):
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[finding(original_commit_id="abc")],
+        )
+        api.pull = {**api.pull, "head": {"sha": "moved-since"}}
+        out = fpc.collect(api, REPO, PR, "def")
+        self.assertEqual(out["head_sha"], "def")
+        (item,) = out["items"]
+        self.assertEqual(
+            (item["pull_request_review_id"], item["original_commit_id"]), (50, "abc")
+        )
+
     def test_people_are_kept_before_earlier_findings(self):
         issue = [
             comment("maint", body="y" * 1000, when=f"2026-01-{i:02d}")
@@ -382,7 +412,7 @@ class TestReactions(unittest.TestCase):
         self.assertFalse([c for c in api.calls if "/reactions" in c])
         self.assertFalse([i for i in out["items"] if "reactions" in i])
 
-    def test_a_comment_deleted_since_listing_is_left_out(self):
+    def test_a_failed_lookup_keeps_the_comment_with_unknown_reactions(self):
         api = FakeApi(
             reviews=[ours()],
             inline=[finding(reactions={"total_count": 1})],
@@ -391,8 +421,28 @@ class TestReactions(unittest.TestCase):
         )
         api.deleted.add(f"repos/{REPO}/pulls/comments/10/reactions")
         out = fpc.collect(api, REPO, PR)
-        self.assertEqual([i["id"] for i in out["items"]], [20])
+        self.assertEqual([i["id"] for i in out["items"]], [10, 20])
+        self.assertNotIn("reactions", out["items"][0])
+        self.assertTrue(out["reactions_truncated"])
         self.assertFalse(out["truncated"])
+
+    def test_a_failed_lookup_does_not_inherit_the_previous_reactions(self):
+        api = FakeApi(
+            issue=[
+                comment(
+                    "maint", id=20, when="2026-01-01", reactions={"total_count": 1}
+                ),
+                comment(
+                    "maint", id=21, when="2026-01-02", reactions={"total_count": 1}
+                ),
+            ],
+            maintainers={"maint"},
+            reactions={"issues/comments/21": [reaction("author", "+1")]},
+        )
+        api.deleted.add(f"repos/{REPO}/issues/comments/20/reactions")
+        by_id = {i["id"]: i for i in fpc.collect(api, REPO, PR)["items"]}
+        self.assertIn("reactions", by_id[21])
+        self.assertNotIn("reactions", by_id[20])
 
     def test_only_the_newest_reacted_comments_are_looked_up(self):
         issue = [
@@ -520,7 +570,7 @@ class TestFailsClosed(unittest.TestCase):
         ):
             out = Path(td) / "c.json"
             with mock.patch("sys.stderr"):
-                rc = fpc.main(["--repo", REPO, "--pr", str(PR), "--out", str(out)])
+                rc = fpc.main(ARGV + ["--out", str(out)])
             self.assertEqual(rc, 1)
             self.assertFalse(out.exists())
 
@@ -539,10 +589,14 @@ class TestFailsClosed(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, mock.patch.object(fpc, "gh_api", api):
             out = Path(td) / "c.json"
             with mock.patch("sys.stdout"):
-                self.assertEqual(
-                    fpc.main(["--repo", REPO, "--pr", str(PR), "--out", str(out)]), 0
-                )
-            self.assertEqual(json.loads(out.read_text())["items"][0]["author"], "maint")
+                self.assertEqual(fpc.main(ARGV + ["--out", str(out)]), 0)
+            written = json.loads(out.read_text())
+            self.assertEqual(written["items"][0]["author"], "maint")
+            self.assertEqual(written["head_sha"], "abc")
+
+    def test_main_requires_the_commit_under_review(self):
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            fpc.main(["--repo", REPO, "--pr", str(PR), "--out", "c.json"])
 
     def test_main_writes_a_single_line(self):
         # The workflow hands the file over as a `name=value` job output.
@@ -551,7 +605,7 @@ class TestFailsClosed(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, mock.patch.object(fpc, "gh_api", api):
             out = Path(td) / "c.json"
             with mock.patch("sys.stdout"):
-                fpc.main(["--repo", REPO, "--pr", str(PR), "--out", str(out)])
+                fpc.main(ARGV + ["--out", str(out)])
             text = out.read_text()
             self.assertNotIn("\n", text)
             self.assertNotIn("\r", text)
