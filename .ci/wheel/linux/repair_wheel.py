@@ -61,6 +61,59 @@ def detect_libgomp() -> Path:
     return Path("/usr/lib64/libgomp.so.1")
 
 
+def copy_runtime_dependencies(
+    torch_dir: Path,
+    arch: str,
+    use_cuda: bool,
+    gpu_arch_type: str,
+    gpu_arch_version: str,
+) -> None:
+    torch_lib = torch_dir / "lib"
+    libgomp_path = detect_libgomp()
+    if not libgomp_path.exists():
+        sys.exit(f"libgomp not found at {libgomp_path}")
+
+    # Bundle libgomp and rewrite NEEDED entries to point at our copy
+    shutil.copy(libgomp_path, torch_lib / "libgomp.so.1")
+    for sofile in torch_dir.glob("*.so*"):
+        if sofile.is_file():
+            patchelf(
+                "--replace-needed",
+                "libgomp.so.1",
+                "libgomp.so.1",
+                str(sofile),
+            )
+
+    # Bundle aarch64 BLAS/LAPACK/ACL dependencies (no-op on x86)
+    for dep in arch_extra_deps(arch, use_cuda):
+        shutil.copy(dep, torch_lib / dep.name)
+
+    bundled_libs: list[BundledLib] = []
+    is_rocm = gpu_arch_type == "rocm" or "rocm" in os.environ.get("DESIRED_CUDA", "")
+    if is_rocm and not use_cuda:
+        # Pre-10.0 TheRock SDKs ship a rocSHMEM that dlopens the bare name
+        # "libnuma.so". At wheel runtime that name resolves nowhere: the
+        # SDK vendors numa only as librocm_sysdeps_numa.so.1, and on user
+        # systems the bare dev name exists only if numactl-devel is
+        # installed (#195670). The 10.0 SDK line links the vendored soname
+        # directly instead (rocm-systems#6640), so bundle a bare-named
+        # copy, reached via $ORIGIN on the RPATHs above, only for older
+        # SDKs. The builder image installs numactl-libs for this.
+        ver = gpu_arch_version
+        if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
+            is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
+            libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
+            libnuma = Path(libdir) / "libnuma.so.1"
+            if not libnuma.is_file():
+                sys.exit(f"libnuma to bundle for rocSHMEM not found: {libnuma}")
+            bundled_libs.append(BundledLib(src=libnuma, dest_name="libnuma.so"))
+
+    # Keep only compatibility dependencies that are not supplied by the
+    # ROCm SDK wheel packages (currently pre-10.0 rocSHMEM's libnuma).
+    for lib in bundled_libs:
+        shutil.copy(lib.src, torch_lib / lib.dest_name)
+
+
 def cuda_rpaths(gpu_arch_version: str) -> str:
     """Build the colon-separated RPATH list for CUDA wheels.
 
@@ -165,10 +218,10 @@ def set_rpath(sofile: Path, rpath: str, force_rpath: bool) -> None:
 def repair_wheel(
     wheel: Path,
     output_dir: Path,
-    platform_tag: str,
-    libgomp_path: Path,
-    arch_deps: list[Path],
-    bundled_libs: list[BundledLib],
+    arch: str,
+    use_cuda: bool,
+    gpu_arch_type: str,
+    gpu_arch_version: str,
     c_so_rpath: str,
     lib_so_rpath: str,
     force_rpath: bool,
@@ -178,62 +231,42 @@ def repair_wheel(
     # stdlib zipfile (correct ZIP64), unlike `wheel pack`/`wheel tags` which
     # corrupt >4GB ROCm wheels (pypa/wheel#692, pytorch#189748).
     with InWheelCtx(wheel, output_dir / wheel.name) as ctx:
-        torch_dir = ctx.path / "torch"
-        torch_lib = torch_dir / "lib"
+        completed = False
+        try:
+            torch_dir = ctx.path / "torch"
+            torch_lib = torch_dir / "lib"
 
-        # Bundle libgomp and rewrite NEEDED entries to point at our copy
-        shutil.copy(libgomp_path, torch_lib / "libgomp.so.1")
-        for sofile in torch_dir.glob("*.so*"):
-            if sofile.is_file():
-                patchelf(
-                    "--replace-needed",
-                    "libgomp.so.1",
-                    "libgomp.so.1",
-                    str(sofile),
-                )
+            copy_runtime_dependencies(
+                torch_dir, arch, use_cuda, gpu_arch_type, gpu_arch_version
+            )
 
-        # Bundle aarch64 BLAS/LAPACK/ACL dependencies (no-op on x86)
-        for dep in arch_deps:
-            shutil.copy(dep, torch_lib / dep.name)
+            # Set RPATH on top-level (_C.so etc.) and lib/ shared objects
+            for sofile in torch_dir.glob("*.so*"):
+                if sofile.is_file():
+                    set_rpath(sofile, c_so_rpath, force_rpath)
+            for sofile in torch_lib.glob("*.so*"):
+                if sofile.is_file():
+                    set_rpath(sofile, lib_so_rpath, force_rpath)
 
-        # Keep only compatibility dependencies that are not supplied by the
-        # ROCm SDK wheel packages (currently pre-10.0 rocSHMEM's libnuma).
-        for lib in bundled_libs:
-            shutil.copy(lib.src, torch_lib / lib.dest_name)
-        # Set RPATH on top-level (_C.so etc.) and lib/ shared objects
-        for sofile in torch_dir.glob("*.so*"):
-            if sofile.is_file():
-                set_rpath(sofile, c_so_rpath, force_rpath)
-        for sofile in torch_lib.glob("*.so*"):
-            if sofile.is_file():
-                set_rpath(sofile, lib_so_rpath, force_rpath)
-
-        # Retag linux_* -> manylinux_2_28_* in both the filename and the WHEEL
-        # metadata. add_platforms updates ctx.out_wheel to the new name; RECORD
-        # regeneration and repacking happen when the context exits.
-        add_platforms(
-            ctx, [platform_tag], remove_platforms=wheel_platform_tags(wheel.name)
-        )
+            if arch not in PLATFORM_TAGS:
+                sys.exit(f"Unknown arch {arch}")
+            platform_tag = PLATFORM_TAGS[arch]
+            # Retag linux_* -> manylinux_2_28_* in both the filename and the WHEEL
+            # metadata. add_platforms updates ctx.out_wheel to the new name; RECORD
+            # regeneration and repacking happen when the context exits.
+            add_platforms(
+                ctx, [platform_tag], remove_platforms=wheel_platform_tags(wheel.name)
+            )
+            completed = True
+        finally:
+            if not completed:
+                ctx.out_wheel = None
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input_dir", type=Path)
-    parser.add_argument("output_dir", type=Path)
-    args = parser.parse_args()
-
-    arch = platform.machine()
-    use_cuda = os.environ.get("USE_CUDA", "0") == "1"
-    gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
-    gpu_arch_version = os.environ.get("GPU_ARCH_VERSION", "")
+def prepare_runtime_paths(
+    use_cuda: bool, gpu_arch_type: str, gpu_arch_version: str
+) -> tuple[str, str, bool]:
     is_rocm = gpu_arch_type == "rocm" or "rocm" in os.environ.get("DESIRED_CUDA", "")
-
-    libgomp_path = detect_libgomp()
-    if not libgomp_path.exists():
-        sys.exit(f"libgomp not found at {libgomp_path}")
-
-    bundled_libs: list[BundledLib] = []
-
     if use_cuda:
         rpaths = cuda_rpaths(gpu_arch_version)
         c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
@@ -257,45 +290,42 @@ def main() -> None:
         c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = f"{rpaths}:$ORIGIN"
         force_rpath = True
-        # Pre-10.0 TheRock SDKs ship a rocSHMEM that dlopens the bare name
-        # "libnuma.so". At wheel runtime that name resolves nowhere: the
-        # SDK vendors numa only as librocm_sysdeps_numa.so.1, and on user
-        # systems the bare dev name exists only if numactl-devel is
-        # installed (#195670). The 10.0 SDK line links the vendored soname
-        # directly instead (rocm-systems#6640), so bundle a bare-named
-        # copy, reached via $ORIGIN on the RPATHs above, only for older
-        # SDKs. The builder image installs numactl-libs for this.
-        ver = gpu_arch_version
-        if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
-            is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
-            libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
-            libnuma = Path(libdir) / "libnuma.so.1"
-            if not libnuma.is_file():
-                sys.exit(f"libnuma to bundle for rocSHMEM not found: {libnuma}")
-            bundled_libs.append(BundledLib(src=libnuma, dest_name="libnuma.so"))
     else:
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = "$ORIGIN"
         force_rpath = False
 
-    arch_deps = arch_extra_deps(arch, use_cuda)
+    return c_so_rpath, lib_so_rpath, force_rpath
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input_dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
+    args = parser.parse_args()
+
+    arch = platform.machine()
+    use_cuda = os.environ.get("USE_CUDA", "0") == "1"
+    gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
+    gpu_arch_version = os.environ.get("GPU_ARCH_VERSION", "")
+
+    c_so_rpath, lib_so_rpath, force_rpath = prepare_runtime_paths(
+        use_cuda, gpu_arch_type, gpu_arch_version
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     wheels = sorted(args.input_dir.glob("*.whl"))
     if not wheels:
         sys.exit(f"No wheels found in {args.input_dir}")
 
-    if arch not in PLATFORM_TAGS:
-        sys.exit(f"Unknown arch {arch}")
-    platform_tag = PLATFORM_TAGS[arch]
     for whl in wheels:
         repair_wheel(
             whl,
             args.output_dir,
-            platform_tag,
-            libgomp_path,
-            arch_deps,
-            bundled_libs,
+            arch,
+            use_cuda,
+            gpu_arch_type,
+            gpu_arch_version,
             c_so_rpath,
             lib_so_rpath,
             force_rpath,
