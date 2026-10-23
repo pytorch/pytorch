@@ -318,7 +318,9 @@ def check_windows_zlibwapi_version() -> None:
                 f"{dll} is missing, but this wheel has no cuda-toolkit requirement "
                 "and is expected to bundle it"
             )
-        print("zlibwapi.dll is not bundled (cuda-toolkit wheel), skipping version check")
+        print(
+            "zlibwapi.dll is not bundled (cuda-toolkit wheel), skipping version check"
+        )
         return
 
     file_version = subprocess.check_output(
