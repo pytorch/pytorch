@@ -15,9 +15,11 @@ from unittest import mock
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -29,8 +31,15 @@ try:
 finally:
     sys.path.remove(REPO_ROOT)
 
+# The runner compiles and counts graphs itself; wrapping tests in Dynamo makes
+# its steady-state checks see the test's own compilation.
+skipIfWrappedByDynamo = skipIfTorchDynamo("the benchmark runner manages compilation")
 
+
+@skipIfWrappedByDynamo
 class TestDiffusionCompileBenchmark(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _toy_scenarios(self, modes):
         recipe = benchmark.BENCHMARKS["toy"]
         execution = benchmark.ExecutionConfig(
@@ -79,7 +88,11 @@ class TestDiffusionCompileBenchmark(TestCase):
                 "compiler_times_s": {},
                 "unique_graphs": int(scenario.mode != "eager"),
             },
-            "output_summary": {"shape": [1], "dtype": "torch.float32", "sha256": "0" * 64},
+            "output_summary": {
+                "shape": [1],
+                "dtype": "torch.float32",
+                "sha256": "0" * 64,
+            },
             "output_check": "not requested",
         }
 
@@ -524,7 +537,8 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         ),
     )
     def test_malformed_child_preserves_other_results(self, field):
-        args = ["--model", "toy", "--mode", "eager", "--mode", "full", "--backend", "eager"]
+        args = ["--model", "toy", "--backend", "eager"]
+        args += ["--mode", "eager", "--mode", "full"]
         execution = benchmark._execution_from_args(
             benchmark._parser().parse_args(args), ("eager", "full")
         )
@@ -848,7 +862,10 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertEqual(second.getpixel((0, 0)), (255, 0, 0))
 
 
+@skipIfWrappedByDynamo
 class TestDiffusionCompileBenchmarkDeviceType(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_cudagraph_request_retains_predictions(self, device):
         from torch.utils._triton import has_triton
 

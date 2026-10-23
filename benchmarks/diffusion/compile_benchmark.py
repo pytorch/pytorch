@@ -1395,7 +1395,9 @@ def _compare_outputs(
             reference = torch.load(sample_paths[eager.scenario_id], weights_only=True)
         except (OSError, RuntimeError) as error:
             eager_result["status"] = "failed"
-            eager_result["error"] = f"could not load eager output for comparison: {error}"
+            eager_result["error"] = (
+                f"could not load eager output for comparison: {error}"
+            )
             eager_result["output_check"] = "failed"
         else:
             eager_result["output_check"] = "reference"
