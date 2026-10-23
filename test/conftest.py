@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
 xml_key = StashKey["LogXMLReruns"]()
+# Under pytest's cache (<cache_dir>/v/). run_test.py reads these files, and the
+# torchci report writer publishes next to them (StepcurrentPlugin.directory).
 STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 
@@ -490,14 +492,14 @@ class StepcurrentPlugin:
         if config.cache is None:
             raise AssertionError("Expected config.cache to not be None")
         self.cache: pytest.Cache = config.cache
-        directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
-        self.lastrun_location = f"{directory}/lastrun"
+        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{self.directory}/lastrun"
         self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
 
-        self.made_failing_xml_location = f"{directory}/made_failing_xml"
+        self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
