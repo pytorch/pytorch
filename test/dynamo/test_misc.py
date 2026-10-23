@@ -9754,6 +9754,183 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(*make_args()), fn(*make_args()), msg=fn.__name__)
 
+    def test_isinstance_protocol_descriptor_members(self):
+        # A member the class provides through a descriptor is read without
+        # tracing it. 3.12+ takes the class attribute, as inspect.getattr_static
+        # does, so a property or slot matches whatever the instance holds.
+        # 3.10/3.11 run the descriptor, as hasattr() does there; a slot is read
+        # through Dynamo's hasattr instead, so whether it is set is guarded.
+        # The method member keeps the ABC check from answering from the class.
+        @typing.runtime_checkable
+        class HasPortsFoo(typing.Protocol):
+            ports: tuple[int, ...]
+
+            def foo(self) -> int: ...
+
+        class WithProperty:
+            @property
+            def ports(self):
+                return (1,)
+
+        class RaisingProperty:
+            @property
+            def ports(self):
+                raise AttributeError("ports")
+
+        class Slotted:
+            __slots__ = ("foo", "ports")
+
+        class Cached:
+            @functools.cached_property
+            def ports(self):
+                return (1,)
+
+        class ClassPorts:
+            ports = (0,)
+
+        def foo():
+            return 1
+
+        def make(cls, **attrs):
+            o = cls()
+            o.foo = foo
+            for name, value in attrs.items():
+                setattr(o, name, value)
+            return o
+
+        def check(x, o):
+            return x + 1 if isinstance(o, HasPortsFoo) else x - 1
+
+        x = torch.ones(3)
+        slot_frames = 2 if sys.version_info < (3, 12) else 1
+        filled = make(Cached)
+        filled.ports
+        cases = {
+            "property": ([make(WithProperty), make(WithProperty)], 1),
+            "property raising AttributeError": ([make(RaisingProperty)], 1),
+            "slot set then unset": (
+                [make(Slotted, ports=(1,)), make(Slotted)],
+                slot_frames,
+            ),
+            "slot unset then set": (
+                [make(Slotted), make(Slotted, ports=(1,))],
+                slot_frames,
+            ),
+            "cached_property filled then empty": ([filled, make(Cached)], 1),
+            "cached_property empty then filled": ([make(Cached), filled], 1),
+            "class attribute shadowed then not": (
+                [make(ClassPorts, ports=(1,)), make(ClassPorts)],
+                1,
+            ),
+            "class attribute not shadowed then shadowed": (
+                [make(ClassPorts), make(ClassPorts, ports=(1,))],
+                1,
+            ),
+        }
+        for name, (objs, frames) in cases.items():
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(check, backend=cnt, fullgraph=True)
+            for o in objs:
+                self.assertEqual(opt_fn(x, o), check(x, o), msg=name)
+            self.assertEqual(cnt.frame_count, frames, msg=name)
+
+        def set_slot_before(x, o):
+            o.ports = (3,)
+            return check(x, o)
+
+        def del_slot_before(x, o):
+            del o.ports
+            return check(x, o)
+
+        for fn, make_arg in (
+            (set_slot_before, lambda: make(Slotted)),
+            (del_slot_before, lambda: make(Slotted, ports=(1,))),
+        ):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, make_arg()), fn(x, make_arg()), msg=fn.__name__)
+
+    def test_isinstance_protocol_member_getter_raises(self):
+        # 3.10/3.11 run a member's getter, as hasattr() does there, and user
+        # code sees what it raises; 3.12+ never calls it.
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        class RaisingProperty:
+            @property
+            def ports(self):
+                raise TypeError("ports")
+
+        def fn(x, o):
+            try:
+                return x + 1 if isinstance(o, HasPorts) else x - 1
+            except TypeError:
+                return x * 10
+
+        x = torch.ones(3)
+        o = RaisingProperty()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
+
+    def test_isinstance_protocol_answered_by_real_object(self):
+        # Objects whose class hooks attribute lookup, threading.local objects
+        # and Protocols with a custom metaclass are answered by the real
+        # isinstance(), as before.
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        class Meta(type(typing.Protocol)):
+            pass
+
+        @typing.runtime_checkable
+        class HasPortsMeta(typing.Protocol, metaclass=Meta):
+            ports: tuple[int, ...]
+
+        class WithGetattribute:
+            def __getattribute__(self, name):
+                return object.__getattribute__(self, name)
+
+        class WithGetattr:
+            def __init__(self, has_ports):
+                self.has_ports = has_ports
+
+            def __getattr__(self, name):
+                if name == "ports" and self.has_ports:
+                    return (1,)
+                raise AttributeError(name)
+
+        class Local(threading.local):
+            pass
+
+        class Bag:
+            pass
+
+        def with_ports(cls):
+            o = cls()
+            o.ports = (1,)
+            return o
+
+        def check(x, o, proto):
+            return x + 1 if isinstance(o, proto) else x - 1
+
+        x = torch.ones(3)
+        for name, o, proto in (
+            ("__getattribute__", with_ports(WithGetattribute), HasPorts),
+            ("__getattribute__ without", WithGetattribute(), HasPorts),
+            ("__getattr__", WithGetattr(True), HasPorts),
+            ("__getattr__ without", WithGetattr(False), HasPorts),
+            ("threading.local", with_ports(Local), HasPorts),
+            ("threading.local without", Local(), HasPorts),
+            ("custom metaclass", with_ports(Bag), HasPortsMeta),
+            ("custom metaclass without", Bag(), HasPortsMeta),
+        ):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(check, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o, proto), check(x, o, proto), msg=name)
+
     def test_isinstance_does_not_specialize_value_independent_constant(self):
         # Neither hook can see anything about a str that its type does not
         # already fix, so the answer must not realize the constant and guard
