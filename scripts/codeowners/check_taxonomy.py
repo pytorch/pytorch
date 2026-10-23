@@ -60,6 +60,7 @@ class TaxonomyPattern:
     group: str
     path: str
     line_number: int
+    labels: tuple[str, ...] = ()
 
 
 @dataclass
@@ -129,13 +130,18 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     patterns = []
     section_groups = []
     group = None
+    labels: tuple[str, ...] = ()
     for line_number, raw_line in enumerate(lines[start:], start=start + 1):
         line = raw_line.strip()
         if line.startswith(GROUP_PREFIX) and line.endswith("]"):
             group = line[len(GROUP_PREFIX) : -1]
+            labels = ()
             if group in section_groups:
                 raise ValueError(f"{codeowners}:{line_number}: repeated group: {group}")
             section_groups.append(group)
+        elif line.startswith("# label:"):
+            label_names = line.removeprefix("# label:").split(",")
+            labels = tuple(label.strip() for label in label_names)
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -160,7 +166,7 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
                     )
             if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
-            patterns.append(TaxonomyPattern(group, pattern[1:], line_number))
+            patterns.append(TaxonomyPattern(group, pattern[1:], line_number, labels))
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
@@ -205,16 +211,39 @@ def pattern_specificity(pattern: TaxonomyPattern) -> tuple[int, int, int]:
     return prefix.count("/"), len(prefix), len(pattern.path)
 
 
+class TaxonomyIndex:
+    """Look up the taxonomy patterns that match a tracked path."""
+
+    def __init__(self, patterns: list[TaxonomyPattern]) -> None:
+        self.patterns_by_path: dict[str, list[TaxonomyPattern]] = defaultdict(list)
+        self.glob_patterns: list[TaxonomyPattern] = []
+        for pattern in patterns:
+            if "*" in pattern.path:
+                self.glob_patterns.append(pattern)
+            else:
+                self.patterns_by_path[pattern.path].append(pattern)
+
+    def matches(self, path: str) -> list[TaxonomyPattern]:
+        """Return the patterns matching the path or one of its parent directories."""
+        parts = path.split("/")
+        candidates = [path]
+        candidates.extend(
+            "/".join(parts[:index]) + "/" for index in range(1, len(parts))
+        )
+        matches: list[TaxonomyPattern] = []
+        for candidate in candidates:
+            matches.extend(self.patterns_by_path.get(candidate, []))
+        matches.extend(
+            pattern
+            for pattern in self.glob_patterns
+            if compile_glob(pattern.path).fullmatch(path)
+        )
+        return matches
+
+
 def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     """Measure coverage and verify that source order preserves specificity."""
-    patterns_by_path: dict[str, list[TaxonomyPattern]] = defaultdict(list)
-    glob_patterns = []
-    for pattern in patterns:
-        if "*" in pattern.path:
-            glob_patterns.append(pattern)
-        else:
-            patterns_by_path[pattern.path].append(pattern)
-
+    index = TaxonomyIndex(patterns)
     matched_patterns: set[TaxonomyPattern] = set()
     effective_patterns: set[TaxonomyPattern] = set()
     effective_groups = set()
@@ -222,19 +251,7 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     uncovered = []
     overridden = {}
     for path in paths:
-        parts = path.split("/")
-        candidates = [path]
-        candidates.extend(
-            "/".join(parts[:index]) + "/" for index in range(1, len(parts))
-        )
-        matches = []
-        for candidate in candidates:
-            matches.extend(patterns_by_path.get(candidate, []))
-        matches.extend(
-            pattern
-            for pattern in glob_patterns
-            if compile_glob(pattern.path).fullmatch(path)
-        )
+        matches = index.matches(path)
         if not matches:
             uncovered.append(path)
             continue
@@ -256,7 +273,9 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
             )
 
     duplicates = {
-        path: entries for path, entries in patterns_by_path.items() if len(entries) > 1
+        path: entries
+        for path, entries in index.patterns_by_path.items()
+        if len(entries) > 1
     }
     return Report(
         tracked=len(paths),

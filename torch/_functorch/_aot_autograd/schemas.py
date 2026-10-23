@@ -587,6 +587,13 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
+    # Whether the compiled region runs with the eager saved tensors hooks
+    # disabled because inlineable hooks were inlined into the graphs. Recorded
+    # when the joint graph is partitioned, since a wrapper rebuilt from a cache
+    # entry may run outside the hooks context the graph was compiled under.
+    # None for entries that predate the field.
+    disable_saved_tensors_hooks: bool | None = None
+
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue

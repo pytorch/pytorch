@@ -5,8 +5,14 @@
 #include <c10/util/Enumerate.h>
 #include <gtest/gtest.h>
 #include <array>
+#include <ranges>
+#include <vector>
 
 namespace {
+
+using EnumeratedVector =
+    decltype(c10::enumerate(std::declval<std::vector<int>&>()));
+static_assert(std::ranges::input_range<EnumeratedVector>);
 
 template <class T>
 struct IsConstReference {
