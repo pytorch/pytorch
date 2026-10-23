@@ -4469,7 +4469,17 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
-        msg = get_concrete_sizes_from_symints(str(cause), fake_mode)
+        # Surface the actionable size mismatch for invalid concatenation.
+        # Preserve FX-node context for unrelated operator failures.
+        error_text = str(cause)
+        is_cat = node.op == "call_function" and node.target in (
+            torch.cat,
+            torch.ops.aten.cat.default,
+        )
+        if is_cat and "Sizes of tensors must match except in dimension" in error_text:
+            msg = get_concrete_sizes_from_symints(error_text, fake_mode)
+        else:
+            msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         from .exc import (
             FakeTensorObservedException,
             ObservedException,
