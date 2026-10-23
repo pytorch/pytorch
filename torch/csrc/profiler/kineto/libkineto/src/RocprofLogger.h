@@ -42,8 +42,6 @@ class RocprofLogger {
   RocprofLogger(const RocprofLogger&) = delete;
   RocprofLogger& operator=(const RocprofLogger&) = delete;
 
-  virtual ~RocprofLogger();
-
   static RocprofLogger& singleton();
 
   static void pushCorrelationID(uint64_t id, RocLogger::CorrelationDomain type);
@@ -70,8 +68,6 @@ class RocprofLogger {
       rocprofiler_tracing_operation_t op);
 
  private:
-  void endTracing();
-
   static void insert_row_to_buffer(rocprofBase* row);
 
   static ThreadTraceBuffer* getThreadBuffer();

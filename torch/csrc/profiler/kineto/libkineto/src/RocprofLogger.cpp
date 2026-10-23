@@ -518,16 +518,12 @@ class Flush {
 };
 
 RocprofLogger& RocprofLogger::singleton() {
-  static RocprofLogger instance;
-  return instance;
+  // Intentionally leaky singleton
+  static auto* instance = new RocprofLogger{};
+  return *instance;
 }
 
 RocprofLogger::RocprofLogger() {}
-
-RocprofLogger::~RocprofLogger() {
-  stopLogging();
-  endTracing();
-}
 
 namespace {
 thread_local std::deque<uint64_t>
@@ -948,24 +944,14 @@ void RocprofLogger::setPerThreadBuffers(bool enabled) {
 }
 
 void RocprofLogger::ensureRegistered() {
-  // Construct the logger eagerly. libkineto_init() calls this before
-  // libkineto::api() exists, and statics are destroyed in reverse order of
-  // construction: the logger must be constructed first so it outlives the
-  // profiler-thread teardown (and its trace finalization) performed in
-  // LibkinetoApi's destructor.
-  singleton();
-
   int status = 0;
   rocprofiler_is_initialized(&status);
   VLOG(0) << "rocprofiler_is_initialized returned " << status;
   if (status == 0) {
     VLOG(0) << "Forcing rocprofiler-sdk tool registration";
-    auto result = rocprofiler_force_configure(&rocprofiler_configure);
-    if (result == ROCPROFILER_STATUS_SUCCESS) {
+    if (ROCPROF_CALL(rocprofiler_force_configure(&rocprofiler_configure)) ==
+        ROCPROFILER_STATUS_SUCCESS) {
       VLOG(0) << "rocprofiler-sdk tool registration completed successfully";
-    } else {
-      LOG(WARNING) << "rocprofiler_force_configure failed with status "
-                   << result << ": " << rocprofiler_get_status_string(result);
     }
   }
 }
@@ -1011,17 +997,6 @@ void RocprofLogger::stopLogging() {
   // Flush after stopping so records finalized by the stop are captured;
   // flushing a drained buffer is a no-op.
   ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
-}
-
-void RocprofLogger::endTracing() {
-  auto& globalContext = getGlobalContext();
-  // force the finalizer function to run if it hasn't already to ensure cleanup
-  // before static data is destroyed.
-  if (globalContext.finalizer != nullptr && globalContext.clientId != nullptr) {
-    globalContext.finalizer(*globalContext.clientId);
-    globalContext.finalizer = nullptr;
-    globalContext.clientId = nullptr;
-  }
 }
 
 //
