@@ -329,7 +329,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
     @parametrize("payload", [b"", "message", bytearray(b"message"), 1])
     def test_invalid_notification_does_not_submit(self, payload):
         first, second, memory, remote = self.registered_pair()
-        error = ValueError if payload == b"" else TypeError
+        error = ValueError if type(payload) is bytes and not payload else TypeError
         with patch.object(first._agent, "initialize_xfer") as initialize:
             with self.assertRaises(error):
                 first.write(memory.to_view(), remote, notification=payload)
