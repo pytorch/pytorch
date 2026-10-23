@@ -2890,6 +2890,26 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(10)
         self.assertEqual(f(x), opt_f(x))
 
+    def test_specialized_module_partial_staticmethod(self):
+        def get_value(mod, scale):
+            return mod.weight * scale
+
+        class Mod(torch.nn.Module):
+            value = staticmethod(partial(get_value, scale=2))
+
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return x + self.value(self)
+
+        mod = Mod()
+        mod.torchdynamo_force_dynamic = False
+        x = torch.randn(3)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(opt_mod(x), mod(x))
+
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

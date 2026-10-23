@@ -2139,8 +2139,12 @@ class ContextWrappedFunctionMixin(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if config.nested_graph_breaks or self._always_trace_context:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            wrapper_fn = SourcelessBuilder.create_internal_user_function(
+                polyfills._fn_with_ctx
+            )
             return wrapper_fn.call_function(
                 tx, [self.context, self.wrapped] + list(args), kwargs
             )

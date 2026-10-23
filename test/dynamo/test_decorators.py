@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
-from torch._dynamo import external_utils, trace_rules
+from torch._dynamo import external_utils, polyfills, trace_rules
 from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
@@ -337,6 +337,38 @@ class DecoratorTests(PytreeRegisteringTestCase):
         x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, 2, 3), fn(x, 2, 3))
+
+    def test_internal_iterator_helper_ignores_allow_in_graph(self):
+        class Sequence:
+            def __init__(self, values):
+                self.values = values
+
+            def __len__(self):
+                return len(self.values)
+
+            def __getitem__(self, index):
+                return self.values[index]
+
+        def fn(x):
+            return x + sum(reversed(Sequence([1, 2, 3])))
+
+        self._override_trace_rule(polyfills.builtins.reversed_sequence_iterator)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_context_wrapper_ignores_allow_in_graph(self):
+        def target(y):
+            return y.sin()
+
+        def fn(x):
+            return torch.no_grad()(target)(x)
+
+        self._override_trace_rule(polyfills._fn_with_ctx)
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_allow_in_graph_no_id_reuse(self):
         cnts = torch._dynamo.testing.CompileCounter()
