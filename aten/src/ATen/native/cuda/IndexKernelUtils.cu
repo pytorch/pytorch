@@ -284,10 +284,11 @@ void vectorized_scatter_kernel_launch(
   int64_t threads_per_entry = std::min(
       at::round_up(num_vectors, static_cast<int64_t>(at::cuda::warp_size())),
       max_num_threads);
+  int64_t entries_per_block = max_num_threads / threads_per_entry;
   if constexpr (std::is_same_v<atomic_op, ScatterCopyOp>) {
     threads_per_entry = ScatterCopyOp::threads_per_entry;
+    entries_per_block = ScatterCopyOp::entries_per_block;
   }
-  int64_t entries_per_block = max_num_threads / threads_per_entry;
   int64_t block_size = entries_per_block * threads_per_entry;
   int64_t grid_x = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);
   uint32_t grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
