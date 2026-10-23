@@ -182,6 +182,25 @@ class StaticallyLaunchedTritonKernel:
         self._has_tensordesc = False
         # tensordesc<> arg names in signature order; filled by arg_ty_from_signature
         self.tensordesc_arg_names: list[str] = []
+
+        # Auto-TMA: the compiler may synthesize recipes that tell the launcher
+        # to build CUtensorMap descriptors at launch time from existing kernel
+        # args.  Recipes are plain dicts and already pickleable.
+        self.auto_tma_recipes: list[dict[str, Any]] = []
+        if hasattr(kernel, "metadata"):
+            recipes = getattr(kernel.metadata, "auto_tma_recipes", None)
+            if recipes:
+                self.auto_tma_recipes = list(recipes)
+        # Opaque C++ handle holding the parsed recipes and their last-encoded
+        # CUtensorMap. Built on first launch, since it cannot be pickled.
+        self._tma_cache: object | None = None
+        if self.auto_tma_recipes and self.global_scratch_size:
+            # The auto-TMA launch path fills every scratch slot with null, so a
+            # kernel that actually wants a global scratch buffer would read a
+            # null pointer. Bail out here so inductor falls back to triton's own
+            # launcher, which allocates scratch and handles recipes.
+            raise NotImplementedError("Auto-TMA with global scratch not supported")
+
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
@@ -412,6 +431,8 @@ class StaticallyLaunchedTritonKernel:
         # Cubin paths aren't consistent across processes, so we clear
         # and reload them.
         state["cubin_path"] = None
+        # A PyCapsule holding C++ state; rebuilt on demand from the recipes.
+        state["_tma_cache"] = None
         return state
 
     def _expand_tma_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
@@ -471,6 +492,34 @@ class StaticallyLaunchedTritonKernel:
             args = self._expand_tma_args(args)
 
         arg_tys = self.arg_tys
+
+        if self.auto_tma_recipes and not is_rocm():
+            # Auto-TMA: pass user args only; C++ builds the full param layout
+            # [user_args, tma_descs, scratch] and constructs CUtensorMap at launch.
+            # Scratch slots are all null. That is correct because __init__ rejects
+            # any kernel that needs a real scratch buffer: non-zero profile scratch
+            # for every kernel, non-zero global scratch for auto-TMA kernels.
+            n_scratch = int(self.has_global_scratch) + int(self.has_profile_scratch)
+            # pyrefly: ignore [bad-argument-type]
+            if len(args) != len(arg_tys):
+                raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
+            if self._tma_cache is None:
+                self._tma_cache = self.C_impl._make_tma_cache(self.auto_tma_recipes)
+            # pyrefly: ignore [bad-argument-type]
+            self.C_impl._launch_kernel_tma(
+                function,
+                grid_x,
+                grid_y,
+                grid_z,
+                self.num_warps,
+                self.shared,
+                arg_tys,
+                args,
+                stream,
+                self._tma_cache,
+                n_scratch,
+            )
+            return
 
         if is_rocm():
             # HIP always includes both scratch slots in the kernel ABI.

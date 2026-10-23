@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -58,6 +59,327 @@ const at::cuda::NVRTC& nvrtc() {
 
 // 120 max args + 1 for global scratch size
 #define MAX_ARGS 121
+
+// Auto-TMA requires CUtensorMap (CUDA 12.0+) and is NVIDIA-only. Recipes only
+// ever arrive from a triton whose PromoteLoadToTMA pass ran, so where that pass
+// does not exist this compiles in but never activates: AutoTmaState is left
+// unallocated and the launch path costs a single null check.
+// TORCH_INDUCTOR_NO_AUTO_TMA compiles it out entirely.
+#if !defined(TORCH_INDUCTOR_NO_AUTO_TMA) && !defined(USE_ROCM) && \
+    defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#define INDUCTOR_HAS_AUTO_TMA 1
+#else
+#define INDUCTOR_HAS_AUTO_TMA 0
+#endif
+
+#if INDUCTOR_HAS_AUTO_TMA
+// Auto-TMA recipe support: constructs CUtensorMap at launch time from
+// compiler-synthesized recipes.  Mirrors triton's launch.h logic but uses
+// ATen's NVRTC stub for cuTensorMapEncodeTiled.
+static constexpr int MAX_TMA_DESCS = 8;
+static constexpr int MAX_TMA_DIMS = 5;
+
+struct AutoTmaRecipe {
+  int ndim;
+  uint32_t blockShape[MAX_TMA_DIMS];
+  int swizzle;
+  int elemType;
+  int elemSize;
+  int fp4Padded;
+  int fillMode;
+  int basePtrArgIndex;
+  int shapeArgIndices[MAX_TMA_DIMS];
+  int strideArgIndices[MAX_TMA_DIMS]; // -1 = contiguous
+};
+
+inline int64_t readArgAsInt64(
+    const uint64_t* argStorage,
+    const char* argTypes,
+    int argIdx,
+    int numArgs) {
+  TORCH_CHECK(
+      argIdx >= 0 && argIdx < numArgs,
+      "TMA recipe: arg index ",
+      argIdx,
+      " out of bounds (numArgs=",
+      numArgs,
+      ")");
+  char t = argTypes[argIdx];
+  const void* slot = &argStorage[argIdx];
+  switch (t) {
+    case 'i':
+      return static_cast<int64_t>(*reinterpret_cast<const int32_t*>(slot));
+    case 'l':
+      return *reinterpret_cast<const int64_t*>(slot);
+    case 'I':
+      return static_cast<int64_t>(*reinterpret_cast<const uint32_t*>(slot));
+    case 'K':
+      return static_cast<int64_t>(*reinterpret_cast<const uint64_t*>(slot));
+    default:
+      TORCH_CHECK(
+          false, "TMA recipe: shape/stride arg has unsupported type '", t, "'");
+  }
+}
+
+// Everything a recipe reads out of the kernel args. The rest of the descriptor
+// (block shape, swizzle, element type) is baked into the recipe at compile
+// time, so two launches agreeing on this key encode to the same CUtensorMap.
+struct TmaDescKey {
+  CUdeviceptr basePtr;
+  int64_t shape[MAX_TMA_DIMS];
+  int64_t stride[MAX_TMA_DIMS];
+
+  bool operator==(const TmaDescKey& other) const {
+    if (basePtr != other.basePtr)
+      return false;
+    for (int j = 0; j < MAX_TMA_DIMS; j++) {
+      if (shape[j] != other.shape[j] || stride[j] != other.stride[j])
+        return false;
+    }
+    return true;
+  }
+};
+
+inline TmaDescKey readTmaDescKey(
+    const AutoTmaRecipe& recipe,
+    const uint64_t* argStorage,
+    const char* argTypes,
+    int numArgs) {
+  TORCH_CHECK(
+      recipe.basePtrArgIndex >= 0 && recipe.basePtrArgIndex < numArgs,
+      "TMA recipe: basePtrArgIndex ",
+      recipe.basePtrArgIndex,
+      " out of bounds (numArgs=",
+      numArgs,
+      ")");
+  TmaDescKey key = {};
+  std::memcpy(
+      &key.basePtr, &argStorage[recipe.basePtrArgIndex], sizeof(CUdeviceptr));
+  for (int j = 0; j < recipe.ndim; j++) {
+    key.shape[j] = readArgAsInt64(
+        argStorage, argTypes, recipe.shapeArgIndices[j], numArgs);
+    if (recipe.strideArgIndices[j] >= 0)
+      key.stride[j] = readArgAsInt64(
+          argStorage, argTypes, recipe.strideArgIndices[j], numArgs);
+  }
+  if (recipe.fp4Padded && recipe.ndim > 0)
+    key.shape[recipe.ndim - 1] *= 2;
+  return key;
+}
+
+// Mirrors triton_construct_tma_desc() from launch.h
+inline CUresult encodeTmaDesc(
+    CUtensorMap* desc,
+    const AutoTmaRecipe& recipe,
+    const TmaDescKey& key) {
+  int rank = recipe.ndim;
+  const CUdeviceptr basePtr = key.basePtr;
+  const int64_t* shp = key.shape;
+  const int64_t* strd = key.stride;
+
+  // Reverse row-major -> column-major for cuTensorMapEncodeTiled.
+  cuuint64_t globalDim[MAX_TMA_DIMS] = {0};
+  cuuint64_t globalStrides[MAX_TMA_DIMS] = {0};
+  cuuint32_t boxDim[MAX_TMA_DIMS] = {0};
+  cuuint32_t elemStrides[MAX_TMA_DIMS] = {1, 1, 1, 1, 1};
+  for (int j = 0; j < rank; j++) {
+    boxDim[rank - 1 - j] = recipe.blockShape[j];
+    globalDim[rank - 1 - j] = static_cast<cuuint64_t>(shp[j]);
+  }
+  for (int j = 0; j + 1 < rank; j++)
+    globalStrides[rank - 2 - j] = static_cast<cuuint64_t>(
+        static_cast<int64_t>(recipe.elemSize) * strd[j]);
+  if (rank > 0)
+    globalStrides[rank - 1] = globalDim[rank - 1] *
+        (rank == 1 ? static_cast<cuuint64_t>(recipe.elemSize)
+                   : globalStrides[rank - 2]);
+
+  CUtensorMapSwizzle swizzleMode = CU_TENSOR_MAP_SWIZZLE_NONE;
+  if (recipe.swizzle >= 0)
+    swizzleMode = static_cast<CUtensorMapSwizzle>(recipe.swizzle);
+  if (rank >= 2) {
+    int contigBytes = recipe.elemSize * static_cast<int>(boxDim[0]);
+    if (recipe.swizzle < 0) {
+      if (boxDim[1] < 8 || contigBytes < 32) {
+        swizzleMode = CU_TENSOR_MAP_SWIZZLE_NONE;
+      } else if (contigBytes >= 128) {
+        swizzleMode = CU_TENSOR_MAP_SWIZZLE_128B;
+      } else if (contigBytes >= 64) {
+        swizzleMode = CU_TENSOR_MAP_SWIZZLE_64B;
+      } else {
+        swizzleMode = CU_TENSOR_MAP_SWIZZLE_32B;
+      }
+    }
+    int swzBytes = (swizzleMode == CU_TENSOR_MAP_SWIZZLE_128B) ? 128
+        : (swizzleMode == CU_TENSOR_MAP_SWIZZLE_64B)           ? 64
+        : (swizzleMode == CU_TENSOR_MAP_SWIZZLE_32B)           ? 32
+                                                               : 0;
+    if (swzBytes > 0 && contigBytes > swzBytes)
+      boxDim[0] = static_cast<cuuint32_t>(swzBytes / recipe.elemSize);
+  }
+
+  CUtensorMapFloatOOBfill fill = recipe.fillMode
+      ? CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA
+      : CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
+
+  CUresult r = nvrtc().cuTensorMapEncodeTiled(
+      desc,
+      static_cast<CUtensorMapDataType>(recipe.elemType),
+      static_cast<cuuint32_t>(rank),
+      reinterpret_cast<void*>(static_cast<uintptr_t>(basePtr)),
+      globalDim,
+      globalStrides,
+      boxDim,
+      elemStrides,
+      CU_TENSOR_MAP_INTERLEAVE_NONE,
+      swizzleMode,
+      CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
+      fill);
+  if (r != CUDA_SUCCESS)
+    return r;
+
+  // Small-tensor CUtensorMap workaround: on drivers up to CUDA 13.1, clear
+  // bit 21 of word 1 when the tensor fits in 128 KiB. Mirrors triton's
+  // launch.h and driver.c, which follow CUTLASS:
+  // https://github.com/NVIDIA/cutlass/commit/b7ecaa605dd70326900433695e11ebfec407edd2
+  // cudaDriverGetVersion() encodes 1000 * major + 10 * minor, so 13010 is 13.1.
+  static constexpr int kDriverVersionWithSmallTensorBug = 13010;
+  static constexpr int64_t kSmallTensorThresholdBytes = 128 * 1024;
+  static const int driverVersion = [] {
+    int v = 0;
+    cudaDriverGetVersion(&v);
+    return v;
+  }();
+  if (driverVersion <= kDriverVersionWithSmallTensorBug) {
+    int64_t maxByteIndex = 0;
+    for (int j = 0; j < rank; j++) {
+      int64_t bytesStride = (j == 0)
+          ? static_cast<int64_t>(recipe.elemSize)
+          : static_cast<int64_t>(globalStrides[j - 1]);
+      maxByteIndex += (static_cast<int64_t>(globalDim[j]) - 1) * bytesStride;
+    }
+    if (maxByteIndex + 1 < kSmallTensorThresholdBytes) {
+      auto* descU64 = reinterpret_cast<uint64_t*>(desc);
+      descU64[1] &= ~(1ull << 21);
+    }
+  }
+  return CUDA_SUCCESS;
+}
+
+// One descriptor plus the inputs it was encoded from. A CUtensorMap records
+// addressing, not buffer contents, so it stays valid for as long as the base
+// address, shape and strides do -- which for a shape-specialized inductor
+// launcher is usually every launch after the first. Mirrors the host-side TMA
+// descriptor cache added in D110555296, where skipping cuTensorMapEncodeTiled
+// was worth ~4.4us per call.
+struct CachedTmaDesc {
+  CUtensorMap desc;
+  TmaDescKey key;
+  bool valid = false;
+};
+
+inline CUresult constructTmaDesc(
+    CachedTmaDesc& slot,
+    const AutoTmaRecipe& recipe,
+    const uint64_t* argStorage,
+    const char* argTypes,
+    int numArgs) {
+  const TmaDescKey key =
+      readTmaDescKey(recipe, argStorage, argTypes, numArgs);
+  if (slot.valid && slot.key == key)
+    return CUDA_SUCCESS;
+  const CUresult r = encodeTmaDesc(&slot.desc, recipe, key);
+  if (r != CUDA_SUCCESS) {
+    slot.valid = false;
+    return r;
+  }
+  slot.key = key;
+  slot.valid = true;
+  return CUDA_SUCCESS;
+}
+
+// Per-kernel auto-TMA state: the parsed recipes plus the descriptor each one
+// last encoded to. Allocated only for a kernel that actually carries recipes.
+// Only triton's PromoteLoadToTMA pass emits them, so in a build whose triton
+// never runs that pass no kernel ever allocates one, and a launcher costs one
+// null pointer rather than ~2.5 KB of recipe and descriptor storage.
+struct AutoTmaState {
+  int numRecipes = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  AutoTmaRecipe recipes[MAX_TMA_DESCS];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  CachedTmaDesc descs[MAX_TMA_DESCS];
+};
+
+int parseRecipesFromPython(PyObject* recipesList, AutoTmaRecipe* recipes) {
+  if (!recipesList || recipesList == Py_None || !PyList_Check(recipesList))
+    return 0;
+  int numRecipes = static_cast<int>(PyList_Size(recipesList));
+  TORCH_CHECK(
+      numRecipes <= MAX_TMA_DESCS,
+      "Too many TMA recipes: ",
+      numRecipes,
+      " > ",
+      MAX_TMA_DESCS);
+
+  for (int r = 0; r < numRecipes; r++) {
+    PyObject* dict = PyList_GetItem(recipesList, r);
+    TORCH_CHECK(PyDict_Check(dict), "TMA recipe must be a dict");
+
+    auto getInt = [&](const char* key) -> int {
+      PyObject* val = PyDict_GetItemString(dict, key);
+      TORCH_CHECK(val, "TMA recipe missing key: ", key);
+      return static_cast<int>(THPUtils_unpackLong(val));
+    };
+    auto getList = [&](const char* key) -> PyObject* {
+      PyObject* list = PyDict_GetItemString(dict, key);
+      TORCH_CHECK(
+          list && PyList_Check(list),
+          "TMA recipe key '",
+          key,
+          "' must be a list");
+      return list;
+    };
+
+    PyObject* blockList = getList("block_shape");
+    int ndim = static_cast<int>(PyList_Size(blockList));
+    TORCH_CHECK(ndim <= MAX_TMA_DIMS, "TMA recipe ndim too large: ", ndim);
+    recipes[r].ndim = ndim;
+    for (int i = 0; i < ndim; i++)
+      recipes[r].blockShape[i] = static_cast<uint32_t>(
+          THPUtils_unpackLong(PyList_GetItem(blockList, i)));
+
+    recipes[r].swizzle = getInt("swizzle");
+    recipes[r].elemType = getInt("elem_type");
+    recipes[r].elemSize = getInt("elem_size");
+    recipes[r].fp4Padded = getInt("fp4_padded");
+    recipes[r].fillMode = getInt("fill_mode");
+    recipes[r].basePtrArgIndex = getInt("base_ptr_arg_index");
+
+    PyObject* shapeList = getList("shape_arg_indices");
+    PyObject* strideList = getList("stride_arg_indices");
+    TORCH_CHECK(
+        PyList_Size(shapeList) >= ndim,
+        "TMA recipe: shape_arg_indices has ",
+        PyList_Size(shapeList),
+        " entries, need ",
+        ndim);
+    TORCH_CHECK(
+        PyList_Size(strideList) >= ndim,
+        "TMA recipe: stride_arg_indices has ",
+        PyList_Size(strideList),
+        " entries, need ",
+        ndim);
+    for (int i = 0; i < ndim; i++) {
+      recipes[r].shapeArgIndices[i] =
+          static_cast<int>(THPUtils_unpackLong(PyList_GetItem(shapeList, i)));
+      recipes[r].strideArgIndices[i] =
+          static_cast<int>(THPUtils_unpackLong(PyList_GetItem(strideList, i)));
+    }
+  }
+  return numRecipes;
+}
+#endif // INDUCTOR_HAS_AUTO_TMA
 
 CUdeviceptr getPointer(PyObject* obj) {
   CUdeviceptr data_ptr = 0;
@@ -671,7 +993,143 @@ PyObject* unload_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
+#if INDUCTOR_HAS_AUTO_TMA
+static const char* kTmaCacheCapsuleName = "torch.inductor.AutoTmaState";
+
+static void tmaCacheCapsuleDestructor(PyObject* capsule) {
+  delete static_cast<AutoTmaState*>(
+      PyCapsule_GetPointer(capsule, kTmaCacheCapsuleName));
+}
+
+// Parse a recipe list once and hand back an opaque handle the launcher reuses.
+// Walking the recipe dicts costs far more per launch than the encode does, so
+// the static launcher path builds this once per kernel rather than re-reading
+// Python objects on every call.
+PyObject* make_tma_cache(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* recipesList = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &recipesList))
+    return nullptr;
+
+  auto state = std::make_unique<AutoTmaState>();
+  state->numRecipes = parseRecipesFromPython(recipesList, state->recipes);
+  PyObject* capsule = PyCapsule_New(
+      state.get(), kTmaCacheCapsuleName, tmaCacheCapsuleDestructor);
+  if (!capsule)
+    return nullptr;
+  state.release();
+  return capsule;
+  END_HANDLE_TH_ERRORS
+}
+
+// Launch a kernel with auto-TMA recipes.  Constructs CUtensorMap descriptors
+// at launch time and inserts them between user args and scratch in the kernel
+// param array: [user_args, tma_descs, scratch].
+PyObject* launch_kernel_tma(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  uint64_t func_ptr = 0;
+  int gridX = 0, gridY = 0, gridZ = 0, numWarps = 0, sharedMemBytes = 0;
+  uint64_t stream = 0;
+  const char* argTypes = nullptr;
+  PyObject* varArgs = nullptr;
+  PyObject* tmaCache = nullptr;
+  int nScratch = 0;
+
+  if (!PyArg_ParseTuple(
+          args,
+          "KiiiiisOKOi",
+          &func_ptr,
+          &gridX,
+          &gridY,
+          &gridZ,
+          &numWarps,
+          &sharedMemBytes,
+          &argTypes,
+          &varArgs,
+          &stream,
+          &tmaCache,
+          &nScratch)) {
+    return nullptr;
+  }
+  auto* tma = static_cast<AutoTmaState*>(
+      PyCapsule_GetPointer(tmaCache, kTmaCacheCapsuleName));
+  TORCH_CHECK(
+      tma, "_launch_kernel_tma: expected a cache from _make_tma_cache");
+  if (gridX <= 0 || gridY <= 0 || gridZ <= 0)
+    Py_RETURN_NONE;
+
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    CUdevice device = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGet(&device, 0));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
+  }
+
+  CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
+  cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
+
+  const int numRecipes = tma->numRecipes;
+  int numUserArgs = static_cast<int>(std::strlen(argTypes));
+  int numTotalParams = numUserArgs + numRecipes + nScratch;
+  TORCH_CHECK(
+      numTotalParams <= MAX_ARGS,
+      "Too many kernel params with TMA: ",
+      numTotalParams,
+      " > ",
+      MAX_ARGS);
+
+  std::array<uint64_t, MAX_ARGS> argStorage = {};
+  std::array<void*, MAX_ARGS> kernelArgs = {};
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), kernelArgs.data());
+
+  // The cache lives in the capsule, so a repeat launch on the same buffers
+  // reuses the encoded descriptor instead of calling cuTensorMapEncodeTiled.
+  for (int r = 0; r < numRecipes; r++) {
+    AT_CUDA_DRIVER_CHECK(constructTmaDesc(
+        tma->descs[r],
+        tma->recipes[r],
+        argStorage.data(),
+        argTypes,
+        numUserArgs));
+    kernelArgs[numUserArgs + r] = &tma->descs[r].desc;
+  }
+
+  // Scratch slots (nullptr). parseKernelArgs only writes the first numUserArgs
+  // entries, so the rest of argStorage is still zeroed and gives each slot its
+  // own address, matching the fast launcher.
+  for (int s = 0; s < nScratch; s++) {
+    const int slot = numUserArgs + numRecipes + s;
+    kernelArgs[slot] = &argStorage[slot];
+  }
+
+  launchKernel(
+      func,
+      gridX,
+      gridY,
+      gridZ,
+      numWarps,
+      sharedMemBytes,
+      kernelArgs.data(),
+      cudaStream);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+#endif // INDUCTOR_HAS_AUTO_TMA
+
+#if !INDUCTOR_HAS_AUTO_TMA
+// Keep the two auto-TMA entry points present in every build so python can
+// probe for them without caring how torch was configured.
+PyObject* autoTmaUnsupported(PyObject*, PyObject*) {
+  PyErr_SetString(
+      PyExc_NotImplementedError, "Auto-TMA is not supported on this platform");
+  return nullptr;
+}
+#endif
+
+std::array<PyMethodDef, 5> StaticCudaLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
@@ -686,7 +1144,31 @@ std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
         "_unload_kernel",
         unload_kernel,
         METH_VARARGS,
-        "Unload CUDA/HIP module loaded by _load_kernel"}};
+        "Unload CUDA/HIP module loaded by _load_kernel"},
+#if INDUCTOR_HAS_AUTO_TMA
+    PyMethodDef{
+        "_make_tma_cache",
+        make_tma_cache,
+        METH_VARARGS,
+        "Parse auto-TMA recipes once into a reusable launch cache"},
+    PyMethodDef{
+        "_launch_kernel_tma",
+        launch_kernel_tma,
+        METH_VARARGS,
+        "Launch triton kernel with auto-TMA recipe support"},
+#else
+    PyMethodDef{
+        "_make_tma_cache",
+        autoTmaUnsupported,
+        METH_VARARGS,
+        "Auto-TMA not supported"},
+    PyMethodDef{
+        "_launch_kernel_tma",
+        autoTmaUnsupported,
+        METH_VARARGS,
+        "Auto-TMA not supported"},
+#endif
+};
 
 // Define a minimal type for StaticCudaLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a
@@ -806,6 +1288,10 @@ struct FastCudaLauncherObject {
   uint64_t argStorage[MAX_ARGS];
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   void* kernelArgs[MAX_ARGS];
+
+#if INDUCTOR_HAS_AUTO_TMA
+  AutoTmaState* autoTma; // null unless the kernel carries auto-TMA recipes
+#endif
 };
 
 static PyObject* fast_launcher_vectorcall(
@@ -827,8 +1313,16 @@ static PyObject* FastCudaLauncher_new(
   uint64_t func_ptr = 0;
   int numWarps = 0, shared = 0, nScratch = 0;
   const char* argTypes = nullptr;
+  PyObject* recipesList = nullptr;
   if (!PyArg_ParseTuple(
-          args, "Kiisi", &func_ptr, &numWarps, &shared, &argTypes, &nScratch)) {
+          args,
+          "Kiisi|O",
+          &func_ptr,
+          &numWarps,
+          &shared,
+          &argTypes,
+          &nScratch,
+          &recipesList)) {
     Py_DECREF(self);
     return nullptr;
   }
@@ -837,8 +1331,27 @@ static PyObject* FastCudaLauncher_new(
   self->numWarps = static_cast<uint32_t>(numWarps);
   self->sharedMemBytes = static_cast<uint32_t>(shared);
 
+  int numRecipes = 0;
+#if INDUCTOR_HAS_AUTO_TMA
+  self->autoTma = nullptr;
+  if (recipesList && recipesList != Py_None && PyList_Check(recipesList) &&
+      PyList_Size(recipesList) > 0) {
+    try {
+      auto state = std::make_unique<AutoTmaState>();
+      state->numRecipes = parseRecipesFromPython(recipesList, state->recipes);
+      numRecipes = state->numRecipes;
+      self->autoTma = state.release();
+    } catch (...) {
+      // A malformed recipe throws out of here; self is already allocated and
+      // HANDLE_TH_ERRORS does not know about it.
+      Py_DECREF(self);
+      throw;
+    }
+  }
+#endif
+
   int nKernel = static_cast<int>(std::strlen(argTypes));
-  int nTotal = nKernel + nScratch;
+  int nTotal = nKernel + numRecipes + nScratch;
   if (nTotal > MAX_ARGS) {
     Py_DECREF(self);
     PyErr_Format(
@@ -852,13 +1365,16 @@ static PyObject* FastCudaLauncher_new(
   self->numKernelArgs = nKernel;
   self->numTotalArgs = nTotal;
   std::memcpy(self->argTypes, argTypes, nKernel);
-  // Scratch slots are pointer type ('O')
+  // Scratch slots are pointer type ('O'). TMA descriptor slots, when present,
+  // sit between the kernel args and the scratch slots; nothing reads their
+  // argTypes entry, so they get the same filler.
   for (int i = nKernel; i < nTotal; ++i) {
     self->argTypes[i] = 'O';
   }
   self->argTypes[nTotal] = '\0';
 
-  // Pre-compute kernelArgs pointers and zero all storage.
+  // Pre-compute kernelArgs pointers and zero all storage. TMA descriptor slots
+  // are repointed at the encoded CUtensorMap on every launch.
   std::memset(self->argStorage, 0, sizeof(self->argStorage));
   for (int i = 0; i < nTotal; ++i) {
     self->kernelArgs[i] = &self->argStorage[i];
@@ -872,6 +1388,9 @@ static PyObject* FastCudaLauncher_new(
 }
 
 static void FastCudaLauncher_dealloc(PyObject* self) {
+#if INDUCTOR_HAS_AUTO_TMA
+  delete reinterpret_cast<FastCudaLauncherObject*>(self)->autoTma;
+#endif
   Py_TYPE(self)->tp_free(self);
 }
 
@@ -984,6 +1503,25 @@ static PyObject* fast_launcher_vectorcall(
             false, "_FastCudaLauncher: unknown arg type '", typeChar, "'");
     }
   }
+
+#if INDUCTOR_HAS_AUTO_TMA
+  // Auto-TMA: encode one CUtensorMap per recipe into the slots sitting between
+  // the user args and the scratch slots. autoTma is null unless the compiler
+  // promoted a load, so this costs one predictable branch otherwise.
+  if (self->autoTma) {
+    AutoTmaState* tma = self->autoTma;
+    for (int r = 0; r < tma->numRecipes; r++) {
+      AT_CUDA_DRIVER_CHECK(constructTmaDesc(
+          tma->descs[r],
+          tma->recipes[r],
+          self->argStorage,
+          self->argTypes,
+          self->numKernelArgs));
+      self->kernelArgs[self->numKernelArgs + r] = &tma->descs[r].desc;
+    }
+  }
+#endif
+
   // Scratch slots already zeroed at construction time and stay zero.
   // Invariant: inductor codegen always passes None for scratch args, so the
   // pre-zeroed nullptr values remain valid across launches.  If scratch
