@@ -87,7 +87,8 @@ def is_available() -> bool:
 
     Example::
 
-        >>> assert torch.accelerator.is_available() "No available accelerators detected."
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> assert torch.accelerator.is_available(), "No available accelerators detected."
     """
     # Why not just check "device_count() > 0" like other is_available call?
     # Because device like CUDA have a python implementation of is_available that is
@@ -258,7 +259,7 @@ def synchronize(device: Device = None, /) -> None:
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> assert torch.accelerator.is_available() "No available accelerators detected."
+        >>> assert torch.accelerator.is_available(), "No available accelerators detected."
         >>> start_event = torch.Event(enable_timing=True)
         >>> end_event = torch.Event(enable_timing=True)
         >>> start_event.record()
