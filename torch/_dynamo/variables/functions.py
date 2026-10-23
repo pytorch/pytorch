@@ -78,6 +78,7 @@ from ..source import (
     DefaultsSource,
     GetItemSource,
     ImportSource,
+    PropertyNameSource,
     TypeMROSource,
     TypeSource,
 )
@@ -85,6 +86,7 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     FrameState,
+    get_property_name,
     identity,
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
@@ -97,6 +99,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    AttrMutationKind,
     GetSet,
     getset_build,
     getset_load_or_build,
@@ -5554,12 +5557,18 @@ class PropertyVariable(VariableTracker):
     }
 
     def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # property.__name__ only exists from 3.13
         if sys.version_info >= (3, 13):
-            name = getattr(self.descriptor, "__name__", None)
-            if name is not None:
-                source = self.source and AttrSource(self.source, "__name__")
-                return VariableTracker.build(tx, name, source)
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                self, "__name__", AttrMutationKind.GENERIC_SETATTR
+            ):
+                return tx.output.side_effects.load_attr(self, "__name__")
+            source = self.source and PropertyNameSource(self.source)
+            names = VariableTracker.build(
+                tx, get_property_name(self.descriptor), source, realize=True
+            ).unpack_var_sequence(tx)
+            if names:
+                return names[0]
+            raise_attribute_error(tx, "'property' object has no attribute '__name__'")
         raise_attribute_error(
             tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
         )
@@ -5677,6 +5686,9 @@ class PropertyVariable(VariableTracker):
                 getter_doc = not doc.is_constant_none()
             except ObservedAttributeError:
                 handle_observed_exception(tx)
+                # Match the pre-3.12.5 early return for missing getter docs.
+                if sys.version_info < (3, 12, 5):
+                    return ConstantVariable.create(None)
         if not self.python_type().__dictoffset__ and not isinstance(
             doc_attr, types.MemberDescriptorType
         ):
@@ -5716,7 +5728,12 @@ class PropertyVariable(VariableTracker):
         fn = self._get_accessor(tx, attr)
 
         if fn.is_constant_none():
-            display_name = getattr(self.descriptor, "__name__", None)
+            name = None
+            if sys.version_info >= (3, 13):
+                try:
+                    name = repr(self._name_getter(tx).as_python_constant())
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
             kind = "setter" if value is not None else "deleter"
             if sys.version_info >= (3, 11):
                 # property_descr_set formats %R of the owner's *type*, whose
@@ -5724,20 +5741,17 @@ class PropertyVariable(VariableTracker):
                 # python_qualified_name(), which mirrors the module-qualified
                 # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
                 try:
-                    cls_name = obj.python_type().__qualname__
+                    owner_name = obj.python_type().__qualname__
                 except NotImplementedError:
-                    cls_name = obj.python_type_name()
-                if display_name is not None:
-                    msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
+                    owner_name = obj.python_type_name()
+                if name is not None:
+                    msg = f"property {name} of {owner_name!r} object has no {kind}"
                 else:
-                    msg = f"property of '{cls_name}' object has no {kind}"
+                    msg = f"property of {owner_name!r} object has no {kind}"
             else:
                 # < 3.11: no owner/property-name in the message at all.
                 verb = "set" if value is not None else "delete"
-                if display_name is not None:
-                    msg = f"can't {verb} attribute '{display_name}'"
-                else:
-                    msg = f"can't {verb} attribute"
+                msg = f"can't {verb} attribute"
             raise_attribute_error(tx, msg)
 
         args = [obj] if value is None else [obj, value]
@@ -5780,9 +5794,12 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
             if self.lookup_class_mro_attr(name) is not descriptor:
                 return None
             if self.cls_source is not None and descriptor is not NO_SUCH_SUBOBJ:
-                install_guard(
-                    AttrSource(self.cls_source, name).make_guard(GuardBuilder.ID_MATCH)
+                from torch._dynamo.symbolic_convert import InstructionTranslator
+
+                source = self.get_source_by_walking_mro(
+                    InstructionTranslator.current_tx(), name
                 )
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
         return super().lookup_tp_getset_member(name)
 
     def _get_accessor(
@@ -5805,9 +5822,10 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
         from .base import load_pending_mutation
         from .object_protocol import generic_getattr
 
-        pending = load_pending_mutation(tx, self, "__name__")
-        if pending is not None:
-            return pending
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self, "__name__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            return load_pending_mutation(tx, self, "__name__")
         if self.property_args is not None:
             try:
                 return generic_getattr(tx, self._get_accessor(tx, "fget"), "__name__")

@@ -3431,6 +3431,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 desc_source = self.get_source_by_walking_mro(tx, name_str)
 
             if isinstance(descriptor, property):
+                slot = (
+                    "__delete__"
+                    if isinstance(value, variables.DeletedVariable)
+                    else "__set__"
+                )
+                if (
+                    (3, 11) <= sys.version_info < (3, 13)
+                    and inspect.getattr_static(type(descriptor), slot)
+                    is getattr(property, slot)
+                    and getattr(descriptor, "fdel" if slot == "__delete__" else "fset")
+                    is None
+                ):
+                    raise_property_error(
+                        "deleter" if slot == "__delete__" else "setter"
+                    )
                 if type(descriptor) is not property and desc_source is not None:
                     desc_var = VariableTracker.build(
                         tx, descriptor, desc_source, realize=True
@@ -3439,11 +3454,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         None if isinstance(value, variables.DeletedVariable) else value
                     )
                     return desc_var.tp_descr_set_impl(tx, self, descr_val)
-                slot = (
-                    "__delete__"
-                    if isinstance(value, variables.DeletedVariable)
-                    else "__set__"
-                )
                 if inspect.getattr_static(type(descriptor), slot) is not getattr(
                     property, slot
                 ):
@@ -4121,10 +4131,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
-        if can_use_mro_source:
+        if self.cls_source is not None:
             source = self.get_source_by_walking_mro(tx, name)
-        elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(

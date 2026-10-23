@@ -4702,6 +4702,14 @@ def import_submodule(mod: types.ModuleType) -> None:
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
+def get_property_name(obj: property) -> tuple[Any, ...]:
+    # Distinguish a missing name from a name explicitly set to None.
+    try:
+        return (property.__dict__["__name__"].__get__(obj),)
+    except AttributeError:
+        return ()
+
+
 def initialize_property(obj: property, fget: Any, fset: Any, fdel: Any) -> None:
     # A non-None doc avoids reading a getter whose mutations have not replayed.
     # Only plain attribute setters/doc slots are supported by the tracing model.

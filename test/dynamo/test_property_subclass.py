@@ -643,6 +643,247 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(actual[1].__doc__, "doc")
         self.assertEqual(events, ["doc"])
 
+    @parametrize("action", ("set", "delete"))
+    @parametrize("shadow_name", (False, True))
+    @parametrize("explicit", (False, True))
+    def test_missing_accessor_message(self, action, shadow_name, explicit):
+        if explicit and sys.version_info < (3, 13):
+            self.skipTest("explicit descriptor names require Python 3.13+")
+
+        class NamedProperty(property):
+            __name__ = "shadowed name"
+
+        cls = NamedProperty if shadow_name else PropertyWithoutDoc
+
+        class Holder:
+            prop = cls(lambda obj: obj.value)
+
+        p = Holder.__dict__["prop"]
+
+        def fn(x):
+            obj = Holder()
+            try:
+                if action == "set":
+                    if explicit:
+                        p.__set__(obj, x)
+                    else:
+                        obj.prop = x
+                elif explicit:
+                    p.__delete__(obj)
+                else:
+                    del obj.prop
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("action", ("set", "delete"))
+    @parametrize(
+        "name_case",
+        ("default", "renamed", "shadowed", "shadowed_store", "quoted", "none"),
+    )
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_new_missing_accessor_message(self, action, name_case):
+        class NamedProperty(property):
+            __name__ = "shadowed name"
+
+        class Holder:
+            pass
+
+        cls = NamedProperty if name_case.startswith("shadowed") else PropertyWithoutDoc
+
+        def getter(obj):
+            return obj
+
+        def fn(x):
+            p = cls(getter)
+            if name_case in ("renamed", "shadowed_store"):
+                p.__name__ = "custom name"
+            elif name_case == "quoted":
+                p.__name__ = "name's quote"
+            elif name_case == "none":
+                p.__name__ = None
+            try:
+                if action == "set":
+                    p.__set__(Holder(), x)
+                else:
+                    p.__delete__(Holder())
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("shadow_name", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_missing_accessor_name_mutation_guard(self, shadow_name):
+        class NamedProperty(property):
+            __name__ = "shadowed name"
+
+        cls = NamedProperty if shadow_name else PropertyWithoutDoc
+
+        class Holder:
+            prop = cls()
+
+        p = Holder.__dict__["prop"]
+
+        def fn(x):
+            try:
+                p.__set__(Holder(), x)
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x + 1), fn(x + 1))
+        self.assertEqual(counter.frame_count, 1)
+        property.__dict__["__name__"].__set__(p, "renamed property")
+        self.assertEqual(compiled(x + 2), fn(x + 2))
+        self.assertEqual(compiled(x + 3), fn(x + 3))
+        self.assertEqual(counter.frame_count, 2)
+        property.__dict__["__name__"].__delete__(p)
+        self.assertEqual(compiled(x + 4), fn(x + 4))
+        self.assertEqual(compiled(x + 5), fn(x + 5))
+        self.assertEqual(counter.frame_count, 3)
+        property.__dict__["__name__"].__set__(p, None)
+        self.assertEqual(compiled(x + 6), fn(x + 6))
+        self.assertEqual(compiled(x + 7), fn(x + 7))
+        self.assertEqual(counter.frame_count, 4)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_name_source_reconstruction(self):
+        p = PropertyWithoutDoc()
+        name = []
+        p.__name__ = name
+
+        def fn(x):
+            return x + 1, p.__name__
+
+        x = torch.ones(2)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual[0], x + 1)
+        self.assertIs(actual[1], name)
+
+    @parametrize("reinitialize", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
+    def test_getter_missing_doc(self, reinitialize):
+        class Getter:
+            __slots__ = ("__doc__",)
+
+            def __call__(self, obj):
+                return obj
+
+        getter = Getter()
+
+        def fn(x):
+            if reinitialize:
+                p = PropertyWithDoc(doc="original doc")
+                p.__init__(getter)
+            else:
+                p = PropertyWithDoc(getter)
+            return x + 1, p.__doc__, p
+
+        x = torch.ones(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual[:2], expected[:2])
+        self.assertEqual(actual[2].__dict__, expected[2].__dict__)
+        self.assertIs(actual[2].fget, getter)
+
+    @parametrize("change", ("rename", "shadow"))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_name_mro_guard(self, change):
+        class BaseProperty(property):
+            pass
+
+        class NamedProperty(property):
+            __name__ = "shadowed name"
+
+        class SubProperty(BaseProperty):
+            pass
+
+        def getter(obj):
+            return obj
+
+        def fn(x):
+            return x + 1, SubProperty(getter).__name__
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x + 1), fn(x + 1))
+        self.assertEqual(counter.frame_count, 1)
+        if change == "rename":
+            SubProperty.__name__ = "RenamedProperty"
+        else:
+            SubProperty.__bases__ = (NamedProperty,)
+        self.assertEqual(compiled(x + 2), fn(x + 2))
+        self.assertEqual(compiled(x + 3), fn(x + 3))
+        self.assertEqual(counter.frame_count, 1 if change == "rename" else 2)
+
+    @parametrize("action", ("get", "set"))
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_sourceless_custom_descriptor_graph_break(self, action):
+        class CustomProperty(property):
+            def __get__(self, obj, owner=None):
+                return obj.value + 1
+
+            def __set__(self, obj, value):
+                obj.value = value + 2
+
+        descriptor = CustomProperty()
+
+        def fn(x):
+            class Holder:
+                prop = descriptor
+
+            obj = Holder()
+            obj.value = x
+            if action == "set":
+                obj.prop = x
+                return obj.value
+            return obj.prop
+
+        kind = "getter" if action == "get" else "setter"
+        with self.assertRaisesRegex(
+            Unsupported, f"Property subclass {kind} without a source"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(2)), fn(torch.ones(2))
+        )
+
+    @parametrize("inherited", (False, True))
+    def test_plain_property_replacement_guard(self, inherited):
+        class Base:
+            pass
+
+        class Holder(Base):
+            pass
+
+        owner = Base if inherited else Holder
+        owner.prop = property(lambda obj: obj.value + 1)
+
+        def fn(x):
+            obj = Holder()
+            obj.value = x
+            return obj.prop
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x + 1), fn(x + 1))
+        self.assertEqual(counter.frame_count, 1)
+        owner.prop = property(lambda obj: obj.value * 2)
+        self.assertEqual(compiled(x + 2), fn(x + 2))
+        self.assertEqual(compiled(x + 3), fn(x + 3))
+        self.assertEqual(counter.frame_count, 2)
+
 
 if __name__ == "__main__":
     run_tests()
