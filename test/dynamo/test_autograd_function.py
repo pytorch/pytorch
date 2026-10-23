@@ -3948,6 +3948,22 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, dx)
         self.assertEqual(actual, torch.sin(x))
 
+    def test_custom_jvp_under_vmap(self):
+        """The tangent check must not dispatch _unpack_dual on a BatchedTensor."""
+
+        class F(SinWithZeroJvp):
+            generate_vmap_rule = True
+
+        x, dx = torch.randn(3, 4), torch.randn(3, 4)
+        opt_fn = torch.compile(torch.vmap(F.apply), backend="aot_eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), torch.sin(x))
+
+        def fn(x, dx):
+            return torch.func.jvp(torch.vmap(F.apply), (x,), (dx,))[1]
+
+        self.assertEqual(fn(x, dx), torch.zeros(3, 4))
+        self.assertEqual(torch.compile(fn, backend="aot_eager")(x, dx), fn(x, dx))
+
     def test_custom_jvp_after_forward_grad_re_enabled_at_same_level(self):
         """Re-enabling forward grad at an unchanged dual level must stay correct.
 

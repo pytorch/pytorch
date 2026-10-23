@@ -717,6 +717,13 @@ def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
     says nothing about whether this input carries a tangent. Level 0 is the only
     one there can be, since forward AD does not support nesting.
     """
+    from torch._C._functorch import (
+        get_unwrapped,
+        is_batchedtensor,
+        is_functorch_wrapped_tensor,
+    )
+    from torch.autograd.forward_ad import unpack_dual
+
     if tx.output.dual_level >= 0:
         return True
     has_dual = False
@@ -724,10 +731,14 @@ def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
     def visit(vt: VariableTracker) -> None:
         nonlocal has_dual
         if vt.is_tensor():
-            fake = vt.as_proxy().node.meta.get("example_value")
-            if isinstance(fake, torch.Tensor):
-                tangent = torch.autograd.forward_ad.unpack_dual(fake, level=0).tangent
-                has_dual = has_dual or tangent is not None
+            t = vt.as_proxy().node.meta.get("example_value")
+            # _unpack_dual has no batching rule and a BatchedTensor never holds
+            # the tangent (under jvp(vmap(f)) it is on an inner layer), so skip
+            # batched layers and check every other functorch layer.
+            while isinstance(t, torch.Tensor) and not has_dual:
+                if not is_batchedtensor(t):
+                    has_dual = unpack_dual(t, level=0).tangent is not None
+                t = get_unwrapped(t) if is_functorch_wrapped_tensor(t) else None
 
     VariableTracker.visit(visit, value)
     return has_dual
