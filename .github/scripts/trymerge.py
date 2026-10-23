@@ -775,7 +775,12 @@ def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> boo
     if author is None:
         return False
     author_login, author_url = author
-    if author_login == "facebook-github-bot":
+    # meta-codesync took the co-dev auto-merge over from facebook-github-tools and
+    # only posts it once the internal diff has landed.  Without the waiver, the
+    # merge fails whenever CodeSync recomputes its internal-changes check before
+    # Phabricator marks the diff closed (#201671).  Matched on login, like
+    # CODEV_MERGE_BOT_LOGINS: a "[bot]" login can't be forged.
+    if author_login in ("facebook-github-bot", "meta-codesync[bot]"):
         return True
     # facebook-github-tools is a GitHub App; identify by its app URL.
     return author_url == "https://github.com/apps/facebook-github-tools"
@@ -3382,8 +3387,17 @@ def merge(
             native_stack=native_stack,
         )
 
+    # The rule checks below raise on has_internal_changes() unless told to skip it,
+    # so pass the same waiver merge_into computes for itself.
+    skip_internal_checks = can_skip_internal_checks(pr, comment_id)
+
     # Check for approvals
-    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+    find_matching_merge_rule(
+        pr,
+        repo,
+        skip_mandatory_checks=True,
+        skip_internal_checks=skip_internal_checks,
+    )
 
     ensure_mergeable_labels(pr, comment_id, dry_run)
 
@@ -3431,7 +3445,10 @@ def merge(
             ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(
-                    pr, repo, ignore_current_checks=ignore_current_checks
+                    pr,
+                    repo,
+                    skip_internal_checks=skip_internal_checks,
+                    ignore_current_checks=ignore_current_checks,
                 )
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:

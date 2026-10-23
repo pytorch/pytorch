@@ -613,12 +613,28 @@ class TestTryMerge(TestCase):
         )
         self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
 
-    def test_codev_bot_list_does_not_widen_internal_checks(self, *args: Any) -> None:
-        "Auto-labeling meta-codesync must not also waive the Phabricator guard."
+    def test_meta_codesync_merge_skips_internal_checks(self, *args: Any) -> None:
+        "meta-codesync merges only after the diff landed, so it waives the guard."
         pr = self._pr_with_merge_comment(
             "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
         )
-        self.assertTrue(is_bot_initiated_codev_merge(pr, 123))
+        self.assertTrue(can_skip_internal_checks(pr, 123))
+        # author_url is None for comments outside the prefetched window.
+        no_url = self._pr_with_merge_comment("meta-codesync[bot]")
+        self.assertTrue(can_skip_internal_checks(no_url, 123))
+
+    def test_edited_meta_codesync_merge_keeps_internal_checks(self, *args: Any) -> None:
+        "An edited comment can't be trusted to name its real author."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]",
+            "https://github.com/apps/meta-codesync",
+            editor_login="some-human",
+        )
+        self.assertFalse(can_skip_internal_checks(pr, 123))
+
+    def test_lookalike_login_keeps_internal_checks(self, *args: Any) -> None:
+        "A user account named like the bot, without the [bot] suffix, is not it."
+        pr = self._pr_with_merge_comment("meta-codesync")
         self.assertFalse(can_skip_internal_checks(pr, 123))
 
     def test_is_bot_initiated_codev_merge_without_author_url(self, *args: Any) -> None:
@@ -2683,6 +2699,44 @@ class TestGreenlightWaitPlumbing(TestCase):
             skip_mandatory_checks=True,
         )
         self.assertIsNone(pr.merge_into.call_args.kwargs["greenlight_wait"])
+
+
+@mock.patch("trymerge.gh_add_labels")
+@mock.patch("trymerge.check_for_sev")
+@mock.patch("trymerge.post_starting_merge_comment")
+@mock.patch("trymerge.ensure_mergeable_labels")
+@mock.patch("trymerge.find_matching_merge_rule")
+@mock.patch("trymerge.get_classifications", return_value={})
+@mock.patch("trymerge.GitHubPR")
+class TestMergeInternalChecksWaiver(TestCase):
+    """merge() runs find_matching_merge_rule before merge_into; both must get the
+    waiver, or a trusted co-dev merge is refused there (#201671)."""
+
+    def _merge(self, mock_pr_cls: Any, mock_rule: Any, can_skip: bool) -> list[Any]:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = 1
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.get_labels.return_value = []
+        pr.is_ghstack_pr.return_value = False
+        pr.get_checkrun_conclusions.return_value = {}
+        mock_pr_cls.return_value = pr
+        with mock.patch("trymerge.can_skip_internal_checks", return_value=can_skip):
+            merge(pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True)
+        return [
+            call.kwargs.get("skip_internal_checks") for call in mock_rule.call_args_list
+        ]
+
+    def test_trusted_comment_waives_every_rule_check(
+        self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
+    ) -> None:
+        self.assertEqual(self._merge(mock_pr_cls, mock_rule, True), [True, True])
+
+    def test_other_comment_keeps_every_rule_check(
+        self, mock_pr_cls: Any, _classifications: Any, mock_rule: Any, *args: Any
+    ) -> None:
+        self.assertEqual(self._merge(mock_pr_cls, mock_rule, False), [False, False])
 
 
 class TestGreenlightGuardWiring(TestCase):
