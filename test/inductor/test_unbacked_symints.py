@@ -18,18 +18,72 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     skipCPUIf,
     skipCUDAIf,
     skipGPUIf,
 )
 from torch.testing._internal.common_utils import parametrize, skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.printers import PythonPrinter
 
 
 class TestUnbackedSymints(InductorTestCase):
+    @onlyCPU
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @dynamo_config.patch(capture_scalar_outputs=True)
+    @inductor_config.patch(
+        cpp_wrapper=True, scalar_asserts=True, unsafe_skip_scalar_range_asserts=False
+    )
+    def test_cpp_wrapper_unsigned_runtime_bound(self, device):
+        x = torch.arange(4, dtype=torch.float32)
+        for reject_upper_half in (True, False):
+
+            def fn(value, x):
+                scalar = value.clone().item()
+                if reject_upper_half:
+                    torch._check(scalar < 2**63)
+                else:
+                    torch._check(scalar != 2**63)
+                return x + 1
+
+            compiled = torch.compile(fn, fullgraph=True)
+            valid = (0, 7, 2**63 - 1)
+            invalid = (2**63,)
+            if reject_upper_half:
+                invalid += (2**64 - 1,)
+            else:
+                valid += (2**64 - 1,)
+            for scalar in valid:
+                value = torch.tensor(scalar, dtype=torch.uint64)
+                self.assertEqual(compiled(value, x), fn(value, x))
+            for scalar in invalid:
+                with self.assertRaisesRegex(RuntimeError, r"Expected (?:Ne|u\d+)"):
+                    compiled(torch.tensor(scalar, dtype=torch.uint64), x)
+
+    @onlyCPU
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @dynamo_config.patch(capture_scalar_outputs=True)
+    @inductor_config.patch(
+        cpp_wrapper=True, scalar_asserts=True, unsafe_skip_scalar_range_asserts=False
+    )
+    def test_cpp_wrapper_oversized_runtime_bounds(self, device):
+        def fn(value, x):
+            scalar = value.sum().item()
+            torch._check(scalar >= 0)
+            torch._check(scalar <= 2**64)
+            return x + scalar
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = torch.arange(4, dtype=torch.float32)
+        for scalar in (7, 0, 2**63 - 1):
+            value = torch.tensor([scalar, 0], dtype=torch.int64)
+            self.assertEqual(compiled(value, x), fn(value, x))
+        with self.assertRaisesRegex(RuntimeError, "Expected .* >= 0"):
+            compiled(torch.tensor([-1, 0], dtype=torch.int64), x)
+
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
