@@ -2266,6 +2266,23 @@ class AbstractLargeCommTest:
         ]
         self.assertEqual(output_tensor_list, expected)
 
+    def _test_new_group_after_local_sync_subset(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        # Ranks 2 and 3 skip this call, which use_local_synchronization allows.
+        if self.rank in (0, 1):
+            dist.new_group([0, 1], use_local_synchronization=True)
+
+        pg = dist.new_group(timeout=timedelta(seconds=10))
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor, group=pg)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
