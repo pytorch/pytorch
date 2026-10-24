@@ -48,8 +48,10 @@ from torch._prims_common import (
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
+    guard_int,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    statically_known_true,
     SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -481,6 +483,12 @@ def _register_foreach_lowering(
     return wrapped
 
 
+def _expr_to_symint(a: Any) -> Any:
+    if isinstance(a, sympy.Expr) and a.is_integer:
+        return V.graph.sizevars.to_symint_or_int(a)
+    return a
+
+
 def _register_lowering(
     aten_fn,
     decomp_fn: Callable[..., Any],
@@ -488,6 +496,7 @@ def _register_lowering(
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None,
     convert_input_to_bool: bool,
     lowering_dict: dict[Callable[..., Any] | str, Callable[..., Any]],
+    symint_args: bool = False,
 ):
     """
     Add a lowering to lowerings dict
@@ -498,10 +507,15 @@ def _register_lowering(
         broadcast: True to apply broadcasting to tensor inputs
         type_promotion_kind: kind of type promotion applied to tensor inputs, `None` means no type promotion
         convert_input_to_bool: some logical ops require inputs are converted to bool
+        symint_args: decomp_fn receives integer scalars as SymInt instead of sympy.Expr,
+            and any SymInt it returns is converted back to sympy.Expr
     """
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
+        # port sympy.Expr to SymInt
+        to_arg = _expr_to_symint if symint_args else convert_symint_to_expr
+        args, kwargs = pytree.tree_map(to_arg, (args, kwargs))
         args: list[Any] = list(args)
         kwargs: dict[str, Any] = dict(kwargs)
         unpacked = False
@@ -525,6 +539,8 @@ def _register_lowering(
             args = [args]
 
         out = decomp_fn(*args, **kwargs)
+        if symint_args:
+            out = pytree.tree_map(convert_symint_to_expr, out)
         validate_ir(out)
 
         return out
@@ -542,6 +558,7 @@ def register_lowering(
     | None = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
     lowering_dict=lowerings,
+    symint_args=False,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
@@ -553,6 +570,7 @@ def register_lowering(
         type_promotion_kind=type_promotion_kind,
         convert_input_to_bool=convert_input_to_bool,
         lowering_dict=lowering_dict,
+        symint_args=symint_args,
     )
 
 
@@ -2680,7 +2698,7 @@ def select(x, dim, idx):
     )
 
 
-@register_lowering(aten.split, type_promotion_kind=None)
+@register_lowering(aten.split, type_promotion_kind=None, symint_args=True)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     sizes_ = sizes
@@ -2688,23 +2706,22 @@ def split(x, sizes, dim=0):
     # If sizes is an integer (or a SymInt), we turn it into a list of sizes
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
-        sizevars = V.graph.sizevars
-        if sizevars.statically_known_lt(sizes, 0):
+        if statically_known_true(sizes < 0):
             raise RuntimeError(
                 f"split expects split_size be non-negative, but got split_size={sizes}"
             )
 
-        x_size = x.get_size()[dim]
-        if sizevars.statically_known_equals(x_size, 0):
+        x_size = V.graph.sizevars.to_symint_or_int(x.get_size()[dim])
+        if statically_known_true(x_size == 0):
             return [slice_(x, dim, 0, 0, clamp=False)]
 
-        if sizevars.statically_known_equals(sizes, 0):
+        if statically_known_true(sizes == 0):
             raise RuntimeError(
                 "split_size can only be 0 if dimension size is 0, "
                 f"but got dimension size of {x_size}"
             )
 
-        chunks = sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+        chunks = guard_int((x_size + sizes - 1) // sizes)
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -2793,11 +2810,10 @@ def _validate_dim(x, dim, offset=0):
     return dim
 
 
-@register_lowering(aten.glu)
+@register_lowering(aten.glu, symint_args=True)
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
-    # TODO: don't guard on static shape here
-    new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.to_symint_or_int(x.get_size()[dim]) // 2
     # no need to clamp, index is int based on input size
     a = slice_(x, dim, 0, new_len, clamp=False)
     b = slice_(x, dim, new_len, new_len * 2, clamp=False)

@@ -9014,6 +9014,18 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    def test_glu_dynamic_no_recompile(self):
+        def fn(x):
+            return aten.glu(x * 2, -1)
+
+        cnts = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=cnts, dynamic=True)
+        for n in (8, 10, 12):
+            x = torch.randn(3, n, device=self.device)
+            self.assertEqual(fn(x), compiled(x))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_unsigned_constant_tensors(self):
         def fn(x):
             c = torch.tensor(7, dtype=torch.uint8)
