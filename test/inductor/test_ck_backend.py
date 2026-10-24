@@ -523,6 +523,153 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
+    @contextlib.contextmanager
+    def _offered_ck_conv_ops(self):
+        """Collects every CK conv instance offered to autotuning in the block."""
+        from torch._inductor.codegen.rocm.ck_conv_template import (
+            CKGroupedConvFwdTemplate,
+        )
+
+        offered: list = []
+        original_gen_ops = CKGroupedConvFwdTemplate.gen_ops
+
+        def gen_ops(template):
+            ops = original_gen_ops(template)
+            offered.extend(ops)
+            return ops
+
+        with patch.object(CKGroupedConvFwdTemplate, "gen_ops", gen_ops):
+            yield offered
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    @parametrize(
+        "max_autotune_conv_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATEN,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
+    @parametrize(
+        "conv_params",
+        (((3, 3, 3), 1, 0, 1), ((3, 5, 7), 2, 1, 3)),
+        name_fn=lambda p: "default" if p[1:] == (1, 0, 1) else "strided",
+    )
+    def test_max_autotune_conv3d(self, max_autotune_conv_backends, conv_params):
+        """
+        ck4inductor ships only 2D instances; CKGroupedConvFwdTemplate re-stamps
+        the channels-last arm of those for 3D. The strided case uses a
+        non-cubic filter and non-default stride/padding/dilation so the spatial
+        size args cannot be permuted or sourced from the wrong field unnoticed.
+        """
+        kernel_size, stride, padding, dilation = conv_params
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+
+        x = torch.randn(1, 8, 32, 64, 64, **tensor_options).to(
+            memory_format=torch.channels_last_3d
+        )
+        w = torch.randn(64, 8, *kernel_size, **tensor_options).to(
+            memory_format=torch.channels_last_3d
+        )
+
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": max_autotune_conv_backends,
+                    "compile_threads": 4,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+            from torch._inductor.utils import run_and_get_code
+
+            @torch.compile(dynamic=False)
+            def conv3d(x, w):
+                return torch.conv3d(
+                    x, w, stride=stride, padding=padding, dilation=dilation
+                )
+
+            Y_eager = torch.conv3d(
+                x, w, stride=stride, padding=padding, dilation=dilation
+            )
+            with self._offered_ck_conv_ops() as offered:
+                Y_compiled, codes = run_and_get_code(conv3d, x, w)
+
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+
+            # ATen can win the benchmark in fallback mode, so assert CK was
+            # offered rather than that it was selected.
+            self.assertGreater(len(offered), 0)
+            if max_autotune_conv_backends == "CK":
+                FileCheck().check("async_compile.rocm").run(codes[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ, {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"}
+    )
+    @parametrize("case", ("contiguous", "grouped"))
+    def test_max_autotune_conv3d_skips_ck(self, case):
+        """
+        The two rank-3 shapes CK must decline. Contiguous, because only the
+        channels-last arm is re-stamped for 3D -- CK's NGCDHW path
+        static_asserts on Filter1x1Stride1Pad0 and cannot compile under the
+        Default specialization. Grouped, because size_args reports total rather
+        than per-group channel counts, which faults the device at rank 3.
+
+        Asserts no CK instance was *offered*. Checking the generated code
+        instead would also pass when CK was offered and merely lost the
+        benchmark, which is the failure this is meant to catch.
+        """
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+        groups = 2 if case == "grouped" else 1
+
+        x = torch.randn(1, 8, 32, 64, 64, **tensor_options)
+        w = torch.randn(64, 8 // groups, 3, 3, 3, **tensor_options)
+        if case == "grouped":
+            x = x.to(memory_format=torch.channels_last_3d)
+            w = w.to(memory_format=torch.channels_last_3d)
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": "ATEN,CK",
+                    "compile_threads": 4,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv3d(x, w):
+                return torch.conv3d(x, w, groups=groups)
+
+            Y_eager = torch.conv3d(x, w, groups=groups)
+            with self._offered_ck_conv_ops() as offered:
+                Y_compiled = conv3d(x, w)
+
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+            self.assertEqual(offered, [])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, _test_env)
+    @parametrize(
+        "max_autotune_gemm_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
