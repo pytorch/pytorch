@@ -3039,10 +3039,14 @@ class TestDistributions(DistributionsTestCase):
         cov_diag = torch.randn(5).abs()
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
-        empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
-        empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.02, rtol=0)
+        num_samples = samples.shape[0]
+        # Check each moment to within 5 standard errors (Gaussian formulas)
+        # instead of a fixed atol, which ignores the scale of the variance.
+        mean_se = (d.variance / num_samples).sqrt()
+        var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
+        zeros = torch.zeros_like(d.mean)
+        self.assertEqual((samples.mean(0) - d.mean) / mean_se, zeros, atol=5, rtol=0)
+        self.assertEqual((samples.var(0) - d.variance) / var_se, zeros, atol=5, rtol=0)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -3273,10 +3277,14 @@ class TestDistributions(DistributionsTestCase):
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
-        empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
-        empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
+        num_samples = samples.shape[0]
+        # Check each moment to within 5 standard errors (Gaussian formulas)
+        # instead of a fixed atol, which ignores the scale of the variance.
+        mean_se = (d.variance / num_samples).sqrt()
+        var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
+        zeros = torch.zeros_like(d.mean)
+        self.assertEqual((samples.mean(0) - d.mean) / mean_se, zeros, atol=5, rtol=0)
+        self.assertEqual((samples.var(0) - d.variance) / var_se, zeros, atol=5, rtol=0)
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     @expectedFailureMPS
