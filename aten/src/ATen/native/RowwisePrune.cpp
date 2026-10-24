@@ -36,9 +36,9 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
                              at::ScalarType::BFloat16,
                              weights.scalar_type(),
                             "rowwise_prune_helper", [&]() {
-    auto* pruned_2d_tensor_data = pruned_2d_tensor.data_ptr<scalar_t>();
+    auto* pruned_2d_tensor_data = pruned_2d_tensor.mutable_data_ptr<scalar_t>();
     auto compressed_indices_mapping_data =
-        compressed_indices_mapping.data_ptr<input_t>();
+        compressed_indices_mapping.mutable_data_ptr<input_t>();
     auto weights_data = weights.const_data_ptr<scalar_t>();
     int last_row_kept = 0;
     for (const auto i : c10::irange(mask.numel())) {
