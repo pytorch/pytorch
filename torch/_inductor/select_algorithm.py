@@ -3861,10 +3861,7 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
-        # Bind to a local: entering the dynamic_dims_mask context below drops
-        # the narrowing on self.bmreq, since a context manager could reassign it.
-        bmreq = self.bmreq
-        if bmreq is None:
+        if self.bmreq is None:
             raise AssertionError("self.bmreq must not be None")
 
         from . import tunableop
@@ -3924,6 +3921,11 @@ class ExternKernelCaller(ChoiceCaller):
         return self._benchmark_inline(args, out)
 
     def _benchmark_inline(self, args, out):
+        # Bind to a local: entering the dynamic_dims_mask context below drops
+        # the narrowing on self.bmreq, since a context manager could reassign it.
+        bmreq = self.bmreq
+        if bmreq is None:
+            raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         mask = self.tunable_dyn_dims_mask

@@ -89,18 +89,20 @@ def is_tunableop_gemm(choice_name: str) -> bool:
 # ExternKernelChoice names the ladder and worker routing cover. _int_mm /
 # sparse semi-structured variants are not hipBLASLt-tunable.
 _TUNABLEOP_GEMM_CHOICES = frozenset(
-    {
-        "mm",
-        "mm_dtype",
-        "addmm",
-        "addmm_dtype",
-        "bmm",
-        "bmm_dtype",
-        "baddbmm",
-        "bias_addmm",
-        "_scaled_mm",
-        "_scaled_mm_v2",
-    }
+    OrderedSet(
+        [
+            "mm",
+            "mm_dtype",
+            "addmm",
+            "addmm_dtype",
+            "bmm",
+            "bmm_dtype",
+            "baddbmm",
+            "bias_addmm",
+            "_scaled_mm",
+            "_scaled_mm_v2",
+        ]
+    )
 )
 
 

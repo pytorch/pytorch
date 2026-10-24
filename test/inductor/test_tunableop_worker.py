@@ -551,8 +551,6 @@ class ExternRoutingTest(TestCase):
         self.assertEqual(job.dyn_dims_mask, (True, False, False, False))
 
     def test_non_gemm_candidate_stays_inline(self):
-        from torch._inductor import tunableop as _top
-
         caller, out = _extern_caller("convolution")
         with (
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
