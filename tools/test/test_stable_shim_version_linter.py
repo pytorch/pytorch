@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -98,6 +99,23 @@ index 365c954dbe7..c5fcf7a09cf 100644
             self.assertEqual(
                 result, {18, 19, 20, 21, 22, 23, 24, 49, 50, 51, 52, 53, 54}
             )
+
+    def test_get_added_lines_retries_when_git_diff_times_out(self):
+        """A `git diff` slower than the short local timeout must be retried, not fatal."""
+        simulated_diff = """@@ -15,6 +15,7 @@
++AOTI_TORCH_EXPORT int new_function();
+"""
+
+        def fake_run(cmd, **kwargs):
+            # Only the short, no-lazy-fetch attempt times out.
+            if cmd[:2] == ["git", "diff"] and kwargs["timeout"] == 5:
+                raise subprocess.TimeoutExpired(cmd, 5)
+            return MagicMock(returncode=0, stdout=simulated_diff)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = get_added_lines("torch/csrc/stable/c/shim.h")
+
+        self.assertEqual(result, {15})
 
     def test_get_current_version(self):
         """Test that we can get the current version from version.txt."""
