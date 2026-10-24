@@ -194,6 +194,28 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
 # are NOT integers.
 
 
+_SYMPY_HAS_INTEGER_QUOTIENT_BUG = TorchVersion(sympy.__version__) < TorchVersion(
+    "1.15.0"
+)
+
+
+def _is_integer_quotient(quotient: sympy.Expr) -> bool:
+    """
+    Returns True if sympy proves that quotient (e.g. p / q) is an integer.
+
+    sympy < 1.15 can wrongly report a product divided by an even integer that
+    is not a power of two as an integer when the product has an even factor
+    other than a number, e.g. Max(2*x, 4) / 6 or 2**x * y / 6, see
+    https://github.com/sympy/sympy/pull/28442. On those versions we only
+    trust is_integer when the quotient has no non-integer rational in it.
+    """
+    if quotient.is_integer is not True:
+        return False
+    if _SYMPY_HAS_INTEGER_QUOTIENT_BUG:
+        return all(r.q == 1 for r in quotient.atoms(sympy.Rational))
+    return True
+
+
 # TODO: In Triton, // rounds to zero, but in Python, it is floor division.
 # When we can prove both arguments are non-negative, we should just have a
 # GenericFloorDiv (name pending) which can codegen efficiently in Python/C,
@@ -281,21 +303,7 @@ class FloorDiv(sympy.Function):
             terms: list[sympy.Expr] = []
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
-
-                # This is a sympy bug fixed in https://github.com/sympy/sympy/pull/28442
-                # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
-                # FloorDiv should not allow that as output. see
-                quotient_is_integer = None
-                if isinstance(quotient, sympy.Mul) and TorchVersion(
-                    sympy.__version__
-                ) < TorchVersion("1.15.0"):
-                    rationals = quotient.atoms(sympy.Rational)
-                    all_rationals_ints = all(r.q == 1 for r in rationals)
-                    quotient_is_integer = quotient.is_integer and all_rationals_ints
-                else:
-                    quotient_is_integer = quotient.is_integer
-
-                if quotient_is_integer:
+                if _is_integer_quotient(quotient):
                     terms.append(term)
                     quotients += quotient
 
@@ -459,7 +467,7 @@ class PythonMod(sympy.Function):
 
         # If p is a multiple of q.
         r = p / q
-        if r.is_integer:
+        if _is_integer_quotient(r):
             return S.Zero
 
         # If p < q and its ratio is positive, then:
@@ -470,7 +478,9 @@ class PythonMod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
-        if sympy.Mod(p, q) == 0:
+        # sympy.Mod runs the same r.is_integer test, so skip it when we just
+        # declined to trust that test.
+        if r.is_integer is not True and sympy.Mod(p, q) == 0:
             return S.Zero
 
         return None
@@ -533,7 +543,7 @@ class Mod(sympy.Function):
 
         # If p is a multiple of q.
         r = p / q
-        if r.is_integer:
+        if _is_integer_quotient(r):
             return S.Zero
 
         # If p < q and its ratio is positive, then:
