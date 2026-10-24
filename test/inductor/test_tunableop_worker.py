@@ -9,9 +9,9 @@ from torch._inductor import tunableop
 from torch._inductor.autotune_process import _TestBenchmarkRequest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    run_tests,
     skipIfWindows,
     TestCase,
-    run_tests,
 )
 
 
@@ -230,9 +230,7 @@ class TunableOpWorkerTest(TestCase):
         with (
             mock.patch("torch.cuda.current_device", return_value=1),
             mock.patch("torch.cuda.tunable.get_filename", return_value=""),
-            mock.patch.dict(
-                "os.environ", {"PYTORCH_TUNABLEOP_FILENAME": "env.csv"}
-            ),
+            mock.patch.dict("os.environ", {"PYTORCH_TUNABLEOP_FILENAME": "env.csv"}),
         ):
             tunableop.submit(job)
             self.assertEqual(job.filename, "env1.csv")
@@ -246,9 +244,7 @@ class TunableOpWorkerTest(TestCase):
         job = tunableop.BenchmarkJob(None, tuning=False)
         with (
             mock.patch("torch.cuda.current_device", return_value=0),
-            mock.patch(
-                "torch.cuda.tunable.get_filename", return_value="parent.csv"
-            ),
+            mock.patch("torch.cuda.tunable.get_filename", return_value="parent.csv"),
         ):
             tunableop.submit(job)
             self.assertEqual(job.filename, "parent.csv")
@@ -290,9 +286,8 @@ class BenchmarkJobCallTest(TestCase):
         job.filename = "w.csv"
         with (
             mock.patch(
-                "torch.cuda.set_device", side_effect=lambda d: calls.append(
-                    ("set_device", d)
-                ),
+                "torch.cuda.set_device",
+                side_effect=lambda d: calls.append(("set_device", d)),
             ),
             mock.patch("torch.cuda.tunable", FakeTunable()),
         ):
@@ -362,9 +357,7 @@ class TunableopModeValidationTest(TestCase):
     def test_invalid_mode_warns_and_disables(self):
         tunableop._mode_warned = False
         try:
-            with mock.patch.object(
-                tunableop.config, "aten_tunableop_mode", "Tune"
-            ):
+            with mock.patch.object(tunableop.config, "aten_tunableop_mode", "Tune"):
                 with self.assertLogs(tunableop.log, level="WARNING") as logs:
                     self.assertFalse(tunableop.is_tune_mode())
                     self.assertFalse(tunableop.is_reuse_mode())
@@ -373,9 +366,7 @@ class TunableopModeValidationTest(TestCase):
                 any("TORCHINDUCTOR_ATEN_TUNABLEOP_MODE" in m for m in logs.output)
             )
             # Warns only once: the second invalid value logs nothing.
-            with mock.patch.object(
-                tunableop.config, "aten_tunableop_mode", "bogus"
-            ):
+            with mock.patch.object(tunableop.config, "aten_tunableop_mode", "bogus"):
                 with self.assertNoLogs(tunableop.log, level="WARNING"):
                     tunableop.is_enabled()
         finally:
@@ -385,9 +376,7 @@ class TunableopModeValidationTest(TestCase):
         tunableop._mode_warned = False
         try:
             for mode in ("off", "tune", "reuse"):
-                with mock.patch.object(
-                    tunableop.config, "aten_tunableop_mode", mode
-                ):
+                with mock.patch.object(tunableop.config, "aten_tunableop_mode", mode):
                     with self.assertNoLogs(tunableop.log, level="WARNING"):
                         tunableop.is_enabled()
         finally:
@@ -486,9 +475,7 @@ class TunableOpRocmWorkerTest(TestCase):
             torch.cuda.tunable.set_filename(results_file, False)
             try:
                 torch.cuda.tunable.enable(False)
-                job = tunableop.BenchmarkJob(
-                    _TestTunableMatmulRequest(), tuning=True
-                )
+                job = tunableop.BenchmarkJob(_TestTunableMatmulRequest(), tuning=True)
                 with mock.patch(
                     "torch.cuda.current_device",
                     return_value=torch.cuda.current_device(),
@@ -502,6 +489,8 @@ class TunableOpRocmWorkerTest(TestCase):
             with open(results_file) as f:
                 content = f.read()
             self.assertIn("GemmTunableOp", content)
+
+
 def _extern_caller(choice_name="mm", cuda_out=True):
     """An ExternKernelCaller stand-in for routing tests (no GPU, no bmreq build)."""
     from types import SimpleNamespace
@@ -519,8 +508,8 @@ def _extern_caller(choice_name="mm", cuda_out=True):
     caller._benchmark_with_cudagraphs = False
     # spec autospecs the new _benchmark_inline helper as a Mock; make it run
     # the real inline body so routing tests observe real return values.
-    caller._benchmark_inline = lambda args, out: sa.ExternKernelCaller._benchmark_inline(
-        caller, args, out
+    caller._benchmark_inline = (
+        lambda args, out: sa.ExternKernelCaller._benchmark_inline(caller, args, out)
     )
     out = mock.Mock()
     out.is_cuda = cuda_out
@@ -550,15 +539,9 @@ class ExternRoutingTest(TestCase):
 
         with (
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
-            mock.patch(
-                "torch._inductor.tunableop.is_tune_mode", return_value=True
-            ),
-            mock.patch(
-                "torch._inductor.tunableop.is_reuse_mode", return_value=False
-            ),
-            mock.patch(
-                "torch._inductor.tunableop.submit", side_effect=_fake_submit
-            ),
+            mock.patch("torch._inductor.tunableop.is_tune_mode", return_value=True),
+            mock.patch("torch._inductor.tunableop.is_reuse_mode", return_value=False),
+            mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
         ):
             self.assertEqual(self._benchmark(caller, out), 1.5)
         job = seen["job"]
@@ -625,17 +608,13 @@ class ExternRoutingTest(TestCase):
             proc.result = bad
             with (
                 mock.patch("torch.cuda.current_device", return_value=0),
-                mock.patch(
-                    "torch.cuda.tunable.get_filename", return_value="t.csv"
-                ),
+                mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
                 mock.patch(
                     "torch._inductor.autotune_process.TuningProcess",
                     return_value=proc,
                 ),
             ):
-                outcome = tunableop.submit(
-                    tunableop.BenchmarkJob(None, tuning=False)
-                )
+                outcome = tunableop.submit(tunableop.BenchmarkJob(None, tuning=False))
             self.assertEqual(outcome.status, "error", f"value={bad!r}")
             self.assertIsNone(outcome.time)
         tunableop._worker = None
