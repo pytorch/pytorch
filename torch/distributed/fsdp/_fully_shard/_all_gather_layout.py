@@ -258,6 +258,9 @@ class DefaultAllGatherLayout(AllGatherLayout):
             each rank's chunk holds ``split_sizes[i]`` elements (bytes for a uint8
             ``output``) of ``outputs[i]``, viewed as ``(outer_sizes[i], -1)`` and
             concatenated along dim 1, filling a prefix of a larger ``outputs[i]``.
+            When this layout pads each rank's chunk up to the comm's alignment,
+            ``outputs`` ends with a scratch output of outer size 1 that takes
+            the padding.
             It may only write ``outputs`` and keep none of its arguments; see
             :func:`torch.distributed.fsdp.experimental.all_gather_output_fn_with_native_copy`
             for a native implementation.
@@ -275,6 +278,11 @@ class DefaultAllGatherLayout(AllGatherLayout):
     def prepare_output(self, input_metadata: AllGatherInputMetadata) -> None:
         """Return None: this layout always uses rank-major input and output."""
         return None
+
+    def rank_stride(self, input_numel: int, alignment: int) -> int:
+        """Pad each rank's chunk up to the comm's alignment; the copy-out copies
+        the padding into a scratch output."""
+        return (input_numel + alignment - 1) // alignment * alignment
 
     def copy_in(
         self,

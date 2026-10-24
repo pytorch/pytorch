@@ -10,6 +10,9 @@ on a fully sharded model::
     )
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
+``NativeReduceScatterInputLayout()`` installs the same reduce-scatter copy-in as
+a layout, which also pads each rank's row to the comm's alignment.
+
 The native CUDA copies write contiguous tensors without intermediate buffers and
 can improve performance for wide tensors with small ``outer_size`` (the product of
 dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
@@ -33,8 +36,14 @@ import torch
 from torch.distributed.fsdp._fully_shard._all_gather_layout import (
     DefaultAllGatherLayout,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGatherInput,
+    ReduceScatterInputLayout,
+    ReduceScatterInputMetadata,
+    ReduceScatterInputPlan,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _append_zero_tail,
     _default_all_gather_output_fn,
 )
 
@@ -42,6 +51,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
 __all__ = [
     "AllGatherInput",
     "DefaultAllGatherLayout",
+    "NativeReduceScatterInputLayout",
     "all_gather_output_fn_with_native_copy",
     "reduce_scatter_input_fn_with_native_copy",
 ]
@@ -101,6 +111,42 @@ def reduce_scatter_input_fn_with_native_copy(
     Noncontiguous gradients sharded on a nonzero dim use the existing
     chunk-and-concatenate reorder.
     """
+    return _native_copy_in(unsharded_grads, shard_dims, world_size, 0)
+
+
+class NativeReduceScatterInputLayout(ReduceScatterInputLayout):
+    r""":func:`reduce_scatter_input_fn_with_native_copy` as a reduce-scatter
+    input layout, which also pads each rank's row with zeros up to the comm's
+    alignment. Install with
+    :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`.
+    """
+
+    def prepare(
+        self,
+        unsharded_grads: list[torch.Tensor],
+        metadata: ReduceScatterInputMetadata,
+    ) -> ReduceScatterInputPlan:
+        shards_numel = sum(metadata.padded_sharded_numels)
+        alignment = metadata.rank_stride_alignment
+        row_numel = (shards_numel + alignment - 1) // alignment * alignment
+        copy_in = _native_copy_in(
+            unsharded_grads,
+            metadata.shard_dims,
+            metadata.world_size,
+            row_numel - shards_numel,
+        )
+        return ReduceScatterInputPlan(row_numel=row_numel, copy_in=copy_in)
+
+
+NativeReduceScatterInputLayout.__module__ = "torch.distributed.fsdp.experimental"
+
+
+def _native_copy_in(
+    unsharded_grads: list[torch.Tensor],
+    shard_dims: list[int],
+    world_size: int,
+    padding: int,
+) -> Callable[[torch.Tensor], None]:
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
@@ -113,12 +159,16 @@ def reduce_scatter_input_fn_with_native_copy(
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
 
     def copy_in(output: torch.Tensor) -> None:
+        grads, leading_dims = unsharded_grads, num_leading_dims
+        if padding:
+            grads = _append_zero_tail(grads, output, padding)
+            leading_dims = [*leading_dims, 0]
         torch.ops.fsdp.chunk_cat_mixed_dtype(
-            unsharded_grads,
+            grads,
             dim=0,
             num_chunks=world_size,
             out=output.view(world_size, -1),
-            num_leading_dims=num_leading_dims,
+            num_leading_dims=leading_dims,
         )
 
     return copy_in
