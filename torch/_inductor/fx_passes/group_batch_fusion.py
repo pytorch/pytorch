@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import logging
 import operator
 from collections import OrderedDict
@@ -10,7 +11,7 @@ import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -529,15 +530,14 @@ class BatchLinearLHSFusion(BatchFusion):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+            weight_val = weight.meta["example_value"]
+            if not statically_known_true(weight_val.shape[0] > 0):
+                return None
             # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
             # fuse() calls torch.cat on the weight example_values, which fails for
             # subclasses lacking aten.cat dispatch.  Probe it here so subclasses that
             # do implement aten.cat (e.g. future torchao versions) still get fused.
-            weight_val = weight.meta.get("example_value", weight.meta.get("val"))
-            if weight_val is not None and type(weight_val) not in (
-                torch.Tensor,
-                FakeTensor,
-            ):
+            if type(weight_val) not in (torch.Tensor, FakeTensor):
                 try:
                     _ = torch.cat([weight_val[:1], weight_val[:1]], dim=0)
                 except (RuntimeError, TypeError):
@@ -545,6 +545,16 @@ class BatchLinearLHSFusion(BatchFusion):
             bias_tensor = None
             if bias is not None:
                 bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
+                if (
+                    bias_tensor is None
+                    or bias_tensor.ndim != 1
+                    or not statically_known_true(
+                        bias_tensor.shape[0] == weight_val.shape[0]
+                    )
+                ):
+                    return None
+            if _has_layout_sensitive_user(node):
+                return None
             bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
             group_key = ("batch_linear_lhs", bias_dim, input)
         else:
@@ -623,6 +633,230 @@ class BatchLinearLHSFusion(BatchFusion):
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
+
+
+_OPERATOR_TO_ATEN = {
+    operator.add: torch.ops.aten.add,
+    operator.sub: torch.ops.aten.sub,
+    operator.mul: torch.ops.aten.mul,
+    operator.truediv: torch.ops.aten.div,
+    operator.neg: torch.ops.aten.neg,
+    operator.pow: torch.ops.aten.pow,
+    operator.matmul: torch.ops.aten.matmul,
+}
+
+
+@functools.lru_cache(None)
+def _aten_op_overloads(name):
+    packet = getattr(torch.ops.aten, name, None)
+    return tuple(packet.op_overloads()) if packet is not None else ()
+
+
+def _layout_target_overloads(target):
+    if isinstance(target, torch._ops.OpOverload):
+        return (target,)
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        return tuple(target.op_overloads())
+    if isinstance(target, str):
+        if not hasattr(torch.Tensor, target) and target not in ("sym_size",):
+            return ()
+        return _aten_op_overloads(target)
+    name = torch.jit._builtins._find_builtin(target)
+    if name is None or not name.startswith("aten::"):
+        return ()
+    return _aten_op_overloads(name.removeprefix("aten::"))
+
+
+def _layout_user_overloads(user):
+    target = user.target
+    args = user.args
+    kwargs = dict(user.kwargs)
+    if target in (torch.nn.functional.relu, torch.nn.functional.silu):
+        if get_arg_value(user, 1, "inplace") not in (None, False):
+            return ()
+        args = args[:1]
+        kwargs.pop("inplace", None)
+        target = (
+            torch.ops.aten.relu
+            if target is torch.nn.functional.relu
+            else torch.ops.aten.silu
+        )
+    elif target is torch.nn.functional.softmax:
+        if get_arg_value(user, 1, "dim") is None:
+            return ()
+        args = (*args[:2], *args[3:])
+        kwargs.pop("_stacklevel", None)
+        target = torch.ops.aten.softmax
+    elif target is torch.nn.functional.layer_norm:
+        target = torch.ops.aten.layer_norm
+    elif target in (torch.nn.functional.sigmoid, torch.nn.functional.tanh):
+        target = (
+            torch.ops.aten.sigmoid
+            if target is torch.nn.functional.sigmoid
+            else torch.ops.aten.tanh
+        )
+    elif target in _OPERATOR_TO_ATEN:
+        target = _OPERATOR_TO_ATEN[target]
+    candidates = []
+    for op in _layout_target_overloads(target):
+        schema = op._schema
+        positional = [arg for arg in schema.arguments if not arg.kwarg_only]
+        if len(args) > len(positional):
+            continue
+        supplied = OrderedSet(arg.name for arg in positional[: len(args)])
+        candidate_kwargs = dict(kwargs)
+        if "input" in candidate_kwargs and any(
+            arg.name == "self" for arg in schema.arguments
+        ):
+            candidate_kwargs["self"] = candidate_kwargs.pop("input")
+        if supplied.intersection(candidate_kwargs):
+            continue
+        supplied.update(candidate_kwargs)
+        if supplied.difference(arg.name for arg in schema.arguments):
+            continue
+        if any(
+            arg.name not in supplied and not arg.has_default_value()
+            for arg in schema.arguments
+        ):
+            continue
+        candidates.append(op)
+    return candidates
+
+
+_LAYOUT_SENSITIVE_OPS = OrderedSet(
+    [
+        "view",
+        "_unsafe_view",
+        "view_as",
+        "view_as_complex",
+        "as_strided",
+        "as_strided_copy",
+        "_reshape_alias",
+        "unsafe_chunk",
+        "unsafe_split",
+        "unsafe_split_with_sizes",
+        "stride",
+        "sym_stride",
+        "storage_offset",
+        "sym_storage_offset",
+        "is_contiguous",
+        "sym_is_contiguous",
+        "_has_same_storage_numel",
+        "is_set_to",
+        "clone",
+    ]
+)
+
+_CONVERSION_METHODS = OrderedSet(
+    [
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "long",
+        "int",
+        "short",
+        "char",
+        "byte",
+        "bool",
+        "type",
+        "type_as",
+        "to",
+        "cpu",
+        "cuda",
+        "xpu",
+    ]
+)
+
+_LAYOUT_INDEPENDENT_OPS = OrderedSet(
+    [
+        "cat",
+        "stack",
+        "mm",
+        "bmm",
+        "matmul",
+        "linear",
+        "sum",
+        "mean",
+        "softmax",
+        "_softmax",
+        "layer_norm",
+        "native_layer_norm",
+        "rms_norm",
+        "size",
+        "sym_size",
+        "dim",
+        "numel",
+    ]
+)
+
+
+def _classify_layout_user(
+    user: torch.fx.Node, current: torch.fx.Node, node: torch.fx.Node
+) -> str:
+    exposed = current is node
+    if user.target is operator.getitem or (
+        user.op == "call_method" and user.target in _CONVERSION_METHODS
+    ):
+        return "reject" if exposed else "walk"
+    ops = _layout_user_overloads(user)
+    if not ops or any(op._schema.is_mutable for op in ops):
+        return "reject"
+    non_aten = any(op.namespace != "aten" for op in ops)
+    if exposed and non_aten:
+        return "reject"
+    if non_aten:
+        pending = [n for n in user.all_input_nodes if n is not current]
+        visited = OrderedSet()
+        while pending:
+            candidate = pending.pop()
+            if candidate is node:
+                return "reject"
+            if candidate < node:
+                continue
+            if candidate not in visited:
+                visited.add(candidate)
+                pending.extend(candidate.all_input_nodes)
+    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+    if names == OrderedSet(["contiguous"]):
+        if get_arg_value(user, 1, "memory_format") not in (
+            None,
+            torch.contiguous_format,
+        ):
+            return "reject"
+        if not exposed:
+            return "walk"
+        value = node.meta.get("example_value", node.meta.get("val"))
+        if value is not None and statically_known_true(value.shape[0] > 1):
+            return "walk"
+        return "reject"
+    if names.intersection(_LAYOUT_SENSITIVE_OPS) or any(
+        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
+    ):
+        return "reject" if exposed else "walk"
+    if any(torch.Tag.pointwise in op.tags for op in ops) or all(
+        op.namespace != "aten" or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
+        for op in ops
+    ):
+        return "terminal"
+    return "reject"
+
+
+def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+    queue = [node]
+    seen = OrderedSet(queue)
+    while queue:
+        current = queue.pop()
+        for user in current.users:
+            if user.op == "output" or user.op not in ("call_method", "call_function"):
+                return True
+            action = _classify_layout_user(user, current, node)
+            if action == "reject":
+                return True
+            if action == "walk" and user not in seen:
+                seen.add(user)
+                queue.append(user)
+    return False
 
 
 # Poor person's check for if a node in the graph mutates its input.
