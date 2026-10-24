@@ -23,7 +23,8 @@ requires_gpu_and_triton = unittest.skipUnless(
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
-if has_triton():
+# Test kernels are shared across accelerator and CPU Triton backends.
+if has_triton(include_cpu=True):
     import triton
     from triton import language as tl
 

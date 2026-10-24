@@ -76,7 +76,7 @@ struct MemFile {
     ELF_CHECK(ehdr_->e_ident[EI_CLASS] == ELFCLASS64);
     ELF_CHECK(ehdr_->e_ident[EI_VERSION] == EV_CURRENT);
     ELF_CHECK(ehdr_->e_version == EV_CURRENT);
-    ELF_CHECK(ehdr_->e_machine == EM_X86_64);
+    ELF_CHECK(ehdr_->e_machine == EM_X86_64 || ehdr_->e_machine == EM_AARCH64);
 #undef ELF_CHECK
     UNWIND_CHECK(
         ehdr_->e_shoff + sizeof(Elf64_Shdr) * ehdr_->e_shnum <= n_bytes_,

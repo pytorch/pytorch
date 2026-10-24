@@ -12,9 +12,11 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import ShardPlacementResult
 from torch.distributed.fsdp._fully_shard._fsdp_init import _get_mesh_info
-from torch.distributed.tensor import init_device_mesh, Replicate, Shard
+from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -218,14 +220,11 @@ class TestFullyShardSpmdTypes(TestCase):
                 with CommDebugMode() as comm_mode:
                     loss.backward()
                 comm_counts = comm_mode.get_comm_counts()
-                if seq_parallel:
-                    self.assertEqual(
-                        comm_counts[torch.ops.c10d._reduce_scatter_base_], 2
-                    )
-                else:
-                    self.assertEqual(
-                        comm_counts[torch.ops.c10d._reduce_scatter_base_], 1
-                    )
+                reduce_scatter_count = (
+                    comm_counts[torch.ops.c10d._reduce_scatter_base_]
+                    + comm_counts[torch.ops.c10d_functional.reduce_scatter_tensor]
+                )
+                self.assertEqual(reduce_scatter_count, 2 if seq_parallel else 1)
                 self.assertEqual(
                     comm_counts[torch.ops.c10d.allreduce_]
                     + comm_counts[torch.ops.c10d_functional.all_reduce],
@@ -584,6 +583,85 @@ class TestFullyShardSpmdTypes(TestCase):
             "requires DP parameters to be R since it handles the DP gradient "
             "reduction.",
         )
+
+
+@unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
+class TestFullyShardSpmdGradDtype(FSDPTest):
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    def test_native_spmd_accumulation(self):
+        device = get_devtype().type
+        mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
+        dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
+        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
+        model = SpmdLinear(mesh, seq_parallel=True).to(device, torch.bfloat16)
+        # The global computation is inp @ ref_weights[0] @ ref_weights[1].t()
+        ref_weights = [
+            torch.empty(n, 16, device=device, dtype=torch.bfloat16, requires_grad=True)
+            for n in (16, 32)
+        ]
+        for param in (*model.parameters(), *ref_weights):
+            nn.init.constant_(param, 0.25)
+            param.grad_dtype = torch.float32
+        spmd.assert_type(model.unsharded_weight, {dp_axis: spmd.R, tp_axis: spmd.R})
+        spmd.assert_type(model.sharded_weight, {dp_axis: spmd.R, tp_axis: spmd.S(0)})
+        fully_shard(
+            model,
+            mesh=mesh,
+            dp_mesh_dims=DataParallelMeshDims(shard="dp"),
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
+            reshard_after_forward=False,
+        )
+        model.set_reshard_after_backward(False)
+        saved = []
+        arange = torch.arange(32, device=device, dtype=torch.bfloat16).view(1, 2, 16)
+        for step in range(3):
+            model.set_requires_gradient_sync(step == 2)
+            inputs = [
+                arange / 32 + (rank + step + 1) / 2 for rank in range(self.world_size)
+            ]
+            loss = (
+                sum(
+                    (
+                        torch.cat([inputs[rank] for rank in ranks], dim=1)
+                        @ ref_weights[0]
+                        @ ref_weights[1].t()
+                    ).sum()
+                    for ranks in mesh.mesh.tolist()
+                )
+                / mesh["dp"].size()
+            )
+            loss.backward()
+            inp = inputs[self.rank]
+            with (
+                spmd.set_current_mesh(mesh),
+                typecheck(strict_mode="strict", local=False),
+            ):
+                spmd.assert_type(
+                    inp,
+                    {dp_axis: spmd.V, tp_axis: spmd.V},
+                    partition_spec=spmd.PartitionSpec(dp_axis, tp_axis, None),
+                )
+                model(inp).backward()
+            if step == 2:
+                for param in model.parameters():
+                    self.assertIsNone(param.grad)
+                continue
+            for index, param in enumerate(model.parameters()):
+                unreduced = param.grad
+                self.assertNotIsInstance(unreduced, DTensor)
+                self.assertEqual(unreduced.dtype, torch.float32)
+                self.assertEqual(unreduced.device.type, device)
+                if step:
+                    self.assertIs(unreduced, saved[index])
+                else:
+                    saved.append(unreduced)
+        model.reshard()
+        for param, ref_weight in zip(model.parameters(), ref_weights):
+            self.assertEqual(param.grad.full_tensor(), ref_weight.grad)
 
 
 if __name__ == "__main__":

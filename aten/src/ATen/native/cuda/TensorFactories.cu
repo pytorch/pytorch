@@ -3,6 +3,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/EmptyTensor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.h>
@@ -23,6 +25,7 @@
 #include <ATen/ops/tril_native.h>
 #include <ATen/ops/triu_indices_native.h>
 #include <ATen/ops/triu_native.h>
+#include <ATen/ops/zero_native.h>
 #endif
 
 #include <algorithm>
@@ -30,6 +33,32 @@
 #include <cstddef>
 
 namespace at::native {
+
+Tensor& zero_cuda_(Tensor& self) {
+#if defined(USE_ROCM) && ROCM_VERSION >= 70000 && ROCM_VERSION < 70100
+  // hipMemsetAsync recorded into a HIP graph leaves stale bytes on ROCm
+  // [7.0.0, 7.1.0) (runtime bug, fixed in ROCm/clr 3038c4c3). The bug needs
+  // an active stream capture, so the memset fast path stays sound whenever
+  // no capture is underway; only a captured zero_ must take the fill_
+  // kernel.
+  const bool memset_safe =
+      at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None;
+#else
+  constexpr bool memset_safe = true;
+#endif
+  if (memset_safe) {
+    void* const ptr = self.mutable_data_ptr();
+    if (ptr != nullptr && self.is_non_overlapping_and_dense()) {
+      AT_CUDA_CHECK(cudaMemsetAsync(
+          ptr,
+          0,
+          self.numel() * self.dtype().itemsize(),
+          at::cuda::getCurrentCUDAStream(self.device().index())));
+      return self;
+    }
+  }
+  return self.fill_(0);
+}
 
 Tensor& eye_out_cuda(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`

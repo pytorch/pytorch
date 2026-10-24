@@ -11,6 +11,7 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -22,7 +23,7 @@ from ..pattern_matcher import (
     MatchResult,
     stable_topological_sort,
 )
-from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
+from ..utils import is_bf16x9_matmul, OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -190,7 +191,9 @@ class PostGradBatchLinearFusion(BatchFusion):
             and isinstance(input_shapes[1], int)
         )
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int, int, int, bool, str] | None:
+    def match(
+        self, node: torch.fx.Node
+    ) -> tuple[str, int, int, int, bool, str, str] | None:
         if CallFunctionVarArgs(aten.mm).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -211,7 +214,17 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         m, k = input_m.meta["val"].shape  # type: ignore[union-attr]
         n = weight_m.meta["val"].shape[1]  # type: ignore[union-attr]
-        batch_key = ("batch_linear_post_grad", m, k, n, bias_m is not None, str(users))
+        batch_key = (
+            "batch_linear_post_grad",
+            m,
+            k,
+            n,
+            bias_m is not None,
+            str(users),
+            # mm/addmm operands share a dtype, so mixing an autocast-exempt fp32
+            # linear with bf16 ones would make the stack in fuse() fail.
+            str(input_m.meta["val"].dtype),  # type: ignore[union-attr]
+        )
         return batch_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
@@ -301,7 +314,12 @@ class PostGradBatchLinearFusion(BatchFusion):
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[1].meta["val"]  # type: ignore[union-attr]
+        # fbgemm.gmm has no precision argument and bypasses ATen/cuBLAS.
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[2].meta["val"].shape  # type: ignore[union-attr]
         return (
             node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
@@ -316,7 +334,10 @@ class GroupLinearFusion(GroupFusion):
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[0].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[0].meta["val"]  # type: ignore[union-attr]
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
         return (
             len(input_shape) == 2
@@ -413,8 +434,9 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(
             node
         ) and self._pointwise_node_can_be_fused(node):
-            alpha = node.kwargs.get("alpha", DEFAULT_ALPHA)
-            rounding_mode = node.kwargs.get("rounding_mode", None)
+            # NOTE: fuse() propagates subset[0].kwargs verbatim onto the
+            # fused node, so the group key must encode everything that is
+            # copied; key on node.kwargs rather than individual fields.
             input, other = node.args
             shape = list(input.meta["val"].shape)  # type: ignore[union-attr]
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
@@ -437,8 +459,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 str(shape),
                 str(input.meta["val"].dtype),  # type: ignore[union-attr]
                 str(other.meta["val"].dtype),  # type: ignore[union-attr]
-                str(alpha),
-                str(rounding_mode),
+                str(node.kwargs),
                 str(parent),
             )
         else:
@@ -447,7 +468,9 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_inputs, batch_others = [], []
-        alpha = subset[0].kwargs.get("alpha", DEFAULT_ALPHA)
+        # Safe because match() keys the group on str(node.kwargs): every
+        # node in the subset shares the same kwargs.
+        kwargs = subset[0].kwargs
         batch_inputs_meta, batch_others_meta = [], []
 
         for node in subset:
@@ -470,17 +493,19 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
                 args=(stack_inputs, stack_others),
-                kwargs={"alpha": alpha} if self.op == aten.add.Tensor else {},
+                kwargs=kwargs,
             )
-            batch_op.meta["val"] = self.op(stack_inputs_meta, stack_others_meta)
-            for i, original_add in enumerate(subset):
+            batch_op.meta["val"] = self.op(
+                stack_inputs_meta, stack_others_meta, **kwargs
+            )
+            for i, original_node in enumerate(subset):
                 with graph.inserting_after(batch_op):  # type: ignore[operator]
-                    new_add = graph.call_function(  # type: ignore[operator]
+                    new_node = graph.call_function(  # type: ignore[operator]
                         torch.ops.aten.select, args=((batch_op, 0, i))
                     )
-                original_add.replace_all_uses_with(new_add)
-                new_add.meta.update(original_add.meta)
-                graph.erase_node(original_add)  # type: ignore[operator]
+                original_node.replace_all_uses_with(new_node)
+                new_node.meta.update(original_node.meta)
+                graph.erase_node(original_node)  # type: ignore[operator]
         counters["inductor"][
             "batch_aten_" + self.op.__name__.lower().split(".")[0]
         ] += 1
@@ -1317,22 +1342,47 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         super().__init__(op, **kwargs)
         self.op = op
 
-    def match(self, node: torch.fx.Node):
-        input = get_arg_value(node, 0, "input")
-        if self._match_op(node) and is_node_meta_valid(node):
-            # check the input has the same shape and its users have the same target
-            # check all clamp operators have the same min and max values, and
-            # nan_to_num operators use the same default value.
-            child = next(iter(node.users.keys()))
-            group_key = (
-                str(input.meta["example_value"].shape)
-                + str(node.args[1:])
-                + str(node.kwargs)
-                + str(child.target)
+    def _get_non_input_kwargs(self, node: torch.fx.Node) -> dict[str, Any] | None:
+        """All arguments except `input` as kwargs, with defaults filled in."""
+        try:
+            normalized = normalize_function(
+                self.op,
+                node.args,
+                node.kwargs,
+                # otherwise clamp's Scalar and Tensor overloads are ambiguous
+                arg_types=(torch.Tensor,),
+                normalize_to_only_use_kwargs=True,
             )
-        else:
-            group_key = None
-        return group_key
+        except TypeError:
+            return None
+        if normalized is None:
+            return None
+        normalized.kwargs.pop("input")
+        return normalized.kwargs
+
+    def match(self, node: torch.fx.Node):
+        if not self._match_op(node) or not is_node_meta_valid(node):
+            return None
+
+        kwargs = self._get_non_input_kwargs(node)
+        # one batched call can't replay per-node mutation or tensor arguments
+        if (
+            kwargs is None
+            or kwargs.get("inplace")
+            or any(isinstance(v, torch.fx.Node) for v in kwargs.values())
+        ):
+            return None
+
+        input = get_arg_value(node, 0, "input")
+        # check the input has the same shape and its users have the same target
+        # check all clamp operators have the same min and max values, and
+        # nan_to_num operators use the same default value.
+        child = next(iter(node.users.keys()))
+        return (
+            str(input.meta["example_value"].shape),
+            str(kwargs),
+            str(child.target),
+        )
 
     def _match_op(self, node: torch.fx.Node) -> MatchResult:
         return CallFunctionVarArgs(self.op).match(node)
@@ -1341,8 +1391,9 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
-        args = subset[0].args[1:]
-        kwargs = subset[0].kwargs
+        kwargs = self._get_non_input_kwargs(subset[0])
+        if kwargs is None:
+            raise AssertionError("matched node could not be normalized")
 
         for node in subset:
             batch_nodes.append(node)
@@ -1357,11 +1408,11 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
-                args=(stack_inputs, *args),
+                args=(stack_inputs,),
                 kwargs=kwargs,
             )
             batch_op.meta["example_value"] = self.op(
-                stack_inputs.meta["example_value"], *args, **kwargs
+                stack_inputs.meta["example_value"], **kwargs
             )
             unbind_op = graph.call_function(  # type: ignore[operator]
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}

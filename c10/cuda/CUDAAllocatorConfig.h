@@ -71,28 +71,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
         garbage_collection_threshold();
   }
 
-  static bool expandable_segments() {
-    bool enabled = c10::CachingAllocator::AcceleratorAllocatorConfig::
-        use_expandable_segments();
-#if !defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
-    (!defined(USE_ROCM) || (ROCM_VERSION < 70000))
-    if (enabled) {
-      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
-    }
-    return false;
-#else
-    return enabled;
-#endif
-  }
-
-  static Expandable_Segments_Handle_Type expandable_segments_handle_type() {
-    return instance().m_expandable_segments_handle_type;
-  }
-
-  static void set_expandable_segments_handle_type(
-      Expandable_Segments_Handle_Type handle_type) {
-    instance().m_expandable_segments_handle_type = handle_type;
-  }
+  static bool expandable_segments();
 
   static bool release_lock_on_cudamalloc() {
     return instance().m_release_lock_on_cudamalloc;
@@ -318,11 +297,6 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
-  // UNSPECIFIED resolves to FABRIC where supported and POSIX_FD otherwise, so a
-  // separate POSIX_FD default for older CUDA is redundant.
-  std::atomic<Expandable_Segments_Handle_Type>
-      m_expandable_segments_handle_type{
-          Expandable_Segments_Handle_Type::UNSPECIFIED};
   std::atomic<bool> m_release_lock_on_cudamalloc{false};
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};

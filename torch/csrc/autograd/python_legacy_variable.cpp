@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/python_legacy_variable.h>
 
 #include <ATen/ATen.h>
-#include <fmt/format.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -14,7 +13,7 @@ using namespace at;
 namespace torch::autograd {
 
 static PyObject* THPVariable_pynew(
-    PyTypeObject* type,
+    PyTypeObject* /*type*/,
     PyObject* args,
     PyObject* kwds) {
   HANDLE_TH_ERRORS

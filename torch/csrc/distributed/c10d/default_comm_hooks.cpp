@@ -1,4 +1,3 @@
-#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 

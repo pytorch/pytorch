@@ -10,7 +10,7 @@ from torch._dynamo.test_minifier_common import (
     MinifierTestBase,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfNNModuleInlined
+from torch.testing._internal.common_utils import set_cwd, skipIfNNModuleInlined
 
 
 class MinifierTests(MinifierTestBase):
@@ -190,6 +190,111 @@ class Repro(torch.nn.Module):
         relu = torch.relu(sin_19);  sin_19 = None
         return (relu,)""",
         )
+
+
+class TestDynamoMinifierBackend(torch._dynamo.test_case.TestCase):
+    def _make_graph(self):
+        def fn(x):
+            return torch.sin(x) + 1
+
+        return torch.fx.symbolic_trace(fn), [torch.randn(2)]
+
+    def test_preserves_original_error_when_minifier_cannot_reproduce(self):
+        from torch._dynamo.repro.after_dynamo import dynamo_minifier_backend
+
+        class OriginalBackendError(Exception):
+            pass
+
+        class OriginalBackendCause(Exception):
+            pass
+
+        class OriginalBackendContext(Exception):
+            pass
+
+        gm, args = self._make_graph()
+        calls = 0
+
+        def flaky_backend(gm, example_inputs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                cause = OriginalBackendCause("original backend cause 97750")
+                try:
+                    raise OriginalBackendContext("original backend context 97750")
+                except OriginalBackendContext:
+                    raise OriginalBackendError(
+                        "original backend failure 97750"
+                    ) from cause
+            return gm
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            set_cwd(tmpdir),
+            torch._dynamo.config.patch(debug_dir_root=tmpdir),
+            patch(
+                "torch._dynamo.repro.after_dynamo.lookup_backend",
+                return_value=flaky_backend,
+            ),
+            self.assertLogs("torch._dynamo.repro", level="WARNING") as logs,
+            self.assertRaisesRegex(
+                OriginalBackendError, "original backend failure 97750"
+            ) as cm,
+        ):
+            dynamo_minifier_backend(gm, args, compiler_name="unused")
+
+        self.assertIsInstance(cm.exception.__cause__, OriginalBackendCause)
+        self.assertIsInstance(cm.exception.__context__, OriginalBackendContext)
+        self.assertIn(
+            "Minifier could not reproduce the original failure", "\n".join(logs.output)
+        )
+
+    def test_preserves_accuracy_error_when_minifier_cannot_reproduce(self):
+        from torch._dynamo.debug_utils import AccuracyError
+        from torch._dynamo.repro.after_dynamo import dynamo_accuracy_minifier_backend
+
+        gm, args = self._make_graph()
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            set_cwd(tmpdir),
+            torch._dynamo.config.patch(debug_dir_root=tmpdir),
+            patch(
+                "torch._dynamo.repro.after_dynamo.lookup_backend",
+                return_value=lambda gm, example_inputs: gm,
+            ),
+            patch(
+                "torch._dynamo.repro.after_dynamo._accuracy_fails",
+                side_effect=[True, False],
+            ),
+            self.assertLogs("torch._dynamo.repro", level="WARNING"),
+            self.assertRaisesRegex(AccuracyError, "Bad accuracy detected") as cm,
+        ):
+            dynamo_accuracy_minifier_backend(gm, args, compiler_name="unused")
+
+        self.assertIsNone(cm.exception.__context__)
+
+    def test_successful_graph_reports_no_issue_without_minifying(self):
+        from torch._dynamo.repro.after_dynamo import dynamo_minifier_backend
+
+        gm, args = self._make_graph()
+
+        def passing_backend(gm, example_inputs):
+            return gm
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            set_cwd(tmpdir),
+            torch._dynamo.config.patch(debug_dir_root=tmpdir),
+            patch("functorch.compile.minifier") as minifier_mock,
+            patch(
+                "torch._dynamo.repro.after_dynamo.lookup_backend",
+                return_value=passing_backend,
+            ),
+            self.assertRaisesRegex(ValueError, "No issue was detected"),
+        ):
+            dynamo_minifier_backend(gm, args, compiler_name="unused")
+
+        minifier_mock.assert_not_called()
 
 
 class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):

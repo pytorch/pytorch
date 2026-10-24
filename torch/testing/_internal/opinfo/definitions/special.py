@@ -385,7 +385,7 @@ op_db: list[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
-        dtypesIfMPS=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=(lambda x: scipy.special.airy(x)[0]) if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
@@ -393,8 +393,6 @@ op_db: list[OpInfo] = [
                 "TestUnaryUfuncs",
                 "test_reference_numerics_large",
             ),
-            # NotImplementedError: The operator 'aten::special_airy_ai.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         supports_autograd=False,
     ),
@@ -405,6 +403,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -446,6 +445,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -482,6 +482,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -513,6 +514,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -628,7 +630,7 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo(
         "special.laguerre_polynomial_l",
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
-        dtypesIfMPS=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
@@ -638,38 +640,6 @@ op_db: list[OpInfo] = [
             # Too slow
             DecorateInfo(
                 unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
-            ),
-            # NotImplementedError: The operator 'aten::special_laguerre_polynomial_l.out'
-            # is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_promotes_int_to_float",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
         ),
         supports_one_python_scalar=True,
@@ -923,6 +893,7 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
         ),
@@ -936,6 +907,7 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
         ),
@@ -963,22 +935,6 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: tol(atol=0, rtol=4e-6),
                 }
-            ),
-        ),
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
             ),
         ),
     ),

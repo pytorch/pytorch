@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 Visualization tools for operation stacks and graphs as DAGs.
 """
@@ -10,7 +8,7 @@ from torchfuzz.ops_fuzzer import OperationGraph
 from torchfuzz.tensor_fuzzer import TensorSpec
 
 
-def save_and_render_dot(dot_content: str, filename: str = "operation_stack"):
+def save_and_render_dot(dot_content: str, filename: str = "operation_stack") -> None:
     """
     Save DOT content to file and render as PNG/PDF.
 
@@ -137,7 +135,7 @@ def visualize_operation_graph(
     graph: OperationGraph,
     title: str = "Operation Graph",
     output_folder: str = ".",
-):
+) -> None:
     """
     Complete visualization pipeline for an operation graph.
 
@@ -156,7 +154,7 @@ def visualize_operation_graph(
     save_and_render_dot(dot_content, filename)
 
 
-def operation_graph_to_networkx(graph: OperationGraph):
+def operation_graph_to_networkx(graph: OperationGraph) -> None:
     """
     Convert operation graph to NetworkX graph for Python visualization.
     Requires: pip install networkx matplotlib

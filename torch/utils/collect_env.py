@@ -51,6 +51,7 @@ SystemEnv = namedtuple(
         "caching_allocator_config",
         "is_xnnpack_available",
         "cpu_info",
+        "rocm_compiled_version",
     ],
 )
 
@@ -724,6 +725,7 @@ def get_env_info():
             not hasattr(torch.version, "hip") or torch.version.hip is None
         ):  # cuda version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+            rocm_compiled_version = "N/A"
         else:  # HIP version
 
             def get_version_or_na(cfg, prefix):
@@ -734,10 +736,14 @@ def get_env_info():
             hip_runtime_version = get_version_or_na(cfg, "HIP Runtime")
             miopen_runtime_version = get_version_or_na(cfg, "MIOpen")
             cuda_version_str = "N/A"
+            # Older wheels have no torch.version.rocm; pretty_str would
+            # otherwise render None as "Could not collect".
+            rocm_compiled_version = getattr(torch.version, "rocm", None) or "N/A"
             hip_compiled_version = torch.version.hip
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = "N/A"  # type: ignore[assignment]
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+        rocm_compiled_version = "N/A"
 
     sys_version = sys.version.replace("\n", " ")
 
@@ -772,6 +778,7 @@ def get_env_info():
         caching_allocator_config=get_cachingallocator_config(),
         is_xnnpack_available=is_xnnpack_available(),
         cpu_info=get_cpu_info(run_lambda),
+        rocm_compiled_version=rocm_compiled_version,
     )
 
 
@@ -779,7 +786,8 @@ env_info_fmt = """
 PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
 CUDA used to build PyTorch: {cuda_compiled_version}
-ROCM used to build PyTorch: {hip_compiled_version}
+ROCm SDK used to build PyTorch: {rocm_compiled_version}
+HIP used to build PyTorch: {hip_compiled_version}
 
 OS: {os}
 GCC version: {gcc_version}

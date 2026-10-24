@@ -4,6 +4,7 @@ import argparse
 import importlib
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -224,6 +225,80 @@ def find_pypi_package_version(package: str) -> str | None:
     return None
 
 
+def find_torch_cuda_toolkit_metadata_version() -> str | None:
+    from importlib import metadata
+
+    try:
+        requirements = metadata.distribution("torch").requires or []
+    except metadata.PackageNotFoundError:
+        return None
+
+    for requirement in requirements:
+        package, _, _ = requirement.partition(";")
+        if not package.strip().lower().startswith("cuda-toolkit"):
+            continue
+        match = re.search(r"==\s*(\d+\.\d+\.\d+)", package)
+        if match:
+            return match.group(1)
+    return None
+
+
+def get_expected_cuda_toolkit_version_windows(cuda_version: str) -> str | None:
+    bat_file = (
+        PYTORCH_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    )
+    if not bat_file.exists():
+        print(f"Warning: {bat_file} not found, skipping CUDA toolkit version check")
+        return None
+
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    pattern = (
+        rf":cuda{re.escape(cuda_ver_nodot)}\s*"
+        r"[\s\S]*?set CUDA_INSTALL_EXE=cuda_(\d+\.\d+\.\d+)"
+        r"(?:_[0-9.]+)?_windows\.exe"
+    )
+    match = re.search(pattern, bat_file.read_text())
+    if match:
+        return match.group(1)
+    return None
+
+
+# CUPTI DLL names vary between CTK patch releases. Verify that the runtime CTK
+# matches the build CTK; future CTK versions fix this naming mismatch.
+def check_cuda_toolkit_version(
+    cuda_version: str, cuda_toolkit_metadata_version: str | None
+) -> None:
+    if sys.platform != "win32":
+        print(
+            f"CUDA toolkit patch version check not required / supported on platform {sys.platform}"
+        )
+        return
+    expected = get_expected_cuda_toolkit_version_windows(cuda_version)
+    source = "cuda_install.bat"
+
+    if cuda_toolkit_metadata_version is None:
+        raise RuntimeError(
+            "Can't find cuda-toolkit requirement in torch wheel metadata "
+            f"for CUDA {cuda_version}"
+        )
+    if expected is None:
+        print(
+            f"Warning: Could not determine expected CUDA toolkit version for CUDA "
+            f"{cuda_version} from {source}, skipping validation"
+        )
+        return
+    if cuda_toolkit_metadata_version != expected:
+        raise RuntimeError(
+            f"CUDA toolkit version mismatch for CUDA {cuda_version}. "
+            f"Wheel metadata: {cuda_toolkit_metadata_version} "
+            f"Expected: {expected} (from {source})"
+        )
+    print(
+        f"CUDA toolkit version check passed: {cuda_toolkit_metadata_version} "
+        f"matches expected {expected} from {source}"
+    )
+
+
 def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     """Parse expected cuDNN version from generate_binary_build_matrix.py for Linux.
 
@@ -241,7 +316,7 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
     # and extract major.minor.patch (dropping the build number)
     pattern = (
-        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        rf'"{re.escape(cuda_version)}":\s*\{{\s*"linux":\s*\(\s*'
         r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
     )
     match = re.search(pattern, content)
@@ -348,11 +423,11 @@ def smoke_test_cuda(
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-    # torch.compile is not supported on Python 3.15+ yet (it raises at runtime),
-    # so skip the compile smoke test there instead of failing the wheel test.
+    # torch.compile is not supported on Python 3.16+ yet, so skip the compile
+    # smoke test there instead of failing the wheel test.
     if (
         torch_compile_check == "enabled"
-        and sys.version_info < (3, 15)
+        and sys.version_info < (3, 16)
         and target_os
         in [
             "linux",
@@ -361,7 +436,14 @@ def smoke_test_cuda(
             "darwin",
         ]
     ):
-        smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            compile_device = "cuda"
+        elif torch.xpu.is_available():
+            compile_device = "xpu"
+        else:
+            compile_device = "cpu"
+        smoke_test_compile(compile_device)
+        smoke_test_compile_dynamic_indirect_indexing()
 
     if torch.cuda.is_available():
         if torch.version.cuda != gpu_arch_ver:
@@ -398,8 +480,22 @@ def smoke_test_cuda(
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
 
-        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
-        if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
+        if (
+            pypi_pkg_check == "enabled"
+            and sys.platform == "win32"
+            and platform.machine().lower() in ("amd64", "x86_64")
+        ):
+            cuda_toolkit_metadata_version = find_torch_cuda_toolkit_metadata_version()
+            check_cuda_toolkit_version(gpu_arch_ver, cuda_toolkit_metadata_version)
+            compare_pypi_to_torch_versions(
+                "cuda-toolkit",
+                find_pypi_package_version("cuda-toolkit"),
+                cuda_toolkit_metadata_version,
+            )
+            compare_pypi_to_torch_versions(
+                "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+            )
+        if pypi_pkg_check == "enabled" and (sys.platform in ["linux", "linux2"]):
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
             )
@@ -498,6 +594,9 @@ def test_sdpa(device="cpu", dtype=torch.float16) -> None:
 
 def smoke_test_compile(device: str = "cpu") -> None:
     supported_dtypes = [torch.float16, torch.float32, torch.float64]
+    # Intel client GPUs (e.g. Arc) have no native fp64.
+    if device == "xpu" and not torch.xpu.get_device_properties().has_fp64:
+        supported_dtypes.remove(torch.float64)
 
     def foo(x: torch.Tensor) -> torch.Tensor:
         return torch.sin(x) + torch.cos(x)
@@ -526,6 +625,57 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x = torch.rand(64, 1, 28, 28, device=device).type(torch.float32)
     model = Net().to(device=device)
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
+
+
+def smoke_test_compile_dynamic_indirect_indexing(device: str = "cuda") -> None:
+    """Regression check for gh-194490: gather/scatter around a loop reduction
+    emitted Triton whose epilogue read a loop-local temp. Only reproduces on the
+    second compile, once a differing shape triggers automatic dynamic shapes.
+    """
+    # fix (gh-194786) is in 2.14. This skip should be removed if also cherry-picked
+    # into prior versions.
+    from torch.torch_version import TorchVersion
+
+    if TorchVersion(torch.__version__) < (2, 14):
+        print(f"Skipping dynamic indirect indexing test on torch {torch.__version__}")
+        return
+
+    if not torch.cuda.is_available():
+        print("CUDA is not available, skipping dynamic indirect indexing test")
+        return
+
+    def normalize_selected(
+        x: torch.Tensor, buf: torch.Tensor, idx: torch.Tensor, beta: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        idx = idx.unsqueeze(-1)
+        selected = torch.gather(buf, -2, idx)
+        stat = x.float().pow(2).mean(dim=-1, keepdim=True)
+        updated = torch.where(
+            (1.0 - beta).abs() >= 0.5,
+            stat,
+            torch.lerp(selected, stat, 1.0 - beta),
+        )
+        normalized = x.float() / (updated.sqrt() + 1e-8)
+        return normalized, buf.scatter(-2, idx, updated)
+
+    compiled = torch.compile(normalize_selected, fullgraph=True)
+
+    # Second shape forces automatic dynamic; 4096 keeps the reduction non-persistent.
+    for rows in (64, 32):
+        k = rows // 4
+        torch.manual_seed(0)
+        x = torch.randn(2, k, 4096, device=device, dtype=torch.bfloat16)
+        buf = torch.randn(2, rows, 1, device=device, dtype=torch.float32).abs()
+        idx = torch.stack([torch.randperm(rows, device=device)[:k] for _ in range(2)])
+        beta = torch.tensor(0.95, device=device)
+
+        print(f"Testing compile with dynamic indirect indexing, rows={rows}")
+        expected = normalize_selected(x, buf, idx, beta)
+        actual = compiled(x, buf, idx, beta)
+        torch.cuda.synchronize()
+        # Loose: eager/Inductor differ by reduction order; codegen success is the check.
+        for got, want in zip(actual, expected):
+            torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
 
 
 def smoke_test_nvshmem() -> None:
@@ -612,7 +762,7 @@ def parse_args():
     )
     parser.add_argument(
         "--pypi-pkg-check",
-        help="Check pypi package versions cudnn and nccl",
+        help="Check pypi package versions cuda-toolkit, cudnn, and nccl",
         type=str,
         choices=["enabled", "disabled"],
         default="enabled",

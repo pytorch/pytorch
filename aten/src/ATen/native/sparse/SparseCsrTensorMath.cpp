@@ -30,8 +30,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_prod_native.h>
 #include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -982,8 +980,11 @@ Tensor& add_out_sparse_compressed_cpu(
       return out;
     }
 
-    at::native::resize_as_sparse_compressed_(out, self);
-    sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    // out is resized in place, so operate on clones of any input aliasing it.
+    const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
+    const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
+    at::native::resize_as_sparse_compressed_(out, self_);
+    sparse::impl::cpu::add_out_sparse_csr(self_, other_, alpha, out);
   }
   return out;
 }

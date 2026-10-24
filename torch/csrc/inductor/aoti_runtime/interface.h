@@ -17,6 +17,9 @@ the import case.
 #define AOTI_API __attribute__((__visibility__("default")))
 #endif
 
+inline constexpr int64_t AOTI_STREAM_AFFINITY_DISABLED = -2;
+inline constexpr int64_t AOTI_STREAM_AFFINITY_UNBOUND = -1;
+
 extern "C" {
 struct AOTInductorModelOpaque;
 using AOTInductorModelHandle = AOTInductorModelOpaque*;
@@ -117,6 +120,23 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
     const char* cubin_dir,
     const AOTInductorConstantMapEntry* constant_entries,
     size_t num_constant_entries);
+
+// Enables or disables stable device-stream-to-model assignment. This may only
+// be reconfigured while all model instances are idle. A null stream handle
+// continues to use the default model-pool scheduling policy.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerSetUseStreamAffinity(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_stream_affinity);
+
+// Returns the model index currently bound to a stream,
+// AOTI_STREAM_AFFINITY_UNBOUND when no binding exists, or
+// AOTI_STREAM_AFFINITY_DISABLED when affinity is disabled. This is intended for
+// diagnostics and testing of affinity policies.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerGetStreamAffinityModelIndexForTesting(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorStreamHandle stream_handle,
+    int64_t* model_index);
 
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
@@ -223,8 +243,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
     size_t* num_entries,
     bool use_inactive);
 
-// Setup the constant buffer in model container with provided ConstantMap.
-// The ConstantMap is user managed, and the user would retain ownership.
+// Setup the constant buffer in model container with a user-managed ConstantMap.
+// The caller retains ownership of the provided handles. The container retains
+// shallow handles to the same tensor storage without copying its data until an
+// entry is replaced or the container is deleted.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
@@ -407,7 +429,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     const char** out_spec);
 
 // Enables or disables pinned async H2D copies for constant loading and updates.
-// Call before creating a model/container to affect embedded constant loading.
+// Eligible initial loads are coalesced into staging windows even when the CPU
+// copy thread count is one. Coalescing zero-fills the inter-constant alignment
+// padding in the device blob, which the per-range path left uninitialized. Call
+// before creating a model/container to affect embedded constant loading.
 AOTI_API AOTIRuntimeError
 AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 
@@ -415,6 +440,13 @@ AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 // AOTI_COPY_STAGE_BUFFER_BYTES or the runtime default.
 AOTI_API AOTIRuntimeError
 AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
+
+// Sets the total number of CPU threads used to fill pinned staging buffers,
+// including the caller. Pass 0 to use AOTI_COPY_STAGE_CPU_THREADS or the
+// runtime default. Clamped to 16 and to the machine's core count. Setting this
+// to 1 disables worker threads but eligible initial loads remain coalesced.
+AOTI_API AOTIRuntimeError
+AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(size_t threads);
 
 // Retrieves the error message from the last failed AOTI runtime call on the
 // current thread. The returned pointer is valid until the next AOTI runtime

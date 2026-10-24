@@ -140,7 +140,10 @@ c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index) {
 
 void emptyHostCache() {
   const auto device_type = getAccelerator(true).value();
-  at::getHostAllocator(device_type)->empty_cache();
+  // A backend that registers no host allocator caches nothing on the host.
+  if (auto* allocator = at::getHostAllocator(device_type)) {
+    allocator->empty_cache();
+  }
 }
 
 const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {

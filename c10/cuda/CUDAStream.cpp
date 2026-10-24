@@ -208,7 +208,6 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_creation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
-    priority_counters[p][device_index] = 0;
   }
 }
 
@@ -224,15 +223,17 @@ void initDeviceStreamState(DeviceIndex device_index) {
 
 // Init front-end to ensure initialization only occurs once
 void initCUDAStreamsOnce() {
+  // Quick return if streams have been initialized. current_streams
+  // is thread_local, we don't need to worry about a data race.
+  if (current_streams) {
+    return;
+  }
+
   // Inits default streams (once, globally)
   auto static init_flag [[maybe_unused]] = [] {
     initGlobalStreamState();
     return true;
   }();
-
-  if (current_streams) {
-    return;
-  }
 
   // Inits current streams (thread local) to default streams
   // NOLINTNEXTLINE(*-arrays)

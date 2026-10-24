@@ -255,10 +255,15 @@ def _aoti_compile_and_package_inner(
 
 
 def aoti_load_package(
-    path: FileLike, run_single_threaded: bool = False, device_index: int = -1
+    path: FileLike,
+    run_single_threaded: bool = False,
+    device_index: int = -1,
+    *,
+    num_runners: int = 1,
+    use_stream_affinity: bool = False,
 ) -> AOTICompiledModel:
     """
-    Loads the model from the PT2 package.
+    Loads a model from a PT2 package or an extracted PT2 package directory.
 
     If multiple models were packaged into the PT2, this will load the default
     model. To load a specific model, you can directly call the load API
@@ -271,7 +276,7 @@ def aoti_load_package(
         compiled_model2 = load_package("my_package.pt2", "model2")
 
     Args:
-        path: Path to the .pt2 package
+        path: Path to the .pt2 package or extracted package directory.
         run_single_threaded (bool): Whether the model should be run without
             thread synchronization logic. This is useful to avoid conflicts with
             CUDAGraphs.
@@ -279,11 +284,20 @@ def aoti_load_package(
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would
             load the package to `cuda:1`, for example.
+        num_runners (int): Number of model instances available for concurrent
+            execution.
+        use_stream_affinity (bool): Whether each non-null device stream should
+            retain a stable model instance. Intended for controlled
+            multi-stream benchmarking; this may reduce host-side pipelining.
     """
     from torch._inductor.package import load_package
 
     return load_package(
-        path, run_single_threaded=run_single_threaded, device_index=device_index
+        path,
+        run_single_threaded=run_single_threaded,
+        num_runners=num_runners,
+        device_index=device_index,
+        use_stream_affinity=use_stream_affinity,
     )
 
 
