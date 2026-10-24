@@ -629,6 +629,28 @@ class TestReactions(unittest.TestCase):
         self.assertIn("reactions", by_id[21])
         self.assertNotIn("reactions", by_id[20])
 
+    def test_earlier_findings_get_the_reaction_lookups_first(self):
+        issue = [
+            comment(
+                "maint", id=20 + n, when=f"2026-01-0{n}", reactions={"total_count": 1}
+            )
+            for n in range(1, 4)
+        ]
+        reactions = {
+            f"issues/comments/{20 + n}": [reaction("author", "+1")] for n in range(1, 4)
+        }
+        reactions["pulls/comments/10"] = [reaction("author", "-1")]
+        api = FakeApi(
+            issue=issue,
+            inline=[finding(when="2025-12-01", reactions={"total_count": 1})],
+            reviews=[ours()],
+            maintainers={"maint"},
+            reactions=reactions,
+        )
+        with mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"] if "reactions" in i], [10, 23])
+
     def test_only_the_newest_reacted_comments_are_looked_up(self):
         issue = [
             comment(

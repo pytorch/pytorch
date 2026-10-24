@@ -15,8 +15,9 @@ reacted to, so those are normally not shown. Each inline comment's
 ``original_commit_id`` is the commit it was written against, and ``head_sha``,
 passed in by the caller, is the commit under review. Other bots and other users
 are dropped. A comment's ``reactions`` are the emoji reactions of the author
-and maintainers, read for the newest ``MAX_REACTION_LOOKUPS`` reacted comments
-(reactions to a review body have no REST endpoint and are not read), and
+and maintainers, read for up to ``MAX_REACTION_LOOKUPS`` reacted comments,
+earlier findings first and newest first within each (reactions to a review
+body have no REST endpoint and are not read), and
 ``reactions_truncated`` is set when a limit or a failed lookup may have left
 some out. Bodies are capped. If the conversation is too long, ``truncated`` is
 set and items are selected in two phases. First, people's comments alone,
@@ -70,7 +71,7 @@ REVIEW_AUTHOR = "github-actions[bot]"
 MARKER = "<!-- hardened-pr-review -->"
 AUTOMATED = "automated_review"
 REACTIONS = {"issue_comment": "issues/comments", "review_comment": "pulls/comments"}
-# Reactions are read for the newest reacted comments only, one page each: every
+# Reactions are read for a bounded number of reacted comments, one page each: every
 # lookup is an API call on a token the repository's other workflows share.
 MAX_REACTION_LOOKUPS = 50
 # Permission checks for reactors not already known from the conversation; a
@@ -271,7 +272,12 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
             items.append(item)
 
     items.sort(key=lambda i: i["created_at"])
-    newest = [i for i in reversed(items) if id(i) in lookups]
+    # Earlier findings first, so a reaction to one is never crowded out by
+    # people's comments; newest first within each.
+    newest = sorted(
+        (i for i in reversed(items) if id(i) in lookups),
+        key=lambda i: i["role"] != AUTOMATED,
+    )
     # Items whose reactions some limit may have left out.
     partial = {id(i) for i in newest[MAX_REACTION_LOOKUPS:]}
     for item in newest[:MAX_REACTION_LOOKUPS]:
