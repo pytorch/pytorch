@@ -1410,6 +1410,9 @@ def config_to_command(
         cmd_parts.append("--export-aot-inductor")
         cmd_parts.append("--disable-cudagraphs")
 
+    if "prefill" in backend_variant:
+        cmd_parts.extend(["--hf-inference-mode", "prefill"])
+
     cmd_parts.extend(["--performance", "--cold-start-latency"])
 
     if model:
