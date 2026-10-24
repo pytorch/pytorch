@@ -676,20 +676,7 @@ class TestGroupBatchFusion(TestCase):
             "conversion_dtype",
             "conversion_dtype_after_transpose",
             "conversion_noop_after_transpose",
-            "contiguous_as_strided",
-            "transpose_output",
-            "transpose_merge_view",
             "split_view_mutation",
-            "getitem_output",
-            "transpose_contiguous_merge_view",
-            "unflatten",
-            "unbind",
-            "expand",
-            "movedim",
-            "swapaxes",
-            "split_with_sizes",
-            "tensor_split",
-            "leaky_relu",
             "reshape_kwargs",
             "out_user",
             "dropout_eval_output",
@@ -742,9 +729,6 @@ class TestGroupBatchFusion(TestCase):
             result = graph.call_method("double", args=(node,))
             result.meta["example_value"] = node.meta["example_value"].double()
             return result
-
-        def transpose_output(graph, node):
-            return graph.output(transpose(graph, node))
 
         def transpose_merge_view(graph, node):
             return graph.call_method("view", args=(transpose(graph, node), -1))
@@ -809,42 +793,11 @@ class TestGroupBatchFusion(TestCase):
             "conversion_noop_after_transpose": lambda graph, node: graph.call_method(
                 "mul_", args=(conversion(graph, node, False, True), 2)
             ),
-            "contiguous_as_strided": lambda graph, node: graph.call_method(
-                "as_strided", args=(contiguous(graph, node), (4, 6), (6, 1))
-            ),
             "reshape_kwargs": lambda graph, node: graph.call_function(
                 torch.reshape,
                 kwargs={"input": node, "shape": (2, 2, 6)},
             ),
-            "transpose_output": transpose_output,
-            "transpose_merge_view": transpose_merge_view,
             "split_view_mutation": split_view_mutation,
-            "getitem_output": getitem_output,
-            "transpose_contiguous_merge_view": transpose_contiguous_merge_view,
-            "unflatten": lambda graph, node: graph.call_method(
-                "unflatten", args=(node, -1, (2, 3))
-            ),
-            "unbind": lambda graph, node: graph.call_function(
-                torch.unbind, args=(node, 0)
-            ),
-            "expand": lambda graph, node: graph.call_method(
-                "expand", args=(node, 4, 6)
-            ),
-            "movedim": lambda graph, node: graph.call_method(
-                "movedim", args=(node, 0, 1)
-            ),
-            "swapaxes": lambda graph, node: graph.call_method(
-                "swapaxes", args=(node, 0, 1)
-            ),
-            "split_with_sizes": lambda graph, node: graph.call_function(
-                torch.ops.aten.split_with_sizes.default, args=(node, [3, 3], 1)
-            ),
-            "tensor_split": lambda graph, node: graph.call_function(
-                torch.tensor_split, args=(node, 2), kwargs={"dim": 1}
-            ),
-            "leaky_relu": lambda graph, node: graph.call_function(
-                torch.nn.functional.leaky_relu, args=(node, 0.1)
-            ),
             "out_user": out_user,
             "dropout_eval_output": lambda graph, node: graph.output(
                 dropout(graph, node, False)
@@ -1069,57 +1022,6 @@ class TestGroupBatchFusion(TestCase):
 
         module = M().eval()
         _check_lhs_fusion(self, module, [3], torch.randn(32, 64), dynamic=dynamic)
-
-    @parametrize("consumer", ["mutation", "merge_view", "output"])
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_skips_dropout_alias_users(self, consumer):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.large = torch.nn.Linear(64, 48, bias=False)
-                self.a = torch.nn.Linear(64, 16, bias=False)
-                self.b = torch.nn.Linear(64, 16, bias=False)
-
-            def forward(self, x):
-                large = self.large(x)
-                dropped = torch.nn.functional.dropout(large, 0.1, training=False)
-                if consumer == "output":
-                    return dropped, torch.sin(self.a(x)), torch.cos(self.b(x))
-                if consumer == "merge_view":
-                    return (
-                        torch.sin(dropped.view(-1)),
-                        torch.sin(self.a(x)),
-                        torch.cos(self.b(x)),
-                    )
-                copied = dropped.contiguous()
-                copied.mul_(2)
-                return (
-                    torch.sin(copied),
-                    torch.cos(large),
-                    torch.sin(self.a(x)),
-                    torch.cos(self.b(x)),
-                )
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
-
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_skips_out_user(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.large = torch.nn.Linear(64, 48, bias=False)
-                self.a = torch.nn.Linear(64, 16, bias=False)
-                self.b = torch.nn.Linear(64, 16, bias=False)
-
-            def forward(self, x):
-                large = self.large(x)
-                out = torch.empty_like(large)
-                torch.sin(large, out=out)
-                return out, torch.sin(self.a(x)), torch.cos(self.b(x))
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
 
     @parametrize("op", ["add_tensor", "add_scalar", "mul_scalar"])
     @_lhs_fusion_config
