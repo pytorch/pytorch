@@ -21,7 +21,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 from torch.utils.cpp_extension import (
     CUDA_HOME,
     get_cxx_compiler,
@@ -36,8 +41,13 @@ GPU_HOME = CUDA_HOME or ROCM_HOME
 # numba.cuda.cudadrv.driver:driver.py:384 Call to cuInit results in CUDA_ERROR_NO_DEVICE
 if not IS_WINDOWS:
 
-    class FunctionVersionCompatibilityTest(TestCase):
-        """Test that all function files require PyTorch 2.10+."""
+    class _VersionCompatibilityBase(TestCase):
+        """Shared infrastructure for version compatibility tests.
+
+        Provides build-directory setup, C++/CUDA compilation helpers,
+        and error extraction. Subclasses add hw_classification and the
+        actual test methods.
+        """
 
         @classmethod
         def setUpClass(cls):
@@ -175,6 +185,32 @@ if not IS_WINDOWS:
                 "the appropriate version guards.",
             )
 
+        @staticmethod
+        def _extract_relevant_errors(error_msg: str) -> list[str]:
+            """Extract the most relevant error messages."""
+            error_lines = error_msg.strip().split("\n")
+            relevant_errors = []
+
+            for line in error_lines:
+                line_lower = line.lower()
+                if (
+                    "error:" in line_lower
+                    or "undefined" in line_lower
+                    or "undeclared" in line_lower
+                    or "no member named" in line_lower
+                ):
+                    relevant_errors.append(line.strip())
+
+            return relevant_errors
+
+    class FunctionVersionCompatibilityTest(_VersionCompatibilityBase):
+        """Tests that all .cpp function files require PyTorch 2.10+.
+
+        Runs entirely with the host C++ compiler — no CUDA hardware needed.
+        """
+
+        hw_classification = HardwareClassification.GENERIC
+
         def test_kernel_works_with_2_9(self):
             """Test that the 2.9 extension's kernel.cpp compiles successfully with 2.9.0.
 
@@ -206,6 +242,14 @@ if not IS_WINDOWS:
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
+
+    class FunctionVersionCompatibilityTestCUDA(_VersionCompatibilityBase):
+        """Tests that all .cu CUDA function files require PyTorch 2.10+.
+
+        Requires CUDA build tools (nvcc/hipcc) and a CUDA device.
+        """
+
+        hw_classification = HardwareClassification.CUDA
 
         def test_cuda_kernel_works_with_2_9(self):
             """Test that cuda_kernel.cu compiles successfully with 2.9.0.
@@ -241,24 +285,6 @@ if not IS_WINDOWS:
                 f"Error: {error_msg}",
             )
 
-        @staticmethod
-        def _extract_relevant_errors(error_msg: str) -> list[str]:
-            """Extract the most relevant error messages."""
-            error_lines = error_msg.strip().split("\n")
-            relevant_errors = []
-
-            for line in error_lines:
-                line_lower = line.lower()
-                if (
-                    "error:" in line_lower
-                    or "undefined" in line_lower
-                    or "undeclared" in line_lower
-                    or "no member named" in line_lower
-                ):
-                    relevant_errors.append(line.strip())
-
-            return relevant_errors
-
     # Dynamically create test methods for each .cpp and .cu file
 
     def _create_test_method_for_file(source_file: Path):
@@ -277,22 +303,30 @@ if not IS_WINDOWS:
 
         return test_method_impl
 
-    # Test discovery: generate a test for each .cpp and .cu file
+    # Test discovery: generate a test for each .cpp and .cu file,
+    # routing .cpp tests to the GENERIC class and .cu tests to the CUDA class.
     _csrc_dir = Path(__file__).parent / "csrc"
     if not _csrc_dir.exists():
         raise AssertionError(f"Expected csrc directory to exist at {_csrc_dir}")
-    # Collect both .cpp and .cu files. The control tests defined above compile
-    # sources from the 2.9 extension, which is not globbed here.
-    _source_files = sorted([*_csrc_dir.rglob("*.cpp"), *_csrc_dir.rglob("*.cu")])
 
-    for _source_file in _source_files:
+    _cpp_files = sorted(_csrc_dir.rglob("*.cpp"))
+    _cu_files = sorted(_csrc_dir.rglob("*.cu"))
+
+    for _source_file in _cpp_files:
         _test_method = _create_test_method_for_file(_source_file)
         setattr(FunctionVersionCompatibilityTest, _test_method.__name__, _test_method)
+
+    for _source_file in _cu_files:
+        _test_method = _create_test_method_for_file(_source_file)
+        setattr(
+            FunctionVersionCompatibilityTestCUDA, _test_method.__name__, _test_method
+        )
 
     del (
         _create_test_method_for_file,
         _csrc_dir,
-        _source_files,
+        _cpp_files,
+        _cu_files,
         _source_file,
         _test_method,
     )
