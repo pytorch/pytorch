@@ -9,12 +9,13 @@ import warnings
 
 import torch
 import torch.distributed as dist
-from torch.autograd import Function
+import torch.distributed._functional_collectives as funcol
 
 # The two imports below are not always available depending on the
 # USE_DISTRIBUTED compile flag. Make sure they raise import error
 # if we're trying to use them.
 from torch.distributed import group, ReduceOp
+from torch.distributed.distributed_c10d import _rank_not_in_group
 
 
 def _not_supported_under_compile(name, *, suggestion=None):
@@ -33,6 +34,10 @@ def _deprecated(name, suggestion):
         category=FutureWarning,
         stacklevel=3,
     )
+
+
+def _resolve_group(group):
+    return dist.group.WORLD if group is None else group
 
 
 def broadcast(tensor, src, group=group.WORLD):
@@ -58,7 +63,12 @@ def broadcast(tensor, src, group=group.WORLD):
             suggestion="torch.distributed.functional_collectives.broadcast",
         )
     _deprecated("broadcast", "torch.distributed.functional_collectives.broadcast")
-    return _Broadcast.apply(src, group, tensor)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return tensor.clone()
+    return funcol.wait_tensor(
+        funcol.broadcast(tensor, dist.get_group_rank(group, src), group)
+    )
 
 
 def gather(tensor, dst=0, group=group.WORLD):
@@ -79,7 +89,13 @@ def gather(tensor, dst=0, group=group.WORLD):
             suggestion="torch.distributed.functional_collectives.all_gather_single",
         )
     _deprecated("gather", "torch.distributed.functional_collectives.all_gather_single")
-    return _Gather.apply(dst, group, tensor)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return ()
+    out = funcol.wait_tensor(
+        funcol.gather(tensor.unsqueeze(0), dist.get_group_rank(group, dst), group)
+    )
+    return tuple(t.clone() for t in out.unbind(0))
 
 
 def scatter(tensors, src=0, group=group.WORLD):
@@ -91,7 +107,7 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter on the source rank.
-            Receivers must pass ``None``.
+            Other ranks only use ``tensors[0]`` for the output shape.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 
@@ -105,7 +121,13 @@ def scatter(tensors, src=0, group=group.WORLD):
             suggestion="torch.distributed.functional_collectives.all_to_all_single",
         )
     _deprecated("scatter", "torch.distributed.functional_collectives.all_to_all_single")
-    return _Scatter.apply(src, group, *tensors)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return torch.zeros_like(tensors[0])
+    if dist.get_rank() != src:
+        tensors = tensors[:1] * dist.get_world_size(group)
+    out = funcol.scatter(torch.stack(tensors), dist.get_group_rank(group, src), group)
+    return funcol.wait_tensor(out)[0]
 
 
 def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
@@ -115,9 +137,9 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
     Only the process with rank ``dst`` is going to receive the final result.
 
     .. warning::
-        The backward broadcasts the gradient from ``dst`` and is only correct
-        for ``ReduceOp.SUM``. Gradients of the outputs on other ranks are
-        ignored.
+        The backward broadcasts the gradient from ``dst`` and only supports
+        ``ReduceOp.SUM`` and ``ReduceOp.AVG``. Gradients of the outputs on
+        other ranks are ignored.
 
     Arguments:
         tensor (Tensor): Input of the collective.
@@ -136,7 +158,17 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
             "reduce", suggestion="torch.distributed.functional_collectives.all_reduce"
         )
     _deprecated("reduce", "torch.distributed.functional_collectives.all_reduce")
-    return _Reduce.apply(dst, op, group, tensor)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return tensor.clone()
+    out = funcol.wait_tensor(
+        funcol.reduce(tensor, dist.get_group_rank(group, dst), op, group)
+    )
+    if dist.get_rank() == dst:
+        return out
+    # Non-dst ranks return their input. ``out`` is zeros here and stays in the
+    # graph so the backward broadcast runs on every rank.
+    return out + tensor.detach()
 
 
 def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
@@ -144,8 +176,8 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     Reduces, then scatters a list of tensors to all processes in a group.
 
     .. warning::
-        The backward all-gathers the gradient and is only correct for
-        ``ReduceOp.SUM``.
+        The backward all-gathers the gradient and only supports
+        ``ReduceOp.SUM`` and ``ReduceOp.AVG``.
 
     Arguments:
         output (Tensor): Output tensor.
@@ -168,7 +200,15 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
         "reduce_scatter",
         "torch.distributed.functional_collectives.reduce_scatter_single",
     )
-    return _Reduce_Scatter.apply(op, group, output, *input_list)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return output
+    return funcol.reduce_scatter_inplace(
+        output,
+        list(input_list),
+        funcol.REDUCE_OP_TO_STR[funcol._reduce_op_type(op)],
+        group,
+    )
 
 
 def all_gather(tensor, group=group.WORLD):
@@ -191,7 +231,11 @@ def all_gather(tensor, group=group.WORLD):
     _deprecated(
         "all_gather", "torch.distributed.functional_collectives.all_gather_single"
     )
-    return _AllGather.apply(group, tensor)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return ()
+    out = funcol.wait_tensor(funcol.all_gather_single(tensor.unsqueeze(0), 0, group))
+    return tuple(t.clone() for t in out.unbind(0))
 
 
 def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
@@ -235,7 +279,10 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
     _deprecated(
         "_all_gather_base", "torch.distributed.functional_collectives.all_gather_single"
     )
-    return _AllGatherBase.apply(output_tensor, input_tensor, group)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return output_tensor
+    return funcol.all_gather_tensor_inplace(output_tensor, input_tensor, group)
 
 
 def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
@@ -259,7 +306,20 @@ def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     _deprecated(
         "all_to_all", "torch.distributed.functional_collectives.all_to_all_single"
     )
-    return _AlltoAll.apply(group, output_tensor_list, *input_tensor_list)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return tuple(output_tensor_list)
+    output_split_sizes = [t.numel() for t in output_tensor_list]
+    out = funcol.all_to_all_single(
+        torch.cat([t.reshape(-1) for t in input_tensor_list]),
+        output_split_sizes,
+        [t.numel() for t in input_tensor_list],
+        group,
+    )
+    outputs = funcol.wait_tensor(out).split(output_split_sizes)
+    for o, t in zip(output_tensor_list, outputs):
+        o.copy_(t.view_as(o))
+    return tuple(output_tensor_list)
 
 
 def all_to_all_single(
@@ -297,8 +357,16 @@ def all_to_all_single(
         "all_to_all_single",
         "torch.distributed.functional_collectives.all_to_all_single",
     )
-    return _AlltoAllSingle.apply(
-        group, output, output_split_sizes, input_split_sizes, input
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return output
+    world_size = dist.get_world_size(group)
+    output_split_sizes = (
+        output_split_sizes or [output.size(0) // world_size] * world_size
+    )
+    input_split_sizes = input_split_sizes or [input.size(0) // world_size] * world_size
+    return funcol.all_to_all_inplace(
+        output, input, output_split_sizes, input_split_sizes, group
     )
 
 
@@ -310,10 +378,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
     identical in all processes.
 
     .. warning::
-        The backward all-reduces the gradient with ``op`` and is only correct
-        for ``ReduceOp.SUM`` and ``ReduceOp.AVG``. For example, for
-        ``ReduceOp.PRODUCT`` it returns the product of the gradients rather
-        than the summed gradient times the product of the other ranks' inputs.
+        The backward does not support bitwise ops.
 
     Arguments:
         tensor (Tensor): Input of the collective.
@@ -332,251 +397,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
             suggestion="torch.distributed.functional_collectives.all_reduce",
         )
     _deprecated("all_reduce", "torch.distributed.functional_collectives.all_reduce")
-    return _AllReduce.apply(op, group, tensor)
-
-
-class _Broadcast(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, src, group, tensor):
-        ctx.src = src
-        ctx.group = group
-        ctx.global_rank = dist.get_rank()
-        # torch.distributed makes all the calls in place
-        # we allocate new tensors to avoid this
-        tensor = tensor.clone()
-        dist.broadcast(tensor, src, group=group)
-        return tensor
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        gx = _Reduce.apply(ctx.src, ReduceOp.SUM, ctx.group, grad_output)
-        if ctx.src != ctx.global_rank:
-            gx.zero_()
-        return (None, None, gx)
-
-
-class _Gather(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, dst, group, tensor):
-        ctx.dst = dst
-        ctx.group = group
-        # Need to create a list of tensors here to do the
-        # aggregation, get it from the group size
-        # tensor should be correctly sized for the method
-        # gathering
-        tensor_list = [
-            torch.zeros_like(tensor) for i in range(dist.get_world_size(group=group))
-        ]
-
-        tensor = tensor.contiguous()
-        if dist.get_rank(group=group) == dst:
-            dist.gather(tensor, tensor_list, dst, group=group)
-        else:
-            dist.gather(tensor, None, dst, group=group)
-        return tuple(tensor_list)
-
-    @staticmethod
-    def backward(ctx, *grad_outputs):
-        return (None, None) + (_Scatter.apply(ctx.dst, ctx.group, *grad_outputs),)
-
-
-class _Scatter(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, src, group, *tensors):
-        ctx.src = src
-        ctx.group = group
-        if not all(t.size() == tensors[0].size() for t in tensors):
-            raise AssertionError
-        output = torch.zeros_like(tensors[0])
-        if dist.get_rank(group=group) == src:
-            dist.scatter(output, list(tensors), src, group=group)
-        else:
-            dist.scatter(output, None, src, group=group)
-        return output
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        return (None, None) + _Gather.apply(ctx.src, ctx.group, grad_output)
-
-
-class _Reduce(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, src, op, group, tensor):
-        ctx.src = src
-        ctx.group = group
-        tensor = tensor.clone()
-        dist.reduce(tensor, src, op=op, group=group)
-        return tensor
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        return (None, None, None) + (_Broadcast.apply(ctx.src, ctx.group, grad_output),)
-
-
-class _Reduce_Scatter(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, op, group, tensor, *input_tensor_list):
-        ctx.group = group
-        # Need contiguous tensors for collectives.
-        tensor = tensor.contiguous()
-        input_tensor_list = tuple(t.contiguous() for t in input_tensor_list)
-        dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
-        return tensor
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        return (None, None, None) + _AllGather.apply(ctx.group, grad_output)
-
-
-class _AllGather(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, group, tensor):
-        # Need contiguous tensors for collectives.
-        tensor = tensor.contiguous()
-
-        ctx.group = group
-        out_tensor_list = [
-            torch.empty_like(tensor) for _ in range(dist.get_world_size(group=group))
-        ]
-
-        dist.all_gather(out_tensor_list, tensor, group=group)
-        return tuple(out_tensor_list)
-
-    @staticmethod
-    def backward(ctx, *grad_outputs):
-        if dist.get_backend(group=ctx.group) in (dist.Backend.NCCL, dist.Backend.XCCL):
-            rank = dist.get_rank(group=ctx.group)
-            gx = torch.empty_like(grad_outputs[rank])
-            gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
-        else:
-            # As many backends don't support ReduceScatter, we use AlltoAll with .sum()
-            # to emulate the ReduceScatter behavior
-            tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
-            gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
-            gx = torch.sum(torch.stack(gxs), dim=0)
-        return (None, gx)
-
-
-class _AllGatherBase(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, output_tensor, input_tensor, group):
-        ctx.group = group
-        dist._all_gather_base(output_tensor, input_tensor.contiguous(), group=group)
-        return output_tensor
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        if dist.get_backend(group=ctx.group) in (dist.Backend.NCCL, dist.Backend.XCCL):
-            world_size = dist.get_world_size(group=ctx.group)
-            out_size = list(grad_output.size())
-            if out_size[0] % world_size != 0:
-                raise RuntimeError(
-                    f"Tensor with dimensions: {out_size} does "
-                    f"not have first dimension divisible by world_size: {world_size}"
-                )
-            out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
-            gx = torch.empty(
-                out_size, device=grad_output.device, dtype=grad_output.dtype
-            )
-            dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
-        else:
-            raise RuntimeError("Backend not supported!")
-        return (None, gx, None)
-
-
-class _AlltoAll(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, group, out_tensor_list, *tensors):
-        ctx.group = group
-        ctx.input_tensor_size_list = [
-            tensors[i].size() for i in range(dist.get_world_size(group=group))
-        ]
-        my_rank = dist.get_rank(group=group)
-        tensors = tuple(t.contiguous() for t in tensors)
-        # Implement it on means of scatter/gather, send/recv async operations have issues
-        if dist.get_backend(group=group) is dist.Backend.GLOO:
-            for i in range(dist.get_world_size(group=group)):
-                to_send = None
-                if i == my_rank:
-                    to_send = list(tensors)
-                dist.scatter(out_tensor_list[i], to_send, i, group=group)
-        else:
-            dist.all_to_all(
-                out_tensor_list,
-                list(tensors),
-                group=group,
-            )
-        return tuple(out_tensor_list)
-
-    @staticmethod
-    def backward(ctx, *grad_outputs):
-        tensor_list = [
-            torch.empty(
-                size, device=grad_outputs[0].device, dtype=grad_outputs[0].dtype
-            )
-            for size in ctx.input_tensor_size_list
-        ]
-        return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
-
-
-class _AlltoAllSingle(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, group, output, output_split_sizes, input_split_sizes, input):
-        ctx.group = group
-        ctx.input_size = input.size()
-        ctx.output_split_sizes = input_split_sizes
-        ctx.input_split_sizes = output_split_sizes
-        dist.all_to_all_single(
-            output,
-            input,
-            output_split_sizes=output_split_sizes,
-            input_split_sizes=input_split_sizes,
-            group=group,
-        )
-        return output
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        tensor = torch.empty(
-            ctx.input_size, device=grad_output.device, dtype=grad_output.dtype
-        )
-        return (None, None, None, None) + (
-            _AlltoAllSingle.apply(
-                ctx.group,
-                tensor,
-                ctx.output_split_sizes,
-                ctx.input_split_sizes,
-                grad_output.contiguous(),
-            ),
-        )
-
-
-class _AllReduce(Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, op, group, tensor):
-        ctx.group = group
-        ctx.op = op
-        tensor = tensor.clone(memory_format=torch.contiguous_format)
-        dist.all_reduce(tensor, op=op, group=group)
-        return tensor
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx, grad_output):
-        return (None, None) + (_AllReduce.apply(ctx.op, ctx.group, grad_output),)
+    group = _resolve_group(group)
+    if _rank_not_in_group(group):
+        return tensor.clone()
+    return funcol.wait_tensor(funcol.all_reduce(tensor, op, group))
