@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import itertools
 import sys
 import types
@@ -1095,6 +1096,354 @@ class GraphModule(torch.nn.Module):
             pass
         with self.assertRaisesRegex(RuntimeError, "No active exception to reraise"):
             raise  # noqa: PLE0704
+
+    @make_dynamo_test
+    def test_name_qualname(self):
+        def func():
+            yield 1
+
+        gen = func()
+        self.assertEqual(gen.__name__, "func")
+        self.assertEqual(
+            gen.__qualname__, "GeneratorTests.test_name_qualname.<locals>.func"
+        )
+
+        gen.__name__ = "name"
+        gen.__qualname__ = "qualname"
+        self.assertEqual(gen.__name__, "name")
+        self.assertEqual(gen.__qualname__, "qualname")
+
+    @parametrize("attr", ["__name__", "__qualname__"])
+    @make_dynamo_test
+    def test_name_qualname_must_be_str(self, attr):
+        def func():
+            yield 1
+
+        gen = func()
+        msg = f"{attr} must be set to a string object"
+        self.assertRaisesRegex(TypeError, msg, setattr, gen, attr, 123)
+        self.assertRaisesRegex(TypeError, msg, delattr, gen, attr)
+
+    @make_dynamo_test
+    def test_name_qualname_copied_from_function(self):
+        # make_gen copies gi_name/gi_qualname off the function when the generator
+        # is created: a rename before the call shows up, one after it does not.
+        def func():
+            yield 1
+
+        func.__name__ = "func_name"
+        func.__qualname__ = "func_qualname"
+        gen = func()
+        func.__name__ = "late"
+        func.__qualname__ = "late_qualname"
+        self.assertEqual(gen.__name__, "func_name")
+        self.assertEqual(gen.__qualname__, "func_qualname")
+
+    @make_dynamo_test
+    def test_genexpr_name(self):
+        gen = (x for x in range(10))
+        self.assertEqual(gen.__name__, "<genexpr>")
+
+    @parametrize(
+        "attr", ["foo", "__module__", "send", "__doc__", "gi_running", "gi_code"]
+    )
+    def test_setattr_error_message(self, attr):
+        # Generators have no __dict__, so any other write is an AttributeError,
+        # worded by what the type lookup finds and differently across versions.
+        def gfn():
+            yield 1
+
+        def fn(x):
+            gen = gfn()
+            msgs = []
+            try:
+                setattr(gen, attr, None)
+            except AttributeError as e:
+                msgs.append(str(e))
+            try:
+                delattr(gen, attr)
+            except AttributeError as e:
+                msgs.append(str(e))
+            return x + len(msgs), msgs
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_name_tracks_rename_outside_region(self):
+        def gfn():
+            yield 1
+
+        def fn(x):
+            name = gfn().__name__
+            return x + len(name), name + "!"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(1)
+        self.assertEqual(opt_fn(x), fn(x))
+        gfn.__name__ = "renamed_outside"
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_setattr_bad_arguments(self):
+        def gfn():
+            yield 1
+
+        def fn(x):
+            gen = gfn()
+            kinds = []
+            try:
+                gen.__setattr__("__name__")
+            except (TypeError, AttributeError) as e:
+                kinds.append(type(e).__name__)
+            try:
+                gen.__delattr__()
+            except (TypeError, AttributeError) as e:
+                kinds.append(type(e).__name__)
+            try:
+                gen.__setattr__(1, 2)
+            except (TypeError, AttributeError) as e:
+                kinds.append(type(e).__name__)
+            try:
+                delattr(gen, 1)
+            except (TypeError, AttributeError) as e:
+                kinds.append(type(e).__name__)
+            return x + len(kinds), kinds
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_name_of_generator_passed_in(self):
+        # A generator built outside the region carries a source and keeps the
+        # attribute handling it had before, including reads in inlined helpers.
+        def gfn():
+            yield 1
+
+        def read_name(gen):
+            return gen.__name__
+
+        def fn(x, gen):
+            name = read_name(gen)
+            return x + len(name), getattr(gen, "__qualname__", None)
+
+        def rename(x, gen):
+            gen.__name__ = gen.__name__ + "!"
+            return x + 1
+
+        def renamed():
+            gen = gfn()
+            gen.__name__ = "outside"
+            gen.__qualname__ = "Outside.gen"
+            return gen
+
+        x = torch.zeros(1)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(x, renamed()), fn(x, renamed()))
+        gen, expected_gen = gfn(), gfn()
+        torch.compile(rename, backend="eager")(x, gen)
+        rename(x, expected_gen)
+        self.assertEqual(gen.__name__, expected_gen.__name__)
+
+    def test_rename_generator_carrying_a_source(self):
+        # A @contextmanager generator carries its function's source, so it also
+        # keeps the attribute handling it had before.
+        @contextlib.contextmanager
+        def ctx():
+            yield 1
+
+        def fn(x):
+            cm = ctx()
+            cm.gen.__name__ = "renamed"
+            return x + 1, cm.gen.__name__
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_polyfilled_iterator_has_no_generator_name(self):
+        # enumerate and itertools objects are traced as generators built from
+        # polyfill code, but the real objects have no __name__.
+        def fn(x):
+            try:
+                name = itertools.accumulate([1, 2]).__name__
+            except AttributeError:
+                return x + 1, getattr(enumerate([1]), "__name__", None)
+            return x + 2, name
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("attr", ["__name__", "__qualname__"])
+    @parametrize("kind", ["direct", "nested", "container", "yielded", "renamed"])
+    def test_registered_iterator_polyfill_names(self, attr, kind):
+        def original(values):
+            iterator = iter(values)
+            if kind == "container":
+                return {"iterator": iterator}
+            if kind == "yielded":
+                return iter([iterator])
+            return iterator
+
+        def generate(values):
+            yield from values
+
+        def replacement(values):
+            def nested():
+                yield from values
+
+            if kind == "container":
+                return {"iterator": nested()}
+            if kind == "yielded":
+
+                def outer():
+                    yield nested()
+
+                return outer()
+            if kind == "renamed":
+                gen = nested()
+                gen.__name__ = "implementation_name"
+                gen.__qualname__ = "implementation_qualname"
+                return gen
+            return nested()
+
+        torch.compiler.substitute_in_graph(original)(
+            generate if kind == "direct" else replacement
+        )
+
+        def fn(x):
+            iterator = original([1, 2])
+            if kind == "container":
+                iterator = iterator["iterator"]
+            if kind == "yielded":
+                iterator = next(iterator)
+            return x + len(getattr(iterator, attr, "")), list(iterator)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_generator_passed_through_polyfill_keeps_names(self):
+        def original(value):
+            return value
+
+        @torch.compiler.substitute_in_graph(original)
+        def replacement(value):
+            return value
+
+        def generate():
+            yield 1
+
+        def fn(x):
+            gen = generate()
+            result = original(gen)
+            return x + len(result.__name__ + result.__qualname__), result is gen
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_generator_callback_in_polyfill_keeps_names(self):
+        def original(callback):
+            gen = callback()
+            return gen, gen.__name__
+
+        @torch.compiler.substitute_in_graph(original)
+        def replacement(callback):
+            gen = callback()
+            return gen, gen.__name__
+
+        def generate():
+            yield 1
+
+        def fn(x):
+            gen, name = original(generate)
+            return x + len(name + gen.__name__ + gen.__qualname__)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_renamed_generator_escapes_region(self):
+        # Codegen cannot rebuild a generator, so the frame falls back to eager,
+        # and the real generator must carry the rename afterwards.
+        def gfn():
+            yield 1
+
+        def fn(x):
+            gen = gfn()
+            gen.__name__ = "renamed"
+            return x + 1, gen
+
+        x = torch.zeros(1)
+        out, gen = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(out, x + 1)
+        self.assertEqual(gen.__name__, "renamed")
+        self.assertEqual(next(gen), 1)
+
+    def test_name_via_getset_descriptor(self):
+        # The descriptor calls the getter directly, bypassing generic getattr,
+        # so the getter itself has to see an in-region rename.
+        def gfn():
+            yield 1
+
+        def fn(x):
+            gen = gfn()
+            gen.__name__ = "renamed"
+            gen.__qualname__ = "Renamed.gen"
+            name = types.GeneratorType.__dict__["__name__"].__get__(gen)
+            qualname = types.GeneratorType.__dict__["__qualname__"].__get__(gen)
+            return x + len(name + qualname)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_set_name_from_untyped_value_graph_breaks(self):
+        # A passed-in generator's __name__ declines to a value of unknown type;
+        # storing it on a local generator must graph-break, not crash.
+        def gfn():
+            yield 1
+
+        def fn(x, passed):
+            gen = gfn()
+            gen.__name__ = passed.__name__
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "python_type"):
+            opt_fn(torch.zeros(1), gfn())
+
+    def test_method_attributes_resolve_as_in_eager(self):
+        def gfn():
+            yield 1
+
+        def fn(x):
+            gen = gfn()
+            wrapper = gen.__next__
+            is_wrapper = isinstance(wrapper, types.MethodWrapperType)
+            return x + is_wrapper + len(wrapper.__name__), wrapper.__self__ is gen
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_generator_from_callable_object(self):
+        # Calling the instance builds a method VT whose source is the instance,
+        # which has no __name__. The names must be guarded through the function,
+        # and a graph break while the generator is live must not guard them.
+        class Stream:
+            def __call__(self):
+                yield 1
+
+        stream = Stream()
+
+        def consume(gen, _):
+            return sum(gen)
+
+        def names(x):
+            gen = stream()
+            return x + len(gen.__name__ + gen.__qualname__)
+
+        def across_break(x):
+            return x + consume(stream(), torch._dynamo.graph_break())
+
+        x = torch.zeros(1)
+        opt_names = torch.compile(names, backend="eager", fullgraph=True)
+        self.assertEqual(opt_names(x), names(x))
+        opt_break = torch.compile(across_break, backend="eager")
+        self.assertEqual(opt_break(x), across_break(x))
 
 
 class TestGeneratorSend(GeneratorTestsBase):
