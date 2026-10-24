@@ -484,6 +484,18 @@ class TestSparseOnlyCPU(TestSparseBase):
                 "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
             self_sp.sspaddmm(mat1_sparse, mat2_sparse)
 
+        out_dense = torch.randn(m, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'out' to have sparse layout, got 'out' with layout Strided"):
+            torch.sspaddmm(self_sp, mat1_sparse, mat2_dense, out=out_dense)
+
+        self_dense = torch.randn(m, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'self' to have sparse layout, got 'self' with layout Strided"):
+            torch.sspaddmm(self_dense, mat1_sparse, mat2_dense)
+
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_saddmm(self, device, dtype, coalesced):
