@@ -82,6 +82,17 @@ class QLinearOnednnXPU final {
       at::Tensor weight,
       std::optional<torch::List<int64_t>> input_shape);
 
+  C10_API static Tensor q_linear_w4a8_int(
+      Tensor mat_a,
+      Tensor mat_b,
+      Tensor mat_a_scale,
+      Tensor mat_b_scales,
+      Tensor mat_a_zero_point,
+      Tensor mat_b_zero_points,
+      int64_t group_size,
+      std::optional<c10::ScalarType> out_dtype,
+      std::optional<Tensor> bias);
+
   static inline c10::ScalarType qlinear_decide_out_dtype(
       const at::Tensor& act,
       const std::optional<c10::ScalarType> output_dtype);

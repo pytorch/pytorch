@@ -100,6 +100,17 @@ TORCH_API void woq_matmul_int4(
     int64_t group_size,
     bool pri_cache = true);
 
+TORCH_API void matmul_int4_impl(
+    at::Tensor& result,
+    const at::Tensor& mat1_,
+    const at::Tensor& mat2_,
+    const std::optional<at::Tensor>& mat1_scale,
+    const at::Tensor& mat2_scale,
+    const std::optional<at::Tensor>& mat1_zero_point,
+    const at::Tensor& mat2_zero_point,
+    int64_t group_size,
+    const std::optional<at::Tensor>& bias = std::nullopt);
+
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
     IntArrayRef src_tz,
