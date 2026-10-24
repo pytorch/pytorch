@@ -250,6 +250,9 @@ class IndexPropagation(DefaultHandler):
     def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
         return self.wrap(self._inner.value_expr(expr, dtype))
 
+    def register_datadep_range(self, value, symbol):
+        return self._inner.register_datadep_range(self.unwrap(value), symbol)
+
     def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):
             return tuple(self.unwrap(v) for v in a)
