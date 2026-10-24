@@ -2,7 +2,6 @@
 
 import operator
 import random
-import warnings
 from functools import reduce
 from itertools import product
 
@@ -1023,60 +1022,59 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
 
     def test_uint8_index(self, device):
-        # Indexing with a uint8 tensor treats it as a mask, which is deprecated.
+        # Indexing with a uint8 tensor used to treat it as a mask.
         # See https://github.com/pytorch/pytorch/issues/201370
-        v = torch.tensor([True, False, True], dtype=torch.bool, device=device)
-        boolIndices = torch.tensor(
-            [True, False, False], dtype=torch.bool, device=device
-        )
-        uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
-        with warnings.catch_warnings(record=True) as w:
-            v1 = v[boolIndices]
-            v2 = v[uint8Indices]
-            self.assertEqual(v1.shape, v2.shape)
-            self.assertEqual(v1, v2)
-            self.assertEqual(
-                v[boolIndices], tensor([True], dtype=torch.bool, device=device)
+        msg = "indexing with dtype torch.uint8 is no longer supported"
+
+        def u8(*values):
+            return torch.tensor(values, dtype=torch.uint8, device=device)
+
+        def setitem(t, index, value):
+            t = t.clone()
+            t[index] = value
+            return t
+
+        v = torch.randn(5, 7, 3, device=device)
+        x = torch.arange(16.0, device=device).view(4, 4)
+        b = torch.tensor([True, False, True], device=device)
+        mask, mask2 = u8(1, 0, 1, 1, 0), u8(1, 1, 1)
+        value = torch.randn(3, 7, 3, device=device)
+
+        cases = [
+            lambda: v[mask],
+            lambda: v[mask, :, mask2],
+            lambda: b[u8(1, 0, 0)],
+            lambda: setitem(v, mask, value),
+            # the value broadcasts over the selected rows
+            lambda: setitem(x, u8(1, 0, 1, 0), x[0]),
+            lambda: setitem(v, mask, 1.0),
+            lambda: v.index_put((mask,), value, accumulate=True),
+            # an empty mask, read and written
+            lambda: v[mask * 0],
+            lambda: v.clone().index_put_((mask * 0,), value[:0], accumulate=True),
+            lambda: torch.ops.aten.index(v, [mask]),
+        ]
+        for fn in cases:
+            with self.assertRaisesRegex(IndexError, msg):
+                fn()
+
+        scalar = u8(1).squeeze()
+        cases = [
+            (t, index)
+            for t in (
+                v,
+                torch.tensor(1, device=device),
+                torch.tensor(True, device=device),
             )
-            self.assertEqual(len(w), 1)
-
-        v = torch.randn(5, 7, 3, device=device)
-        mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        with warnings.catch_warnings(record=True) as w:
-            res = v[mask]
-            self.assertEqual(res.shape, (3, 7, 3))
-            self.assertEqual(res, torch.stack([v[0], v[2], v[3]]))
-            self.assertEqual(len(w), 1)
-
-        mask = torch.zeros(size=(10,), dtype=torch.uint8, device=device)
-        y = torch.ones(size=(10, 10), device=device)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            y.index_put_((mask,), y[mask], accumulate=True)
-            self.assertEqual(y, torch.ones(size=(10, 10), device=device))
-            self.assertEqual(len(w), 2)
-
-        v = torch.randn(5, 7, 3, device=device)
-        # note: these broadcast together and are transposed to the first dim
-        mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        mask2 = torch.ByteTensor([1, 1, 1]).to(device)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-            self.assertEqual(len(w), 2)
-
-        x = torch.arange(0.0, 16, device=device).view(4, 4)
-        b = torch.ByteTensor([True, False, True, False]).to(device)
-        value = torch.tensor([3.0, 4.0, 5.0, 6.0], device=device)
-
-        with warnings.catch_warnings(record=True) as w:
-            x[b] = value
-            self.assertEqual(len(w), 1)
-
-        self.assertEqual(x[0], value)
-        self.assertEqual(x[1], torch.arange(4.0, 8, device=device))
-        self.assertEqual(x[2], value)
-        self.assertEqual(x[3], torch.arange(12.0, 16, device=device))
+            for index in ((scalar,), (..., scalar))
+        ]
+        # a scalar index adds a dimension, which the next index skips
+        cases.append((v, (scalar, 1)))
+        for t, index in cases:
+            with self.assertRaisesRegex(IndexError, msg):
+                t[index]
+            with self.assertRaisesRegex(IndexError, msg):
+                setitem(t, index, 0)
 
     # MPS: Fails locally, but passes in CI...
     @skipIfTorchDynamo(
@@ -1524,14 +1522,13 @@ class TestIndexingDevice(TestCase):
 
     def test_index_scalar_with_bool_mask(self, device):
         a = torch.tensor(1, device=device)
-        uintMask = torch.tensor(True, dtype=torch.uint8, device=device)
         boolMask = torch.tensor(True, dtype=torch.bool, device=device)
-        self.assertEqual(a[uintMask], a[boolMask])
-        self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
+        self.assertEqual(a[boolMask], a.unsqueeze(0))
+        self.assertEqual(a[boolMask].dtype, a.dtype)
 
         a = torch.tensor(True, dtype=torch.bool, device=device)
-        self.assertEqual(a[uintMask], a[boolMask])
-        self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
+        self.assertEqual(a[boolMask], a.unsqueeze(0))
+        self.assertEqual(a[boolMask].dtype, a.dtype)
 
     def test_setitem_expansion_error(self, device):
         true = torch.tensor(True, device=device)
@@ -1627,6 +1624,18 @@ class TestIndexingDevice(TestCase):
         x = torch.arange(0, 4, device=device).view(2, 2)
         x[1] = torch.arange(5, 7, device=device)
         self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
+
+    def test_bool_tensor_assignment(self, device):
+        x = torch.arange(0.0, 16, device=device).view(4, 4)
+        b = torch.tensor([True, False, True, False], device=device)
+        value = torch.tensor([3.0, 4.0, 5.0, 6.0], device=device)
+
+        x[b] = value
+
+        self.assertEqual(x[0], value)
+        self.assertEqual(x[1], torch.arange(4.0, 8, device=device))
+        self.assertEqual(x[2], value)
+        self.assertEqual(x[3], torch.arange(12.0, 16, device=device))
 
     def test_variable_slicing(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
