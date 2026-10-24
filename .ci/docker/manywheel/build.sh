@@ -92,7 +92,13 @@ case ${image} in
                 --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
             )
         else
-            THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
+            if [[ "${ROCM_VERSION}" == "10.2" ]]; then
+                # Release candidate; drop this branch once 10.2 is on the stable index.
+                ROCM_VERSION="10.2.0rc0"
+                THEROCK_INDEX_URL="https://rc.repo.amd.com/rocm/whl-next/"
+            else
+                THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
+            fi
             DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         fi
         ;;
