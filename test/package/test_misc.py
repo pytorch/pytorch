@@ -7,14 +7,12 @@ import sys
 from io import BytesIO
 from pathlib import Path
 from textwrap import dedent
-from unittest import skipIf
 
 from torch.package import is_from_package, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_SANDCASTLE,
     run_tests,
+    skipIfMeta,
     skipIfTorchDynamo,
 )
 
@@ -194,10 +192,7 @@ class TestMisc(PackageTestCase):
 
         self.assertEqual(hi.python_version(), platform.python_version())
 
-    @skipIf(
-        IS_FBCODE or IS_SANDCASTLE,
-        "Tests that use temporary files are disabled in fbcode",
-    )
+    @skipIfMeta("Tests that use temporary files are disabled in fbcode")
     def test_load_python_version_from_package(self):
         """Tests loading a package with a python version embedded"""
         importer1 = PackageImporter(
