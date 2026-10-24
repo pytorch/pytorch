@@ -130,11 +130,9 @@ def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
     if dims_arg is None:
         return None
     dims = cast(list[int], as_list(dims_arg))
-    dims = cast(list[int], normalize_dims(dims, ndim))
-    empty_dims = [[0], [-1], []]
-    if ndim == 0 and dims_arg in empty_dims:
+    if ndim == 0 and dims in [[0], [-1], []]:
         return None
-    return dims
+    return cast(list[int], normalize_dims(dims, ndim))
 
 
 def _infer_reduce_dims_map(
@@ -371,6 +369,7 @@ def _reduction_single_dim_strategy(
 LINEAR_REDUCTION_OP_MAP = {
     aten.all.default: "product",
     aten.all.dim: "product",
+    aten.all.dims: "product",
     aten.any.default: "sum",
     aten.any.dim: "sum",
     aten.any.dims: "sum",
@@ -408,6 +407,7 @@ FOREACH_LINEAR_REDUCTION_OPS = list(FOREACH_LINEAR_REDUCTION_OP_MAP)
 NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.all.default,
     aten.all.dim,
+    aten.all.dims,
     aten.any.default,
     aten.any.dim,
     aten.any.dims,
@@ -570,7 +570,7 @@ def bool_reduction_single_dim_strategy(
     match op:
         case aten.any.default | aten.any.dim | aten.any.dims | aten.any.out:
             reduce_op = "max"
-        case aten.all.default | aten.all.dim:
+        case aten.all.default | aten.all.dim | aten.all.dims:
             reduce_op = "min"
         case _:
             raise AssertionError(f"Unexpected bool reduction op: {op}")
