@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
     getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
+    validate_test_name,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -947,6 +948,53 @@ if __name__ == "__main__":
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
+
+
+class TestParametrizeNameHygiene(TestCase):
+    # Test names become pytest nodeids that downstream tooling selects by
+    # exact name and transports line-by-line, so default-generated names
+    # must satisfy the hygiene contract enforced by validate_test_name.
+    def test_default_names_satisfy_hygiene_invariants(self):
+        hazard_values = [
+            "at::kCPU",  # bare "::" -> unselectable nodeid
+            "mode = Config(default=False)\nflag = False",  # line separator
+            " \tx ",  # tab + edge whitespace
+            "\x00\x0b\x1f",  # XML-1.0-illegal control chars
+            "[aten::op]_suffix",  # bracket-internal "::"
+            "a.b",  # "." (existing rule)
+        ]
+
+        class TestP(unittest.TestCase):
+            @parametrize("v", hazard_values)
+            def test_p(self, v):
+                pass
+
+        instantiate_parametrized_tests(TestP)
+
+        generated = [n for n in vars(TestP) if n.startswith("test_p_")]
+        self.assertEqual(len(generated), len(hazard_values))
+        for name in generated:
+            validate_test_name(name)  # must not raise
+            self.assertEqual(name, name.strip())
+            self.assertEqual(len(name.splitlines()), 1)
+
+    def test_validate_test_name_rejects_hazardous_names(self):
+        for bad in [
+            "test_a\nb", "test_a\rb", "test_a\vb", "test_a\x85b",
+            "test_a\u2028b", "test_a\u2029b", "test_a\x00b", "test_at::kCPU",
+            " test_a", "test_a ", "test_a.b",
+        ]:
+            with self.assertRaises(RuntimeError):
+                validate_test_name(bad)
+
+    def test_validate_test_name_accepts_selectable_names(self):
+        for good in [
+            "test_p_at_kCPU",  # sanitized form
+            "test_p[aten::op]",  # "::" inside brackets stays legal
+            "test_p_cuda:0",  # single colon is not a separator
+            "test_p_mode = Config(default=False)_flag = False",  # spaces are legal
+        ]:
+            validate_test_name(good)  # must not raise
 
 
 class TestEnvironmentDefFlag(TestCase):
