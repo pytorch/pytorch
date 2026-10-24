@@ -30,6 +30,7 @@ from torch.distributed.fsdp import (
     register_fsdp_forward_method,
     share_comm_ctx,
 )
+from torch.distributed.fsdp._fully_shard._all_gather_layout import AllGatherLayout
 from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_reduce_scatter_input_fn,
@@ -3315,6 +3316,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            layout: AllGatherLayout,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -3326,6 +3328,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                layout,
             )
 
         orig_foreach_reduce = foreach_reduce
