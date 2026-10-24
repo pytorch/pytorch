@@ -362,51 +362,56 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  * Note [Synchronize Streams on Device]
  *
  * syncStreamsOnDevice waits for all work previously submitted to the SYCL
- * queues we manage on `device`. Two paths exist:
- *  1. Fast path (SYCL >= 2026.1 and device exposes `ext_oneapi_device_wait`):
- *     delegate to `device_synchronize`, which issues a single
- *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait. SYCL < 2026.1
- *     is excluded because earlier runtimes could crash (release an invalid
+ * queues we manage on `device`. Two layers:
+ *  1. Best-effort device-wide wait (SYCL >= 2026.1 and device exposes
+ *     `ext_oneapi_device_wait`): a single `ext_oneapi_wait_and_throw()`,
+ *     which also covers SYCL queues outside our pools. SYCL < 2026.1 is
+ *     excluded because earlier runtimes could crash (release an invalid
  *     queue) when a device-wide wait interleaves with XPUGraph capture; see
  *     https://github.com/pytorch/pytorch/issues/187277.
- *  2. Legacy path (otherwise): walk every reserved queue in each priority
- *     pool and `wait()` on it. This only drains queues we own; SYCL queues
- *     outside our pools are unaffected.
+ *     Alone it is NOT a safe drain-before-free on every stack: on Arc
+ *     A-Series + Windows + the 2026.1 UR/Level-Zero runtime,
+ *     `zeDeviceSynchronize` returns SUCCESS without draining in-flight
+ *     work (#197520, #198522).
+ *  2. Authoritative per-queue drain: walk every reserved queue in each
+ *     priority pool and `wait()` on it (one `urQueueFinish` per queue at the
+ *     UR level). This is what the pre-#191900 code did and what actually
+ *     retires in-flight commands before the caller frees memory. It drains
+ *     only queues we own; SYCL queues outside our pools are unaffected (their
+ *     uses are tracked with per-stream events and retired in
+ *     `synchronize_and_free_events`).
  */
 
-// Note: The stream pools are lazily initialized on the legacy path; the fast
-// path bypasses our pools entirely.
+// Note: The stream pools are lazily initialized on both paths.
 void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
   check_device_index(device);
 
-// TODO: drop the legacy fallback below once a driver supporting
-// `ext_oneapi_device_wait` is widely deployed across all supported platforms.
+  // Best-effort device-wide wait; kept for coverage of queues outside our
+  // pools. See layer (1) in Note [Synchronize Streams on Device].
 #if SYCL_COMPILER_VERSION >= 20260100
-  const bool use_device_wide_wait = c10::xpu::get_raw_device(device).has(
-      sycl::aspect::ext_oneapi_device_wait);
-#else
-  constexpr bool use_device_wide_wait = false;
+  if (c10::xpu::get_raw_device(device).has(
+          sycl::aspect::ext_oneapi_device_wait)) {
+    c10::xpu::device_synchronize(device);
+  }
 #endif
 
-  if (use_device_wide_wait) {
-    c10::xpu::device_synchronize(device);
-  } else {
-    initXPUStreamsOnce();
-    // Initializes the stream pools (once)
-    initDeviceStreamOnce(device);
-    // kStreamsPerPool (32) reserved queues per priority for each device.
-    for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
-      for (const auto i : c10::irange(kStreamsPerPool)) {
-        streams[device][p][i]->wait();
-      }
+  // Authoritative per-queue drain; see layer (2) in Note [Synchronize Streams
+  // on Device].
+  initXPUStreamsOnce();
+  // Initializes the stream pools (once)
+  initDeviceStreamOnce(device);
+  // kStreamsPerPool (32) reserved queues per priority for each device.
+  for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
+    for (const auto i : c10::irange(kStreamsPerPool)) {
+      streams[device][p][i]->wait();
     }
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_device_synchronization(c10::kXPU);
-    }
+  }
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
   }
 }
 
