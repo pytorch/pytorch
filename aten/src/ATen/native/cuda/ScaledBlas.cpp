@@ -532,7 +532,7 @@ _scaled_gemm(
       "scaled_addmm: input and output must have the same dtype and leading dimension");
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   // TunableOp's ScaledGemmParams cannot represent the addmm accumulator/alpha/beta
-  // yet, so bypass it for epilogues (ROCm blocks the accumulator upstream, CUDA-only).
+  // yet, so bypass it for epilogues.
   const bool tunable_supports_epilogue = !effective_accumulator &&
       epilogue.alpha == 1.0f && epilogue.beta == 0.0f;
   bool tunable_op_enabled =
@@ -1526,10 +1526,6 @@ void scaled_mm_cuda_v2_impl(
       allowed_device,
       op_name,
       " is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
-#ifdef USE_ROCM
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !accumulator.has_value(), op_name, " is not implemented for ROCm");
-#endif
   if (accumulator) {
     // Layout was validated by the meta function; cuBLASLt additionally needs
     // a 16-byte aligned C pointer, which in-place callers can violate.
@@ -1671,6 +1667,20 @@ void scaled_mm_cuda_v2_impl(
 
   ScaledGemmEpilogue epilogue;
   if (accumulator) {
+#ifdef USE_ROCM
+    // hipBLASLt supports the C operand for rowwise FP8 with BF16 output.
+    // Validate before the alpha/beta shortcuts so unsupported recipes and
+    // output types have the same contract for every scalar value.
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE &&
+            out_mut.scalar_type() == ScalarType::BFloat16,
+        op_name,
+        " on ROCm only supports rowwise FP8 scaling with BF16 output");
+#endif
+    TORCH_CHECK_VALUE(
+        out_mut.stride(1) == 1 &&
+            out_mut.stride(0) == std::max<int64_t>(1, out_mut.size(1)),
+        "scaled_addmm requires canonical contiguous row-major output strides");
     TORCH_CHECK_NOT_IMPLEMENTED(
         gemm_impl != ScaledGemmImplementation::MXFP4_MXFP4,
         op_name,

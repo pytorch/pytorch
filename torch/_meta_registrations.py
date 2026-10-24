@@ -7287,6 +7287,11 @@ def _check_scaled_mm_sizes(
         lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
     )
     torch._check(
+        bias is None or bias.numel() == mat2.size(1),
+        lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",  # type: ignore[union-attr]
+    )
+
+    torch._check(
         is_fp8_or_fp4_type(self.dtype) and is_fp8_or_fp4_type(mat2.dtype),
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
