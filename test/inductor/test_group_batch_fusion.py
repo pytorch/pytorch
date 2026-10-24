@@ -657,6 +657,10 @@ class TestGroupBatchFusion(TestCase):
             "mutable",
             "conversion",
             "conversion_dtype_after_transpose",
+            "dropout_eval_output",
+            "dropout_eval_mutation",
+            "dropout_eval_merge_view",
+            "dropout_training",
             "custom",
             "higher_order",
             "pointwise",
@@ -676,6 +680,16 @@ class TestGroupBatchFusion(TestCase):
         def contiguous(graph, node):
             result = graph.call_method("contiguous", args=(node,))
             result.meta["example_value"] = node.meta["example_value"]
+            return result
+
+        def dropout(graph, node, training):
+            result = graph.call_function(
+                torch.nn.functional.dropout, args=(node, 0.1, training)
+            )
+            if training:
+                result.meta["example_value"] = torch.randn(4, 6)
+            else:
+                result.meta["example_value"] = node.meta["example_value"]
             return result
 
         builders = {
@@ -703,6 +717,16 @@ class TestGroupBatchFusion(TestCase):
                 "to",
                 args=(graph.call_method("transpose", args=(node, 0, 1)), torch.float64),
             ),
+            "dropout_eval_output": lambda graph, node: graph.output(
+                dropout(graph, node, False)
+            ),
+            "dropout_eval_mutation": lambda graph, node: graph.call_method(
+                "mul_", args=(dropout(graph, node, False), 2)
+            ),
+            "dropout_eval_merge_view": lambda graph, node: graph.call_method(
+                "view", args=(dropout(graph, node, False), -1)
+            ),
+            "dropout_training": lambda graph, node: dropout(graph, node, True),
             "custom": lambda graph, node: graph.call_function(
                 torch.ops._batch_linear_lhs_test.require_contiguous.default,
                 args=(node,),
@@ -726,6 +750,7 @@ class TestGroupBatchFusion(TestCase):
             "pointwise",
             "size",
             "contiguous",
+            "dropout_training",
         }
 
         graph = torch.fx.Graph()
@@ -970,6 +995,52 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         self.assertEqual(subsets, [3])
+
+    @parametrize("consumer", ["mutation", "merge_view", "output"])
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_dropout_alias_users(self, consumer):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.large(x)
+                dropped = torch.nn.functional.dropout(large, 0.1, training=False)
+                if consumer == "output":
+                    return dropped, torch.sin(self.a(x)), torch.cos(self.b(x))
+                if consumer == "merge_view":
+                    return (
+                        torch.sin(dropped.view(-1)),
+                        torch.sin(self.a(x)),
+                        torch.cos(self.b(x)),
+                    )
+                copied = dropped.contiguous()
+                copied.mul_(2)
+                return (
+                    torch.sin(copied),
+                    torch.cos(large),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
 
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):

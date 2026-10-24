@@ -735,8 +735,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "scaled_dot_product_efficient_attention",
         "scaled_dot_product_cudnn_attention",
         "_scaled_dot_product_attention_math",
-        "dropout",
-        "native_dropout",
         "size",
         "sym_size",
         "dim",
@@ -913,17 +911,6 @@ def _contiguous_aliases(user: torch.fx.Node) -> bool:
     return _memory_format(user) in (None, torch.contiguous_format)
 
 
-def _conversion_aliases(user: torch.fx.Node) -> bool:
-    source_node = user.args[0] if user.args else None
-    if not isinstance(source_node, torch.fx.Node):
-        return True
-    source = source_node.meta.get("example_value")
-    result = user.meta.get("example_value")
-    if not isinstance(source, torch.Tensor) or not isinstance(result, torch.Tensor):
-        return True
-    return source.dtype == result.dtype and source.device == result.device
-
-
 def _direct_is_mutable(user: torch.fx.Node) -> bool:
     if user.op not in ("call_method", "call_function"):
         return False
@@ -977,7 +964,7 @@ def _tensor_values(value):
     return []
 
 
-def _is_aliasing_user(user: torch.fx.Node) -> bool:
+def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
     # Node-level: if any result aliases any input, every user is traversed.
     # Multi-result ops may over-reject sibling results, but never miss a
     # mutation.
@@ -985,8 +972,9 @@ def _is_aliasing_user(user: torch.fx.Node) -> bool:
         return False
     results = _tensor_values(user.meta.get("example_value"))
     if not results:
-        # No result metadata: assume it may alias so mutations are not missed.
-        return True
+        # Missing metadata: the mutation scan assumes an alias, while the
+        # layout walk treats it as a terminal safe op.
+        return assume_alias
     sources = []
     for arg in user.args:
         if isinstance(arg, torch.fx.Node):
@@ -995,7 +983,7 @@ def _is_aliasing_user(user: torch.fx.Node) -> bool:
         if isinstance(arg, torch.fx.Node):
             sources.extend(_tensor_values(arg.meta.get("example_value")))
     if not sources:
-        return True
+        return assume_alias
     return any(_is_alias_of(source, result) for source in sources for result in results)
 
 
@@ -1013,7 +1001,7 @@ def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
         visited.add(user)
         if _direct_is_mutable(user):
             return True
-        if _is_aliasing_user(user):
+        if _is_aliasing_user(user, assume_alias=True):
             pending.extend(user.users)
     return False
 
@@ -1024,8 +1012,9 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node) -> bool:
     Fusion replaces a contiguous ``[M, N_i]`` linear output with
     ``getitem(split(mm(...), dim=1))``, which has row stride ``sum(N)``. A
     user is sensitive when it can observe that layout or alias it: graph
-    outputs, mutations and ``out=`` calls, no-op conversions that alias,
-    stride/storage/contiguity queries, merging views, and unknown ops.
+    outputs, mutations and ``out=`` calls, conversions (whose preserve-format
+    copies can change layout after a permuted alias), stride/storage/contiguity
+    queries, merging views, and unknown ops.
     Pointwise and known layout-independent ops stay eligible; unknown is
     sensitive so new op forms are rejected rather than miscompiled.
     """
@@ -1079,6 +1068,10 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             pending.extend(user.users)
         elif _direct_layout_user_is_sensitive(user):
             return True
+        elif _is_aliasing_user(user):
+            # Safe ops that return the input itself (eval or p=0 dropout) must
+            # still have their users checked.
+            pending.extend(user.users)
     return False
 
 
