@@ -9,6 +9,7 @@ Key classes include:
 - FrameSummaryVariable: Tracks frame summary objects
 """
 
+import sys
 import traceback
 import types
 from typing import Any, TYPE_CHECKING, Union
@@ -59,6 +60,22 @@ class FrameSummaryVariable(VariableTracker):
         "name": Member(getset_build(lambda s: s.frame_summary.name), readonly_setter),
         "line": Member(getset_build(lambda s: s.frame_summary.line), readonly_setter),
     }
+
+
+if sys.version_info >= (3, 11):
+    FrameSummaryVariable.tp_members.update(
+        {
+            "end_lineno": Member(
+                getset_build(lambda s: s.frame_summary.end_lineno), readonly_setter
+            ),
+            "colno": Member(
+                getset_build(lambda s: s.frame_summary.colno), readonly_setter
+            ),
+            "end_colno": Member(
+                getset_build(lambda s: s.frame_summary.end_colno), readonly_setter
+            ),
+        }
+    )
 
 
 class TracebackVariable(VariableTracker):
