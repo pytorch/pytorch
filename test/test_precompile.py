@@ -4928,6 +4928,55 @@ class TestPrecompileDynamoCapture(TestCase):
             load(artifact, cache)(self.model, self.x2), single(self.model, self.x2)
         )
 
+    def test_mode_and_options_are_checked_like_torch_compile(self):
+        single = self.mod.single
+        options = {"size_asserts": True}
+        with self.assertRaisesRegex(ValueError, "Either mode or options"):
+            self._capture(single, mode="reduce-overhead", options=options)
+        with self.assertRaisesRegex(ValueError, "backend='eager' takes neither"):
+            self._capture(single, backend="eager", mode="reduce-overhead")
+        with self.assertRaisesRegex(RuntimeError, "Unexpected optimization option"):
+            self._capture(single, options={"no_such_option": True})
+        with self.assertRaisesRegex(RuntimeError, "Unrecognized mode"):
+            self._capture(single, mode="no-such-mode")
+        make_fx = MakeFxTracer()
+        with self.assertRaisesRegex(PrecompileError, "cannot serve CUDA graphs"):
+            self._capture(single, tracer=make_fx, mode="reduce-overhead")
+        with self.assertRaisesRegex(PrecompileError, "cannot serve CUDA graphs"):
+            self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph_policy": None})
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph-policy": None})
+        for key in ("size_asserts", "scalar_asserts"):
+            with self.assertRaisesRegex(PrecompileError, "always compiles with"):
+                self._capture(single, tracer=make_fx, options={key: False})
+
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_options_reach_the_inductor_compile(self, tracer):
+        from torch._functorch import aot_autograd
+        from torch._inductor import compile_fx
+
+        options = {"max_autotune_gemm_backends": "ATEN"}
+        if tracer == "make_fx":
+            target, name, kwarg = aot_autograd, "compile_to_python", "options"
+        else:
+            target, name, kwarg = compile_fx, "compile_fx", "config_patches"
+        # A make_fx capture compiles one graph; step graph-breaks into two.
+        fn = self.mod.single if tracer == "make_fx" else self.mod.step
+        tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
+        with mock.patch.object(target, name, wraps=getattr(target, name)) as spy:
+            with self._capture(fn, tracer=tracer_obj, options=options) as cap:
+                cap(self.model, self.x2)
+                graphs = cap.summary().backend_graphs if tracer == "dynamo" else 1
+        # compile_fx re-enters itself without config_patches once it has applied
+        # them, so each graph is one call that carries them.
+        seen = [c.kwargs[kwarg] for c in spy.call_args_list if kwarg in c.kwargs]
+        self.assertEqual(len(seen), graphs)
+        self.assertGreaterEqual(len(seen), 2 if tracer == "dynamo" else 1)
+        for patches in seen:
+            self.assertEqual(patches["max_autotune_gemm_backends"], "ATEN")
+
     # The crossref harness keeps a dispatch mode active while the capture runs,
     # and Dynamo guards on that state; a fresh process has no such mode, so
     # every variant would miss there.
@@ -6289,13 +6338,17 @@ class TestPrecompileCudagraphs(TestCase):
         _, recorded, _, captured = out.stdout.split()[-4:]
         return int(recorded), int(captured)
 
+    @parametrize("how", ["mode", "options"])
     @parametrize("serving", ["standalone", "installed"])
     @torch._dynamo.config.patch(nested_graph_breaks=False)
-    def test_an_artifact_serves_the_cudagraphs_its_capture_compiled(self, serving):
+    def test_an_artifact_serves_the_cudagraphs_its_capture_compiled(self, how, serving):
         mod = self.mod
         fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
-        with torch._inductor.config.patch({"triton.cudagraphs": True}):
-            y, meta = self._capture_step(fn)
+        if how == "mode":
+            kwargs = {"mode": "reduce-overhead"}
+        else:
+            kwargs = {"options": {"triton.cudagraphs": True}}
+        y, meta = self._capture_step(fn, **kwargs)
         self.assertEqual(meta["SERVING_MODE"], serving)
         cudagraphs = {"triton.cudagraphs": True, "triton.cudagraph_trees": True}
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], cudagraphs)
@@ -6303,9 +6356,17 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, _ = self._serve_in_fresh_process(y)
         self.assertGreater(recorded, 0)
 
-    def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
+    def test_a_capture_under_the_ambient_cudagraph_flag_serves_cudagraphs(self):
+        # As under torch.compile, the global flag turns CUDA graphs on too.
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
-            y, _ = self._capture_step(self.mod.step, grad=True)
+            y, meta = self._capture_step(self.mod.step)
+        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        recorded, _ = self._serve_in_fresh_process(y)
+        self.assertGreater(recorded, 0)
+
+    def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(self.mod.step, grad=True, options=options)
         self.model.zero_grad(set_to_none=True)
         self.mod.step(self.model, self.x).sum().backward()
         grad = self.model.lin.weight.grad.clone()
@@ -6315,13 +6376,29 @@ class TestPrecompileCudagraphs(TestCase):
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
-        with torch._inductor.config.patch(config):
-            y, meta = self._capture_step(self.mod.step)
+        y, meta = self._capture_step(self.mod.step, options=config)
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], config)
         # The loading process leaves triton.cudagraph_trees at its default (on).
         recorded, captured = self._serve_in_fresh_process(y)
         self.assertEqual(recorded, 0)
         self.assertGreater(captured, 0)
+
+    def test_options_override_the_ambient_cudagraph_config(self):
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            y, meta = self._capture_step(
+                self.mod.step, options={"triton.cudagraphs": False}
+            )
+        self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        self.assertEqual(self._serve_in_fresh_process(y), (0, 0))
+
+    def test_a_graph_options_kept_out_of_cudagraphs_serves_without_one(self):
+        # The capture decides a graph cannot run as a CUDA graph and that decision
+        # ships with the graph, though CUDAGRAPH_CONFIG turns CUDA graphs on.
+        force_off = {"force_disable_cudagraph_TESTING_ONLY": True}
+        options = {"triton.cudagraphs": True, **force_off}
+        y, meta = self._capture_step(self.mod.step, options=options)
+        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        self.assertEqual(self._serve_in_fresh_process(y), (0, 0))
 
     def test_an_artifact_captured_without_cudagraphs_serves_none(self):
         y, meta = self._capture_step(self.mod.step)

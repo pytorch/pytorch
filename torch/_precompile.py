@@ -575,10 +575,15 @@ class _MakeFxCapture(Capture[_P, _R]):
         *,
         backend: str,
         decompositions: dict | None,
+        inductor_options: dict[str, Any],
     ) -> None:
         super().__init__()
         self._module = PrecompiledModule(
-            fn, backend=backend, tracer="make_fx", decompositions=decompositions
+            fn,
+            backend=backend,
+            tracer="make_fx",
+            decompositions=decompositions,
+            inductor_options=inductor_options,
         )
         self._artifact_path = artifact_path
         self._cache_path = cache_path
@@ -2549,6 +2554,7 @@ class PrecompiledModule(PrecompiledRunnable):
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
+        inductor_options: dict[str, Any] | None = None,
     ) -> None:
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
@@ -2565,6 +2571,7 @@ class PrecompiledModule(PrecompiledRunnable):
         self._backend = backend
         self._tracer = tracer
         self._decompositions = decompositions
+        self._inductor_options = inductor_options or {}
         self._artifact: object = None
         self._module_positions: list[int] = []
         self._num_positional_args: int = 0
@@ -2699,7 +2706,7 @@ class PrecompiledModule(PrecompiledRunnable):
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, object] = {"size_asserts": True}
+        options: dict[str, object] = {**self._inductor_options, "size_asserts": True}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
@@ -3332,6 +3339,8 @@ def capture(
     cache_path: str | os.PathLike[str],
     tracer: MakeFxTracer | DynamoTracer = DynamoTracer(),
     backend: str = "inductor",
+    mode: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> Capture[_P, _R]:
     """Capture ``fn`` across the calls YOUR loop makes, writing the artifact on exit.
 
@@ -3429,10 +3438,38 @@ def capture(
     whenever grad is enabled (a ``.backward()`` in ``fn`` graph-breaks and
     re-runs at serve time through the live autograd engine, accumulating
     ``.grad`` like eager); serve the artifact under the grad mode it was
-    captured in. A :class:`DynamoTracer` inductor capture compiles its calls
-    under ``torch._inductor.config.triton.cudagraphs`` and
-    ``triton.cudagraph_trees`` as they are when ``capture()`` is called, and
-    records them in the artifact's ``CUDAGRAPH_CONFIG``.
+    captured in.
+
+    ``mode`` and ``options`` configure Inductor as they do for
+    :func:`torch.compile`: at most one of them may be given, and only with
+    ``backend="inductor"``. They apply to every graph the capture compiles.
+    ``mode="reduce-overhead"`` (or ``"max-autotune"``, or
+    ``options={"triton.cudagraphs": True}``) makes a :class:`DynamoTracer`
+    capture serve its loaded graphs as CUDA graphs, as the capture ran them:
+    the artifact records ``triton.cudagraphs`` and ``triton.cudagraph_trees``
+    as the capture compiled under them (``mode`` and ``options`` over the
+    process's ``torch._inductor.config`` when ``capture()`` is called) in its
+    ``CUDAGRAPH_CONFIG``, and the loading process records its CUDA graphs
+    afresh on its first calls. Whether a graph can run as a CUDA
+    graph at all (``triton.cudagraph_support_input_mutation``,
+    ``force_disable_cudagraph_TESTING_ONLY``) is decided when it compiles, and
+    that decision ships with it. The settings CUDA graph trees read while the
+    graphs run (``triton.cudagraph_capture_sizes``,
+    ``triton.cudagraph_dynamic_shape_rerecord_limit``,
+    ``triton.cudagraph_or_error``, ...) are the serving process's, as under
+    ``torch.compile``, whose options also cover only the compile.
+    ``cudagraph_policy``, which wraps the graphs again at load and is a Python
+    object, is refused in ``options``. As under ``torch.compile``, a
+    graph's outputs are overwritten by its next replay, so clone what you keep
+    across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
+    between iterations; a graph Inductor cannot capture (CPU tensors, mutated
+    inputs, ...) runs without one and logs a cudagraph skip; and a frame served
+    eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. A
+    :class:`MakeFxTracer` capture refuses a ``mode`` or ``options`` that turns
+    on ``triton.cudagraphs``, since its standalone module runs outside
+    Inductor's CUDA graph wrapper (it ignores the ambient flag, as before), and
+    refuses ``size_asserts`` or ``scalar_asserts`` off, which it always
+    compiles with on.
 
     .. note::
 
@@ -3449,13 +3486,62 @@ def capture(
             "pre-bound model or argument would not be one of them. Pass them as call "
             "arguments instead."
         )
+    # Without mode or options the backend string compiles, as it always has.
+    inductor: torch._TorchCompileInductorWrapper | None = None
+    if mode is not None or options is not None:
+        if backend != "inductor":
+            raise ValueError(
+                f"precompile mode= and options= configure Inductor; backend={backend!r} "
+                "takes neither."
+            )
+        if mode is not None and options is not None:
+            raise ValueError(
+                "Either mode or options can be specified, but both can't be "
+                "specified at the same time."
+            )
+        # Keys normalized as the wrapper does; it cannot take this one at all
+        # (its type check fails on the string annotation).
+        keys = {k.replace("-", "_") for k in options or ()}
+        if "cudagraph_policy" in keys:
+            raise PrecompileError(
+                "precompile cannot record options={'cudagraph_policy': ...}: the "
+                "policy wraps the graphs again at load, and an artifact holds no "
+                "Python objects. Set torch._inductor.config.cudagraph_policy in the "
+                "loading process instead."
+            )
+        if isinstance(tracer, MakeFxTracer):
+            # Refused before the wrapper is built, which sets CUPTI environment
+            # variables for a CUDA graph config. A value that is not a bool is
+            # left to the wrapper's type check.
+            from torch._inductor import list_mode_options
+
+            requested = list_mode_options(mode) if mode is not None else options or {}
+            if requested.get("triton.cudagraphs") is True:
+                raise PrecompileError(
+                    "a MakeFxTracer capture cannot serve CUDA graphs: its standalone "
+                    "module runs outside Inductor's CUDA graph wrapper. Capture with "
+                    "tracer=DynamoTracer(), or use mode='max-autotune-no-cudagraphs'."
+                )
+        # torch.compile's own parsing: mode expands to its options, and an unknown
+        # option or a value of the wrong type raises here rather than mid-capture.
+        dynamic = tracer.dynamic if isinstance(tracer, DynamoTracer) else None
+        inductor = torch._TorchCompileInductorWrapper(mode, options, dynamic)
     if isinstance(tracer, MakeFxTracer):
+        inductor_options = inductor.config if inductor is not None else {}
+        asserts = (inductor_options.get(k) for k in ("size_asserts", "scalar_asserts"))
+        if False in asserts:
+            raise PrecompileError(
+                "a MakeFxTracer capture always compiles with size_asserts (and, for "
+                "a dynamic capture, scalar_asserts) on: they check at load that a "
+                "call's inputs have the layout and ranges its graph was compiled for."
+            )
         return _MakeFxCapture(
             fn,
             artifact_path,
             cache_path,
             backend=backend,
             decompositions=tracer.decompositions,
+            inductor_options=inductor_options,
         )
     if not isinstance(tracer, DynamoTracer):
         raise TypeError(
@@ -3478,6 +3564,7 @@ def capture(
             guard_filter_fn=tracer.guard_filter_fn,
             recompile_limit=tracer.recompile_limit,
             dynamic=tracer.dynamic,
+            inductor=inductor,
         )
     except PackageError as e:
         raise PrecompileError(str(e)) from e
@@ -3574,7 +3661,8 @@ def load(
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
-    backend, as ``torch.compile`` would, under the process-wide stance like any
+    backend (with Inductor's default options, not the capture's ``mode`` or
+    ``options``), as ``torch.compile`` would, under the process-wide stance like any
     other compile. The captured variants are still served first and do not
     count toward ``torch._dynamo.config.recompile_limit``, so each frame gets
     that many serve-time compiles on top of them; a missed call past the limit
