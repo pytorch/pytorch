@@ -32,6 +32,31 @@ TRITON_DEFAULT_BLOCK_SIZES = {
 }
 TRITON_DEFAULT_RSPLIT = 1
 TRITON_DEFAULT_RSPLIT_SIZE = 1
+# The largest XBLOCK of PointwiseHeuristic.capped_grid_candidates
+CAPPED_GRID_DEFAULT_MAX_XBLOCK = 32768
+
+
+def is_valid_grid_cap(value: object) -> typing.TypeGuard[int]:
+    """Whether value can cap a launch grid: an int of at least 1, not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def is_valid_grid_max_xblock(value: object) -> bool:
+    """Whether value can limit a capped XBLOCK: an int power of 2, not a bool."""
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 1
+        and value & (value - 1) == 0
+    )
+
+
+def capped_grid_max_block(grid_max_xblock: int | None) -> int:
+    """A capped pointwise kernel's max block, which its XBLOCKs divide: codegen keeps
+    the x mask unless xnumel is a multiple of it."""
+    if grid_max_xblock is None:
+        grid_max_xblock = CAPPED_GRID_DEFAULT_MAX_XBLOCK
+    return max(grid_max_xblock, TRITON_MAX_BLOCK["X"])
 
 
 def mix_order_reduction_max_num_stages(
@@ -378,6 +403,12 @@ class InductorMeta(typing.TypedDict, total=False):
     strict_reduction_rblock: int
     kernel_num_gb: float
     kernel_flop: int
+    # Capped launch grid (grid_type CappedGrid1D): grid_cap, the most programs;
+    # grid_max_xblock, a limit on the capped pointwise candidates' XBLOCK before raises;
+    # grid_dynamic_xnumel, a symbolic xnumel, whose size hint is one example.
+    grid_cap: int
+    grid_max_xblock: int
+    grid_dynamic_xnumel: bool
 
     # Kernel identity / launch (codegen_kernel literal)
     grid_type: str

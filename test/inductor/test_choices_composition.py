@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from torch._inductor import config
 from torch._inductor.choices import (
+    compose_inductor_choices,
     create_inductor_choices,
     InductorChoices,
     register_inductor_choices,
@@ -419,6 +420,59 @@ class ChoicesCompositionTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "does not implement uuid"):
             register_inductor_choices("plain", PlainChoices)
         self.assertEqual(registered_inductor_choices(), ())
+
+    def test_missing_uuid_inside_a_composition_is_named(self) -> None:
+        def factory():
+            return compose_inductor_choices([UUIDChoices("u"), PlainChoices()])
+
+        with self.assertRaisesRegex(RuntimeError, "'pair:1' does not implement uuid"):
+            register_inductor_choices("pair", factory)
+        self.assertEqual(registered_inductor_choices(), ())
+        # Configured, the composition is the handler; its uuid() names the culprit
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"'composed handler 1 \(PlainChoices\)' does not implement uuid",
+        ):
+            create_inductor_choices(factory).uuid()
+
+    def test_compose_dispatches_to_the_first_override_in_order(self) -> None:
+        handler = compose_inductor_choices([AlphaChoices(3), BetaChoices()])
+        self.assertEqual(handler.customize_fused_kernel_name("k", ""), "k_alpha:3")
+        self.assertEqual(handler.get_config_heuristics().get_conv_configs(), "beta")
+        first = compose_inductor_choices([SecondNameChoices(), AlphaChoices(3)])
+        self.assertEqual(first.customize_fused_kernel_name("k", ""), "k_second")
+
+    def test_compose_keeps_the_hooks_of_a_composed_handler(self) -> None:
+        inner = compose_inductor_choices([AlphaChoices(3), BetaChoices()])
+        self.assertIs(compose_inductor_choices([inner]), inner)
+        handler = compose_inductor_choices([UUIDChoices("u"), inner])
+        self.assertEqual(handler.customize_fused_kernel_name("k", ""), "k_alpha:3")
+        self.assertEqual(handler.get_config_heuristics().get_conv_configs(), "beta")
+        self.assertEqual(
+            handler.uuid(),
+            ("composed_inductor_choices", ("u", "alpha:_alpha:3", "beta")),
+        )
+
+    def test_registered_composed_handler_keeps_its_hooks(self) -> None:
+        pair = compose_inductor_choices([AlphaChoices(3), BetaChoices()])
+        register_inductor_choices("pair", lambda: pair)
+        self.assertIs(V.choices, pair)
+        register_inductor_choices("uuid", lambda: UUIDChoices("u"))
+        handler = V.choices
+        self.assertEqual(handler.customize_fused_kernel_name("k", ""), "k_alpha:3")
+        self.assertEqual(handler.get_conv_configs(), "beta")
+        self.assertEqual(
+            handler.uuid(),
+            ("composed_inductor_choices", ("alpha:_alpha:3", "beta", "u")),
+        )
+
+    def test_compose_returns_a_single_handler_and_rejects_bad_input(self) -> None:
+        alpha = AlphaChoices()
+        self.assertIs(compose_inductor_choices([alpha]), alpha)
+        with self.assertRaisesRegex(ValueError, "at least one handler"):
+            compose_inductor_choices([])
+        with self.assertRaisesRegex(TypeError, "got NotChoices"):
+            compose_inductor_choices([AlphaChoices(), _as_choices(NotChoices())])
 
     def test_registration_replaces_in_place(self) -> None:
         register_inductor_choices("alpha", lambda: AlphaChoices(threshold=1))
