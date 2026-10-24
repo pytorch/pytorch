@@ -175,6 +175,28 @@ class _ReferenceTokenSwitch(TokenSwitch):
         rows = self._all_gather(padded).flatten(0, 1)[h.send_flat_slot]
         out_tokens.zero_().index_add_(0, h.send_token, rows)
 
+    def _dispatch_backward(
+        self, routing, grad_expert_tokens, grad_recv_topk_weights, out_tokens
+    ):
+        self._combine(routing, grad_expert_tokens, out_tokens)
+        # Received weights keep the source's top-k positions; drop the padding entries.
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        n = len(r)
+        local = h.topk_idx_all[r, t] - self._rank * self._experts_per_rank
+        mine = (local >= 0) & (local < self._experts_per_rank)
+        padded = grad_recv_topk_weights.new_zeros(self._max_recv, mine.shape[-1])
+        padded[:n] = torch.where(mine, grad_recv_topk_weights[:n], 0)
+        rows = self._all_gather(padded).flatten(0, 1)[h.send_flat_slot]
+        out = grad_recv_topk_weights.new_zeros(routing.topk_idx.shape)
+        return out.index_add_(0, h.send_token, rows)
+
+
+class _ReferenceTokenSwitchNoWeightGrad(_ReferenceTokenSwitch):
+    """The reference backend without the optional ``_dispatch_backward``."""
+
+    _dispatch_backward = TokenSwitch._dispatch_backward
+
 
 class _TokenSwitchContractTests:
     """Contract tests (see TokenSwitch's docstring) shared by every backend.
@@ -363,6 +385,36 @@ class _TokenSwitchContractTests:
             self.assertEqual(t1.grad.float(), nd1.expand(NUM_TOKENS, HIDDEN))
             self.assertEqual(t2.grad.float(), (2 * nd2).expand(NUM_TOKENS, HIDDEN))
 
+    def test_contract_topk_weights_grad(self):
+        # Identity experts weighted on the receiver: out = x * sum_k w. Summing all K
+        # received entries also weights the padding, whose gradient must be dropped.
+        self._init()
+        ts = self.get_contract_token_switch()
+        if type(ts)._dispatch_backward is TokenSwitch._dispatch_backward:
+            self.skipTest("backend does not implement _dispatch_backward")
+        topk_idx, _w, x, _nd, expected, _ = self._contract_inputs(seed=15)
+        # Exact in bf16 (NCCL tokens): power-of-two weights, small integer values.
+        w = torch.tensor([0.25, 0.5], device=self.device)
+        w = w.expand(NUM_TOKENS, CONTRACT_TOP_K).contiguous()
+        x = x.float().round().clamp(-3, 3).to(x.dtype)
+        routing = ts.create_routing(topk_idx, layout="flat")
+        tokens = x.clone().requires_grad_(True)
+        weights = w.clone().requires_grad_(True)
+        recv, recv_w, _ = ts.dispatch(
+            routing, tokens, weights, ts.max_recv_tokens_per_rank
+        )
+        n = len(expected)
+        y = recv[:n] * recv_w[:n].sum(-1, keepdim=True).to(recv.dtype)
+        out = ts.combine(routing, y.contiguous())
+        g = torch.randint(
+            -1, 2, out.shape, generator=torch.Generator().manual_seed(self.rank)
+        )
+        g = g.to(device=self.device, dtype=out.dtype)
+        (out * g).sum().backward()
+        gx = (g.float() * x.float()).sum(-1, keepdim=True)
+        self.assertEqual(weights.grad, gx.expand(NUM_TOKENS, CONTRACT_TOP_K))
+        self.assertEqual(tokens.grad.float(), g.float() * w.sum(-1, keepdim=True))
+
 
 class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTest):
     """Runs the contract tests on the gloo reference backend (no GPU, no EP library)."""
@@ -394,6 +446,28 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
 
     def _init(self):
         dist.barrier()
+
+    def test_topk_weights_no_grad_without_dispatch_backward(self):
+        # A backend without the optional hook keeps the old behavior.
+        self._init()
+        pg = dist.distributed_c10d._get_default_group()
+        ts = _ReferenceTokenSwitchNoWeightGrad(
+            pg, self.world_size * CONTRACT_EXPERTS_PER_RANK, NUM_TOKENS
+        )
+        topk_idx, w, x, _nd, expected, _ = self._contract_inputs(seed=16)
+        routing = ts.create_routing(topk_idx, layout="flat")
+        tokens = x.clone().requires_grad_(True)
+        weights = w.clone().requires_grad_(True)
+        recv, recv_w, _ = ts.dispatch(
+            routing, tokens, weights, ts.max_recv_tokens_per_rank
+        )
+        n = len(expected)
+        y = recv[:n] * recv_w[:n].sum(-1, keepdim=True)
+        ts.combine(routing, y.contiguous()).sum().backward()
+        self.assertIsNone(weights.grad)
+        self.assertEqual(
+            tokens.grad, w.sum(-1, keepdim=True).expand(NUM_TOKENS, HIDDEN)
+        )
 
 
 @requires_nccl_ep()
