@@ -40,6 +40,7 @@ from torch.distributed.fsdp._fully_shard._all_gather_layout import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import (
     AllGather,
+    ReduceScatter,
     ReduceScatterInputLayout,
     ReduceScatterInputPlan,
 )
@@ -55,6 +56,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
     FSDPMeshInfo,
@@ -74,6 +76,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     DefaultAllGatherLayout,
+    NativeReduceScatterInputLayout,
     reduce_scatter_input_fn_with_native_copy,
 )
 from torch.distributed.tensor import DTensor, Shard
@@ -112,6 +115,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfTorchInductor,
+    subtest,
     TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
@@ -655,6 +659,25 @@ class TestFullyShardNativeReduceScatterInputFn(TestCase):
             outputs.append(output)
         self.assertEqual(outputs[0], outputs[1])
 
+    @parametrize(
+        "grad_dtype, out_dtype",
+        [
+            subtest((torch.float32, torch.float32), name="fp32"),
+            subtest((torch.bfloat16, torch.bfloat16), name="bf16"),
+            subtest((torch.bfloat16, torch.float32), name="bf16_to_fp32"),
+        ],
+    )
+    def test_padded_rows_zero_tails(self, device, grad_dtype, out_dtype):
+        # Per rank, 3 rows of a (6, 2) gradient and a (1,) gradient's padded
+        # shard, then one zero of padding
+        grads = [torch.arange(12.0).view(6, 2), torch.ones(1)]
+        grads = [grad.to(device, grad_dtype) for grad in grads]
+        out = torch.full((2, 8), -1.0, device=device, dtype=out_dtype)
+        foreach_reduce_scatter_copy_in(grads, out.view(-1), world_size=2, padding=1)
+        rows = [[*range(6), 1, 0], [*range(6, 12), 0, 0]]
+        expected = torch.tensor(rows, device=device, dtype=out_dtype)
+        self.assertEqual(out, expected, atol=0, rtol=0)
+
 
 instantiate_device_type_tests(
     TestFullyShardNativeReduceScatterInputFn, globals(), only_for=("cpu", "cuda", "xpu")
@@ -757,8 +780,9 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             dist.all_reduce(ref_param.grad)
             ref_param.grad.div_(self.world_size)
             self.assertEqual(param.grad.full_tensor(), ref_param.grad)
-        # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2)
-        sizes = {"split_sizes": [16, 2, 8, 1], "outer_sizes": [8, 1, 4, 1]}
+        # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2). The
+        # default layout pads each rank's 27 elements to 28 for a scratch output
+        sizes = {"split_sizes": [16, 2, 8, 1, 1], "outer_sizes": [8, 1, 4, 1, 1]}
         self.assertEqual(all_gather_calls, [{**sizes, "world_size": self.world_size}])
         # The default layout's subclass packs the input and keeps per-output buffers
         self.assertEqual(num_copy_ins, 1)
@@ -3381,6 +3405,131 @@ class TestFullyShardRankStride(FSDPTestMultiThread):
         model.set_reduce_scatter_input_fn(NarrowRows())
         with self.assertRaisesRegex(ValueError, "rows of 0 elements"):
             model(torch.randn(4, 5)).sum().backward()
+
+
+class _RecordingAllGather(DefaultAllGather):
+    def __init__(self):
+        self.output_numels = []
+
+    def __call__(self, output_tensor, input_tensor, group, async_op=False):
+        self.output_numels.append(output_tensor.numel())
+        return super().__call__(output_tensor, input_tensor, group, async_op)
+
+
+class _RecordingReduceScatter(DefaultReduceScatter):
+    def __init__(self):
+        self.input_numels = []
+
+    def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
+        self.input_numels.append(input_tensor.numel())
+        args = (output_tensor, input_tensor, group, op, async_op)
+        return super().__call__(*args)
+
+
+class _ExactAllGather(AllGather):
+    # Implements the interface directly, so it keeps the default alignment of 1
+    def __init__(self):
+        self.output_numels = []
+
+    def allocate(self, size, *, dtype, device):
+        return torch.empty(*size, dtype=dtype, device=device)
+
+    def __call__(self, output_tensor, input_tensor, group, async_op=False):
+        self.output_numels.append(output_tensor.numel())
+        return dist.all_gather_into_tensor(
+            output_tensor, input_tensor, group=group, async_op=async_op
+        )
+
+
+class _ExactReduceScatter(ReduceScatter):
+    def __init__(self):
+        self.input_numels = []
+
+    def allocate(self, size, *, dtype, device):
+        return torch.empty(*size, dtype=dtype, device=device)
+
+    def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
+        self.input_numels.append(input_tensor.numel())
+        return dist.reduce_scatter_tensor(
+            output_tensor, input_tensor, op=op, group=group, async_op=async_op
+        )
+
+
+class TestFullyShardRankStridePadding(FSDPTestMultiThread):
+    # A Linear(4, 5) has 10 fp32 elements per rank over 4 ranks, which FSDP's comms
+    # pad to 12 for 16-byte chunks, and 15 per rank over 2 ranks, padded to 16
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def _check_parity(
+        self, model, all_gather_comm, reduce_scatter_comm, *, mesh=None, setup=None
+    ):
+        device = model.weight.device
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh or init_device_mesh(device.type, (4,)))
+        model.set_custom_all_gather(all_gather_comm)
+        model.set_custom_reduce_scatter(reduce_scatter_comm)
+        if setup is not None:
+            setup(model)
+        inp = torch.randn(4, 4, device=device)
+        output = model(inp)
+        self.assertEqual(output, ref_model(inp))
+        output.sum().backward()
+        ref_model(inp).sum().backward()
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            if ref_param.grad is not None:
+                dist.all_reduce(ref_param.grad)
+                ref_param.grad.div_(self.world_size)
+                self.assertEqual(param.grad.full_tensor(), ref_param.grad)
+        model.unshard()
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param, ref_param)
+        model.reshard()
+        return all_gather_comm.output_numels, reduce_scatter_comm.input_numels
+
+    def test_default_comms_pad_chunks(self):
+        comms = (_RecordingAllGather(), _RecordingReduceScatter())
+        numels = self._check_parity(nn.Linear(4, 5), *comms)
+        self.assertEqual(numels, ([4 * 12] * 2, [4 * 12]))
+
+    def test_custom_comms_keep_exact_chunks(self):
+        comms = (_ExactAllGather(), _ExactReduceScatter())
+        numels = self._check_parity(nn.Linear(4, 5), *comms)
+        self.assertEqual(numels, ([4 * 10] * 2, [4 * 10]))
+
+    def test_hsdp_pads_shard_group_chunks(self):
+        comms = (_RecordingAllGather(), _RecordingReduceScatter())
+        names = ("replicate", "shard")
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=names)
+        numels = self._check_parity(nn.Linear(4, 5), *comms, mesh=mesh)
+        self.assertEqual(numels, ([2 * 16] * 2, [2 * 16]))
+
+    def test_byte_buffer_pads_chunks(self):
+        # With an int32 parameter, the group all-gathers bytes: 13 elements per
+        # rank, 52 bytes, padded to 64
+        model = nn.Linear(4, 5)
+        steps = torch.arange(12, dtype=torch.int32)
+        model.steps = nn.Parameter(steps, requires_grad=False)
+        comms = (_RecordingAllGather(), _RecordingReduceScatter())
+        numels = self._check_parity(model, *comms)
+        self.assertEqual(numels, ([4 * 64] * 2, [4 * 12]))
+
+    @skip_if_lt_x_gpu(1)
+    def test_native_copies_pad_chunks(self):
+        # The native copy-out takes the padding as one more output, and the native
+        # copy-in's layout pads its rows
+        def setup(model):
+            fn = all_gather_output_fn_with_native_copy
+            model.set_all_gather_layout(DefaultAllGatherLayout(fn))
+            model.set_reduce_scatter_input_fn(NativeReduceScatterInputLayout())
+
+        model = nn.Linear(4, 5, device=device_type)
+        comms = (_RecordingAllGather(), _RecordingReduceScatter())
+        numels = self._check_parity(model, *comms, setup=setup)
+        self.assertEqual(numels, ([4 * 12] * 2, [4 * 12]))
 
 
 class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
