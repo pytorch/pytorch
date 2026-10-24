@@ -18,6 +18,7 @@ namespace binary_internal {
 
 constexpr char div_name[] = "div_kernel";
 
+namespace {
 bool is_power_of_two(double b) {
   int exponent = 0;
   return std::abs(std::frexp(b, &exponent)) == 0.5;
@@ -26,6 +27,7 @@ bool is_power_of_two(double b) {
 bool is_power_of_two(c10::complex<double>) {
   return false;
 }
+} // namespace
 
 void div_true_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();

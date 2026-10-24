@@ -1432,14 +1432,18 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(actual.cpu(), torch.tensor([0.5 + 0j]), atol=1e-6, rtol=0)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     @parametrize("s", (7.0, 49.0))
     def test_div_trunc_by_scalar_matches_cpu(self, device, dtype, s):
         # trunc(a * (1/s)) can be off by a whole integer, e.g. -17373096 / 7.
         # Large magnitudes make the quotient's fractional part coarse.
-        scale = 2**29 if dtype == torch.double else 1
-        a = torch.arange(-(2**22), 2**22, 997, dtype=dtype) * 7 * scale
-        a = torch.cat([a, torch.tensor([-17373096.0], dtype=dtype)])
+        if dtype in (torch.half, torch.bfloat16):
+            # Small multiples of s that fit in half
+            a = (torch.arange(-1336, 1337, dtype=torch.float) * s).to(dtype)
+        else:
+            scale = 2**29 if dtype == torch.double else 1
+            a = torch.arange(-(2**22), 2**22, 997, dtype=dtype) * 7 * scale
+            a = torch.cat([a, torch.tensor([-17373096.0], dtype=dtype)])
         expect = torch.div(a, s, rounding_mode="trunc")
         actual = torch.div(a.to(device), s, rounding_mode="trunc")
         self.assertEqual(actual, expect, atol=0, rtol=0)
