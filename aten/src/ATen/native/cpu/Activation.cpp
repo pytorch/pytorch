@@ -1133,16 +1133,28 @@ void silu_kernel(TensorIteratorBase& iter) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "silu_cpu", [&]() {
       const Vectorized<float> kOneVec(1.0f);
+      const Vectorized<float> kZeroVec(0.0f);
+      const Vectorized<float> kNegInfVec(
+          -std::numeric_limits<float>::infinity());
       cpu_kernel_vec(
           iter,
           [](scalar_t x) -> scalar_t {
+            // silu(x) -> 0 as x -> -inf; the x/(1+exp(-x)) form would otherwise
+            // yield -inf/inf = NaN (see pytorch/pytorch#160876).
+            if (float(x) == -std::numeric_limits<float>::infinity()) {
+              return scalar_t(0);
+            }
             return float(x) / (1.0f + std::exp(-float(x)));
           },
-          [kOneVec](Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
+          [kOneVec, kZeroVec, kNegInfVec](
+              Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
             auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
-            return convert_from_float<scalar_t>(
-              x_vec0 / (kOneVec + x_vec0.neg().exp()),
-              x_vec1 / (kOneVec + x_vec1.neg().exp()));
+            auto y0 = x_vec0 / (kOneVec + x_vec0.neg().exp());
+            auto y1 = x_vec1 / (kOneVec + x_vec1.neg().exp());
+            // Replace the -inf lanes (NaN above) with the limit, 0.
+            y0 = Vectorized<float>::blendv(y0, kZeroVec, x_vec0 == kNegInfVec);
+            y1 = Vectorized<float>::blendv(y1, kZeroVec, x_vec1 == kNegInfVec);
+            return convert_from_float<scalar_t>(y0, y1);
           });
     });
   } else {
@@ -1152,10 +1164,26 @@ void silu_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [](scalar_t x) {
+              // Complex is excluded: c10::complex has no -inf ordering, and
+              // Vectorized<complex>::blendv does not instantiate.
+              if constexpr (!c10::is_complex<scalar_t>::value) {
+                // silu(x) -> 0 as x -> -inf (avoid -inf/inf = NaN); see
+                // pytorch/pytorch#160876.
+                if (x == -std::numeric_limits<scalar_t>::infinity()) {
+                  return scalar_t(0);
+                }
+              }
               return x / (scalar_t(1) + std::exp(-x));
             },
             [kOneVec](Vectorized<scalar_t> x_vec) {
-              return x_vec / (kOneVec + x_vec.neg().exp());
+              auto y = x_vec / (kOneVec + x_vec.neg().exp());
+              if constexpr (!c10::is_complex<scalar_t>::value) {
+                const Vectorized<scalar_t> kNegInfVec(
+                    -std::numeric_limits<scalar_t>::infinity());
+                y = Vectorized<scalar_t>::blendv(
+                    y, Vectorized<scalar_t>(scalar_t(0)), x_vec == kNegInfVec);
+              }
+              return y;
             });
       });
     }
