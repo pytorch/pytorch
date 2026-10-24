@@ -2585,6 +2585,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
+    def test_LSTM_cell_forward_hidden_state_format(self):
+        input = torch.randn(3)
+        hidden = torch.zeros(3)
+        lstm = nn.LSTMCell(3, 3)
+
+        with self.assertRaisesRegex(TypeError, "Expected hx to be a tuple"):
+            lstm(input, torch.zeros(2, 3, 3))
+
+        for hx in ((hidden,), (hidden, hidden, hidden)):
+            with self.assertRaisesRegex(ValueError, "Expected hx to contain two tensors"):
+                lstm(input, hx)
+
 
     def test_rnn_cell_native_rank_validation(self):
         input_size, hidden_size = 5, 3
