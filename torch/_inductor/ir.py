@@ -65,6 +65,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -4409,11 +4410,12 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+        if fx_config.backed_size_oblivious or any(
+            free_unbacked_symbols(x) for x in (start, end, dim_size)
+        ):
             min_func = Min
             max_func = Max
         elif any(
-            # Only needed when backed_size_oblivious is on.
             x.has(sympy.Min, sympy.Max, Min, Max)
             for x in (start, end, dim_size)
             if isinstance(x, Expr)
@@ -9028,6 +9030,10 @@ class UserDefinedTritonKernel(ExternKernel):
         kwargs: dict[str, IRNode] = {}
         constant_args: list[IRNode] = []
 
+        kernel_args = {
+            key: self.realize_input(value) if isinstance(value, Constant) else value
+            for key, value in kernel_args.items()
+        }
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
