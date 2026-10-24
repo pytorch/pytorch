@@ -104,6 +104,9 @@ def eager_noexcept(
     def inner(*args: Any) -> Any:
         try:
             return gm(*args)
+        # checkpoint early-stop is control flow, not a graph error
+        except torch.utils.checkpoint._StopRecomputationError:
+            raise
         except Exception as e:
             raise torch._dynamo.exc.TorchDynamoException(
                 "Unexpected exception when running generated GraphModule"
