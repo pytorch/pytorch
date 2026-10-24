@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-from unittest import expectedFailure as xfail
-
 import numpy
 
 import torch._numpy as tnp
@@ -24,22 +22,15 @@ dtype_names = [
 
 np_dtype_params = [
     subtest(("bool", "bool"), name="bool"),
-    subtest(
-        ("bool", numpy.dtype("bool")),
-        name="numpy_dtype('bool')",
-        decorators=[xfail],  # reason="XXX: np.dtype() objects not supported"),
-    ),
+    subtest(("bool", numpy.dtype("bool")), name="numpy_dtype('bool')"),
 ]
 
 
 for name in dtype_names:
     np_dtype_params.append(subtest((name, name), name=repr(name)))
-
+    np_dtype_params.append(subtest((name, getattr(numpy, name)), name=f"numpy_{name}"))
     np_dtype_params.append(
-        subtest((name, getattr(numpy, name)), name=f"numpy_{name}", decorators=[xfail])
-    )  # numpy namespaced dtypes not supported
-    np_dtype_params.append(
-        subtest((name, numpy.dtype(name)), name=f"numpy_{name!r}", decorators=[xfail])
+        subtest((name, numpy.dtype(name)), name=f"numpy_{name!r}")
     )
 
 
@@ -63,6 +54,29 @@ class TestConvertDType(TestCase):
                 raise AssertionError(
                     f"Expected tnp_dtype.name == '{name}', got '{tnp_dtype.name}'"
                 )
+
+    def test_astype_accepts_numpy_dtype(self):
+        x = tnp.arange(4)
+        y = x.astype(tnp.float32)
+        z = x.astype(numpy.float32)
+        if y.dtype != z.dtype:
+            raise AssertionError(f"Expected matching dtypes, got {y.dtype} vs {z.dtype}")
+        empty = tnp.empty((1, 1), dtype=numpy.float32)
+        if empty.dtype != tnp.float32:
+            raise AssertionError(f"Expected float32, got {empty.dtype}")
+
+    def test_non_numpy_dtype_name_lookalike_raises(self):
+        class float32:
+            pass
+
+        with self.assertRaises(TypeError):
+            tnp.dtype(float32)
+
+        class _Lookalike:
+            name = "float32"
+
+        with self.assertRaises(TypeError):
+            tnp.dtype(_Lookalike())
 
 
 if __name__ == "__main__":
