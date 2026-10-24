@@ -661,6 +661,10 @@ class TestGroupBatchFusion(TestCase):
             "dropout_eval_mutation",
             "dropout_eval_merge_view",
             "dropout_training",
+            "dropout_p0_mutation",
+            "inplace_relu",
+            "inplace_silu",
+            "inplace_dropout",
             "custom",
             "higher_order",
             "pointwise",
@@ -682,11 +686,11 @@ class TestGroupBatchFusion(TestCase):
             result.meta["example_value"] = node.meta["example_value"]
             return result
 
-        def dropout(graph, node, training):
+        def dropout(graph, node, training, p=0.1):
             result = graph.call_function(
-                torch.nn.functional.dropout, args=(node, 0.1, training)
+                torch.nn.functional.dropout, args=(node, p, training)
             )
-            if training:
+            if training and p != 0.0:
                 result.meta["example_value"] = torch.randn(4, 6)
             else:
                 result.meta["example_value"] = node.meta["example_value"]
@@ -727,6 +731,19 @@ class TestGroupBatchFusion(TestCase):
                 "view", args=(dropout(graph, node, False), -1)
             ),
             "dropout_training": lambda graph, node: dropout(graph, node, True),
+            "dropout_p0_mutation": lambda graph, node: graph.call_method(
+                "mul_", args=(dropout(graph, node, True, 0.0), 2)
+            ),
+            "inplace_relu": lambda graph, node: graph.call_function(
+                torch.nn.functional.relu, args=(node,), kwargs={"inplace": True}
+            ),
+            "inplace_silu": lambda graph, node: graph.call_function(
+                torch.nn.functional.silu, args=(node,), kwargs={"inplace": True}
+            ),
+            "inplace_dropout": lambda graph, node: graph.call_function(
+                torch.nn.functional.dropout,
+                args=(node, 0.1, True, True),
+            ),
             "custom": lambda graph, node: graph.call_function(
                 torch.ops._batch_linear_lhs_test.require_contiguous.default,
                 args=(node,),
