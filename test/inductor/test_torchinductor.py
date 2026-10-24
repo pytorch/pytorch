@@ -8032,6 +8032,21 @@ for dtype in (torch.int32, torch.int64):
                 (torch.randn([1, 2, 4, 8]),),
             )
 
+    def test_var_mean_identical_large_values(self):
+        # https://github.com/pytorch/pytorch/issues/201334
+        # The mean of identical values whose sum is not representable in
+        # float32 rounds away from the input; the plain two-pass fallback then
+        # reports a nonzero variance where eager (Welford) reports zero.
+        def fn(x):
+            return (
+                torch.var_mean(x, dim=1, correction=0)[0],
+                torch.var(x, dim=1),
+                torch.std(x, dim=1),
+            )
+
+        x = torch.full((2, 3), 7.5e10, dtype=torch.float32)
+        self.common(fn, (x,), atol=0, rtol=0)
+
     def test_var_mean_div_by(self):
         def fn(x):
             var, mean = torch.var_mean(x, dim=2, keepdim=True)

@@ -1484,14 +1484,28 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def welford_reduce_fallback(self, dtype, value):
         sum_ = ops.reduction(dtype, dtype, "sum", value)
+        # Compute M2 from residuals against an element of the reduction (its
+        # maximum) instead of against `mean`. Subtracting a value that is
+        # itself an input keeps the residuals exact for inputs that are all
+        # equal, so their variance is exactly zero like with Welford's
+        # algorithm. With residuals against `mean`, the rounding error of
+        # `mean` was squared into M2: three float32 values of 7.5e10 reported
+        # a variance of 2^26.
+        shift = ops.reduction(dtype, dtype, "max", value)
         self.inside_reduction = False
         rnumel = ops.index_expr(self.features.reduction_numel, dtype)
         mean = ops.truediv(sum_, rnumel)
 
         self.inside_reduction = True
-        dx = ops.sub(value, mean)
-        dx2 = ops.mul(dx, dx)
-        m2 = ops.reduction(dtype, dtype, "sum", dx2)
+        dx = ops.sub(value, shift)
+        dx_sum = ops.reduction(dtype, dtype, "sum", dx)
+
+        self.inside_reduction = False
+        dx_mean = ops.truediv(dx_sum, rnumel)
+
+        self.inside_reduction = True
+        ddx = ops.sub(dx, dx_mean)
+        m2 = ops.reduction(dtype, dtype, "sum", ops.mul(ddx, ddx))
         return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def prepare_softmax_twopass_fallback(self, dtype, value):
