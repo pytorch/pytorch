@@ -227,9 +227,7 @@ static void sdpa_prefill_mps(const Tensor& q,
   using namespace mps;
   // matmul2d cooperative_tensor's lane->element layout differs across Apple GPU
   // generations (see MppAttention.h). Before Apple10's matrix units, MPP only
-  // beats the simdgroup kernel on an exact tile (M3 Ultra, M4); MPP fp32 is
-  // only bfloat-accurate in relaxed precision and slower than the simdgroup
-  // kernel in strict precision.
+  // beats the simdgroup kernel on an exact tile (M3 Ultra, M4).
   static const bool is_apple10_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
   static const int64_t core_grid = kGridThreadgroupsPerCore * std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
   const int64_t d = q.size(3), dv = v.size(3), widest = std::max(d, dv);
@@ -282,6 +280,7 @@ static void sdpa_prefill_mps(const Tensor& q,
     const auto vs = v.narrow(3, v0, std::min(step, dv - v0));
     const auto os = out.narrow(3, v0, vs.size(3));
     const int64_t slabs = at::ceil_div(vs.size(3), bd);
+    TORCH_INTERNAL_ASSERT(vs.size(3) % slabs == 0);
     const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * slabs);
     const PrefillAttnParams params{
         .B = c10::safe_conv<int32_t>(q.size(0)),
