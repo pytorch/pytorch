@@ -403,13 +403,13 @@ auto approximate_type = get_gelutype_enum(approximate);
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+      x, y, dnnl::algorithm::eltwise_gelu_erf, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+      x, y, dnnl::algorithm::eltwise_gelu_tanh, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
 #endif  // ifdef __aarch64__
   } else {
     GeluKernel(kCPU, *this, approximate_type);
@@ -429,7 +429,7 @@ auto approximate_type = get_gelutype_enum(approximate);
     ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
     ideep::eltwise_backward::compute(x, grady, gradx,
-      ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
+      dnnl::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
   } else {
     GeluBackwardKernel(kCPU, *this, approximate_type);
   }
