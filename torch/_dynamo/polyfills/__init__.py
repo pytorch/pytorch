@@ -426,23 +426,6 @@ def assert_dict_equal(
     self_.assertTrue(d1 == d2, msg)
 
 
-def assert_multi_line_equal(
-    self_: Any, first: T, second: T, msg: str | None = None
-) -> None:
-    return self_.assertTrue(first == second, msg)
-
-
-# The original impl. uses difflib
-def assert_sequence_equal(
-    self_: Any,
-    seq1: Sequence[T],
-    seq2: Sequence[T],
-    msg: str | None = None,
-    seq_type: type[Any] | None = None,
-) -> None:
-    return self_.assertTrue(seq1 == seq2, msg)
-
-
 def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     wrapper_obj = args[0]
     attr_name = args[1]
@@ -460,6 +443,19 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def unpack_mapping_keys_and_values(
+    mapping: Mapping[T, U],
+) -> tuple[tuple[T, ...], tuple[U, ...]]:
+    # Snapshot `items()` once to keep keys and values aligned, including overrides.
+    items = list(mapping.items())
+    keys: list[T] = []
+    values: list[U] = []
+    for key, value in items:
+        keys.append(key)
+        values.append(value)
+    return tuple(keys), tuple(values)
 
 
 def instantiate_user_defined_class_object(
@@ -530,6 +526,14 @@ def construct_dict(
     self = cls.__new__(cls)
     mutable_mapping_update(self, data, **kwargs)
     return self
+
+
+def dict_fromkeys(cls: Any, /, iterable: Iterable[Any], value: Any = None) -> Any:
+    # Mirrors the subclass path in CPython's _PyDict_FromKeys.
+    result = cls()
+    for key in iterable:
+        result[key] = value
+    return result
 
 
 def foreach_map_fn(*args: Any) -> Any:
