@@ -37,6 +37,21 @@ at::Tensor cudnn_convolution(
   TORCH_CHECK(false, "cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
+at::Tensor cudnn_convolution_bias(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const std::optional<at::Tensor>& bias,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  TORCH_CHECK(
+      false, "cudnn_convolution: ATen not compiled with cuDNN support");
+}
+
 at::Tensor& cudnn_convolution_out(
     const Tensor& input_t,
     const Tensor& weight_t,
@@ -180,6 +195,23 @@ void raw_cudnn_convolution_forward_out(
   TORCH_CHECK(
       false,
       "raw_cudnn_convolution_forward_out: ATen not compiled with cuDNN support");
+}
+
+void raw_cudnn_convolution_bias_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  TORCH_CHECK(
+      false,
+      "raw_cudnn_convolution_bias_out: ATen not compiled with cuDNN support");
 }
 
 void raw_cudnn_convolution_backward_input_out(

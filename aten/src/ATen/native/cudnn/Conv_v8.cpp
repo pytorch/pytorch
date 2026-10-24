@@ -185,6 +185,14 @@ struct CacheKeyFused {
   float alpha;
 };
 
+struct CacheKeyBias {
+  ConvolutionParams params;
+  uint8_t x_alignment;
+  uint8_t w_alignment;
+  uint8_t y_alignment;
+  uint8_t b_alignment;
+};
+
 struct CacheKeyWrapper : ParamsWrapper<CacheKey> {
   CacheKeyWrapper(
       const cudnnBackendDescriptorType_t operation,
@@ -248,6 +256,37 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
     this->pod.z_alignment = getAlignment(z);
     this->pod.b_alignment = getAlignment(b);
     this->pod.alpha = alpha;
+  }
+};
+
+struct CacheKeyBiasWrapper : ParamsWrapper<CacheKeyBias> {
+  CacheKeyBiasWrapper(
+      const Tensor& y,
+      const Tensor& x,
+      const Tensor& w,
+      const Tensor& b,
+      const IntArrayRef padding,
+      const IntArrayRef stride,
+      const IntArrayRef dilation,
+      int64_t groups,
+      bool deterministic,
+      bool allow_tf32) {
+    at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
+    setConvolutionParams(
+        &(this->pod).params,
+        x,
+        w,
+        padding,
+        stride,
+        dilation,
+        groups,
+        deterministic,
+        allow_tf32,
+        memory_format);
+    this->pod.x_alignment = getAlignment(x);
+    this->pod.y_alignment = getAlignment(y);
+    this->pod.w_alignment = getAlignment(w);
+    this->pod.b_alignment = getAlignment(b);
   }
 };
 
@@ -366,6 +405,15 @@ _get_benchmark_cache_fused() {
       new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
   return benchmark_cache_fused;
 }
+
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyBiasWrapper>*
+_get_benchmark_cache_bias() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyBiasWrapper>* benchmark_cache_bias =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyBiasWrapper>();
+  return benchmark_cache_bias;
+}
 } // namespace
 
 void run_conv_plan(
@@ -439,6 +487,29 @@ void run_conv_plan_fused(
       handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
+void run_conv_plan_bias(
+    cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b,
+    const cudnn_frontend::ExecutionPlan& plan) {
+  c10::DeviceGuard g(x.options().device());
+  auto workspace_size = plan.getWorkspaceSize();
+  auto workspace_ptr =
+      c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  void* data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), b.data_ptr()};
+  int64_t uids[] = {'x', 'y', 'w', 'b'};
+  auto variantPack =
+      cudnn_frontend::VariantPackBuilder()
+          .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
+          .setDataPointers(4, data_ptrs)
+          .setUids(4, uids)
+          .build();
+  AT_CUDNN_CHECK(cudnnBackendExecute(
+      handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+}
+
 auto build_opgraph(
     const cudnnHandle_t handle,
     const cudnnBackendDescriptorType_t desc,
@@ -469,6 +540,59 @@ auto build_opgraph(
                      .setOperationGraph(ops.size(), ops.data())
                      .build();
   return opGraph;
+}
+
+auto build_opgraph_bias(
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b,
+    const CacheKeyBiasWrapper& key,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation) {
+  // Match the existing conv-add-relu graph: convolution accumulation and the
+  // bias pointwise operation use FP32 for reduced-precision inputs.
+  const auto precision = CUDNN_DATA_FLOAT;
+  auto add_bias_desc = cudnn_frontend::PointWiseDescBuilder()
+                           .setMode(CUDNN_POINTWISE_ADD)
+                           .setMathPrecision(precision)
+                           .build();
+  auto conv_desc = getConvDescriptor(
+      key.pod.params.dataType, padding, stride, dilation, x.scalar_type());
+  auto conv_op =
+      cudnn_frontend::OperationBuilder(
+          CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+          .setxDesc(getTensorDescriptor(
+              x, 'x', key.pod.x_alignment, key.pod.params.memory_format))
+          .setyDesc(getTensorDescriptorWithTypeVirtual(
+              y,
+              'C',
+              key.pod.y_alignment,
+              precision,
+              key.pod.params.memory_format,
+              true))
+          .setwDesc(getTensorDescriptor(
+              w, 'w', key.pod.w_alignment, key.pod.params.memory_format))
+          .setcDesc(conv_desc)
+          .build();
+  auto add_bias_op =
+      cudnn_frontend::OperationBuilder(
+          CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
+          .setxDesc(conv_op.getOutputTensor())
+          .setbDesc(getTensorDescriptor(
+              b, 'b', key.pod.b_alignment, key.pod.params.memory_format))
+          .setyDesc(getTensorDescriptor(
+              y, 'y', key.pod.y_alignment, key.pod.params.memory_format))
+          .setpwDesc(add_bias_desc)
+          .build();
+  auto ops = std::to_array<cudnn_frontend::Operation const*>(
+      {&conv_op, &add_bias_op});
+  return cudnn_frontend::OperationGraphBuilder()
+      .setHandle(handle)
+      .setOperationGraph(ops.size(), ops.data())
+      .build();
 }
 
 auto build_opgraph_fused(
@@ -862,6 +986,58 @@ auto get_plans_from_find(
   return sorted_plans;
 }
 
+auto get_plans_from_find_bias(
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b,
+    const CacheKeyBiasWrapper& key,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const bool deterministic,
+    const bool allow_tf32) {
+  auto opGraph =
+      build_opgraph_bias(handle, x, y, w, b, key, padding, stride, dilation);
+  void* data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), b.data_ptr()};
+  int64_t uids[] = {'x', 'y', 'w', 'b'};
+  auto sources = get_generator_sources(
+      CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+      x,
+      deterministic,
+      allow_tf32,
+      CUDNN_HEUR_MODE_INSTANT,
+      true,
+      true,
+      true);
+  cudnn_frontend::EngineConfigGenerator generator(
+      sources.size(), sources.data());
+  cudnn_frontend::executionPlans_t valid_plans;
+  c10::DeviceGuard g(x.options().device());
+  at::DataPtr workspace_ptr;
+  generate_and_filter_plans(
+      handle, opGraph, generator, x, valid_plans, workspace_ptr);
+  auto variantPack =
+      cudnn_frontend::VariantPackBuilder()
+          .setDataPointers(4, data_ptrs)
+          .setUids(4, uids)
+          .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
+          .build();
+
+  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
+  auto plans = cudnn_frontend::time_sorted_plan<
+      cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+      handle, std::move(valid_plans), variantPack, benchmark_limit);
+
+  cudnn_frontend::executionPlans_t sorted_plans;
+  for (auto& plan : plans) {
+    sorted_plans.emplace_back(std::move(plan));
+  }
+  return sorted_plans;
+}
+
 auto get_plans_from_find_fused(
     const cudnnHandle_t handle,
     const Tensor& x,
@@ -959,6 +1135,45 @@ auto get_configs_from_heuristics(
   return EngineConfigResult{std::move(configs), heuristic_config_count};
 }
 
+auto get_configs_from_heuristics_bias(
+    const cudnnHandle_t handle,
+    std::string& opgraph_tag,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b,
+    const CacheKeyBiasWrapper& key,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const bool deterministic,
+    const bool allow_tf32,
+    const bool fallback,
+    const bool get_all_heuristic_configs = false) {
+  auto opGraph =
+      build_opgraph_bias(handle, x, y, w, b, key, padding, stride, dilation);
+  opgraph_tag = opGraph.getTag();
+  auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b()
+      ? CUDNN_HEUR_MODE_B
+      : CUDNN_HEUR_MODE_INSTANT;
+  int64_t heuristic_config_count = -1;
+  auto sources = get_generator_sources(
+      CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+      x,
+      deterministic,
+      allow_tf32,
+      heuristic_mode,
+      !fallback,
+      fallback,
+      get_all_heuristic_configs,
+      &heuristic_config_count);
+
+  cudnn_frontend::EngineConfigGenerator generator(
+      sources.size(), sources.data());
+  auto configs = generator.generate_engine_config(opGraph);
+  return EngineConfigResult{std::move(configs), heuristic_config_count};
+}
+
 auto get_configs_from_heuristics_fused(
     const cudnnHandle_t handle,
     std::string& opgraph_tag,
@@ -1012,6 +1227,29 @@ void try_plans(
     try {
       run_conv_plan(handle, x, y, w, plan, operation);
       _get_benchmark_cache()->update(key, plan);
+      return;
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
+    }
+  }
+  TORCH_CHECK(
+      false, "FIND was unable to find an engine to execute this computation");
+}
+
+void try_plans_bias(
+    cudnn_frontend::executionPlans_t& plans,
+    const CacheKeyBiasWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b) {
+  for (auto& plan : plans) {
+    try {
+      run_conv_plan_bias(handle, x, y, w, b, plan);
+      _get_benchmark_cache_bias()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -1080,6 +1318,39 @@ bool try_configs(
   return false;
 }
 
+bool try_configs_bias(
+    cudnn_frontend::EngineConfigList::iterator configs_begin,
+    cudnn_frontend::EngineConfigList::iterator configs_end,
+    const std::string& opgraph_tag,
+    const CacheKeyBiasWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b) {
+  for (auto config_iter = configs_begin; config_iter != configs_end;
+       ++config_iter) {
+    try {
+      auto& config = *config_iter;
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+                      .setHandle(handle)
+                      .setEngineConfig(config, opgraph_tag)
+                      .build();
+      if (plan_errata_exception(handle, plan, x)) {
+        continue;
+      }
+      run_conv_plan_bias(handle, x, y, w, b, plan);
+      _get_benchmark_cache_bias()->update(key, plan);
+      return true;
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
+    }
+  }
+  return false;
+}
+
 bool try_configs_fused(
     cudnn_frontend::EngineConfigList::iterator configs_begin,
     cudnn_frontend::EngineConfigList::iterator configs_end,
@@ -1133,6 +1404,19 @@ bool try_configs(
       y,
       w,
       operation);
+}
+
+bool try_configs_bias(
+    cudnn_frontend::EngineConfigList& configs,
+    const std::string& opgraph_tag,
+    const CacheKeyBiasWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b) {
+  return try_configs_bias(
+      configs.begin(), configs.end(), opgraph_tag, key, handle, x, y, w, b);
 }
 
 bool try_configs_fused(
@@ -1300,6 +1584,146 @@ void run_single_conv(
   }
 }
 
+void run_bias_conv(
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& b,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    const bool benchmark,
+    const bool deterministic,
+    const bool allow_tf32) {
+  cudnnHandle_t handle = getCudnnHandle();
+  CacheKeyBiasWrapper key(
+      y,
+      x,
+      w,
+      b,
+      padding,
+      stride,
+      dilation,
+      groups,
+      deterministic,
+      allow_tf32);
+  auto search = _get_benchmark_cache_bias()->find(key);
+  if (search) {
+    try {
+      run_conv_plan_bias(handle, x, y, w, b, *search);
+      return;
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
+    }
+  }
+  if (!benchmark) {
+    std::string opgraph_tag;
+    auto engine_config_result = get_configs_from_heuristics_bias(
+        handle,
+        opgraph_tag,
+        x,
+        y,
+        w,
+        b,
+        key,
+        padding,
+        stride,
+        dilation,
+        deterministic,
+        allow_tf32,
+        false);
+    const bool tried_top_config = !engine_config_result.configs.empty();
+    if (tried_top_config &&
+        try_configs_bias(
+            engine_config_result.configs,
+            opgraph_tag,
+            key,
+            handle,
+            x,
+            y,
+            w,
+            b)) {
+      return;
+    }
+    if (engine_config_result.heuristic_config_count > 0) {
+      engine_config_result = get_configs_from_heuristics_bias(
+          handle,
+          opgraph_tag,
+          x,
+          y,
+          w,
+          b,
+          key,
+          padding,
+          stride,
+          dilation,
+          deterministic,
+          allow_tf32,
+          false,
+          true);
+      auto configs_begin = engine_config_result.configs.begin();
+      if (tried_top_config &&
+          configs_begin != engine_config_result.configs.end()) {
+        configs_begin += 1;
+      }
+      if (try_configs_bias(
+              configs_begin,
+              engine_config_result.configs.end(),
+              opgraph_tag,
+              key,
+              handle,
+              x,
+              y,
+              w,
+              b)) {
+        return;
+      }
+    }
+    engine_config_result = get_configs_from_heuristics_bias(
+        handle,
+        opgraph_tag,
+        x,
+        y,
+        w,
+        b,
+        key,
+        padding,
+        stride,
+        dilation,
+        deterministic,
+        allow_tf32,
+        true);
+    if (try_configs_bias(
+            engine_config_result.configs,
+            opgraph_tag,
+            key,
+            handle,
+            x,
+            y,
+            w,
+            b)) {
+      return;
+    }
+    TORCH_CHECK(
+        false, "GET was unable to find an engine to execute this computation");
+  } else {
+    auto plans = get_plans_from_find_bias(
+        handle,
+        x,
+        y,
+        w,
+        b,
+        key,
+        padding,
+        stride,
+        dilation,
+        deterministic,
+        allow_tf32);
+    try_plans_bias(plans, key, handle, x, y, w, b);
+  }
+}
+
 void run_fused_conv(
     const Tensor& x,
     const Tensor& y,
@@ -1459,6 +1883,39 @@ void run_fused_conv(
         allow_tf32);
     try_plans_fused(plans, key, handle, x, y, w, z, b);
   }
+}
+
+void raw_cudnn_convolution_bias_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups,
+    const bool benchmark,
+    const bool deterministic,
+    const bool allow_tf32) {
+  if (output.numel() == 0) {
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(cudnnv8_enabled_check_debug());
+  for (long it : dilation) {
+    TORCH_CHECK_VALUE(it > 0, "Expected positive dilation in convolution.");
+  }
+  run_bias_conv(
+      input,
+      output,
+      weight,
+      reshape_bias(input.dim(), bias),
+      stride,
+      padding,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      allow_tf32);
 }
 
 void raw_cudnn_convolution_forward_out(
