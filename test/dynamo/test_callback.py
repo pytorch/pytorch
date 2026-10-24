@@ -4,8 +4,10 @@ import unittest
 from unittest.mock import Mock
 
 import torch
+from torch._dynamo import convert_frame
 from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigger
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.utils import guard_failures
 from torch._guards import CompileId
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON
@@ -62,6 +64,23 @@ class CallbackTests(TestCase):
         self.assertEqual(
             callback_handler._CompilationCallbackHandler__pending_callbacks_counter, 0
         )
+
+    def test_reset_callback(self) -> None:
+        calls = []
+
+        def callback():
+            calls.append((len(guard_failures), convert_frame.compile_lock._is_owned()))
+
+        self.assertIs(torch._dynamo.on_reset(callback), callback)
+        try:
+            guard_failures[object()].append(object())
+            torch._dynamo.reset()
+            guard_failures[object()].append(object())
+            torch._dynamo.reset()
+        finally:
+            callback_handler.remove_reset_callback(callback)
+
+        self.assertEqual(calls, [(0, True), (0, True)])
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @torch._inductor.config.patch(force_disable_caches=True)
