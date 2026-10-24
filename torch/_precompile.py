@@ -3513,7 +3513,7 @@ def capture(
             # left to the wrapper's type check.
             from torch._inductor import list_mode_options
 
-            requested = options if mode is None else list_mode_options(mode)
+            requested = list_mode_options(mode) if mode is not None else options or {}
             if requested.get("triton.cudagraphs") is True:
                 raise PrecompileError(
                     "a MakeFxTracer capture cannot serve CUDA graphs: its standalone "
