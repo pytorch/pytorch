@@ -8,7 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
 from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -1106,6 +1106,30 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpsTest3D,
 )
+
+
+class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_random_op_on_cpu_offloaded_param_raises(self):
+        # fully_shard with CPUOffloadPolicy keeps the mesh on the accelerator,
+        # so to_empty(device="cpu") yields CPU local tensors whose RNG the
+        # accelerator tracker cannot coordinate.
+        dp_mesh = self.build_device_mesh()
+        lin = torch.nn.Linear(4, 4, bias=False)
+        fully_shard(lin, mesh=dp_mesh, offload_policy=CPUOffloadPolicy())
+        lin.to_empty(device="cpu")
+        self.assertEqual(lin.weight.device_mesh.device_type, self.device_type)
+        self.assertEqual(lin.weight.to_local().device.type, "cpu")
+
+        with torch.no_grad():
+            with self.assertRaisesRegex(RuntimeError, "local tensors on cpu"):
+                lin.weight.normal_()
+
 
 if __name__ == "__main__":
     run_tests()

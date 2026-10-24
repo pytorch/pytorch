@@ -419,6 +419,15 @@ class OpDispatcher:
                     and not first_local_arg.is_meta
                     and random._rng_tracker.distribute_region_enabled
                 ):
+                    tracker_device_type = random._rng_tracker._device.type
+                    if first_local_arg.device.type != tracker_device_type:
+                        # e.g. CPU-offloaded local tensors on an accelerator mesh.
+                        raise RuntimeError(
+                            f"DTensor random op {op_call} does not support local tensors on "
+                            f"{first_local_arg.device.type} when the DTensor RNG tracker is on "
+                            f"{tracker_device_type}, since RNG cannot be coordinated across ranks. "
+                            "Run the op on DTensor.to_local() instead."
+                        )
                     accelerator = torch.accelerator.current_accelerator()
                     if (
                         maybe_user_generator is not None
@@ -458,7 +467,10 @@ class OpDispatcher:
                                 **op_info.local_kwargs,
                             )
                 else:
-                    # No rng_tracker, meta tensor, or distribute_region disabled
+                    # No rng_tracker, meta tensor, or distribute_region disabled.
+                    # Nothing else will pass the generator along, so restore it.
+                    if maybe_user_generator is not None:
+                        op_info.local_kwargs["generator"] = maybe_user_generator
                     with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                         output_sharding.output_spec
                     ):
