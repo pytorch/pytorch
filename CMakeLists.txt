@@ -388,6 +388,14 @@ option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
+
+# If USE_ROCM is already defined in cache, it means user explicitly set it
+if(DEFINED CACHE{USE_ROCM})
+  set(_USE_ROCM_EXPLICITLY_SET TRUE)
+else()
+  set(_USE_ROCM_EXPLICITLY_SET FALSE)
+endif()
+
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
