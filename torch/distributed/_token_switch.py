@@ -128,7 +128,6 @@ class _DispatchAutograd(torch.autograd.Function):
         )
         ctx.ts = ts
         ctx.routing = routing
-        ctx.tokens_shape = tokens.shape
         return out_tokens, out_topk_weights, out_topk_idx
 
     @staticmethod
@@ -138,10 +137,15 @@ class _DispatchAutograd(torch.autograd.Function):
         grad_out_tokens: torch.Tensor,
         grad_out_topk_weights: torch.Tensor | None,
         grad_out_topk_idx: torch.Tensor | None,
-    ) -> tuple[None, None, torch.Tensor, None, None]:
-        grad_tokens = grad_out_tokens.new_zeros(ctx.tokens_shape)
-        ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
-        return None, None, grad_tokens, None, None
+    ) -> tuple[None, None, torch.Tensor, torch.Tensor | None, None]:
+        grad_tokens, grad_weights = ctx.ts._dispatch_backward(
+            ctx.routing,
+            grad_out_tokens.contiguous(),
+            grad_out_topk_weights.contiguous()
+            if grad_out_topk_weights is not None
+            else None,
+        )
+        return None, None, grad_tokens, grad_weights, None
 
 
 class _CombineAutograd(torch.autograd.Function):
@@ -286,6 +290,18 @@ class TokenSwitch(abc.ABC):
     ) -> None:
         raise NotImplementedError
 
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        grad_topk_weights: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        out_tokens = grad_tokens.new_zeros(
+            routing.topk_idx.shape[0], grad_tokens.shape[-1]
+        )
+        self._combine(routing, grad_tokens, out_tokens)
+        return out_tokens, None
+
     def dispatch(
         self,
         routing: Routing,
@@ -306,7 +322,8 @@ class TokenSwitch(abc.ABC):
         provided buffers and returns them; no autograd support.
         Without ``out``: allocates output buffers and returns the tuple with
         autograd support.  ``max_recv_tokens`` is required when ``out`` is not
-        provided.  ``topk_weights`` receives no gradient (routing metadata).
+        provided. Routing-weight gradients depend on the backend; NCCL supports
+        first-order gradients for FP32 ``topk_weights``.
         """
         if out is not None:
             self._dispatch(routing, tokens, topk_weights, *out)
@@ -449,3 +466,20 @@ class TokenSwitchNCCL(TokenSwitch):
             expert_tokens,
             out_tokens,
         )
+
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        grad_topk_weights: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if grad_topk_weights is None:
+            return super()._dispatch_backward(routing, grad_tokens, None)
+        out_tokens = grad_tokens.new_zeros(
+            routing.topk_idx.shape[0], grad_tokens.shape[-1]
+        )
+        out_weights = grad_topk_weights.new_zeros(routing.topk_idx.shape)
+        self._ep._nccl_ep_combine_backward(
+            routing.handle, grad_tokens, grad_topk_weights, out_tokens, out_weights
+        )
+        return out_tokens, out_weights

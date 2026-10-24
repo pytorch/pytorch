@@ -239,26 +239,54 @@ void nccl_ep_dispatch(
         &config, stream));
 }
 
-void nccl_ep_combine(
+static void nccl_ep_combine_impl(
     const c10::intrusive_ptr<NcclEpHandle>& handle,
     const at::Tensor& expert_tokens,
-    at::Tensor& out_tokens) {
+    at::Tensor& out_tokens,
+    const std::optional<at::Tensor>& topk_weights,
+    const std::optional<at::Tensor>& out_topk_weights,
+    bool backward) {
     auto stream = at::cuda::getCurrentCUDAStream();
     auto ep_handle = reinterpret_cast<ncclEpHandle_t>(handle->handle);
 
     EpTensor in_tok = make_ep_tensor(expert_tokens, handle->group_name);
     EpTensor out_tok(out_tokens);
+    std::optional<EpTensor> in_weights, out_weights;
+    if (topk_weights) in_weights.emplace(*topk_weights);
+    if (out_topk_weights) out_weights.emplace(*out_topk_weights);
 
     ncclEpCombineInputs_t inputs = NCCL_EP_COMBINE_INPUTS_INIT;
     inputs.tokens = &in_tok.desc;
+    inputs.topk_weights = in_weights ? &in_weights->desc : nullptr;
 
     ncclEpCombineOutputs_t outputs = NCCL_EP_COMBINE_OUTPUTS_INIT;
     outputs.tokens = &out_tok.desc;
+    outputs.topk_weights = out_weights ? &out_weights->desc : nullptr;
 
     ncclEpCombineConfig_t config = NCCL_EP_COMBINE_CONFIG_INIT;
+    config.pass_direction = backward ? NCCL_EP_BWD_PASS : NCCL_EP_FWD_PASS;
 
     NCCL_EP_CHECK(ncclEpCombine(
         ep_handle, &inputs, &outputs, &config, stream));
+}
+
+
+void nccl_ep_combine(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& expert_tokens,
+    at::Tensor& out_tokens) {
+    nccl_ep_combine_impl(
+        handle, expert_tokens, out_tokens, std::nullopt, std::nullopt, false);
+}
+
+void nccl_ep_combine_backward(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& grad_tokens,
+    const at::Tensor& grad_topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_topk_weights) {
+    nccl_ep_combine_impl(
+        handle, grad_tokens, out_tokens, grad_topk_weights, out_topk_weights, true);
 }
 
 } // namespace c10d::nccl_ep
@@ -303,6 +331,16 @@ void nccl_ep_dispatch(
 void nccl_ep_combine(
     const c10::intrusive_ptr<NcclEpHandle>&,
     const at::Tensor&,
+    at::Tensor&) {
+    not_supported();
+}
+
+
+void nccl_ep_combine_backward(
+    const c10::intrusive_ptr<NcclEpHandle>&,
+    const at::Tensor&,
+    const at::Tensor&,
+    at::Tensor&,
     at::Tensor&) {
     not_supported();
 }
