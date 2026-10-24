@@ -1053,6 +1053,9 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tens
     const int64_t head_dim_v = value.size(3);
     auto attn_bias_ = attn_bias;
     if (attn_bias_.has_value()) {
+      if (attn_bias_.value().dtype() != query.dtype()) {
+        attn_bias_ = attn_bias_.value().to(query.dtype());
+      }
       const auto bias_dim = attn_bias_.value().dim();
       if (bias_dim == 2) {
         attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
@@ -1187,6 +1190,9 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tens
     }
     auto attn_bias_ = attn_bias;
     if (attn_bias_.has_value()) {
+      if (attn_bias_.value().dtype() != query.dtype()) {
+        attn_bias_ = attn_bias_.value().to(query.dtype());
+      }
       const auto bias_dim = attn_bias_.value().dim();
       if (bias_dim == 2) {
         attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
