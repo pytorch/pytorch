@@ -11,6 +11,7 @@ from torch.testing._internal.common_device_type import (
     Capability,
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     onlyOn,
     ops,
@@ -301,6 +302,77 @@ with _temp_test_configs(
 ):
     instantiate_device_type_tests(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
+    )
+
+
+class TestSizeOverride(TestCase):
+    """Verify that test_size_overrides replaces the declared test size.
+
+    The declared size is deliberately impossible to satisfy, so the tests only
+    run if the override (an int number of bytes or a "N GB" string) applies.
+    """
+
+    checked_sizes: list = []
+
+    @classmethod
+    def setUpClass(cls):
+        cls.checked_sizes = []
+        cls._saved_hook = inspect.getattr_static(
+            PrivateUse1TestBase, "has_sufficient_memory"
+        )
+        PrivateUse1TestBase.has_sufficient_memory = classmethod(
+            lambda cls, size: cls.checked_sizes.append(size) or True
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        PrivateUse1TestBase.has_sufficient_memory = cls._saved_hook
+        if sorted(cls.checked_sizes) != [1024**3, 2**35]:
+            raise AssertionError(
+                f"Expected 2**35 and 1GB to be checked, got {cls.checked_sizes}"
+            )
+        super().tearDownClass()
+
+    @largeTensorTest("100000GB")
+    def test_override_with_bytes(self, device):
+        self.assertEqual(torch.device(device).type, "openreg")
+
+    @largeTensorTest("100000GB")
+    def test_override_with_gb_string(self, device):
+        self.assertEqual(torch.device(device).type, "openreg")
+
+
+class TestSizeOverrideDeviceScoped(TestCase):
+    """Verify that an override does not affect another device type's check."""
+
+    executed_count = 0
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.executed_count != 0:
+            raise AssertionError("cpu check used the openreg size override")
+        super().tearDownClass()
+
+    @largeTensorTest("100000GB", device="cpu")
+    def test_cpu_check_keeps_declared_size(self, device):
+        type(self).executed_count += 1
+
+
+OPENREG_SIZE_OVERRIDES = {
+    "TestSizeOverride": {
+        "test_override_with_bytes": 2**35,
+        "test_override_with_gb_string": "1GB",
+    },
+    "TestSizeOverrideDeviceScoped": {
+        "test_cpu_check_keeps_declared_size": 1,
+    },
+}
+with _temp_test_configs(
+    PrivateUse1TestBase, test_size_overrides=OPENREG_SIZE_OVERRIDES
+):
+    instantiate_device_type_tests(TestSizeOverride, globals(), only_for="openreg")
+    instantiate_device_type_tests(
+        TestSizeOverrideDeviceScoped, globals(), only_for="openreg"
     )
 
 
