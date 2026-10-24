@@ -449,6 +449,19 @@ def _always_prefer_recompute(ctx, op, *args, **kwargs):
     return CheckpointPolicy.PREFER_RECOMPUTE
 
 
+def _is_executing_eagerly() -> bool:
+    """
+    True if no tracing machinery (torch dispatch modes, functorch transforms) is
+    active, i.e. the ops are really being executed.
+    """
+    from torch.utils._python_dispatch import _len_torch_dispatch_stack
+
+    return (
+        _len_torch_dispatch_stack() == 0
+        and torch._C._functorch.peek_interpreter_stack() is None
+    )
+
+
 def tag_activation_checkpoint_impl(gmod, *args, **kwargs):
     import functools
 
@@ -483,12 +496,15 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
     # And we ensure that AOT Autograd traces through the non reentrant
     # version of checkpointing.
     kwargs["use_reentrant"] = False
-    # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
-    # `torch.random.fork_rng` op (which is not supported yet under CUDA).
+    # While tracing, preserve_rng_state is set to False because we want to prevent AOTAutograd from
+    # tracing through `torch.random.fork_rng` op (which is not supported yet under CUDA).
     # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
     # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
     # instead of in AOTAutograd).
-    kwargs["preserve_rng_state"] = False
+    # When this op is executed eagerly (e.g. backend="eager"), nothing is traced and nothing
+    # functionalizes RNG later, so we have to preserve the RNG state here. This keeps the
+    # promise above that torch.compile always preserves RNG state.
+    kwargs["preserve_rng_state"] = _is_executing_eagerly()
     kwargs["context_fn"] = context_fn_with_graph_id
     # Disable early stop to prevent _StopRecomputationError from interrupting
     # recomputation between _vmap_increment_nesting and _vmap_decrement_nesting,
