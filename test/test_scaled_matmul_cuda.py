@@ -1798,6 +1798,117 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("bias_rank", [1, 2])
+    @parametrize("dynamic", [False, True])
+    def test_scaled_mm_v1_vector_bias_uses_template(self, device, bias_rank, dynamic):
+        from unittest import mock
+
+        from torch._inductor import config
+        from torch._inductor.utils import run_and_get_code
+
+        with (
+            mock.patch("torch._inductor.utils.is_big_gpu", return_value=True),
+            config.patch({
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": False,
+                "test_configs.max_mm_configs": 1,
+                "force_disable_caches": True,
+            }),
+        ):
+            scale_a = torch.tensor(0.125, device=device)
+            scale_b = torch.tensor(0.25, device=device)
+
+            def fn(a, b, bias):
+                return torch._scaled_mm(
+                    a, b, scale_a, scale_b, bias=bias,
+                    out_dtype=torch.bfloat16, use_fast_accum=False,
+                )
+
+            compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+            for index, (m, n) in enumerate(((32, 64), (48, 96))):
+                a = (torch.randint(0, 2, (m, 128), device=device) * 2 - 1).to(e4m3_type)
+                b = (torch.randint(0, 2, (n, 128), device=device) * 2 - 1).to(e4m3_type).t()
+                bias = torch.arange(n, device=device).to(torch.bfloat16) / 16
+                if bias_rank == 2:
+                    bias = bias.unsqueeze(0)
+                if dynamic:
+                    torch._dynamo.mark_dynamic(b, 1)
+                    torch._dynamo.mark_dynamic(bias, bias.dim() - 1)
+                expected = ((a.float() @ b.float()) / 32 + bias.float()).to(torch.bfloat16)
+                self.assertEqual(fn(a, b, bias), expected, atol=0, rtol=0)
+                if not dynamic or index == 0:
+                    actual, codes = run_and_get_code(compiled, a, b, bias)
+                    source = "\n".join(codes)
+                    self.assertIn("@triton_heuristics.template(", source)
+                    self.assertIn("tl.dot(", source)
+                    self.assertNotIn("extern_kernels._scaled_mm(", source)
+                    self.assertNotIn("torch.ops.aten._scaled_mm.default(", source)
+                else:
+                    actual = compiled(a, b, bias)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("execution,dynamic", [
+        ("eager", False), ("inductor", False), ("inductor", True),
+        ("aot_eager", False), ("aot_eager", True), ("export", False),
+    ])
+    def test_scaled_mm_v1_rejects_matrix_bias(self, device, execution, dynamic):
+        a = torch.ones((32, 128), device=device, dtype=e4m3_type)
+        b = torch.ones((64, 128), device=device, dtype=e4m3_type).t()
+        bias = torch.ones((32, 64), device=device, dtype=torch.bfloat16)
+        scale = torch.ones((), device=device)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, bias, scale):
+                return torch._scaled_mm(a, b, scale, scale, bias=bias, out_dtype=torch.bfloat16)
+
+        model = Model()
+        with self.assertRaisesRegex(RuntimeError, "Bias must be size"):
+            if execution == "export":
+                torch.export.export(model, (a, b, bias, scale))
+            else:
+                fn = model if execution == "eager" else torch.compile(
+                    model, backend=execution, fullgraph=True, dynamic=dynamic,
+                )
+                fn(a, b, bias, scale)
+
+    @onlyOn(["cpu"])
+    @parametrize("fake_device", ["cpu", "cuda", "xpu"])
+    @parametrize("bias_shape,valid", [
+        (None, True), ((64,), True), ((1, 64), True),
+        ((32, 64), False), ((65,), False),
+    ])
+    def test_scaled_mm_v1_fake_bias_shape(self, device, fake_device, bias_shape, valid):
+        with FakeTensorMode():
+            a = torch.empty((32, 128), device=fake_device, dtype=e4m3_type)
+            b = torch.empty((64, 128), device=fake_device, dtype=e4m3_type).t()
+            bias = None if bias_shape is None else torch.empty(bias_shape, device=fake_device, dtype=torch.bfloat16)
+            scale = torch.ones((), device=fake_device)
+            if valid:
+                result = torch._scaled_mm(a, b, scale, scale, bias=bias, out_dtype=torch.bfloat16)
+                self.assertEqual(result.shape, (32, 64))
+                self.assertEqual(result.dtype, torch.bfloat16)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "Bias must be size"):
+                    torch._scaled_mm(a, b, scale, scale, bias=bias, out_dtype=torch.bfloat16)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16])
+    def test_scaled_mm_v1_single_row_vector_compatibility(self, device, out_dtype):
+        x = (torch.randint(0, 2, (1, 128), device=device) * 2 - 1).to(e4m3_type)
+        y = (torch.randint(0, 2, (64, 128), device=device) * 2 - 1).to(e4m3_type).t()
+        sa = torch.tensor(0.125, device=device)
+        sb = torch.tensor(0.25, device=device)
+        bias = torch.arange(64, device=device, dtype=out_dtype).unsqueeze(0) / 16
+        expected = torch._scaled_mm(x, y, sa, sb, bias=bias.flatten(), out_dtype=out_dtype)
+        actual = torch._scaled_mm(x, y, sa, sb, bias=bias, out_dtype=out_dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
