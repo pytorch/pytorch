@@ -17,6 +17,7 @@ from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
+    recover_orig_fp32_precision,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -204,6 +205,19 @@ user_stack=None)
                 self.assertIs(guard.check(), False)
                 self.assertEqual(guard.reason(), "autocast(cpu)_dtype ")
         self.assertIs(guard.check(), False)
+
+    @recover_orig_fp32_precision
+    def test_global_state_reason_conv_precisions(self):
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        guard = GlobalStateGuard()
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        self.assertIs(guard.check(), False)
+        self.assertEqual(guard.reason(), "cuda_conv_precision ")
+        guard = GlobalStateGuard()
+        torch._C._set_fp32_precision_setter("cuda", "all", "ieee")
+        self.assertIs(guard.check(), False)
+        self.assertEqual(guard.reason(), "cudnn_fp32_precision ")
 
     def test_global_state_autocast_round_trip(self):
         with torch.autocast("cpu", dtype=torch.bfloat16):

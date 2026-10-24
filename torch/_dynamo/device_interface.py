@@ -226,6 +226,23 @@ class DeviceInterface:
         """
         return False
 
+    @staticmethod
+    def conv_allow_tf32(*, depthwise: bool = False) -> bool:
+        """Whether the backend permits the convolution lowering's templates to set
+        ALLOW_TF32 (forward, and the template a transposed convolution uses).
+
+        depthwise is True for a non-transposed convolution with more than one
+        group and one input channel per group. The default follows the cuDNN-wide
+        fp32 precision for every convolution. The FX graph cache key records both
+        results per device. Dynamo's global state guard (GlobalStateGuard in
+        torch/csrc/dynamo/guards.cpp) records the CUDA matmul, CUDA conv and
+        cuDNN-wide fp32 precisions; if an override reads any other setting,
+        changing that setting does not recompile code that Dynamo already
+        compiled. The convolution_backward lowering's templates do not use this
+        hook: they read torch.backends.cudnn.allow_tf32 and run only off CUDA.
+        """
+        return torch.backends.cudnn.fp32_precision == "tf32"
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -438,6 +455,19 @@ class CudaInterface(DeviceInterface):
     @staticmethod
     def allow_tf32() -> bool:
         return torch.backends.cuda.matmul.fp32_precision == "tf32"
+
+    @staticmethod
+    def conv_allow_tf32(*, depthwise: bool = False) -> bool:
+        if torch.version.hip is not None:
+            return DeviceInterface.conv_allow_tf32(depthwise=depthwise)
+        # Keep depthwise convolutions in full precision, the conservative choice:
+        # eager runs contiguous ones on native kernels without TF32, and on an A100
+        # cuDNN did not use TF32 for channels-last ones either.
+        if depthwise:
+            return False
+        # Eager cuDNN convolutions read the conv precision, which is TF32 by default
+        # while the cuDNN-wide setting stays "none".
+        return torch._C._get_fp32_precision_getter("cuda", "conv") == "tf32"
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:

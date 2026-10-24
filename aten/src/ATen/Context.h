@@ -399,6 +399,27 @@ class TORCH_API Context {
       Float32Precision p);
   bool allowTF32CuDNN(std::optional<Float32Op> op = std::nullopt) const;
   void setAllowTF32CuDNN(bool /*b*/);
+  // Every fp32 precision setting exactly as stored (an op still at its
+  // internal default keeps it), so code that must undo changes to them can
+  // restore them as they were. Opaque: only a value returned by
+  // float32PrecisionState(), possibly sent to another process through
+  // encode() and decode(), can be passed to setFloat32PrecisionState().
+  class TORCH_API Float32PrecisionState {
+   public:
+    std::vector<int64_t> encode() const;
+    static Float32PrecisionState decode(const std::vector<int64_t>& values);
+
+   private:
+    friend class Context;
+    Float32PrecisionState() = default;
+    using Key = std::pair<Float32Backend, Float32Op>;
+    std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision;
+    Float32MatmulPrecision float32_matmul_precision{};
+    bool allow_tf32_cudnn{};
+    bool allow_tf32_onednn{};
+  };
+  Float32PrecisionState float32PrecisionState() const;
+  void setFloat32PrecisionState(const Float32PrecisionState& state);
   bool allowTF32OneDNN() const;
   void setAllowTF32OneDNN(bool /*b*/);
   bool allowTF32CuBLAS() const;

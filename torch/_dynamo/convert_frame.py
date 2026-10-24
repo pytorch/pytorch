@@ -359,9 +359,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if torch.cuda.is_available():
                 with torch._C.DisableTorchFunction():
                     cuda_rng_state = torch.cuda.get_rng_state()
-            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
-                "cuda", "matmul"
-            )
+            fp32_precision_state = torch._C._get_float32_precision_state()
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
@@ -390,9 +388,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if cuda_rng_state is not None:
                     with torch._C.DisableTorchFunction():
                         torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_fp32_precision_setter(
-                    "cuda", "matmul", cuda_matmul_fp32_prec
-                )
+                # Traced code can run TF32 setters such as
+                # torch._C._set_cudnn_allow_tf32 for real. Restore the stored values,
+                # not the resolved ones, so a precision that inherits from a wider
+                # setting keeps inheriting.
+                torch._C._set_float32_precision_state(fp32_precision_state)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 if not guards.check():
                     raise AssertionError(

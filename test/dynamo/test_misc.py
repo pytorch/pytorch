@@ -5559,6 +5559,105 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result, correct)
 
     @recover_orig_fp32_precision
+    def test_traced_tf32_setters_are_undone_exactly(self):
+        # Tracing runs these setters for real. This backend drops them from the
+        # graph, so only tracing changes the settings. They must come back as
+        # stored, not as resolved: precisions set to "none" inherit the CUDA-wide
+        # one and must keep inheriting it.
+        setters = (
+            torch._C._set_cudnn_allow_tf32,
+            torch._C._set_cublas_allow_tf32,
+            torch._C._set_float32_matmul_precision,
+        )
+
+        traced = []
+
+        def drop_setters(gm, example_inputs):
+            # Before the restore: the settings as tracing left them.
+            traced.append(
+                (torch.backends.cudnn.allow_tf32, torch.get_float32_matmul_precision())
+            )
+            for node in list(gm.graph.nodes):
+                if node.target in setters:
+                    gm.graph.erase_node(node)
+            gm.recompile()
+            return gm.forward
+
+        @torch.compile(backend=drop_setters)
+        def g(x):
+            torch._C._set_cudnn_allow_tf32(True)
+            torch._C._set_cublas_allow_tf32(True)
+            torch._C._set_float32_matmul_precision("medium")
+            return x + 1
+
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "none"
+        torch._C._set_cudnn_allow_tf32(False)
+        torch._C._set_fp32_precision_setter("cuda", "all", "ieee")
+        g(torch.randn(3))
+        self.assertEqual(traced, [(True, "medium")])
+        self.assertFalse(torch.backends.cudnn.allow_tf32)
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "ieee")
+        torch._C._set_fp32_precision_setter("cuda", "all", "tf32")
+        self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+    def test_compiling_keeps_conv_precision_inheriting(self):
+        # A fresh process, where the conv precision is still at its internal
+        # default (it follows the cuDNN-wide one) and test flag locks are off.
+        script = """
+import pickle
+
+import torch
+
+def drop_setter(gm, example_inputs):
+    for node in list(gm.graph.nodes):
+        if node.target is torch._C._set_cudnn_allow_tf32:
+            gm.graph.erase_node(node)
+    gm.recompile()
+    return gm.forward
+
+@torch.compile(backend=drop_setter)
+def traced_setter(x):
+    torch._C._set_cudnn_allow_tf32(True)
+    return x + 1
+
+traced_setter(torch.randn(3))
+torch.backends.cudnn.fp32_precision = "ieee"
+assert torch.backends.cudnn.conv.fp32_precision == "ieee"
+
+# A pickled state, as subprocess compiles send it, restores the same way.
+torch.backends.cudnn.fp32_precision = "none"
+state = pickle.loads(pickle.dumps(torch._C._get_float32_precision_state()))
+torch._C._set_cudnn_allow_tf32(True)
+torch._C._set_float32_precision_state(state)
+torch.backends.cudnn.fp32_precision = "ieee"
+assert torch.backends.cudnn.conv.fp32_precision == "ieee"
+
+# Assigning the attribute is replayed after the graph, so it takes effect.
+@torch.compile(backend="aot_eager")
+def assigns(x):
+    torch.backends.cudnn.allow_tf32 = False
+    return x + 1
+
+torch.backends.cudnn.fp32_precision = "none"
+for _ in range(2):
+    torch.backends.cudnn.allow_tf32 = True
+    assigns(torch.randn(3))
+    assert not torch.backends.cudnn.allow_tf32
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
+    @recover_orig_fp32_precision
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
@@ -5641,6 +5740,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         _test_autocast(torch.float32)
         _test_autocast(torch.float64)
         _test_autocast(torch.bfloat16)
+
+        # A payload written before the conv precisions were recorded loads and
+        # ignores them.
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        guards = GlobalStateGuard()
+        pre_conv_json_guards = json.loads(guards.__getstate__())
+        del pre_conv_json_guards["cuda_conv_precision"]
+        del pre_conv_json_guards["cudnn_fp32_precision"]
+        guards.__setstate__(json.dumps(pre_conv_json_guards))
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        torch._C._set_fp32_precision_setter("cuda", "all", "tf32")
+        self.assertTrue(guards.check())
+        self.assertNotIn("cuda_conv_precision", json.loads(guards.__getstate__()))
 
     def test_type_copy(self):
         def fn(seq):
@@ -12848,6 +12961,38 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                             )
         finally:
             write_state(initial_state)
+
+    @recover_orig_fp32_precision
+    def test_recompile_on_conv_precision_change(self):
+        # Inductor's conv templates read these precisions.
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10)
+        # An explicit matmul precision keeps the cuDNN-wide change below from
+        # recompiling through the matmul guard.
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch._C._set_fp32_precision_setter("cuda", "all", "none")
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        fn(x)
+        fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        torch._C._set_fp32_precision_setter("cuda", "all", "tf32")
+        fn(x)
+        self.assertEqual(counter.frame_count, 3)
+
+        torch._C._set_fp32_precision_setter("cuda", "all", "none")
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        fn(x)
+        self.assertEqual(counter.frame_count, 3)
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"

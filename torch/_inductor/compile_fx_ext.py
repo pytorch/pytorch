@@ -222,6 +222,9 @@ class _WireProtocolInput:
     # applied in the child instead of reading the worker's own backend
     # config state
     backend_configs: dict[str, dict[str, object]]
+    # The parent's fp32 precision settings, which the template ALLOW_TF32 hooks
+    # read; the child would otherwise use its own defaults.
+    fp32_precision_state: torch._C._Float32PrecisionState
     virtualized: _VirtualizedSerializer
     deterministic_guard_for_testing: (  # type: ignore[name-defined]  # mypy bug
         torch.testing._internal.common_utils.DeterministicGuard | None
@@ -532,6 +535,7 @@ class _SerializedFxCompile(FxCompile):
                     for m in custom_backend_codegen_configs.values()
                     if m is not None
                 },
+                torch._C._get_float32_precision_state(),
                 _VirtualizedSerializer.serialize(),
                 deterministic_guard_for_testing,
                 logger_state,
@@ -584,6 +588,11 @@ class _SerializedFxCompile(FxCompile):
             stack.enter_context(config.patch(input.config))
             for name, values in input.backend_configs.items():
                 stack.enter_context(importlib.import_module(name).patch(values))
+            stack.callback(
+                torch._C._set_float32_precision_state,
+                torch._C._get_float32_precision_state(),
+            )
+            torch._C._set_float32_precision_state(input.fp32_precision_state)
             captured_logs = stack.enter_context(input.logger_state)
             if input.deterministic_guard_for_testing:
                 stack.enter_context(input.deterministic_guard_for_testing)

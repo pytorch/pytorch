@@ -766,6 +766,11 @@ struct GlobalStateGuard {
     _cuda_matmul_precision =
         ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
     _uses_legacy_allow_tf32 = false;
+    _records_conv_precisions = true;
+    _cuda_conv_precision =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::CONV);
+    _cudnn_fp32_precision =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::ALL);
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
@@ -782,6 +787,20 @@ struct GlobalStateGuard {
         : _cuda_matmul_precision == precision;
   }
 
+  // Conv templates read the conv precision on CUDA and the cuDNN-wide one
+  // elsewhere. A payload written before they were recorded carries neither.
+  bool cudaConvPrecisionMatches(const at::Context& ctx) const {
+    return !_records_conv_precisions ||
+        _cuda_conv_precision ==
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::CONV);
+  }
+
+  bool cudnnFp32PrecisionMatches(const at::Context& ctx) const {
+    return !_records_conv_precisions ||
+        _cudnn_fp32_precision ==
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::ALL);
+  }
+
   bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
@@ -792,7 +811,8 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            cudaMatmulPrecisionMatches(ctx) &&
+            cudaMatmulPrecisionMatches(ctx) && cudaConvPrecisionMatches(ctx) &&
+            cudnnFp32PrecisionMatches(ctx) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
@@ -815,6 +835,10 @@ struct GlobalStateGuard {
       os << "deterministic_algorithms_warn_only ";
     if (!cudaMatmulPrecisionMatches(ctx))
       os << "cuda_matmul_precision ";
+    if (!cudaConvPrecisionMatches(ctx))
+      os << "cuda_conv_precision ";
+    if (!cudnnFp32PrecisionMatches(ctx))
+      os << "cudnn_fp32_precision ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
     if (_allow_bf16_reduce != ctx.allowBF16ReductionCuBLAS())
@@ -848,6 +872,12 @@ struct GlobalStateGuard {
       json_j["cuda_matmul_precision"] =
           static_cast<int64_t>(json_t._cuda_matmul_precision);
     }
+    if (json_t._records_conv_precisions) {
+      json_j["cuda_conv_precision"] =
+          static_cast<int64_t>(json_t._cuda_conv_precision);
+      json_j["cudnn_fp32_precision"] =
+          static_cast<int64_t>(json_t._cudnn_fp32_precision);
+    }
     json_j["allow_fp16_reduce"] =
         static_cast<int64_t>(json_t._allow_fp16_reduce);
     json_j["allow_bf16_reduce"] =
@@ -876,6 +906,14 @@ struct GlobalStateGuard {
           allow_tf32 ? at::Float32Precision::TF32 : at::Float32Precision::IEEE;
       json_t._uses_legacy_allow_tf32 = true;
     }
+    json_t._records_conv_precisions = json_j.contains("cuda_conv_precision") &&
+        json_j.contains("cudnn_fp32_precision");
+    if (json_t._records_conv_precisions) {
+      json_t._cuda_conv_precision = static_cast<at::Float32Precision>(
+          static_cast<int64_t>(json_j.at("cuda_conv_precision")));
+      json_t._cudnn_fp32_precision = static_cast<at::Float32Precision>(
+          static_cast<int64_t>(json_j.at("cudnn_fp32_precision")));
+    }
     json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
         static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
     json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
@@ -893,6 +931,9 @@ struct GlobalStateGuard {
   bool _deterministic_algorithms_warn_only;
   at::Float32Precision _cuda_matmul_precision;
   bool _uses_legacy_allow_tf32;
+  bool _records_conv_precisions;
+  at::Float32Precision _cuda_conv_precision;
+  at::Float32Precision _cudnn_fp32_precision;
   at::CuBLASReductionOption _allow_fp16_reduce;
   at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
