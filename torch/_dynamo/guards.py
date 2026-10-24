@@ -3527,18 +3527,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         t = type(value)
+        remaining = tuple_iterator_len(value)
 
         code = []
-        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        code.append(f"___tuple_iterator_len({ref}) == {remaining}")
         self._set_guard_export_info(guard, code)
+        item_word = "item" if remaining == 1 else "items"
+        reason = (
+            f"Expected {ref} to be a tuple iterator with {remaining} {item_word} left; "
+            "this compiled version assumes that iterator type and remaining count."
+        )
 
-        t = type(value)
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value),
+            remaining,
             obj_id,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
 

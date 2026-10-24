@@ -323,6 +323,34 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             for line in ["len(x) == 2", "len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
 
+    @parametrize(
+        "first, second, expected",
+        [
+            ((1, 2, 3), (1, 2), "3 items"),
+            ((1, 2, 3), [1, 2, 3], "3 items"),
+            ((1,), (), "1 item"),
+        ],
+    )
+    def test_tuple_iterator_length_recompile_hint(self, first, second, expected):
+        reasons = []
+
+        def fn(t, x):
+            if len(list(t)) > 2:
+                return x * 2
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(fn)
+        x = torch.randn(3)
+        compiled(iter(first), x)
+        compiled(iter(second), x)
+
+        self.assertEqual(len(reasons), 1)
+        self.assertIn(f"___tuple_iterator_len(t) == {len(first)}", reasons[0])
+        expected_hint = f"(HINT: Expected t to be a tuple iterator with {expected} left; this compiled version assumes that iterator type and remaining count.)"
+        self.assertIn(expected_hint, reasons[0])
+
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_recompile_child_run_only(self):
         def f(x, n):
@@ -1718,6 +1746,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ids, sorted(ids))
 
 
+instantiate_parametrized_tests(RecompileUxTests)
 instantiate_parametrized_tests(IsolateRecompilesTests)
 
 
