@@ -1141,8 +1141,6 @@ class DynamicRendezvousHandler(RendezvousHandler):
         # Cached shared store server reference
         self._shared_tcp_store_server: dist.Store | None = None
 
-        self._bootstrap_store_info: RendezvousStoreInfo | None = None
-
     def _record(
         self,
         message: str,
@@ -1240,36 +1238,27 @@ class DynamicRendezvousHandler(RendezvousHandler):
             )
 
         # This will only be hit when TCPStore sharing is enabled.
-        # Rebuild bootstrap store info when this is the first rendezvous or
-        # when the node became rank 0 but hasn't created a TCP store server
-        # yet (rank changed between rounds due to elastic membership changes).
-        if self._bootstrap_store_info is None or (
-            rank == 0 and self._shared_tcp_store_server is None
-        ):
-            server_port = 0
-            if rank == 0:
+        # The keys live under the round's store prefix, so rank 0 republishes
+        # them and every other rank reads them again on every round.
+        server_port = 0
+        if rank == 0:
+            if self._shared_tcp_store_server is None:
                 self._shared_tcp_store_server = self._create_tcp_store_server(
                     self._this_node.addr, server_port
                 )
-                server_port = self._shared_tcp_store_server.port
-            self._bootstrap_store_info = RendezvousStoreInfo.build(
-                rank,
-                store,
-                local_addr=self._this_node.addr,
-                server_port=server_port,  # For non-0 rank, this is a no-op
-            )
-
-        if self._bootstrap_store_info is None:
-            raise AssertionError
-        if rank == 0:
-            if self._shared_tcp_store_server is None:
-                raise AssertionError
+            server_port = self._shared_tcp_store_server.port
+        bootstrap_store_info = RendezvousStoreInfo.build(
+            rank,
+            store,
+            local_addr=self._this_node.addr,
+            server_port=server_port,  # For non-0 rank, this is a no-op
+        )
 
         return RendezvousInfo(
             store,
             rank,
             world_size,
-            self._bootstrap_store_info,  # type: ignore[assignment]
+            bootstrap_store_info,
         )
 
     def is_closed(self) -> bool:
