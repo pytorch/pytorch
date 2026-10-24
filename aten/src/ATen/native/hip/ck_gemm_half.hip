@@ -6,6 +6,15 @@
 
 #include <ck/utility/sequence.hpp>
 
+#include <string_view>
+
+#if defined(__has_include) && __has_include(<ATen/ROCmCKGEMMConfig.h>)
+#include <ATen/ROCmCKGEMMConfig.h>
+#endif
+#ifndef TORCH_CK_GEMM_ARCH_LIST
+#define TORCH_CK_GEMM_ARCH_LIST "gfx90a,gfx942,gfx950"
+#endif
+
 template <ck::index_t... Is>
 using S = ck::Sequence<Is...>;
 
@@ -605,9 +614,21 @@ void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     "gfx1150", "gfx1151"
 #endif
   };
-  // Keep in sync with torch_filter_ck_gemm_arches (cmake/public/utils.cmake)
-  // and at::Context::ckGemmSupported().
-  static const std::vector<std::string> supported_archs = {"gfx90a", "gfx942", "gfx950"};
+  // Allowlist from TORCH_CK_GEMM_ARCH_LIST (ATen/ROCmCKGEMMConfig.h); same
+  // source of truth as the ck_gemm build arch filter and Context::ckGemmSupported.
+  static const std::vector<std::string> supported_archs = [] {
+    std::vector<std::string> archs;
+    std::string_view rest{TORCH_CK_GEMM_ARCH_LIST};
+    while (!rest.empty()) {
+      const auto comma = rest.find(',');
+      archs.emplace_back(rest.substr(0, comma));
+      if (comma == std::string_view::npos) {
+        break;
+      }
+      rest.remove_prefix(comma + 1);
+    }
+    return archs;
+  }();
   if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGS(at::Half));
   }
