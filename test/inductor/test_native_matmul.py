@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 
+import unittest
 from collections.abc import Callable
+from unittest import mock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -10,14 +12,19 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import (
+    has_triton_tensor_descriptor_host_tma,
+    has_triton_tma_device,
+)
 
 
 aten = torch.ops.aten
 
 
 @inductor_config.patch({"triton.native_matmul": True})
-class TestTritonDotReduction(TestCase):
+class TestNativeMatmul(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
     ):
@@ -237,8 +244,10 @@ class TestTritonDotReduction(TestCase):
         code = run_and_get_triton_code(f, x, y)
 
         FileCheck().check("zoffset = tl.program_id(0)").check(
-            "yoffset = tl.program_id(1)"
-        ).check("xoffset = tl.program_id(2)").run(code)
+            "pid_mn = tl.program_id(2)"
+        ).check("tl.program_id(1)").check(
+            "pid_y, pid_x = tl.swizzle2d(pid_mn //"
+        ).check("yoffset = pid_y * YBLOCK").check("xoffset = pid_x * XBLOCK").run(code)
 
     def test_bmm_no_z_broadcast(self):
         def f(x, y):
@@ -259,7 +268,152 @@ class TestTritonDotReduction(TestCase):
         ).check("tl.arange(0, R0_BLOCK)[None, None, None, :]").run(code)
 
 
+@unittest.skipUnless(
+    HAS_GPU and has_triton_tma_device(), "Tensor descriptors are not supported"
+)
+@inductor_config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.enable_host_side_tma": False,
+        "assume_aligned_inputs": True,
+    }
+)
+class TestNativeMatmulDeviceTMA(TestNativeMatmul):
+    pass
+
+
+@unittest.skipUnless(
+    HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+    "Host tensor descriptors are not supported",
+)
+@inductor_config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.enable_host_side_tma": True,
+        "assume_aligned_inputs": True,
+    }
+)
+class TestNativeMatmulHostTMA(TestNativeMatmul):
+    pass
+
+
+class TestNativeMatmulCodegen(TestCase):
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.use_tensor_descriptor": True,
+            "triton.enable_host_side_tma": False,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_mm_device_tma_grouped_pid(self, device):
+        if not has_triton_tma_device():
+            self.skipTest("Tensor descriptors are not supported")
+
+        def f(a, b):
+            return a @ b
+
+        # Cover a partial group of eight Y tiles and a K tail.
+        a = torch.randn((1025, 72), device=device, dtype=torch.float16)
+        b = torch.randn((72, 136), device=device, dtype=torch.float16)
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, a, b)
+        self.assertEqual(compiled(a, b), f(a, b), atol=1e-3, rtol=1e-3)
+        FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+        FileCheck().check("tl.swizzle2d").check(
+            "tl.cdiv(ynumel, YBLOCK), tl.cdiv(xnumel, XBLOCK), 8)"
+        ).run(code)
+
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.use_tensor_descriptor": True,
+            "triton.enable_host_side_tma": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_bmm_host_tma_grouped_pid(self, device):
+        if not (has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()):
+            self.skipTest("Host tensor descriptors are not supported")
+
+        def f(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn((3, 1025, 72), device=device, dtype=torch.bfloat16)
+        b = torch.randn((3, 136, 72), device=device, dtype=torch.bfloat16)
+        b = b.transpose(-1, -2)
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, a, b)
+        self.assertEqual(compiled(a, b), f(a, b), atol=0.016, rtol=0.016)
+        FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+        FileCheck().check("zoffset = tl.program_id(0)").check(
+            "pid_mn = tl.program_id(2)"
+        ).check("tl.program_id(1)").check("tl.swizzle2d(pid_mn //").run(code)
+
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.use_tensor_descriptor": False,
+            "combo_kernels": True,
+            "combo_kernels_autotune": 0,
+            "benchmark_combo_kernel": False,
+            "combo_kernel_per_subkernel_blocks": False,
+            "combo_kernel_peak_memory_increase_gb": None,
+            "combo_kernel_peak_memory_pct_threshold": None,
+            "fx_graph_cache": False,
+        }
+    )
+    def test_grouped_pid_combo(self, device):
+        def f(a, b, c, d):
+            return a @ b, c @ d
+
+        # Round-robin dispatch pads both X and Y for the smaller matmul.
+        inputs = [
+            torch.randn(shape, device=device, dtype=torch.bfloat16)
+            for shape in ((256, 64), (64, 96), (512, 64), (64, 128))
+        ]
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, *inputs)
+        self.assertEqual(compiled(*inputs), f(*inputs), atol=0.016, rtol=0.016)
+        FileCheck().check_count("if pid_y <", 2, exactly=True).run(code)
+        FileCheck().check_count("tl.swizzle2d", 2, exactly=True).run(code)
+        FileCheck().check("pid_offset = pid // 2").run(code)
+
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.use_tensor_descriptor": False,
+            "fx_graph_cache": False,
+        }
+    )
+    def test_grouped_pid_y_grid_overflow(self, device):
+        def f(a, b):
+            return a @ b
+
+        a = torch.randn((256, 32), device=device, dtype=torch.bfloat16)
+        b = torch.randn((32, 48), device=device, dtype=torch.bfloat16)
+        # Split 16 Y tiles into a 6x3 launch grid, leaving two padded Y tiles.
+        with (
+            mock.patch("torch._inductor.codegen.triton.get_max_y_grid", return_value=7),
+            mock.patch(
+                "torch._inductor.runtime.triton_heuristics.get_max_y_grid",
+                return_value=7,
+            ),
+            mock.patch(
+                "torch._inductor.runtime.triton_heuristics.triton_native_mm_configs",
+                [({"x": 16, "y": 16, "r": 16}, 4, 2)],
+            ),
+        ):
+            compiled = torch.compile(f, fullgraph=True)
+            code = run_and_get_triton_code(compiled, a, b)
+            self.assertEqual(compiled(a, b), f(a, b), atol=0.016, rtol=0.016)
+        FileCheck().check("tl.swizzle2d").check(
+            "tl.num_programs(1) * tl.num_programs(2)"
+        ).run(code)
+
+
 if HAS_GPU:
+    instantiate_device_type_tests(TestNativeMatmulCodegen, globals(), only_for=GPU_TYPE)
     torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
