@@ -2982,6 +2982,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
     # and turns a failure to trace the comparison into a silent fall back to
     # eager, so the result alone would look correct either way.
+    def test_setattr_readonly_function_closure(self):
+        def fn(x):
+            a = 12
+
+            def f():
+                return a
+
+            results = []
+            try:
+                f.__closure__ = f.__closure__
+            except AttributeError:
+                results.append("set")
+            try:
+                del f.__closure__
+            except AttributeError:
+                results.append("del")
+            return x + 1, results
+
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(res[1], ["set", "del"])
+
     def test_cell_comparison_deleted_cell(self):
         x = torch.ones(2)
         expected = torch.ones(2) + 1
