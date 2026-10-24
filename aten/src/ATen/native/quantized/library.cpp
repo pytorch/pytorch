@@ -255,6 +255,8 @@ TORCH_LIBRARY(onednn, m) {
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Weight Prepack
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv_prepack(Tensor weight, Tensor w_scales, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups, int[]? x_shape=None) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "onednn::qconv_pointwise_prepack(Tensor qw, Tensor w_scale, Tensor? bias, float x_scale, int x_zero_point, int[] x_shape, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, ScalarType? output_dtype, str attr, Scalar?[] scalars, str? algorithm, str? binary_attr=None, Scalar? binary_alpha=None, float accum_scale=0.0, int accum_zero_point=0) -> Tensor"));
 
   // Conv1D/2D/3D with unary postop
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv1d_pointwise(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, ScalarType? output_dtype, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
