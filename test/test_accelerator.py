@@ -3,8 +3,10 @@
 import gc
 import operator
 import sys
+import types
 import unittest
 from contextlib import nullcontext
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -341,6 +343,49 @@ instantiate_device_type_tests(
     allow_mps=True,
     allow_xpu=True,
 )
+
+
+class TestAcceleratorSnapshot(TestCase):
+    # _snapshot dispatches on the current accelerator's device module, so these
+    # tests plug in a fake one instead of depending on the build's real backend.
+    def _patch_accelerator(self, device_module):
+        # _get_device_module is lru_cached, so a fake module from one test would
+        # otherwise be returned to the next.
+        torch._utils._get_device_module.cache_clear()
+        self.addCleanup(torch._utils._get_device_module.cache_clear)
+        return (
+            mock.patch.object(torch, "fakeacc", device_module, create=True),
+            mock.patch(
+                "torch.accelerator.current_accelerator",
+                return_value=types.SimpleNamespace(type="fakeacc"),
+            ),
+        )
+
+    def test_snapshot_not_implemented(self):
+        patch_module, patch_acc = self._patch_accelerator(
+            types.ModuleType("torch.fakeacc")
+        )
+        with patch_module, patch_acc:
+            with self.assertRaisesRegex(NotImplementedError, "'fakeacc'"):
+                torch.accelerator.memory._snapshot()
+
+    def test_snapshot_without_memory_submodule(self):
+        device_module = types.ModuleType("torch.fakeacc")
+        device_module._snapshot = lambda device=None: {"device": device}
+        patch_module, patch_acc = self._patch_accelerator(device_module)
+        with patch_module, patch_acc:
+            self.assertEqual(torch.accelerator.memory._snapshot(0), {"device": 0})
+
+    def test_snapshot_forwards_fx_traces_only_when_set(self):
+        snapshot = mock.Mock(return_value={})
+        device_module = types.ModuleType("torch.fakeacc")
+        device_module.memory = types.SimpleNamespace(_snapshot=snapshot)
+        patch_module, patch_acc = self._patch_accelerator(device_module)
+        with patch_module, patch_acc:
+            torch.accelerator.memory._snapshot()
+            snapshot.assert_called_with(None)
+            torch.accelerator.memory._snapshot(augment_with_fx_traces=True)
+            snapshot.assert_called_with(None, augment_with_fx_traces=True)
 
 
 if __name__ == "__main__":
