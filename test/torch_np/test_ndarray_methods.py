@@ -47,6 +47,20 @@ class TestIndexing(TestCase):
         assert_equal(a, [[8, 2, 3], [4, 5, 6]])
 
 
+@instantiate_parametrized_tests
+class TestAstype(TestCase):
+    @parametrize("transpose", [False, True])
+    @parametrize("dtype", ["float32", "float64", "int64"])
+    def test_copy_same_dtype(self, transpose, dtype):
+        original = np.array([[1, 2, 3], [4, 5, 6]], dtype=dtype)
+        if transpose:
+            original = original.T
+        converted = original.astype(dtype)
+        assert_equal(converted, original)
+        converted[0, 0] = 10
+        assert_equal(original[0, 0], 1)
+
+
 class TestReshape(TestCase):
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_function(self):
