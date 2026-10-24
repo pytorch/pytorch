@@ -1,0 +1,103 @@
+# Owner(s): ["module: rocm"]
+# DO NOT MERGE. One shard of the real inductor-rocm-mi350 test on the
+# single DPX+NPS1 runner. Shard 2 is not requested: this machine has
+# one 1-GPU runner, so a second shard would wait behind the first.
+# CUDA, CPU, and multi-GPU inductor jobs are not scheduled.
+#
+# simulate-dpx-nps2-stale-l2 is not a real NPS2 result. The GPU stays
+# NPS1. The real probe must still print stale_launches=0. The next step
+# only copies the CI failure shape from Jeff Daily's DPX+NPS2 gist.
+name: inductor-rocm-mi350-dpx-nps1
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+      check_experiments: amd-dpx
+
+  linux-noble-rocm-py3_11-inductor-build:
+    name: linux-noble-rocm-py3.11-mi350
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      # Main's .ci/docker tree (9db57817), published by docker-builds on
+      # 106626232c1e. Hashing this branch would ask for 4af25553, whose
+      # image is gone (ImagePullBackOff). The pull_request build checks
+      # out the merge with main, so this image matches the source.
+      ci-docker-hash: 9db57817b83b2c8c8c224e23680e2734f8d14d68
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      rocm-arch-list: gfx950
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.1.dpx.nps1" },
+        ]}
+    secrets: inherit
+
+  linux-noble-rocm-py3_11-inductor-test:
+    name: linux-noble-rocm-py3.11-mi350
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-noble-rocm-py3_11-inductor-build
+    with:
+      build-environment: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.test-matrix }}
+    secrets: inherit
+
+  simulate-dpx-nps2-stale-l2:
+    name: simulate-dpx-nps2-stale-l2
+    runs-on: linux.rocm.gpu.mi350.1.dpx.nps1
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Real coherence probe (must stay green)
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          src="${GITHUB_WORKSPACE}/.github/ci/rocm-dpx-nps1"
+          command -v hipcc
+          hipcc --version
+          amd-smi partition || true
+          hipcc -O2 -w --offload-arch=gfx950 "$src/coh.hip" -o "$RUNNER_TEMP/coh"
+          export HIP_FORCE_DEV_KERNARG=0
+          unset ROCR_VISIBLE_DEVICES || true
+          "$RUNNER_TEMP/coh" 2000 gpu | tee "$RUNNER_TEMP/gpu.txt"
+          "$RUNNER_TEMP/coh" 2000 h2d | tee "$RUNNER_TEMP/h2d.txt"
+          grep -q 'stale_launches=0 stale_blocks=0' "$RUNNER_TEMP/gpu.txt"
+          grep -q 'stale_launches=0 stale_blocks=0' "$RUNNER_TEMP/h2d.txt"
+          echo "DPX+NPS1 cross-XCC probe is coherent"
+
+      - name: Simulate DPX+NPS2 stale-L2 CI failure
+        run: |
+          set -euo pipefail
+          echo "SIMULATION ONLY. This is not a measurement from this GPU."
+          echo "SIMULATION of the DPX+NPS2 gist result: stale_launches=1999"
+          echo "SIMULATION gist line: RESULT mode=gpu iters=2000 stale_launches=1999 stale_blocks=767616"
+          echo "The real probe in the previous step passed with stale_launches=0 stale_blocks=0."
+          echo "No memory partition was changed. This runner stayed on NPS1."
+          exit 1
