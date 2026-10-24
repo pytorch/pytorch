@@ -148,5 +148,43 @@ try:
 except ImportError as e:
     log.warning(e)
 
+# Device-type variants of the workflow module tests.
+try:
+    from quantization.core.test_workflow_module import TestObserverAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestObserverAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestFakeQuantizeAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestFakeQuantizeAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestDistributedAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestDistributedAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestFusedObsFakeQuantModuleAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestFusedObsFakeQuantModuleAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestDistributedCudaOnlyCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
 if __name__ == '__main__':
     run_tests()
