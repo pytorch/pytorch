@@ -534,8 +534,7 @@ __host__ __device__
         threadIdx.x,                                                  \
         threadIdx.y,                                                  \
         threadIdx.z,                                                  \
-        #cond,                                                        \
-        ##__VA_ARGS__));                                              \
+        #cond __VA_OPT__(, ) __VA_ARGS__));                           \
     (void)(_wassert(                                                  \
                _CRT_WIDE(#cond),                                      \
                _CRT_WIDE(__FILE__),                                   \
@@ -711,8 +710,7 @@ HIDDEN_NAMESPACE_END(torch, headeronly, detail)
         threadIdx.x,                                                   \
         threadIdx.y,                                                   \
         threadIdx.z,                                                   \
-        #cond,                                                         \
-        ##__VA_ARGS__); \
+        #cond __VA_OPT__(,) __VA_ARGS__); \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
