@@ -101,11 +101,17 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_dir = (
-        config.xpu.cutlass_dir
-        if torch.xpu._is_compiled()
-        else config.cutlass.cutlass_dir
-    )
+    # Prefer a separate XPU toolkit when one is configured and really contains a CUTLASS
+    # checkout. This used to key off torch.xpu._is_compiled(), which is a build-time
+    # capability flag rather than a property of the graph being compiled: on a build
+    # with XPU compiled in it also sent CUDA graphs to config.xpu.cutlass_dir, and that
+    # field used to default to os.path.realpath("") - the current working directory - so
+    # without TORCHINDUCTOR_CUTLASS_DIR the backend was silently disabled for every
+    # device and the symptom moved with the CWD.
+    cutlass_dir = config.cutlass.cutlass_dir
+    xpu_cutlass_dir = config.xpu.cutlass_dir
+    if os.path.isdir(path_join(xpu_cutlass_dir, "python")):
+        cutlass_dir = xpu_cutlass_dir
     cutlass_python_path = path_join(cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
