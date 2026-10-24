@@ -146,8 +146,19 @@ def _pin_device_index(device: torch.device) -> torch.device:
     """
     if device.index is not None or not _is_indexed_device_type(device.type):
         return device
-    if device.type != "mps" and getattr(torch, device.type).is_initialized():
-        return torch.device(device.type, getattr(torch, device.type).current_device())
+    if device.type != "mps":
+        mod = getattr(torch, device.type, None)
+        is_init = getattr(mod, "is_initialized", lambda: False)
+        if mod is not None and is_init():
+            if hasattr(mod, "current_device"):
+                return torch.device(device.type, mod.current_device())
+            if (
+                torch.accelerator.is_available()
+                and (acc := torch.accelerator.current_accelerator()) is not None
+                and acc.type == device.type
+            ):
+                dev_idx = torch.accelerator.current_device_index()
+                return torch.device(device.type, dev_idx)
     return torch.device(device.type, 0)
 
 
