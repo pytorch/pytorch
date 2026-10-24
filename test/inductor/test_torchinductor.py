@@ -1491,6 +1491,24 @@ def target_assert_alignment_regex(
     )
 
 
+def _pdl_last_kernel_code(self: TestCase, middle, *args):
+    # A long pointwise chain, then `middle`, then a kernel that reads the
+    # chain's output and, through the padding, `middle`'s output
+    def fn(x, y, *args):
+        a = x
+        for _ in range(64):
+            a = torch.sin(a) * 1.5
+        b = middle(*args)
+        pb = torch.nn.functional.pad(b, (0, 4))
+        return a.flip(0)[:, None] * y + pb[None, :4], b
+
+    x = torch.randn(1024, device=GPU_TYPE)
+    y = torch.randn(1024, 4, device=GPU_TYPE)
+    result, (code,) = run_and_get_code(torch.compile(fn), x, y, *args)
+    self.assertEqual(result, fn(x, y, *args))
+    return code
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -20450,6 +20468,80 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check_not("def triton_")
             .check("gdc_wait")
         ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_kernel_after_possibly_empty_kernel_waits(self):
+        # Launchers skip a kernel with an empty grid, so the last kernel's
+        # real predecessor may be the sin chain: it must wait before loading
+        def nonzero_exp(m):
+            return torch.nonzero(m).float().flatten().exp()  # u0 elements
+
+        def oblivious_exp(w):
+            return (w * 2).exp()  # w.size(0) may be 0 without a recompile
+
+        def oblivious_scan(w):
+            return torch.cumsum(w, 0)  # split scan: grid from the scan length
+
+        m = torch.zeros(16, device=GPU_TYPE, dtype=torch.bool)
+        w = torch.randn(3, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(w, 0)
+        w_long = torch.randn(1 << 16, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(w_long, 0)
+        for middle, arg, kernel in [
+            (nonzero_exp, m, "def triton_poi_fused__to_copy_exp"),
+            (oblivious_exp, w, "def triton_poi_fused_exp"),
+            (oblivious_scan, w_long, "def triton_spl_fused_cumsum"),
+        ]:
+            with self.subTest(middle.__name__):
+                torch._dynamo.reset()
+                code = _pdl_last_kernel_code(self, middle, arg)
+                FileCheck().check(kernel).check("def triton_").check_not(
+                    "tl.load"
+                ).check("gdc_wait").run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_kernel_after_nonempty_kernel_overlaps(self):
+        # The middle kernel always launches, so it stays the last kernel's
+        # predecessor and the sin chain's output can be loaded before the wait
+        def nonzero_plus_one_exp(m):
+            nz = torch.nonzero(m).float().flatten()
+            return torch.cat([nz, nz.new_ones(1)]).exp()  # 1 + u0 elements
+
+        def guarded_difference_exp(v, u):
+            torch._check(v.size(0) > u.size(0))
+            return v[: v.size(0) - u.size(0)].exp()
+
+        def guarded_floordiv_sum(v):
+            # reduces over v.size(0) // 4, which Dynamo guards to be nonzero
+            return v.unflatten(0, (-1, 4)).sum(1).sum(0)
+
+        m = torch.zeros(16, device=GPU_TYPE, dtype=torch.bool)
+        v = torch.randn(64, device=GPU_TYPE)
+        u = torch.randn(8, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(v, 0)
+        torch._dynamo.mark_dynamic(u, 0)
+        v2d = torch.randn(64, 32, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(v2d, 0)
+        for middle, args, kernel in [
+            (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp"),
+            (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice"),
+            (guarded_floordiv_sum, (v2d,), "def triton_red_fused_sum_view"),
+        ]:
+            with self.subTest(middle.__name__):
+                torch._dynamo.reset()
+                code = _pdl_last_kernel_code(self, middle, *args)
+                FileCheck().check(kernel).check("def triton_").check("tl.load").check(
+                    "gdc_wait"
+                ).run(code)
 
     @requires_cuda_and_triton
     @skip_if_cpu
