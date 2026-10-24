@@ -837,8 +837,21 @@ def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
     args = node.args
     if target is torch.ops.higher_order.with_effects:
         target, args = args[1], args[2:]
+    from torch._higher_order_ops.user_kernel_registry import (
+        get_user_kernel_hops_by_mutation,
+    )
+
     if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
         written = [node.kwargs["kwargs"]]
+    elif get_user_kernel_hops_by_mutation(target) is not None:
+        # Other user-kernel DSLs declare what they write (no TTIR analysis).
+        mutated = node.kwargs.get("mutated_names")
+        kernel_kwargs = node.kwargs["kwargs"]
+        written = (
+            [kernel_kwargs]
+            if mutated is None
+            else [kernel_kwargs[name] for name in mutated]  # type: ignore[index]
+        )
     elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
         written = [
             arg
