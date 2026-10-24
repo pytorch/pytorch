@@ -3954,14 +3954,25 @@ def nonzero(self):
     )
 
 
+def _check_no_uint8_indices(indices):
+    # Mirrors uint8_index_unsupported in aten/src/ATen/native/IndexingUtils.h
+    for index in indices:
+        torch._check_index(
+            index is None or index.dtype != torch.uint8,
+            lambda: "indexing with dtype torch.uint8 is no longer supported "
+            "(deprecated since 1.2). Use a torch.bool mask instead, e.g. index.bool(). "
+            "See https://github.com/pytorch/pytorch/issues/201370",
+        )
+
+
 def _check_index_tensor_types(indices):
     # Mirrors checkIndexTensorTypes(allow_int=true) in
-    # aten/src/ATen/native/IndexingUtils.h
+    # aten/src/ATen/native/IndexingUtils.h, after _check_no_uint8_indices
     for index in indices:
         if index is not None:
             torch._check_index(
-                index.dtype in [torch.long, torch.int, torch.uint8, torch.bool],
-                lambda: "tensors used as indices must be long, int, byte or bool tensors",
+                index.dtype in [torch.long, torch.int, torch.bool],
+                lambda: "tensors used as indices must be long, int or bool tensors",
             )
 
 
@@ -3970,11 +3981,12 @@ def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
+    _check_no_uint8_indices(indices)
     _check_index_tensor_types(indices)
     result: list[Tensor | None] = []
     for i, index in enumerate(indices):
         if index is not None:
-            if index.dtype in [torch.uint8, torch.bool]:
+            if index.dtype == torch.bool:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
@@ -5038,6 +5050,7 @@ def meta_rrelu_with_noise_(
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    _check_no_uint8_indices(indices)
     _check_index_tensor_types(indices)
     return torch.empty_like(self)
 
@@ -5085,6 +5098,7 @@ def meta_masked_scatter_backward(self, mask, sizes):
 
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
+    _check_no_uint8_indices(indices)
     _check_index_tensor_types(indices)
     return self
 

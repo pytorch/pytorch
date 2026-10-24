@@ -349,8 +349,8 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
       }
     } else {
       const Tensor& index = *i;
-      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
-          index.device() != self_device || mask.defined()) {
+      if (index.scalar_type() != kBool || index.device() != self_device ||
+          mask.defined()) {
         return std::make_tuple(false, Tensor());
       } else {
         mask = index;
@@ -615,11 +615,9 @@ inline Tensor handleDimInMultiDimIndexing(
               outIndices,
               dim_ptr);
         } else {
-          impl::recordTensorIndex(
-              impl::boolToIndexingTensor(
-                  result, tensor.item<uint8_t>() != 0, original_tensor_device),
-              outIndices,
-              dim_ptr);
+          // Rejected by at::native::expandTensors. Like the bool case, it
+          // indexes the dimension added above.
+          impl::recordTensorIndex(tensor.unsqueeze(0), outIndices, dim_ptr);
         }
       }
     } else {

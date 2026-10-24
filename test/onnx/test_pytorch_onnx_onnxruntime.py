@@ -455,13 +455,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_index_mask(self):
         class MyModel(torch.nn.Module):
             def forward(self, input):
-                return input[torch.tensor([0, 1, 0], dtype=torch.uint8)]
-
-        m1 = torch.randn(3, 4, 5, 6, 7)
-        self.run_test(MyModel(), m1)
-
-        class MyModel(torch.nn.Module):
-            def forward(self, input):
                 return input[torch.tensor([0, 1, 0], dtype=torch.bool)]
 
         m1 = torch.randn(3, 4, 5, 6, 7)

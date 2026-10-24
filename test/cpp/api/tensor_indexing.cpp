@@ -244,101 +244,58 @@ TEST(TensorIndexingTest, TestEmptyBoolMask) {
 }
 
 TEST(TensorIndexingTest, TestByteIndex) {
-  // Indexing with a uint8 tensor treats it as a mask, which is deprecated.
+  // Indexing with a uint8 tensor used to treat it as a mask.
   // See https://github.com/pytorch/pytorch/issues/201370
-  {
-    auto v = torch::tensor({true, false, true}, torch::kBool);
-    auto boolIndices = torch::tensor({true, false, false}, torch::kBool);
-    auto uint8Indices = torch::tensor({1, 0, 0}, torch::kUInt8);
+  auto v = torch::randn({5, 7, 3});
+  auto x = torch::arange(16.).view({4, 4});
+  auto b = torch::tensor({true, false, true}, torch::kBool);
+  auto mask = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
+  auto mask2 = torch::tensor({1, 1, 1}, torch::kByte);
+  auto value = torch::randn({3, 7, 3});
+  const char* msg = "indexing with dtype torch.uint8 is no longer supported";
+  ASSERT_THROWS_WITH(v.index({mask}), msg);
+  ASSERT_THROWS_WITH(v.index({mask, Slice(), mask2}), msg);
+  ASSERT_THROWS_WITH(b.index({torch::tensor({1, 0, 0}, torch::kByte)}), msg);
+  ASSERT_THROWS_WITH(v.clone().index_put_({mask}, value), msg);
+  // the value broadcasts over the selected rows
+  ASSERT_THROWS_WITH(
+      x.clone().index_put_({torch::tensor({1, 0, 1, 0}, torch::kByte)}, x[0]),
+      msg);
+  ASSERT_THROWS_WITH(
+      v.clone().index_put_({mask}, value, /*accumulate=*/true), msg);
+  // an empty mask, read and written
+  auto empty = torch::zeros_like(mask);
+  ASSERT_THROWS_WITH(v.index({empty}), msg);
+  ASSERT_THROWS_WITH(
+      v.clone().index_put_({empty}, value.slice(0, 0, 0), /*accumulate=*/true),
+      msg);
+}
 
-    {
-      WarningCapture warnings;
-
-      ASSERT_EQ(
-          v.index({boolIndices}).sizes(), v.index({uint8Indices}).sizes());
-      assert_tensor_equal(v.index({boolIndices}), v.index({uint8Indices}));
-      assert_tensor_equal(
-          v.index({boolIndices}), torch::tensor({true}, torch::kBool));
-
-      ASSERT_EQ(
-          count_substr_occurrences(
-              warnings.str(),
-              "indexing with dtype torch.uint8 is now deprecated"),
-          2);
-    }
+static void testByteScalarIndex(torch::Device device) {
+  const char* msg = "indexing with dtype torch.uint8 is no longer supported";
+  auto scalar =
+      torch::tensor(1, torch::TensorOptions(torch::kByte).device(device));
+  for (const auto& t :
+       {torch::randn({5, 7, 3}, device),
+        torch::tensor(1, device),
+        torch::tensor(
+            true, torch::TensorOptions(torch::kBool).device(device))}) {
+    ASSERT_THROWS_WITH(t.index({scalar}), msg);
+    ASSERT_THROWS_WITH(t.index({"...", scalar}), msg);
+    ASSERT_THROWS_WITH(t.clone().index_put_({scalar}, 0), msg);
   }
-  {
-    auto v = torch::randn({5, 7, 3});
-    auto mask = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
-    {
-      WarningCapture warnings;
+  // a scalar index adds a dimension, which the next index skips
+  auto v = torch::randn({5, 7, 3}, device);
+  ASSERT_THROWS_WITH(v.index({scalar, 1}), msg);
+  ASSERT_THROWS_WITH(v.index_put_({scalar, 1}, 0), msg);
+}
 
-      ASSERT_EQ(v.index({mask}).sizes(), torch::IntArrayRef({3, 7, 3}));
-      assert_tensor_equal(v.index({mask}), torch::stack({v[0], v[2], v[3]}));
+TEST(TensorIndexingTest, TestByteScalarIndex) {
+  testByteScalarIndex(torch::kCPU);
+}
 
-      ASSERT_EQ(
-          count_substr_occurrences(
-              warnings.str(),
-              "indexing with dtype torch.uint8 is now deprecated"),
-          2);
-    }
-  }
-  {
-    auto mask = torch::zeros({10}, torch::kUInt8);
-    auto y = torch::ones({10, 10});
-    {
-      WarningCapture warnings;
-
-      y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
-      assert_tensor_equal(y, torch::ones({10, 10}));
-
-      ASSERT_EQ(
-          count_substr_occurrences(
-              warnings.str(),
-              "indexing with dtype torch.uint8 is now deprecated"),
-          2);
-    }
-  }
-  {
-    auto v = torch::randn({5, 7, 3});
-    // note: these broadcast together and are transposed to the first dim
-    auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
-    auto mask2 = torch::tensor({1, 1, 1}, torch::kByte);
-    {
-      WarningCapture warnings;
-
-      ASSERT_EQ(
-          v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
-
-      ASSERT_EQ(
-          count_substr_occurrences(
-              warnings.str(),
-              "indexing with dtype torch.uint8 is now deprecated"),
-          2);
-    }
-  }
-  {
-    auto x = torch::arange(0., 16).to(torch::kFloat).view({4, 4});
-    auto b = torch::tensor({true, false, true, false}, torch::kByte);
-    auto value = torch::tensor({3., 4., 5., 6.});
-
-    {
-      WarningCapture warnings;
-
-      x.index_put_({b}, value);
-
-      ASSERT_EQ(
-          count_substr_occurrences(
-              warnings.str(),
-              "indexing with dtype torch.uint8 is now deprecated"),
-          1);
-    }
-
-    assert_tensor_equal(x.index({0}), value);
-    assert_tensor_equal(x.index({1}), torch::arange(4, 8).to(torch::kLong));
-    assert_tensor_equal(x.index({2}), value);
-    assert_tensor_equal(x.index({3}), torch::arange(12, 16).to(torch::kLong));
-  }
+TEST(TensorIndexingTest, TestByteScalarIndex_CUDA) {
+  testByteScalarIndex(torch::kCUDA);
 }
 
 TEST(TensorIndexingTest, TestByteMask2d) {
@@ -547,32 +504,28 @@ TEST(TensorIndexingTest, TestIndexScalarWithBoolMask) {
   torch::Device device(torch::kCPU);
 
   auto a = torch::tensor(1, device);
-  auto uintMask =
-      torch::tensor(true, torch::TensorOptions(torch::kUInt8).device(device));
   auto boolMask =
       torch::tensor(true, torch::TensorOptions(torch::kBool).device(device));
-  assert_tensor_equal(a.index({uintMask}), a.index({boolMask}));
-  ASSERT_EQ(a.index({uintMask}).dtype(), a.index({boolMask}).dtype());
+  assert_tensor_equal(a.index({boolMask}), a.unsqueeze(0));
+  ASSERT_EQ(a.index({boolMask}).dtype(), a.dtype());
 
   a = torch::tensor(true, torch::TensorOptions(torch::kBool).device(device));
-  assert_tensor_equal(a.index({uintMask}), a.index({boolMask}));
-  ASSERT_EQ(a.index({uintMask}).dtype(), a.index({boolMask}).dtype());
+  assert_tensor_equal(a.index({boolMask}), a.unsqueeze(0));
+  ASSERT_EQ(a.index({boolMask}).dtype(), a.dtype());
 }
 
 TEST(TensorIndexingTest, TestIndexScalarWithBoolMask_CUDA) {
   torch::Device device(torch::kCUDA);
 
   auto a = torch::tensor(1, device);
-  auto uintMask =
-      torch::tensor(true, torch::TensorOptions(torch::kUInt8).device(device));
   auto boolMask =
       torch::tensor(true, torch::TensorOptions(torch::kBool).device(device));
-  assert_tensor_equal(a.index({uintMask}), a.index({boolMask}));
-  ASSERT_EQ(a.index({uintMask}).dtype(), a.index({boolMask}).dtype());
+  assert_tensor_equal(a.index({boolMask}), a.unsqueeze(0));
+  ASSERT_EQ(a.index({boolMask}).dtype(), a.dtype());
 
   a = torch::tensor(true, torch::TensorOptions(torch::kBool).device(device));
-  assert_tensor_equal(a.index({uintMask}), a.index({boolMask}));
-  ASSERT_EQ(a.index({uintMask}).dtype(), a.index({boolMask}).dtype());
+  assert_tensor_equal(a.index({boolMask}), a.unsqueeze(0));
+  ASSERT_EQ(a.index({boolMask}).dtype(), a.dtype());
 }
 
 TEST(TensorIndexingTest, TestSetitemExpansionError) {
@@ -676,6 +629,19 @@ TEST(TensorIndexingTest, TestIntAssignment) {
     x.index_put_({1}, torch::arange(5, 7).to(torch::kLong));
     assert_tensor_equal(x, torch::tensor({{0, 1}, {5, 6}}));
   }
+}
+
+TEST(TensorIndexingTest, TestBoolTensorAssignment) {
+  auto x = torch::arange(0., 16).to(torch::kFloat).view({4, 4});
+  auto b = torch::tensor({true, false, true, false}, torch::kBool);
+  auto value = torch::tensor({3., 4., 5., 6.});
+
+  x.index_put_({b}, value);
+
+  assert_tensor_equal(x.index({0}), value);
+  assert_tensor_equal(x.index({1}), torch::arange(4, 8).to(torch::kLong));
+  assert_tensor_equal(x.index({2}), value);
+  assert_tensor_equal(x.index({3}), torch::arange(12, 16).to(torch::kLong));
 }
 
 TEST(TensorIndexingTest, TestVariableSlicing) {

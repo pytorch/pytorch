@@ -20,30 +20,33 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   " does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
 }
 
-// Called for uint8 masks reaching expandTensors. Treating uint8 index tensors
-// as masks is deprecated, see https://github.com/pytorch/pytorch/issues/201370
-[[maybe_unused]] static void uint8_index_deprecated() {
-  TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
-  " please use a dtype torch.bool instead.");
+// Called for uint8 indices reaching expandTensors; the indexing front ends in
+// ATen/TensorIndexing.h send them here. The meta kernels in
+// torch/_meta_registrations.py raise the same error. uint8 index tensors used
+// to be treated as masks, see https://github.com/pytorch/pytorch/issues/201370
+[[maybe_unused, noreturn]] static void uint8_index_unsupported() {
+  TORCH_CHECK_INDEX(false, "indexing with dtype torch.uint8 is no longer supported "
+  "(deprecated since 1.2). Use a torch.bool mask instead, e.g. index.bool(). "
+  "See https://github.com/pytorch/pytorch/issues/201370");
 }
 
 [[maybe_unused]] static std::vector<Tensor> expandTensors(
     const Tensor& self,
     IOptTensorListRef indices,
     bool ensure_same_device = false) {
-  // If indices come in as ByteTensor or BoolTensor (masks), expand them into
-  // the equivalent indexing by LongTensors
+  // If indices come in as BoolTensor (masks), expand them into the equivalent
+  // indexing by LongTensors
   std::vector<Tensor> result;
   for (const auto& index_opt : indices) {
     if (!index_opt.has_value()) {
       result.emplace_back();
     } else {
       const auto& index = *index_opt;
-      if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
-        if (index.scalar_type() == kByte) {
-          uint8_index_deprecated();
-        }
-        // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
+      if (index.scalar_type() == kByte) {
+        uint8_index_unsupported();
+      }
+      if (index.scalar_type() == kBool) {
+        // The sizes of the bool tensor must match the sizes of the
         // corresponding dimensions in self
         for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = static_cast<int64_t>(result.size() + j);
@@ -81,11 +84,11 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
       auto scalarType = tensor->scalar_type();
       if (allow_int) {
         if (scalarType != kLong && scalarType != kByte && scalarType != kBool && scalarType != kInt) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, int, byte or bool tensors");
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, int or bool tensors");
         }
       } else {
         if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long or bool tensors");
         }
       }
     }

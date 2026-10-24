@@ -36,8 +36,7 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   checkIndexTensorTypes(orig, /*allow_int*/ true);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more
-  // LongTensors
+  // first expand BoolTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig, /*ensure_same_device=*/true);
   // next broadcast all index tensors together
   try {

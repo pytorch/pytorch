@@ -5,8 +5,8 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containing kLong, kBool or kByte tensors or nulls.
-// Byte tensors (boolean masks) are expanded to long tensors via nonzero(). Null
+// The index is a TensorList containing kLong, kInt or kBool tensors or nulls.
+// Bool tensors (masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
 // All indexes are broadcast together and iterated as *one*. From NumPy:
@@ -14,7 +14,7 @@
 // result[i_1, ..., i_M] == x[ind_1[i_1, ..., i_M], ind_2[i_1, ..., i_M],
 //                           ..., ind_N[i_1, ..., i_M]]
 //
-// Note 1: ByteTensors expand to index as many dimensions as there are in the
+// Note 1: BoolTensors expand to index as many dimensions as there are in the
 // mask.
 //
 // Note 2: The behavior is more complicated when the index tensors are not all
