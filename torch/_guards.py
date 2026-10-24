@@ -40,7 +40,9 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.guards import GuardCheckSpec
     from torch._dynamo.output_graph import CodeOptions
-    from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+    from torch._functorch._aot_autograd.schemas import (
+        ViewAndMutationMeta,
+    )
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.types import IntLikeType
@@ -1095,6 +1097,19 @@ class TracingContext:
     Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
     will return None.
     """
+
+    @property
+    def backend_fw_metadata(self) -> "BackendFwMetadata | None":
+        """
+        A live view of fw_metadata exposing only the subset that compiler
+        backends (in-tree Inductor and out-of-tree) may depend on. Derived
+        on read so that DDPOptimizer per-bucket swaps on fw_metadata are
+        always visible. See https://github.com/pytorch/pytorch/issues/114403
+        """
+        if self.fw_metadata is None:
+            return None
+        from torch._functorch._aot_autograd.schemas import BackendFwMetadata
+        return BackendFwMetadata(self.fw_metadata)
 
     @staticmethod
     def try_get() -> TracingContext | None:
