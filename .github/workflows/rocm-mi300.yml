@@ -47,9 +47,13 @@ jobs:
       build-environment: linux-noble-rocm-py3.11-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       rocm-arch-list: gfx942
+      # DO NOT MERGE. copy 2 is a second job for shard 1. GitHub drops identical
+      # matrix rows, so the extra key keeps both. This proves one run can request
+      # more jobs than the shard count.
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.mi300.1" },
+          { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.mi300.1", copy: 1 },
+          { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.mi300.1", copy: 2 },
           { config: "default", shard: 2, num_shards: 8, runner: "linux.rocm.gpu.mi300.1" },
           { config: "default", shard: 3, num_shards: 8, runner: "linux.rocm.gpu.mi300.1" },
           { config: "default", shard: 4, num_shards: 8, runner: "linux.rocm.gpu.mi300.1" },
