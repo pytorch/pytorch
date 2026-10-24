@@ -959,6 +959,13 @@ cache_sdpa_constraint = (
     os.environ.get("TORCHINDUCTOR_CACHE_SDPA_CONSTRAINT", "0") == "1"
 )
 
+# Reuse exact-stride preparation of the same IR object in constrain_to_fake_tensors.
+# Default off so workload experiments can validate end-to-end memory and
+# performance gains before enabling this broadly.
+cache_layout_constrained_inputs = (
+    os.environ.get("TORCHINDUCTOR_CACHE_LAYOUT_CONSTRAINED_INPUTS", "0") == "1"
+)
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"

@@ -3546,28 +3546,49 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fake_tensor(arg, fake_arg):
+def constrain_to_fake_tensor(arg, fake_arg, constrained_input_cache=None):
     if fake_arg is None:
         return arg
     if isinstance(fake_arg, FakeScriptObject) or is_custom_class_obj(fake_arg):
         return arg
     if isinstance(arg, ir.IRNode):
-        return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
+        exact_strides = fake_arg.stride()
+        if constrained_input_cache is None:
+            return ir.ExternKernel.require_exact_strides(arg, exact_strides)
+        strides = tuple(
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+        )
+        key = (id(arg), strides)
+        if key not in constrained_input_cache:
+            constrained_input_cache[key] = ir.ExternKernel.require_exact_strides(
+                arg, strides
+            )
+        return constrained_input_cache[key]
     if isinstance(arg, dict):
-        return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
+        return {
+            key: constrain_to_fake_tensor(
+                arg[key], fake_arg[key], constrained_input_cache
+            )
+            for key in arg
+        }
     elif isinstance(arg, (tuple, list)):
         return type(arg)(
-            constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+            constrain_to_fake_tensor(a, f_a, constrained_input_cache)
+            for (a, f_a) in zip(arg, fake_arg)
         )
     return arg
 
 
 def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
+    constrained_input_cache = {} if config.cache_layout_constrained_inputs else None
     args = tuple(
-        constrain_to_fake_tensor(arg, fake_arg)
+        constrain_to_fake_tensor(arg, fake_arg, constrained_input_cache)
         for arg, fake_arg in zip(args, fake_args)
     )
-    kwargs = {k: constrain_to_fake_tensor(v, fake_kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {
+        k: constrain_to_fake_tensor(v, fake_kwargs[k], constrained_input_cache)
+        for k, v in kwargs.items()
+    }
     return args, kwargs
 
 
