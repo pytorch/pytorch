@@ -119,19 +119,12 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     // Persist a compile-time decision for a shape that was never tuned: a borrowed
     // solution, or Default when the default kernel benchmarked faster. Unlike Add()
-    // this writes while tuning is disabled. Also unconditional, for the same
-    // reason as LookupNearest.
+    // this writes while tuning is disabled.
     //
-    // Known limitation, accepted deliberately: the entry goes into the ordinary
-    // results file in the ordinary format, with nothing marking it as borrowed.
-    // So an entry no longer implies "the tuner measured this exact shape", and a
-    // reader cannot tell the two apart. Because the write path is first-write-wins
-    // (AddImpl try_emplaces, ReadFile emplaces), a later tuning run that loads the
-    // file skips these shapes, which makes a Default recorded here permanent.
-    // Anyone sharing or re-tuning from a results file produced by a reuse pass
-    // needs to know that. Marking them -- a separate file, a tagged column, or the
-    // untuned log -- is follow-up work, and is a format change once such files
-    // exist in the wild.
+    // Accepted limitation: the entry is written in the ordinary format with
+    // nothing marking it as borrowed, so an entry no longer implies the tuner
+    // measured that exact shape. Writes are first-write-wins, so a later tuning
+    // run skips these shapes and a Default recorded here is permanent.
     void RecordBorrowed(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry entry);
@@ -267,11 +260,10 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
-    // Policy for the compile-time reuse pass, read by the pass itself to decide
-    // whether to borrow and whether to persist what it decided. Neither flag is
-    // consulted by TuningResultsManager or by TunableOp dispatch. Runtime-settable
-    // rather than env-only: the reuse pass and the runtime execution that follows
-    // it share a process and need opposite values.
+    // Policy for the compile-time reuse pass, read by the pass itself. Not
+    // consulted by TuningResultsManager or TunableOp dispatch. Runtime-settable
+    // because the pass and the execution that follows it share a process and
+    // need opposite values.
     void EnableNearestMatch(bool value);
     bool IsNearestMatchEnabled() const;
 
@@ -333,12 +325,8 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
-    // Plain bool like every other flag here, including the ones TunableOp reads
-    // on each GEMM. Each is set once before the work it governs, not flipped
-    // underneath it; a caller that needs per-call state uses the thread-local
-    // push/pop stack instead (see TunableDynamicDimsGuard below). Making only
-    // these two atomic would imply a concurrency guarantee their siblings do
-    // not share and that nothing here enforces.
+    // Set once before the work they govern, not flipped underneath it. Per-call
+    // state goes through the thread-local stack; see TunableDynamicDimsGuard.
     bool nearest_match_enable_;
     bool record_borrowed_enable_;
     bool manager_initialized_;
