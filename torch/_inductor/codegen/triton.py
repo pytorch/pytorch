@@ -712,6 +712,40 @@ class BlockDescriptorOptions:
             broadcast_shape = self.stride_sorter.revert(self.broadcast_shape)
             broadcasting_dims = self.stride_sorter.revert(self.broadcasting_dims)
 
+        if (
+            allow_implicit
+            and not for_store
+            and V.kernel.is_native_matmul
+            and len(broadcast_shape) != len(final_shape)
+        ):
+            # An index like ids[z, r % 8] only uses z and r. With R0_BLOCK=16:
+            #
+            # Previously:
+            #   tmp = tl.broadcast_to(tmp, [ZBLOCK, 8, YBLOCK, XBLOCK, 2])
+            #   tmp = tl.reshape(tl.trans(tmp, [0, 2, 3, 4, 1]),
+            #                    [ZBLOCK, YBLOCK, XBLOCK, 16])
+            #
+            # Now:
+            #   tmp = tl.broadcast_to(tmp, [ZBLOCK, 8, 1, 1, 2])
+            #   tmp = tl.reshape(tl.trans(tmp, [0, 2, 3, 4, 1]), [ZBLOCK, 1, 1, 16])
+            #
+            # Expand r to its full size, but keep y/x at size 1. Otherwise the
+            # right input of tl.dot would have a y axis, which it cannot use.
+            used_symbols = OrderedSet(
+                symbol
+                for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
+                if not is_broadcasting
+                for symbol in dim.free_symbols
+            )
+            broadcast_shape = [
+                dim if used_symbols.intersection(dim.free_symbols) else sympy.S.One
+                for dim in broadcast_shape
+            ]
+            final_shape = [
+                dim if used_symbols.intersection(dim.free_symbols) else sympy.S.One
+                for dim in final_shape
+            ]
+
         # Reshape to add singletons.
         pre_broadcast_shape = [
             sympy.S.One if is_broadcasting else dim
@@ -751,7 +785,7 @@ class BlockDescriptorOptions:
             )
             current_shape = broadcast_shape
 
-        old_shape = self.broadcast_shape
+        old_shape = self.broadcast_shape if for_store else broadcast_shape
         if not self.stride_sorter.is_identity:
             # if for_store the transform is
             #   (non-descending strides) broadcasted kernel tile shape
@@ -769,7 +803,7 @@ class BlockDescriptorOptions:
             old_shape = (
                 self.broadcast_shape
                 if for_store
-                else self.stride_sorter.revert(self.broadcast_shape)
+                else self.stride_sorter.revert(broadcast_shape)
             )
 
         # Reshape to the final shape.
@@ -1731,8 +1765,8 @@ class TritonOverrides(OpOverrides):
 
         def reshape_transpose_broadcast_for_dot(
             value,
-            initial_shape: Sequence[sympy.Expr],
-            final_shape: Sequence[sympy.Expr],
+            initial_shape: Sequence[str],
+            final_shape: Sequence[str],
         ) -> str:
             """
             Generate a reshape, transpose, and broadcast for the tl.dot.
@@ -1812,14 +1846,18 @@ class TritonOverrides(OpOverrides):
 
         a = V.kernel.cse.generate(
             V.kernel.compute,
-            reshape_transpose_broadcast_for_dot(a, list(a.shape), [YBLOCK, RBLOCK]),
+            reshape_transpose_broadcast_for_dot(
+                a, triton_shape_dims(a.shape), [YBLOCK, RBLOCK]
+            ),
             dtype=a.dtype,
             shape=(YBLOCK, RBLOCK),
         )
 
         b = V.kernel.cse.generate(
             V.kernel.compute,
-            reshape_transpose_broadcast_for_dot(b, list(b.shape), [RBLOCK, XBLOCK]),
+            reshape_transpose_broadcast_for_dot(
+                b, triton_shape_dims(b.shape), [RBLOCK, XBLOCK]
+            ),
             dtype=b.dtype,
             shape=(RBLOCK, XBLOCK),
         )
@@ -8512,6 +8550,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def max_block(self, prefix: str) -> int:
+        if self.is_native_matmul and prefix == "z":
+            return 1
         block = f"{prefix.upper()}BLOCK"
         if self.fixed_config and block in self.fixed_config:
             return self.fixed_config[block]
