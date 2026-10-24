@@ -1758,9 +1758,11 @@ class PrecompileSession(Generic[_P, _R]):
         | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
+        inductor: torch._TorchCompileInductorWrapper | None = None,
     ) -> None:
         self._fn = fn
         self._backend = backend
+        self._inductor = inductor
         # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
         # graphs is decided again when it is post-compiled at load. The artifact
         # records the capture's choice, and the capture's calls compile under it.
@@ -1772,6 +1774,9 @@ class PrecompileSession(Generic[_P, _R]):
                 "triton.cudagraphs": inductor_config.triton.cudagraphs,
                 "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
             }
+            if inductor is not None:
+                config = self._cudagraph_config
+                config.update((k, v) for k, v in inductor.config.items() if k in config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -1868,7 +1873,7 @@ class PrecompileSession(Generic[_P, _R]):
         # this process would otherwise serve its existing cache entries, and
         # this package would record nothing.
         self._compiled = torch._dynamo.optimize(
-            self._backend,
+            self._inductor or self._backend,
             package=self._package,
             guard_filter_fn=self._guard_filter_fn,
             dynamic=self._dynamic,
@@ -2154,6 +2159,7 @@ def precompile_capture(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
+    inductor: torch._TorchCompileInductorWrapper | None = None,
 ) -> PrecompileSession[_P, _R]:
     """Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2191,4 +2197,5 @@ def precompile_capture(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         dynamic=dynamic,
+        inductor=inductor,
     )
