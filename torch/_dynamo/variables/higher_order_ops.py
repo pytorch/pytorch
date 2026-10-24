@@ -3728,11 +3728,16 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # they capture, and Inductor can't lower opaque print args inside them.
         if tx.output.export or tx.output.current_tracer.parent is not None:
             return None
-        if isinstance(vt, LazyConstantVariable) and not vt.is_realized():
-            value, ctor_arg_source = vt.peek_value(), vt.source
-            if type(value) is not str or ctor_arg_source is None:
-                return None
-            ctor_info = (OpaqueStr, (value,), (ctor_arg_source,))
+        if (
+            not isinstance(vt, (LazyConstantVariable, ComputedLazyConstantVariable))
+            or vt.is_realized()
+            or type(vt.peek_value()) is not str
+        ):
+            return None
+        value = vt.peek_value()
+        is_lazy = isinstance(vt, LazyConstantVariable)
+        if is_lazy:
+            ctor_info = (OpaqueStr, (value,), (vt.source,))
             for proxy in tx.output.root_tracer.input_name_to_proxy.values():
                 grapharg = proxy.node.meta.get("grapharg")
                 if grapharg is not None and (
@@ -3740,16 +3745,10 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     == ctor_info
                 ):
                     return proxy
-            vt._ensure_type_guard()
-        elif isinstance(vt, ComputedLazyConstantVariable) and not vt.is_realized():
-            value, ctor_arg_source = vt._cache.value, vt
-            if type(value) is not str:
-                return None
-            vt._ensure_operand_type_guards()
-        else:
-            return None
+        # Installs TYPE_MATCH guards on the underlying strings without realizing.
+        vt.python_type()
         return tx.output.synthetic_graph_input(
-            OpaqueStr, (value,), ctor_arg_sources=(ctor_arg_source,)
+            OpaqueStr, (value,), ctor_arg_sources=(vt.source if is_lazy else vt,)
         ).as_proxy()
 
     def _call_function(

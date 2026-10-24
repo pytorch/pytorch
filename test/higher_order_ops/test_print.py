@@ -1,5 +1,6 @@
 # Owner(s): ["module: higher order operators"]
 import io
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TestCase,
@@ -345,6 +347,7 @@ x = add_1, y = add_2);  getitem = None
             fn(*args)
             return mock_stdout.getvalue().strip()
 
+    @skipIfCrossRef
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_symbolic_str_no_recompile(self, backend):
         def f(x, fmt, s, t):
@@ -436,12 +439,49 @@ class GraphModule(torch.nn.Module):
 
     def test_symbolic_str_specialized_in_export(self):
         class M(torch.nn.Module):
-            def forward(self, x, s):
-                torch._higher_order_ops.print(s)
+            def __init__(self):
+                super().__init__()
+                self.s = "moo"
+
+            def forward(self, x):
+                torch._higher_order_ops.print(self.s)
+                torch._higher_order_ops.print(self.s + "!")
                 return x.sin()
 
-        ep = torch.export.export(M(), (torch.randn(2), "moo"))
+        ep = torch.export.export(M(), (torch.randn(2),), strict=True)
         self.assertIn("torch.ops.higher_order.print('moo')", ep.graph_module.code)
+        self.assertIn("torch.ops.higher_order.print('moo!')", ep.graph_module.code)
+
+    def test_symbolic_str_computed_guards(self):
+        def f(x, s, n):
+            torch._higher_order_ops.print(s + s)
+            torch._higher_order_ops.print("{:03d}", n + 1)
+            return x.sin()
+
+        cnt = CompileCounter()
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+        for s in ["ab", "cd"]:
+            self.assertEqual(self._run_and_capture(opt_f, x, s, 5), f"{s + s}\n006")
+        self.assertEqual(cnt.frame_count, 1)
+        with self.assertRaisesRegex(Exception, "format_str must be a string"):
+            opt_f(x, 3, 5)
+
+    def test_symbolic_str_repeat_raise_keeps_effect_order(self):
+        def f(x, s, n):
+            torch._higher_order_ops.print("before")
+            x.add_(1)
+            torch._higher_order_ops.print(s * n)
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.zeros(1), "ab", 2)
+        x = torch.zeros(1)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            with self.assertRaises(OverflowError):
+                opt_f(x, "ab", sys.maxsize)
+        self.assertEqual(mock_stdout.getvalue(), "before\n")
+        self.assertEqual(x, torch.ones(1))
 
     @skipIfTorchDynamo("Skipped under Dynamo")
     def test_inductor_python_wrapper_uses_python_print(self):
