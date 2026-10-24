@@ -2265,6 +2265,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.prod",
         "torch.promote_types",
         "torch.put",
+        "torch.put_along_dim",
         "torch.q_per_channel_axis",
         "torch.q_per_channel_scales",
         "torch.q_per_channel_zero_points",
