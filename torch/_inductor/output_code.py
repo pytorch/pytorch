@@ -22,12 +22,16 @@ serialized format:
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import dataclasses
+import json
 import logging
 import os
 from functools import partial
 from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
+
+import sympy
 
 import torch
 from torch._custom_class_base import CustomClassBase
@@ -57,6 +61,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch._logging import trace_structured
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -96,6 +101,122 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_RUNTIME_SYMBOL_FLUSH_CALLS = 16
+
+
+@dataclasses.dataclass
+class _RuntimeSymbolRecorder:
+    """
+    Records the runtime value of each symbol that appears as a bare dimension
+    of a compiled graph's inputs or outputs (config.runtime_symbol_values).
+    Rows are logged in batches; pending rows are flushed at exit.
+    """
+
+    compile_id: str
+    symbols: list[str]
+    # (kind, index, dim) per symbol: kind is "in" or "out"; dim is -1 when the
+    # value itself is a SymInt.
+    locations: list[tuple[str, int, int]]
+    sources: dict[str, list[str]]
+    hints: dict[str, int | None]
+    num_calls: int = 0
+    pending: list[list[int | None]] = dataclasses.field(default_factory=list)
+
+    @classmethod
+    def create(
+        cls, gm: torch.fx.GraphModule, graph: GraphLowering
+    ) -> _RuntimeSymbolRecorder:
+        locations: dict[sympy.Symbol, tuple[str, int, int]] = {}
+
+        def visit(kind: str, index: int, value: Any) -> None:
+            if isinstance(value, torch.SymInt):
+                sizes = [(-1, value)]
+            elif isinstance(value, torch.Tensor):
+                sizes = list(enumerate(value.size()))
+            else:
+                return
+            for dim, size in sizes:
+                if isinstance(size, torch.SymInt) and isinstance(
+                    size.node.expr, sympy.Symbol
+                ):
+                    locations.setdefault(size.node.expr, (kind, index, dim))
+
+        for index, node in enumerate(gm.graph.find_nodes(op="placeholder")):
+            visit("in", index, node.meta.get("val"))
+        for index, arg in enumerate(output_node(gm).args[0]):  # type: ignore[arg-type]
+            if isinstance(arg, torch.fx.Node):
+                visit("out", index, arg.meta.get("val"))
+
+        shape_env = graph.sizevars.shape_env
+        symbols = sorted(locations, key=str)
+        hints = {s: shape_env.var_to_val.get(s) for s in symbols}
+        return cls(
+            compile_id=str(CompileContext.current_compile_id()),
+            symbols=[str(s) for s in symbols],
+            locations=[locations[s] for s in symbols],
+            sources={
+                str(s): [src.name for src in shape_env.var_to_sources.get(s, [])]
+                for s in symbols
+            },
+            hints={str(s): None if h is None else int(h) for s, h in hints.items()},
+        )
+
+    def _read(self, kind: str, values: Sequence[Any], row: list[int | None]) -> None:
+        for position, (location_kind, index, dim) in enumerate(self.locations):
+            if location_kind != kind or index >= len(values):
+                continue
+            value = values[index]
+            if dim < 0 and isinstance(value, (int, torch.SymInt)):
+                row[position] = int(value)
+            elif dim >= 0 and isinstance(value, torch.Tensor):
+                row[position] = int(value.size(dim))
+
+    def start(self, inputs: Sequence[Any]) -> tuple[int, list[int | None]]:
+        row: list[int | None] = [None] * len(self.symbols)
+        self._read("in", inputs, row)
+        call = self.num_calls
+        self.num_calls += 1
+        return call, row
+
+    def finish(
+        self,
+        run: tuple[int, list[int | None]],
+        outputs: object,
+        cache_key: str | None,
+        is_backward: bool,
+    ) -> None:
+        call, row = run
+        if isinstance(outputs, (list, tuple)):
+            self._read("out", outputs, row)
+        if call == 0:
+            atexit.register(self.flush, cache_key, is_backward)
+        self.pending.append([call, *row])
+        if len(self.pending) >= _RUNTIME_SYMBOL_FLUSH_CALLS:
+            self.flush(cache_key, is_backward)
+
+    def flush(self, cache_key: str | None, is_backward: bool) -> None:
+        if not self.pending:
+            return
+        payload = {
+            "cache_key": cache_key,
+            "is_backward": is_backward,
+            "compile_id": self.compile_id,
+            "symbols": self.symbols,
+            "locations": self.locations,
+            "sources": self.sources,
+            "hints": self.hints,
+            "calls": self.pending,
+        }
+        self.pending = []
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_runtime_symbol_values",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(payload),
+        )
 
 
 @dataclasses.dataclass
@@ -573,6 +694,7 @@ class CompiledFxGraph(OutputCode):
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
     _serialized_original_gm: bytes | None = None
+    _runtime_symbols: _RuntimeSymbolRecorder | None = None
 
     def __init__(
         self,
@@ -749,6 +871,8 @@ class CompiledFxGraph(OutputCode):
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
         self._set_compile_context_for_autotune_cache()
+        if config.runtime_symbol_values:
+            self._runtime_symbols = _RuntimeSymbolRecorder.create(gm, graph)
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -816,6 +940,9 @@ class CompiledFxGraph(OutputCode):
             if has_active_autotune_cache_bundler
             else contextlib.nullcontext()
         )
+        recorder = self._runtime_symbols
+        # Read input sizes before the boxed callable clears `inputs`.
+        run = None if recorder is None else recorder.start(inputs)
         # Autotune cache writes happen during the first call. End the bundler
         # while its saved compile context is restored, then clear the saved
         # context after leaving the compile_context manager.
@@ -824,13 +951,18 @@ class CompiledFxGraph(OutputCode):
                 try:
                     # Checking the profiler directly is faster than nullcontext
                     if torch.autograd.profiler._is_profiler_enabled:
+                        if run is not None:
+                            with torch._C._profiler._RecordFunctionFast(
+                                f"inductor_runtime_call:{self._fx_graph_cache_key}:{run[0]}"
+                            ):
+                                pass
                         with torch._C._profiler._RecordFunctionFast(
                             f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},
                         ):
-                            return self.current_callable(inputs)
+                            outputs = self.current_callable(inputs)
                     else:
-                        return self.current_callable(inputs)
+                        outputs = self.current_callable(inputs)
                 finally:
                     get_runtime_metrics_context().finish()
                     if has_active_autotune_cache_bundler:
@@ -843,6 +975,14 @@ class CompiledFxGraph(OutputCode):
                 )
             ):
                 self._compile_context = None
+        if recorder is not None and run is not None:
+            recorder.finish(
+                run,
+                outputs,
+                self._fx_graph_cache_key,
+                self.fx_kwargs.get("is_backward", False),
+            )
+        return outputs
 
     def post_compile(
         self,
