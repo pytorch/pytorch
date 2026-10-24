@@ -2407,6 +2407,41 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def _bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        method: str,
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            return VariableTracker.build(
+                tx, getattr(self.data, method)(*const_args, **const_kwargs)
+            )
+        except (MemoryError, OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "split")
+
+    def bytearray_rsplit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "rsplit")
+
     def bytearray_hex(
         self,
         tx: "InstructionTranslatorBase",
@@ -2440,6 +2475,30 @@ class ByteArrayVariable(VariableTracker):
         except (LookupError, TypeError, UnicodeError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         return ConstantVariable.create(result)
+
+    def bytearray_splitlines(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "splitlines")
+
+    def bytearray_partition(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "partition")
+
+    def bytearray_rpartition(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "rpartition")
 
     def bytearray_append(
         self,
@@ -2527,8 +2586,13 @@ class ByteArrayVariable(VariableTracker):
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
+        "split": Method(bytearray_split),
+        "rsplit": Method(bytearray_rsplit),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
+        "splitlines": Method(bytearray_splitlines),
+        "partition": Method(bytearray_partition),
+        "rpartition": Method(bytearray_rpartition),
         "append": Method(bytearray_append),
         "extend": Method(bytearray_extend),
     }
