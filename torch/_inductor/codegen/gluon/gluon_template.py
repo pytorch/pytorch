@@ -191,7 +191,9 @@ from triton.experimental.gluon import language as gl
                     self, "_epilogue_nodes_by_subgraph", None
                 )
                 epilogue_nodes = (
-                    epilogue_nodes_by_subgraph[0] if epilogue_nodes_by_subgraph else []
+                    epilogue_nodes_by_subgraph[0]
+                    if epilogue_nodes_by_subgraph is not None
+                    else []
                 )
                 has_epilogue_fusion = bool(epilogue_nodes)
                 targets = (

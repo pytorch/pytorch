@@ -3614,6 +3614,23 @@ class TestSDPAAccelerator(NNTestCase):
             if prev_fa_library is not None:
                 torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_sm107_runtime_version(self, device):
+        unsupported = (
+            torch.cuda.get_device_capability(device) == (10, 7)
+            and torch.backends.cudnn.version() < 92500
+        )
+        query = torch.empty(2, 4, 128, 64, device=device, dtype=torch.float16)
+        key = torch.empty_like(query)
+        value = torch.empty_like(query)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+            self.assertEqual(torch.backends.cuda.can_use_cudnn_attention(params), not unsupported)
+            expected = SDPBackend.MATH if unsupported else SDPBackend.CUDNN_ATTENTION
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), expected.value)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
         # See #193893 and #194927 for reasoning

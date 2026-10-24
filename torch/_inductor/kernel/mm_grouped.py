@@ -327,7 +327,7 @@ def get_flydsl_grouped_mm_template_kwargs(
     ]
 
 
-def has_grouped_mm_triton_support(device: torch.device) -> bool:
+def has_grouped_mm_triton_support(device: torch.device | None) -> bool:
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
@@ -337,11 +337,11 @@ def has_grouped_mm_triton_support(device: torch.device) -> bool:
     return torch.cuda.get_device_capability(device) >= (9, 0)
 
 
-def _rocm_gcn_arch(device: torch.device) -> str:
+def _rocm_gcn_arch(device: torch.device | None) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
-def has_rocm_fp8_hardware_support(device: torch.device) -> bool:
+def has_rocm_fp8_hardware_support(device: torch.device | None) -> bool:
     if not torch.version.hip:
         return False
 

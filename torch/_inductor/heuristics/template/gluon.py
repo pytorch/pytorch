@@ -199,8 +199,8 @@ def prune_grouped_mm_configs(
     n_g = N / G if b_is_2d and not a_is_2d else N
     k_g = K / G if a_is_2d and b_is_2d else K
 
-    min_m = min(c.BLOCK_M for c in configs)
-    # Padded N tiles up to 128 still win on tiny N, so they are never pruned.
+    # Padded tiles up to 128 still win on tiny extents, so they are never pruned.
+    min_m = max(min(c.BLOCK_M for c in configs), 128)
     min_n = max(min(c.BLOCK_N for c in configs), 128)
     min_k = min(c.BLOCK_K for c in configs)
     many_waves = (
@@ -212,7 +212,7 @@ def prune_grouped_mm_configs(
     def keep(c: GluonGroupedMMConfig) -> bool:
         tile_m = c.BLOCK_M * (2 if c.USE_TWO_CTA else 1)
         # A tile covering the extent even at half its size only adds padding.
-        if tile_m > min_m and m_g <= tile_m / 2:
+        if (tile_m > min_m or c.USE_TWO_CTA) and m_g <= tile_m / 2:
             return False
         if c.BLOCK_N > min_n and n_g <= c.BLOCK_N / 2:
             return False
