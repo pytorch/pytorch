@@ -52,6 +52,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wrapdim_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
+  # Header-only, no ATen or CUDA dependency: builds and runs on CPU-only builds.
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tunable_ld_rules_test.cpp
   # Fix this.
   # ${CMAKE_CURRENT_SOURCE_DIR}/xnnpack_test.cpp
   )
@@ -79,6 +81,7 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_scan_utils_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocatorTraceTracker_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tunable_nearest_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu)
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS

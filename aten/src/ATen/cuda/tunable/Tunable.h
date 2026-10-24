@@ -100,6 +100,14 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
         const std::string& op_signature,
         const std::string& concrete_params_signature);
 
+    // Borrow the tuned solution of a neighbouring shape: identical except in one
+    // free dim (M, N or batch count), rounded up. Separate from Lookup so a caller
+    // can tell a measured hit from a borrow, which is expected to be validated.
+    // Unconditional: TunableOp dispatch never calls this, so calling it is the
+    // opt-in and there is no flag to consult.
+    ResultEntry LookupNearest(const std::string& op_signature,
+        const std::string& params_signature);
+
     void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
@@ -108,6 +116,18 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     void Add(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best);
+
+    // Persist a compile-time decision for a shape that was never tuned: a borrowed
+    // solution, or Default when the default kernel benchmarked faster. Unlike Add()
+    // this writes while tuning is disabled.
+    //
+    // Accepted limitation: the entry is written in the ordinary format with
+    // nothing marking it as borrowed, so an entry no longer implies the tuner
+    // measured that exact shape. Writes are first-write-wins, so a later tuning
+    // run skips these shapes and a Default recorded here is permanent.
+    void RecordBorrowed(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry entry);
 
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
@@ -140,6 +160,14 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void CloseRealtimeAppend();  // For clean shutdown
   private:
+    // Shared body of Add() and RecordBorrowed(). force_persist writes the entry
+    // to the results file regardless of the tuning flags, so RecordBorrowed can
+    // override the write rule for itself without widening it for Add()'s callers.
+    void AddAndMaybePersist(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry best,
+        bool force_persist);
+
     std::mutex lock_;
     std::mutex realtime_file_mutex_;
     std::unique_ptr<std::ofstream> realtime_out_;
@@ -232,6 +260,16 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
+    // Policy for the compile-time reuse pass, read by the pass itself. Not
+    // consulted by TuningResultsManager or TunableOp dispatch. Runtime-settable
+    // because the pass and the execution that follows it share a process and
+    // need opposite values.
+    void EnableNearestMatch(bool value);
+    bool IsNearestMatchEnabled() const;
+
+    void EnableRecordBorrowed(bool value);
+    bool IsRecordBorrowedEnabled() const;
+
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
     void SetNumericalCheckConfig(bool enabled, double atol, double rtol);
@@ -287,6 +325,10 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
+    // Set once before the work they govern, not flipped underneath it. Per-call
+    // state goes through the thread-local stack; see TunableDynamicDimsGuard.
+    bool nearest_match_enable_;
+    bool record_borrowed_enable_;
     bool manager_initialized_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;
