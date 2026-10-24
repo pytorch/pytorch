@@ -18,14 +18,12 @@ from unittest import mock
 import sympy
 
 import torch
-from torch._inductor import config, ir
-from torch._inductor import select_algorithm as sa
-from torch._inductor import tunableop
+from torch._inductor import config, ir, select_algorithm as sa, tunableop
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    TestCase,
     run_tests,
+    TestCase,
 )
 from torch.utils._sympy.value_ranges import ValueRanges
 
