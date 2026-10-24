@@ -462,6 +462,101 @@ class TestMaxAutotune(TestCase):
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
 
+    @parametrize(
+        "dtype,k_hint,expected,holds_at,fails_at",
+        [
+            # (dtype, K, takes TMA, a K the guards accept, a K they reject)
+            (torch.float16, 512, True, 520, 513),
+            (torch.float16, 513, False, 515, 520),  # aligned K recompiles to TMA
+            (torch.float8_e4m3fn, 64, True, 48, 16),  # fp8 also needs K >= 32
+            (torch.float8_e4m3fn, 16, False, 16, 64),
+        ],
+    )
+    def test_can_use_tma_guards_requirements_not_sizes(
+        self, dtype, k_hint, expected, holds_at, fails_at
+    ):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import can_use_tma
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        m = shape_env.create_symbol(1024, ConstantSource("m"))
+        k = shape_env.create_symbol(k_hint, ConstantSource("k"))
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))(), shape_env=shape_env)
+        mat = mock.Mock()
+        mat.get_size.return_value = [m, k]
+        mat.get_stride.return_value = [k, 1]
+        mat.get_dtype.return_value = dtype
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch.utils._triton.has_triton_tma_device", return_value=True),
+        ):
+            self.assertEqual(can_use_tma(mat, add_guards=True), expected)
+
+        # Only the requirements are guarded: no size is specialized, M is free.
+        guards = [g.expr for g in shape_env.guards]
+        self.assertFalse(shape_env.replacements)
+        self.assertFalse(any(m in g.free_symbols for g in guards))
+        self.assertTrue(all(g.xreplace({k: holds_at}) for g in guards))
+        self.assertFalse(all(g.xreplace({k: fails_at}) for g in guards))
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    @parametrize("aot", (False, True))
+    def test_max_autotune_persistent_tma_dynamic(self, aot):
+        from torch._inductor import aoti_compile_and_package, aoti_load_package, utils
+
+        class Mm(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        can_use_tma, offered = utils.can_use_tma, []
+
+        def spy(*args, **kwargs):
+            offered.append(can_use_tma(*args, **kwargs))
+            return offered[-1]
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.native_matmul": False,
+                    # TLX blackwell_gemm_ws doesn't check K alignment, so it is
+                    # wrong under AOTI with dynamic K; keep it out of this test.
+                    "triton.tlx_mode": None,
+                    # Without AOTI, TMA must be chosen (not just offered).
+                    "test_configs.autotune_choice_name_regex": (
+                        None if aot else "persistent_tma"
+                    ),
+                }
+            ),
+            mock.patch.object(utils, "can_use_tma", spy),
+        ):
+            if aot:
+                # AOTI can't check at runtime that K is aligned, so no TMA.
+                a = torch.randn(1024, 512, dtype=torch.float16, device=GPU_TYPE)
+                b = torch.randn(512, 256, dtype=torch.float16, device=GPU_TYPE)
+                k = torch.export.Dim("k", min=16, max=4096)
+                shapes = {"a": {1: k}, "b": {0: k}}
+                ep = torch.export.export(Mm(), (a, b), dynamic_shapes=shapes)
+                fn = aoti_load_package(aoti_compile_and_package(ep))
+                sizes = [(1024, 512), (1024, 513), (1024, 1000)]
+            else:
+                # M is not a TMA requirement, so any M reuses the TMA graph.
+                fn = torch.compile(Mm())
+                sizes = [(1024, 512), (777, 512), (33, 512)]
+            for m, k in sizes:
+                a = torch.randn(m, k, dtype=torch.float16, device=GPU_TYPE)
+                b = torch.randn(k, 256, dtype=torch.float16, device=GPU_TYPE)
+                torch._dynamo.mark_dynamic(a, 0)
+                ref = a.double() @ b.double()
+                self.assertEqual(fn(a, b).double(), ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(offered and set(offered), {not aot})
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))

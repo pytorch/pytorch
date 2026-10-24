@@ -1237,7 +1237,15 @@ class TritonTemplateKernel(TritonKernel):
         if dim_order is None:
             dim_order = list(range(ndim))
 
-        if self.meta.get("HOST_SIDE_TMA", False):
+        host_side = self.meta.get("HOST_SIDE_TMA", False)
+        if host_side and input_name is not None:
+            # The host launcher needs static dims, so a dynamic input falls back
+            # to a device-side descriptor.
+            host_side = all(
+                isinstance(e, (int, sympy.Integer))
+                for e in (*size, *self.get_stride_and_maybe_freeze_layout(node))
+            )
+        if host_side:
             if input_name is None:
                 raise NotImplementedError(
                     "host-side TMA descriptors for template outputs are not supported"

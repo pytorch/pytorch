@@ -168,14 +168,15 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not("tl.make_tensor_descriptor")
         else:
             fc.check("tl.make_tensor_descriptor")
         fc.check(write_api).run(code[0])
-        if host_side_tma and tma_store:
+        if host_side_tma and tma_store and not dynamic:
             # Loads are host-side, so the TMA store is the only descriptor
             # still built in-kernel.
             FileCheck().check_count("tl.make_tensor_descriptor", 1, exactly=True).run(
@@ -381,7 +382,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -453,7 +455,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -547,14 +550,15 @@ class TestMaxAutotuneBlackwell(TestCase):
 
         # Verify that we are using a TMA implementation
         fc = FileCheck().check("triton_tem_fused_addmm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not(make_desc_api)
         else:
             fc.check(make_desc_api)
         fc.check(read_api).check(write_api).run(code[0])
-        if host_side_tma and tma_store:
+        if host_side_tma and tma_store and not dynamic:
             # Loads are host-side, so the TMA store is the only descriptor
             # still built in-kernel.
             FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
