@@ -10,7 +10,7 @@ else
   arch_path='sbsa'
 fi
 
-NVSHMEM_VERSION=3.7.2
+NVSHMEM_VERSION=3.8.0
 CUDA_CUPTI_VERSION=13.3.75
 
 function install_cuda {
