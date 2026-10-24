@@ -7778,6 +7778,16 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
     )
 
 
+_SORT_INDEX_MAX = {
+    torch.uint8: 2**8 - 1,
+    torch.int8: 2**7 - 1,
+    torch.uint16: 2**16 - 1,
+    torch.int16: 2**15 - 1,
+    torch.uint32: 2**32 - 1,
+    torch.int32: 2**31 - 1,
+}
+
+
 @register_meta(
     [
         aten.sort.default,
@@ -7787,7 +7797,22 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
     ]
 )
 def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
-    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    indices_dtype = indices.dtype if indices is not None else torch.int64
+    # Same checks as the C++ meta (Sorting.cpp), so compiled code rejects what
+    # eager rejects instead of writing wrapped indices.
+    if indices_dtype != torch.int64:
+        torch._check(
+            indices_dtype in _SORT_INDEX_MAX,
+            lambda: "sort(): indices must be int64, int32, uint32, int16, uint16, "
+            f"int8 or uint8, got {indices_dtype}",
+        )
+        nsort = self.size(dim) if self.dim() else 1
+        torch._check(
+            nsort - 1 <= _SORT_INDEX_MAX[indices_dtype],
+            lambda: f"sort(): indices dtype {indices_dtype} is too small for a "
+            f"sorted dimension of size {nsort}",
+        )
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=indices_dtype)
     if values is not None and indices is not None:
         if not isinstance(values, TensorLike):
             raise AssertionError(f"values must be TensorLike, got {type(values)}")
