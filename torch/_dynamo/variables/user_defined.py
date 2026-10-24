@@ -639,6 +639,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 1-2: Metaclass data descriptors.
         # For type(cls) is type, these are C-level getset/member descriptors
         # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
+        # type.__doc__ reads the class dictionary, including deferred writes.
+        if (
+            metacls is type
+            and name == "__doc__"
+            and tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+        ):
+            return tx.output.side_effects.load_attr(self, name)
+
         meta_attr = self.lookup_metaclass_attr(name)
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
@@ -1981,6 +1989,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def get_real_python_backed_value(self) -> object:
         return self.value
+
+
+class NewClassVariable(UserDefinedClassVariable):
+    """A plain class created by type() in this trace, reconstructed per call."""
+
+    def __init__(
+        self,
+        value: type[object],
+        constructor_args: list[VariableTracker],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(value, **kwargs)
+        self.constructor_args = constructor_args
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
+        for arg in self.constructor_args:
+            codegen(arg)
+        codegen.extend_output(create_call_function(3, False))
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
