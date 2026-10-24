@@ -1482,8 +1482,62 @@ class TestFakePGUniformRanks(TestCase):
             work.result()
 
 
+class TestFakePGVersionCounter(TestCase):
+    """Fake collectives write outputs the way NCCL does: invisibly to autograd.
+
+    A real backend fills the output from a kernel, so the output's version
+    counter does not move. Bumping it breaks a tensor autograd saved for
+    backward and a collective then refilled, e.g. TorchRec's fully sharded 2D
+    embedding all-gathering its weights back before backward.
+    """
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _init(self, world_size, uniform):
+        opts = FakeProcessGroup.Options()
+        opts.simulate_uniform_ranks = uniform
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=world_size,
+            store=FakeStore(),
+            pg_options=opts,
+        )
+
+    @parametrize("uniform", [False, True])
+    def test_collectives_leave_the_output_version_alone(self, uniform):
+        self._init(world_size=4, uniform=uniform)
+        output = torch.zeros(8)
+        dist.all_gather_into_tensor(output, torch.ones(2))
+        self.assertEqual(output._version, 0)
+
+        output = torch.zeros(2)
+        dist.reduce_scatter_tensor(output, torch.ones(8))
+        self.assertEqual(output._version, 0)
+
+        output = torch.zeros(8)
+        dist.all_to_all_single(output, torch.ones(8))
+        self.assertEqual(output._version, 0)
+
+    @parametrize("uniform", [False, True])
+    def test_a_tensor_saved_for_backward_survives_an_all_gather_into_it(
+        self, uniform
+    ):
+        self._init(world_size=2, uniform=uniform)
+        weights = torch.zeros(4)
+        x = torch.ones(4, requires_grad=True)
+        loss = (x * weights).sum()  # mul saves `weights` for backward
+        dist.all_gather_into_tensor(weights, torch.ones(2))
+        loss.backward()
+        self.assertEqual(x.grad, weights)
+
+
 instantiate_parametrized_tests(TestFakePG)
 instantiate_parametrized_tests(TestFakePGUniformRanks)
+instantiate_parametrized_tests(TestFakePGVersionCounter)
 
 if __name__ == "__main__":
     run_tests()

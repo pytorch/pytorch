@@ -192,7 +192,7 @@ class FakeProcessGroup : public Backend {
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
     // See note in _allgather_base below.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
@@ -208,8 +208,12 @@ class FakeProcessGroup : public Backend {
     // Real collective backends (e.g. NCCL) write into the output from C++
     // kernels that autograd never sees. We emulate that here: chunk() produces
     // multi-output views, and without this guard autograd would reject the
-    // subsequent copy_() when the input requires grad.
-    at::AutoDispatchBelowAutograd guard;
+    // subsequent copy_() when the input requires grad. The guard also skips
+    // ADInplaceOrView, so these copies leave the output's version counter
+    // alone, as NCCL does; otherwise a tensor autograd saved for backward and
+    // then refilled by a collective fails backward with "modified by an
+    // inplace operation".
+    at::AutoDispatchBelowADInplaceOrView guard;
     auto chunks = outputBuffer.chunk(size_);
     for (auto& tensor : chunks) {
       tensor.copy_(inputBuffer);
@@ -231,7 +235,7 @@ class FakeProcessGroup : public Backend {
     assertAllgatherCoalescedOutputTensorLists(
         invalidArgument, outputTensorLists, inputTensors.size(), size_);
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     for (auto& outputTensorList : outputTensorLists) {
       for (size_t i = 0; i < inputTensors.size(); ++i) {
         outputTensorList[i].copy_(inputTensors[i]);
@@ -254,7 +258,7 @@ class FakeProcessGroup : public Backend {
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto chunks = outputs[i].chunk(size_);
       for (auto& chunk : chunks) {
@@ -279,7 +283,7 @@ class FakeProcessGroup : public Backend {
     if (rank_ == opts.rootRank) {
       assertGatherOutputTensorList(invalidArgument, outputTensors, size_);
       // See note in _allgather_base above.
-      at::AutoDispatchBelowAutograd guard;
+      at::AutoDispatchBelowADInplaceOrView guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
       }
@@ -306,7 +310,7 @@ class FakeProcessGroup : public Backend {
     if (rank_ == opts.rootRank) {
       assertScatterInputTensorList(invalidArgument, inputTensors, size_);
       // See note in _allgather_base above.
-      at::AutoDispatchBelowAutograd guard;
+      at::AutoDispatchBelowADInplaceOrView guard;
       outputTensors[0].copy_(inputTensors[0][rank_]);
     } else {
       assertEmptyInputTensorList(invalidArgument, inputTensors);
@@ -327,7 +331,7 @@ class FakeProcessGroup : public Backend {
     assertInputOutputTensorListsSameSize(
         invalidArgument, outputTensors.size(), inputTensors.size());
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
       assertInputTensorListSizeEqualsWorldSize(
           invalidArgument, inputTensors[i].size(), size_);
@@ -349,7 +353,7 @@ class FakeProcessGroup : public Backend {
         inputBuffer.numel() == outputBuffer.numel() * size_,
         "input tensor must be the same size as output size times world size");
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     auto chunks = inputBuffer.chunk(size_);
     outputBuffer.copy_(chunks[rank_]);
     if (uniformRanks()) {
@@ -372,7 +376,7 @@ class FakeProcessGroup : public Backend {
     assertInputOutputTensorListsSameSize(
         invalidArgument, outputs.size(), inputs.size());
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       TORCH_CHECK(
           inputs[i].numel() == outputs[i].numel() * size_,
@@ -403,7 +407,7 @@ class FakeProcessGroup : public Backend {
         outputBuffer.is_contiguous(outputBuffer.suggest_memory_format()),
         "Output tensor must be contiguous");
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     // Approximation: inputs from other ranks are unavailable here, so copy as
     // much of the local input as fits and zero the remainder.
     auto flat_input = inputBuffer.as_strided(
@@ -450,7 +454,7 @@ class FakeProcessGroup : public Backend {
     assertAllToAllTensorListSizes(
         invalidArgument, outputTensors.size(), inputTensors.size(), size_);
     // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     if (uniformRanks()) {
       // Every peer sends us what it would send to our position, which is our
       // own entry at index rank_, so it is the same source for every slot.
@@ -559,7 +563,7 @@ class FakeProcessGroup : public Backend {
     if (!uniformRanks()) {
       return c10::make_intrusive<FakeWork>();
     }
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     for (auto& tensor : tensors) {
       applyUniformReduction(tensor, reduceOp);
     }
