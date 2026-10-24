@@ -536,6 +536,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
         class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
+        # The code checks are on the traced pytree functions (tree_flatten,
+        # tree_is_leaf, _get_node_type and dict's flatten_fn) and on TreeSpec's
+        # __init__ and __post_init__, which run on the TreeSpec built during
+        # tracing and are resolved through its class's MRO.
         self.assertEqual(
             counts - control_counts,
             {
@@ -543,7 +547,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 "MODULE_MATCH": 1,
                 "CLASS_MATCH": class_matches,
                 "ID_MATCH": id_matches,
-                "FUNCTION_CODE_MATCH": 4,
+                "FUNCTION_CODE_MATCH": 6,
             },
         )
         self.assertEqual(control_counts - counts, {})
