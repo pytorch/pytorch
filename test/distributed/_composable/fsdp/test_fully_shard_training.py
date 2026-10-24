@@ -3317,6 +3317,8 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            *,
+            all_gather_output_fn: Callable | None = None,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -3328,6 +3330,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                all_gather_output_fn=all_gather_output_fn,
             )
 
         orig_foreach_reduce = foreach_reduce

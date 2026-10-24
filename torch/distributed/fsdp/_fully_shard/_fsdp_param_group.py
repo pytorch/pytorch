@@ -491,6 +491,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                all_gather_output_fn=self._all_gather_output_fn,
             )
 
     @_disable_functorch_if_active
