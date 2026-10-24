@@ -25,7 +25,11 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
     });
   } else if (iter.is_cpu_scalar(2)) {
     // Divide rather than multiply by a reciprocal: an error of one bit in
-    // a * (1 / b) can move the truncated result by a whole integer.
+    // a * (1 / b) can move the truncated result by a whole integer. This
+    // matches CPU and tensor/tensor division at the cost of a real divide,
+    // which is much slower for float64 on GPUs with few FP64 units. The
+    // branch differs from the generic one below only by keeping b in
+    // accscalar_t, as CPU does, instead of rounding it to scalar_t.
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, dtype, "div_trunc_cuda", [&]() {
           using accscalar_t = at::acc_type<scalar_t, true>;

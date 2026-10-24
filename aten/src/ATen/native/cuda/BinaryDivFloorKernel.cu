@@ -35,7 +35,8 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   } else if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
-    // precision compared to computing the division.
+    // precision compared to computing the division. If 1/b overflows or is
+    // subnormal in opmath (tiny or huge b), divide by b instead.
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
           using accscalar_t = at::acc_type<scalar_t, true>;
