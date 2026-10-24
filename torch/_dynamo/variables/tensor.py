@@ -2859,11 +2859,14 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # Reaches here only via direct ``tensor.__mul__(x)`` calls — the
-        # ``operator.mul`` path goes through ``_handle_insert_op_in_graph``
-        # in ``BuiltinVariable``.  Build the same FX proxy.
+        # Reaches here only via direct ``tensor.__mul__(x)`` calls, or for a
+        # user-defined operand; the ``operator.mul`` path goes through
+        # ``_handle_insert_op_in_graph`` in ``BuiltinVariable``.  Build the
+        # same FX proxy.
         from .builder import wrap_fx_proxy
 
+        if isinstance(other, variables.UserDefinedObjectVariable):
+            return VariableTracker.build(tx, NotImplemented)
         lhs, rhs = (other, self) if reverse else (self, other)
         return wrap_fx_proxy(
             tx,
@@ -2878,9 +2881,12 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # Reaches here only via direct ``tensor.__matmul__(x)`` calls.
+        # Reaches here only via direct ``tensor.__matmul__(x)`` calls, or for a
+        # user-defined operand.
         from .builder import wrap_fx_proxy
 
+        if isinstance(other, variables.UserDefinedObjectVariable):
+            return VariableTracker.build(tx, NotImplemented)
         lhs, rhs = (other, self) if reverse else (self, other)
         return wrap_fx_proxy(
             tx,
