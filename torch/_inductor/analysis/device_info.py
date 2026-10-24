@@ -337,6 +337,27 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=12.0,
     ),
     # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/243916/
+    # intel-arc-pro-b60-graphics/specifications.html
+    "INTEL B60": DeviceInfo(
+        tops={
+            # Estimated from published single-precision throughput.
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            # not specified, fall back to fp16 matrix throughput
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=456.0,
+        dram_gb=24.0,
+    ),
+    # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/245797/
     # intel-arc-pro-b70-graphics/specifications.html
     "INTEL B70": DeviceInfo(
@@ -392,6 +413,7 @@ _device_mapping["AMD INSTINCT MI250X / MI250"] = _device_mapping["AMD MI250X"]
 # Older ROCr builds report this card without the vendor prefix.
 _device_mapping["RADEON RX 7900 XT"] = _device_mapping["AMD RADEON RX 7900 XT"]
 _device_mapping["Intel(R) Arc(TM) B580 Graphics"] = _device_mapping["INTEL B580"]
+_device_mapping["Intel(R) Arc(TM) Pro B60 Graphics"] = _device_mapping["INTEL B60"]
 _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B70"]
 _device_mapping["NVIDIA GB300 Max-Q"] = _device_mapping["NVIDIA GB300"]
 
