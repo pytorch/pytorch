@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfXpu,
     subtest,
     TEST_WITH_ROCM,
     TestCase,
@@ -183,6 +184,7 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
     return dense_inv, dense_val
 
 
+@skipIfXpu(msg="semi-structured sparsity is not supported on XPU")
 class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -339,6 +341,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
             self.assertEqual(result.shape, torch.Size([out_features, n]))
 
 
+@skipIfXpu(msg="semi-structured sparsity is not supported on XPU")
 class TestSparseSemiStructured(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -680,6 +683,7 @@ class TestSparseSemiStructured(TestCase):
             A_sparse = to_sparse_semi_structured(A)
 
 
+@skipIfXpu(msg="semi-structured sparsity is not supported on XPU")
 class TestSparseSemiStructuredTraining(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -1078,6 +1082,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             torch.testing.assert_close(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[a.dtype])
 
 
+@skipIfXpu(msg="semi-structured sparsity is not supported on XPU")
 class TestSparseSemiStructuredCUTLASS(TestCase):
     """
     This contains CUTLASS specific tests for
@@ -1350,6 +1355,7 @@ def to_float8(x, dtype=e4m3_type):
     return x_scl_sat.to(dtype), scale.float().reciprocal()
 
 
+@skipIfXpu(msg="semi-structured sparsity is not supported on XPU")
 class TestSparseSemiStructuredCUSPARSELT(TestCase):
     """
     This contains cuSPARSELt specific tests for
