@@ -897,6 +897,58 @@ print(torch.xpu.is_initialized())
                 xpu_default_generator.get_state(), acc_default_generator.get_state()
             )
 
+    def test_philox_state_eager(self):
+        g = torch.Generator(device="xpu")
+        g.manual_seed(123)
+        seed_t, off_t, intra_t = g.philox_state(8)
+        self.assertEqual(seed_t.item(), g.initial_seed())
+        self.assertEqual(off_t.item(), 0)
+        self.assertEqual(intra_t.item(), 0)
+        for t in (seed_t, off_t, intra_t):
+            self.assertEqual(t.dtype, torch.int64)
+            self.assertEqual(t.shape, (1,))
+            self.assertEqual(t.device.type, "cpu")
+        self.assertEqual(g.get_offset(), 8)
+        g.philox_state(5)
+        self.assertEqual(g.get_offset(), 16)
+
+    def test_philox_state_composes_with_eager_ops(self):
+        g = torch.Generator(device="xpu")
+        g.manual_seed(0)
+        torch.rand(1000, device="xpu", generator=g)
+        off = g.get_offset()
+        g.philox_state(4)
+        b = torch.rand(1000, device="xpu", generator=g)
+        g.manual_seed(0)
+        g.set_offset(off + 4)
+        self.assertEqual(torch.rand(1000, device="xpu", generator=g), b)
+
+    def test_philox_state_graph_capture(self):
+        torch.rand(1, device="xpu")
+        g = torch.xpu.default_generators[0]
+        g.manual_seed(0)
+        graph = torch.xpu.XPUGraph()
+        s = torch.xpu.Stream()
+        x = torch.zeros(1, device="xpu")
+        with torch.xpu.stream(s):
+            graph.capture_begin()
+            seed_t, off_t, intra_t0 = g.philox_state(1)
+            x += 1
+            _, _, intra_t1 = g.philox_state(5)
+            graph.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        self.assertEqual(seed_t.device.type, "xpu")
+        self.assertEqual(off_t.device.type, "xpu")
+        self.assertEqual(intra_t0.item(), 0)
+        self.assertEqual(intra_t1.item(), 4)
+        for _ in range(2):
+            offset_before = g.get_offset()
+            graph.replay()
+            self.assertEqual(seed_t.item(), g.initial_seed())
+            self.assertEqual(off_t.item(), offset_before)
+            self.assertEqual(g.get_offset(), offset_before + 12)
+
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).xpu()
         y = torch.zeros(2, 5, dtype=torch.int, device="xpu")

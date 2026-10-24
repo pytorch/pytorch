@@ -309,6 +309,37 @@ PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
   }
 }
 
+/*
+ * Reserves `increment` Philox outputs, mirroring philox_xpu_state: outside
+ * capture, seed and offset are CPU tensors holding the current values; during
+ * capture, they are XPU aliases of the extragraph state that replay_prologue
+ * refills on every replay.
+ *
+ * See Note [Acquire lock when using random generators]
+ */
+void XPUGeneratorImpl::philox_state(
+    uint64_t increment,
+    at::Tensor& seed,
+    at::Tensor& offset,
+    at::Tensor& intragraph_offset) {
+  const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  if (at::xpu::currentStreamCaptureStatus() !=
+      at::xpu::CaptureStatus::Executing) {
+    uint32_t intragraph = state_->offset_intragraph_;
+    state_->increase(increment);
+    seed = at::Tensor(state_->seed_extragraph_).alias();
+    offset = at::Tensor(state_->offset_extragraph_).alias();
+    intragraph_offset =
+        at::full({1}, static_cast<int64_t>(intragraph), cpu_opts);
+    return;
+  }
+  uint64_t current_offset = state_->philox_offset_per_thread_;
+  state_->increase(increment);
+  seed = at::full({1}, static_cast<int64_t>(state_->seed_), cpu_opts);
+  offset = at::full({1}, static_cast<int64_t>(current_offset), cpu_opts);
+  intragraph_offset = at::zeros({1}, cpu_opts);
+}
+
 std::pair<uint64_t, uint64_t> XPUGeneratorImpl::philox_engine_inputs(
     uint64_t increment) {
   at::xpu::assertNotCapturing(
