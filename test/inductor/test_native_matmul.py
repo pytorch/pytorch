@@ -13,6 +13,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
     has_triton_tensor_descriptor_host_tma,
@@ -23,7 +24,14 @@ from torch.utils._triton import (
 aten = torch.ops.aten
 
 
-@inductor_config.patch({"triton.native_matmul": True})
+@inductor_config.patch(
+    {
+        "triton.native_matmul": True,
+        "test_configs.force_filter_reduction_configs": True,
+        "coordinate_descent_tuning": False,
+        "triton.autotune_pointwise": False,
+    }
+)
 class TestNativeMatmul(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
@@ -298,6 +306,46 @@ class TestNativeMatmulHostTMA(TestNativeMatmul):
 
 
 class TestNativeMatmulCodegen(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(
+            inductor_config.patch(
+                {
+                    "test_configs.force_filter_reduction_configs": True,
+                    "coordinate_descent_tuning": False,
+                    "triton.autotune_pointwise": False,
+                }
+            )
+        )
+
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.use_tensor_descriptor": True,
+            "triton.enable_host_side_tma": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    @parametrize("batch", [None, 4])
+    def test_matmul_32bit_indexing(self, device, batch):
+        if not (has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()):
+            self.skipTest("Host tensor descriptors are not supported")
+
+        def f(a, b):
+            return a @ b
+
+        m = n = 1536 if batch is None else 1024
+        k = 1024
+        batch_shape = () if batch is None else (batch,)
+        a = torch.randn((*batch_shape, m, k), device=device, dtype=torch.bfloat16)
+        b = torch.randn((*batch_shape, k, n), device=device, dtype=torch.bfloat16)
+        self.assertGreater((batch or 1) * m * n * k, torch.iinfo(torch.int32).max)
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, a, b)
+        self.assertEqual(compiled(a, b), f(a, b), atol=0.016, rtol=0.016)
+        self.assertNotIn(".to(tl.int64)", code)
+        FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+
     @inductor_config.patch(
         {
             "triton.native_matmul": True,
