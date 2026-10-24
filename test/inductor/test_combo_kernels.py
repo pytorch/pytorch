@@ -956,10 +956,18 @@ class ComboKernelTests(TestCase):
         original_triton = AsyncCompile.triton
         original_speedup = Scheduler.speedup_by_combo_kernel
 
-        def triton_spy(self_, kernel_name, source_code, device_str="cuda"):
+        def triton_spy(
+            self_, kernel_name, source_code, device_str="cuda", optional=False
+        ):
             if benchmarking:
                 submitted_while_benchmarking.append(kernel_name)
-            return original_triton(self_, kernel_name, source_code, device_str)
+            return original_triton(
+                self_,
+                kernel_name,
+                source_code,
+                device_str=device_str,
+                optional=optional,
+            )
 
         def speedup_spy(self_, nodes):
             nonlocal benchmarking

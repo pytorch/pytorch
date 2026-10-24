@@ -13,14 +13,20 @@ from unittest import mock
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import InputReader
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.codegen.triton import FixedTritonConfig
+from torch._inductor.codegen.triton import (
+    FixedTritonConfig,
+    TritonKernel,
+    TritonScheduling,
+)
 from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -2698,6 +2704,181 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
             result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
+
+
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.autotune_tensor_descriptor": "auto",
+        "max_autotune_pointwise": True,
+        "assume_aligned_inputs": True,
+    }
+)
+class TensorDescriptorPoolGateTest(InductorTestCase):
+    def test_pool_pins(self):
+        pins = TritonScheduling.tensor_descriptor_variant_pins
+        cuda = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=90,
+            major=9,
+            warp_size=32,
+        )
+        expected = [
+            {"override_tensor_descriptor": False},
+            {"override_tensor_descriptor": True, "override_host_side_tma": True},
+        ]
+        self.assertEqual(
+            pins(cuda),
+            expected,
+        )
+        self.assertEqual(pins(cuda._replace(cc=80, major=8)), [])
+        self.assertEqual(pins(cuda._replace(type="hip")), [])
+        self.assertEqual(pins(cuda._replace(type="xpu")), [])
+        with config.patch({"triton.autotune_tensor_descriptor": "all"}):
+            self.assertEqual(len(pins(cuda)), 3)
+        for patches in (
+            {"triton.autotune_tensor_descriptor": "off"},
+            {"max_autotune_pointwise": False},
+            {"assume_aligned_inputs": False},
+            {"deterministic": True},
+            {"batch_invariant": True},
+            {"triton.multi_kernel": 2},
+            {"cpp_wrapper": True},
+            {"fx_wrapper": True},
+        ):
+            with config.patch(patches):
+                self.assertEqual(pins(cuda), [], msg=str(patches))
+
+
+@unittest.skipIf(
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.autotune_tensor_descriptor": "auto",
+        "max_autotune_pointwise": True,
+        "assume_aligned_inputs": True,
+    }
+)
+class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
+    def test_pool_benchmarks_pointer_loads_against_tma(self):
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        def check_pool(pool, num_kernels, num_tma):
+            torch._dynamo.reset()
+            with config.patch({"triton.autotune_tensor_descriptor": pool}):
+                result, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(result, fn(x), exact_device=True)
+            FileCheck().check_count("@triton.jit", num_kernels, exactly=True).run(
+                code
+            )
+            FileCheck().check_count(
+                "'tma_variant': True", num_tma, exactly=True
+            ).run(code)
+            FileCheck().check("async_compile.multi_kernel").run(code)
+
+        check_pool("auto", 2, 1)
+        check_pool("all", 3, 2)
+
+    def test_dynamic_shapes_preserve_supported_tma_mode(self):
+        def rmsnorm(x, weight):
+            x_float = x.float()
+            scale = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + 1e-6)
+            return (x_float * scale).to(x.dtype) * weight
+
+        x = torch.randn(1024, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(4096, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def compile_with_host_side_tma(enabled):
+            torch._dynamo.reset()
+            with config.patch({"triton.enable_host_side_tma": enabled}):
+                return run_and_get_code(
+                    torch.compile(rmsnorm, dynamic=True), x, weight
+                )
+
+        device_result, (device_code,) = compile_with_host_side_tma(False)
+        self.assertEqual(device_result, rmsnorm(x, weight), exact_device=True)
+        FileCheck().check_not("host_tma_descriptor_args").check(
+            "tl.make_tensor_descriptor"
+        ).run(device_code)
+
+        pointer_result, (pointer_code,) = compile_with_host_side_tma(True)
+        self.assertEqual(pointer_result, rmsnorm(x, weight), exact_device=True)
+        FileCheck().check_not("host_tma_descriptor_args").check_not(
+            "tl.make_tensor_descriptor"
+        ).run(pointer_code)
+
+    @config.patch(
+        {
+            "triton.autotune_tensor_descriptor": "all",
+            "bundle_triton_into_fx_graph_cache": True,
+            "use_static_triton_launcher": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_tma_variants_that_fail_precompile_are_dropped(self):
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        make_launchers = CachingAutotuner._make_launchers
+
+        def fail_tma_launchers(autotuner):
+            if autotuner.inductor_meta.get("tma_variant"):
+                raise RuntimeError("injected TMA precompile failure")
+            return make_launchers(autotuner)
+
+        def fn(x):
+            return torch.softmax(x, dim=-1)
+
+        x = torch.randn(256, 4096, dtype=torch.bfloat16, device=GPU_TYPE)
+        # The second compile loads the graph from the FX graph cache, with the dropped variants bundled.
+        with mock.patch.object(CachingAutotuner, "_make_launchers", fail_tma_launchers):
+            for _ in range(2):
+                torch._dynamo.reset()
+                PyCodeCache.cache_clear(purge=True)
+                self.assertEqual(torch.compile(fn)(x), fn(x), atol=1e-2, rtol=1.6e-2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertGreaterEqual(
+            counters["inductor"]["multi_kernel_sub_kernel_dropped"], 2
+        )
+
+    def test_tma_variant_with_unsupported_dtype_is_dropped(self):
+        def fn(x):
+            return torch.logical_not(x)
+
+        x = torch.randint(0, 2, (1024, 1024), dtype=torch.bool, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        # Bool has no tensor-map dtype, so the TMA choice repeats the baseline.
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
+
+    @config.patch({"force_disable_caches": True})
+    def test_tma_variant_whose_codegen_fails_is_dropped(self):
+        codegen_kernel = TritonKernel.codegen_kernel
+
+        def fail_for_optional(kernel, *args, **kwargs):
+            if kernel.optional:
+                raise RuntimeError("injected codegen failure")
+            return codegen_kernel(kernel, *args, **kwargs)
+
+        def fn(x):
+            return torch.nn.functional.silu(x) + 1
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        # Only an Inductor bug fails codegen, so no input reaches this fallback.
+        with mock.patch.object(TritonKernel, "codegen_kernel", fail_for_optional):
+            result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
 
 
 if __name__ == "__main__":
