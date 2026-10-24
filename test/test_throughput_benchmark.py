@@ -1,7 +1,12 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TemporaryFileName,
+    TestCase,
+)
 from torch.utils import ThroughputBenchmark
 
 
@@ -35,6 +40,8 @@ class TwoLayerNetModule(torch.nn.Module):
 
 
 class TestThroughputBenchmark(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def linear_test(self, Module, profiler_output_path=""):
         D_in = 10
         H = 5
@@ -78,6 +85,10 @@ class TestThroughputBenchmark(TestCase):
     def test_profiling(self):
         with TemporaryFileName() as fname:
             self.linear_test(TwoLayerNetModule, profiler_output_path=fname)
+
+
+class TestThroughputBenchmarkCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
 
     def linear_with_compile_test(self, Module, dtype):
         from contextlib import nullcontext
