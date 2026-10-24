@@ -396,10 +396,11 @@ MACOSX_DEPLOYMENT_TARGET=11.0 spin develop
 
 After a first `spin develop`, you can inspect or adjust the CMake cache interactively with
 `ccmake build` (or `cmake-gui build`) and rebuild with `spin develop`; your edits persist, because
-reconfiguration does not use `--fresh` and environment variables only seed cache entries that are
-not already set. The corollary: once a variable is in the cache, changing its environment variable
-no longer affects it -- edit the cache directly (or delete `build/CMakeCache.txt`) to change it.
-The build type and compiler are the exception; the build always re-applies them.
+reconfiguration does not use `--fresh`. Environment variables win over `-C` flags, `-C` flags win
+over `pyproject.toml`, and all three win over what the build directory remembers from last time:
+a forwarded environment variable is re-applied on every build, so a cache edit only survives for
+variables the environment and the flags leave alone. To change one setting for a single command,
+put the variable in front of the command.
 
 ### Docker Image
 
