@@ -316,6 +316,10 @@ def _load_state_dict(
         read_data()
         distW.barrier()
 
+    if planner is None:
+        raise AssertionError("planner is None")
+    planner.finish_load()
+
 
 def _load_state_dict_from_keys(
     keys: set[str] | str | None = None,
