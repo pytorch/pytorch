@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import unittest
 from collections.abc import Callable
 
 import torch
@@ -10,14 +11,25 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+    tol,
+    toleranceOverride,
+)
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import (
+    has_triton_tensor_descriptor_host_tma,
+    has_triton_tma_device,
+)
 
 
 aten = torch.ops.aten
 
 
 @inductor_config.patch({"triton.native_matmul": True})
-class TestTritonDotReduction(TestCase):
+class TestNativeMatmul(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
     ):
@@ -259,7 +271,78 @@ class TestTritonDotReduction(TestCase):
         ).check("tl.arange(0, R0_BLOCK)[None, None, None, :]").run(code)
 
 
+@unittest.skipUnless(
+    HAS_GPU and has_triton_tma_device(), "Tensor descriptors are not supported"
+)
+@inductor_config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.enable_host_side_tma": False,
+        "assume_aligned_inputs": True,
+    }
+)
+class TestNativeMatmulDeviceTMA(TestNativeMatmul):
+    pass
+
+
+@unittest.skipUnless(
+    HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+    "Host tensor descriptors are not supported",
+)
+@inductor_config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.enable_host_side_tma": True,
+        "assume_aligned_inputs": True,
+    }
+)
+class TestNativeMatmulHostTMA(TestNativeMatmul):
+    pass
+
+
+class TestNativeMatmulTensorDescriptor(TestCase):
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    @dtypes(torch.float16, torch.bfloat16)
+    @toleranceOverride(
+        {torch.float16: tol(1e-3, 1e-3), torch.bfloat16: tol(0.016, 0.016)}
+    )
+    @parametrize("batched", [False, True])
+    @parametrize("transposed", [False, True])
+    @parametrize("k", [64, 72])
+    @parametrize("host_side", [False, True])
+    def test_matmul(self, device, dtype, batched, transposed, k, host_side):
+        if not has_triton_tma_device():
+            self.skipTest("Tensor descriptors are not supported")
+        if host_side and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("Host tensor descriptors are not supported")
+
+        batch = (3,) if batched else ()
+        a = torch.randn((*batch, 33, k), device=device, dtype=dtype)
+        b_shape = (48, k) if transposed else (k, 48)
+        b = torch.randn((*batch, *b_shape), device=device, dtype=dtype)
+        if transposed:
+            b = b.transpose(-1, -2)
+
+        def f(a, b):
+            return a @ b
+
+        with inductor_config.patch({"triton.enable_host_side_tma": host_side}):
+            compiled = torch.compile(f, fullgraph=True)
+            code = run_and_get_triton_code(compiled, a, b)
+            self.assertEqual(compiled(a, b), f(a, b))
+        FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+
+
 if HAS_GPU:
+    instantiate_device_type_tests(
+        TestNativeMatmulTensorDescriptor, globals(), only_for=GPU_TYPE
+    )
     torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
