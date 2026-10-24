@@ -3227,6 +3227,9 @@ class BenchmarkRunner:
             msg += f" {tag:26}"
         print(msg, flush=True)
 
+        # Accuracy runs reset counters, so exclude graphs compiled during model setup.
+        if self.args.accuracy:
+            torch._dynamo.utils.counters.clear()
         start_stats = get_dynamo_stats()
 
         if self.args.accuracy:
@@ -3327,6 +3330,13 @@ def should_diff_branch(args):
     return args.diff_branch != diff_branch_default
 
 
+def _positive_int(value):
+    value = int(value)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return value
+
+
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -3356,7 +3366,7 @@ def parse_args(args=None):
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
-        "--repeat", "-n", type=int, default=30, help="number of timing runs"
+        "--repeat", "-n", type=_positive_int, default=30, help="number of timing runs"
     )
     iterations_per_run_help = """
         Run this may iterations for each time measurement. This is mainly used for
