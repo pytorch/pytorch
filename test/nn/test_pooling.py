@@ -193,6 +193,28 @@ class TestPoolingNN(NNTestCase):
             ),
         )
 
+    def test_adaptive_avg_pooling_backward_fails_meta(self):
+        # Meta must reject the same shapes as eager so fake tensors and compile match
+        backward2d = torch.ops.aten._adaptive_avg_pool2d_backward
+        backward3d = torch.ops.aten._adaptive_avg_pool3d_backward
+        cl = torch.channels_last
+        ndim_msg = "Expected dimensions"
+        dim_msg = "must have the same size at dim"
+        cases = [
+            (backward2d, (1, 2, 7), (1, 2, 3, 3), None, ndim_msg),
+            (backward2d, (1, 3, 7, 7), (1, 2, 3, 3), None, dim_msg),
+            (backward2d, (1, 2, 7, 7), (1, 3, 3, 3), cl, dim_msg),
+            (backward3d, (1, 2, 7, 7), (1, 2, 3, 3, 3), None, ndim_msg),
+        ]
+        for op, grad_shape, input_shape, memory_format, msg in cases:
+            grad_output = torch.empty(grad_shape, device="meta")
+            input = torch.empty(input_shape, device="meta")
+            if memory_format is not None:
+                grad_output = grad_output.to(memory_format=memory_format)
+                input = input.to(memory_format=memory_format)
+            with self.assertRaisesRegex(ValueError, msg):
+                op(grad_output, input)
+
     @parametrize_test("dtype", [torch.bfloat16, torch.float16])
     @parametrize_test(
         "mod",
