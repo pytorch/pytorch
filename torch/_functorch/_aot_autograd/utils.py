@@ -882,26 +882,38 @@ def fn_wrappers(fn: Callable[..., Any]) -> list[Callable[..., Any]]:
     return fns
 
 
+# Canonical primal prefixes take precedence over original input names appended
+# for debugging. Keep the legacy checks for graphs with custom placeholder names.
 def _is_primal(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "placeholder"
-        and "tangents" not in str(node.target)
-        and not _is_bwd_seed_offset(node)
-        and not _is_fwd_seed_offset(node)
+    return node.op == "placeholder" and (
+        str(node.target).startswith("primals_")
+        or (
+            "tangents" not in str(node.target)
+            and not _is_bwd_seed_offset(node)
+            and not _is_fwd_seed_offset(node)
+        )
     )
 
 
 def _is_tangent(node: torch.fx.Node) -> bool:
-    return node.op == "placeholder" and "tangents" in str(node.target)
+    return (
+        node.op == "placeholder"
+        and not str(node.target).startswith("primals_")
+        and "tangents" in str(node.target)
+    )
 
 
 def _is_bwd_seed_offset(node: torch.fx.Node) -> bool:
-    return node.op == "placeholder" and (
-        "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
+    return (
+        node.op == "placeholder"
+        and not str(node.target).startswith("primals_")
+        and ("bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target))
     )
 
 
 def _is_fwd_seed_offset(node: torch.fx.Node) -> bool:
-    return node.op == "placeholder" and (
-        "fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target)
+    return (
+        node.op == "placeholder"
+        and not str(node.target).startswith("primals_")
+        and ("fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target))
     )
