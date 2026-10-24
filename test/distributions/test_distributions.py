@@ -3505,10 +3505,17 @@ class TestDistributions(DistributionsTestCase):
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((ndim * ndim * 100000,))
+        num_samples = samples.shape[0]
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.5, rtol=0)
         empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
+        # Check each moment to within 5 standard errors. A fixed atol fails
+        # whenever the random scale_tril makes the variance large.
+        mean_se = (empirical_var / num_samples).sqrt()
+        fourth = ((samples - empirical_mean) ** 4).mean(0)
+        var_se = ((fourth - empirical_var**2).clamp(min=0) / num_samples).sqrt()
+        zeros = torch.zeros_like(empirical_mean)
+        self.assertEqual((d.mean - empirical_mean) / mean_se, zeros, atol=5, rtol=0)
+        self.assertEqual((d.variance - empirical_var) / var_se, zeros, atol=5, rtol=0)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
