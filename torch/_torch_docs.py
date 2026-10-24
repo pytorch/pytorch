@@ -11439,8 +11439,9 @@ always be real-valued, even if :attr:`input` is complex.
           can be arbitrary bases of the corresponding subspaces.
 
 .. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
-          (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
-          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched`.
+          (a divide-and-conquer algorithm) instead of `?gesvd` for speed. On GPU, the default
+          cuSOLVER driver is chosen heuristically among `gesvdj` / `gesvdjBatched` and
+          `gesvda` (with a `gesvd` fallback); see :func:`torch.linalg.svd` for details.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).
