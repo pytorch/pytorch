@@ -1529,7 +1529,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         elif isinstance(fx_arg, (tuple, list)):
             logger.info("Argument %s is a tuple/list. Promoting each element.", fx_arg)
             return type(fx_arg)(
-                self._maybe_promote_arg(node, fx_arg_elem, dtype)
+                self._maybe_promote_arg(node, fx_arg_elem, dtype, force_tensor)
                 for fx_arg_elem in fx_arg
             )
 
@@ -1546,8 +1546,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         target = node.target
         if not isinstance(target, torch._ops.OpOverload):
             raise AssertionError(f"Expected OpOverload, got {type(target)}")
-        schema_args = target._schema.arguments
-        schema_kwargs = {arg.name: arg for arg in schema_args}
         new_args = []
         new_kwargs = {}
         for i, arg in enumerate(node.args):
@@ -1556,8 +1554,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                     node,
                     arg,
                     type_promotion_info.args_dtypes.get(i, None),
-                    i < len(schema_args)
-                    and isinstance(schema_args[i].type, torch.TensorType),
                 )
             )
 
@@ -1566,10 +1562,53 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 node,
                 arg,
                 type_promotion_info.kwargs_dtypes.get(name, None),
-                name in schema_kwargs
-                and isinstance(schema_kwargs[name].type, torch.TensorType),
             )
         new_args = tuple(new_args)
+
+        schema_args = target._schema.arguments
+        schema_kwargs = {arg.name: arg for arg in schema_args}
+        promoted_args = torch.fx.node.map_arg(new_args, self.env.__getitem__)
+        promoted_kwargs = torch.fx.node.map_arg(new_kwargs, self.env.__getitem__)
+        has_unmaterialized_tensor_arg = any(
+            i in type_promotion_info.args_dtypes
+            and i < len(schema_args)
+            and isinstance(schema_args[i].type, torch.TensorType)
+            and not isinstance(arg, torch.Tensor)
+            for i, arg in enumerate(promoted_args)
+        ) or any(
+            name in type_promotion_info.kwargs_dtypes
+            and name in schema_kwargs
+            and isinstance(schema_kwargs[name].type, torch.TensorType)
+            and not isinstance(arg, torch.Tensor)
+            for name, arg in promoted_kwargs.items()
+        )
+
+        if has_unmaterialized_tensor_arg:
+            try:
+                find_compatible_op_overload(
+                    target.overloadpacket, promoted_args, promoted_kwargs
+                )
+            except RuntimeError:
+                new_args = tuple(
+                    self._maybe_promote_arg(
+                        node,
+                        arg,
+                        type_promotion_info.args_dtypes.get(i, None),
+                        i < len(schema_args)
+                        and isinstance(schema_args[i].type, torch.TensorType),
+                    )
+                    for i, arg in enumerate(new_args)
+                )
+                new_kwargs = {
+                    name: self._maybe_promote_arg(
+                        node,
+                        arg,
+                        type_promotion_info.kwargs_dtypes.get(name, None),
+                        name in schema_kwargs
+                        and isinstance(schema_kwargs[name].type, torch.TensorType),
+                    )
+                    for name, arg in new_kwargs.items()
+                }
 
         if node.args != new_args or node.kwargs != new_kwargs:
             node.args = new_args
