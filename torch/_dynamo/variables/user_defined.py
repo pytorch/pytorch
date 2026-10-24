@@ -1527,10 +1527,42 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
+            if isinstance(fn, variables.functions.FunctoolsPartialVariable):
+                if fn.dict_state_source is not None:
+                    # Guard the flatten decision both ways: the dict state is
+                    # None while the instance dict is unset, a dict once set.
+                    install_guard(
+                        fn.dict_state_source.make_guard(GuardBuilder.TYPE_MATCH)
+                    )
+                # CPython fills an inner partial's functools.Placeholder slots
+                # (3.14+) with the outer args. Dynamo does not model that, so
+                # such partials are left wrapped.
+                placeholder = getattr(functools, "Placeholder", None)
+                if (
+                    fn.flattenable
+                    and not tx.output.side_effects.is_attribute_mutation(fn)
+                    and not (
+                        placeholder is not None
+                        and any(
+                            isinstance(v := arg.realize(), UserDefinedObjectVariable)
+                            and v.value is placeholder
+                            for arg in fn.args
+                        )
+                    )
+                ):
+                    # Like CPython's partial_new, merge a nested partial into
+                    # the new one instead of wrapping it.
+                    rest_args = fn.args + rest_args
+                    kwargs = {**fn.keywords, **kwargs}
+                    fn = fn.func
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
+            # A partial created while tracing never gets an instance dict:
+            # setattr on it graph breaks, as FunctoolsPartialVariable has no
+            # attribute-mutation support (the is_attribute_mutation check above
+            # keeps this correct if that is ever added).
             return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
+                fn, args=rest_args, keywords=kwargs, flattenable=True
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
