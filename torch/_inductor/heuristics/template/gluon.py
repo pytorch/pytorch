@@ -16,6 +16,18 @@ class GluonGroupedMMConfig:
     USE_TWO_CTA: bool = False
 
 
+def get_epilogue_subtile(
+    BLOCK_M: int, BLOCK_N: int, use_tma_store: bool, use_two_cta: bool
+) -> tuple[int, int]:
+    # The TMA store goes out in EPILOGUE_N wide slices through a ring of
+    # EPILOGUE_STAGES staging buffers. A 2-CTA BLOCK_M=64 accumulator can't
+    # be sliced along N (Triton's examples/gluon/03-matmul-multicta.py).
+    if not use_tma_store or (use_two_cta and BLOCK_M == 64):
+        return BLOCK_N, 1
+    epilogue_n = min(BLOCK_N, 32)
+    return epilogue_n, min(4, BLOCK_N // epilogue_n)
+
+
 def compute_stage_variants_gluon(
     BLOCK_M: int,
     BLOCK_N: int,
@@ -45,7 +57,10 @@ def compute_stage_variants_gluon(
     b_bytes_per_stage = BLOCK_N * BLOCK_K * dtype_bytes
     if use_two_cta:
         b_bytes_per_stage //= 2
-    c_bytes_per_stage = BLOCK_M * BLOCK_N * dtype_bytes if uses_c_smem else 0
+    epilogue_n, epilogue_stages = get_epilogue_subtile(
+        BLOCK_M, BLOCK_N, uses_c_smem, use_two_cta
+    )
+    c_bytes = BLOCK_M * epilogue_n * epilogue_stages * dtype_bytes if uses_c_smem else 0
     ab_bytes_per_stage = a_bytes_per_stage + b_bytes_per_stage
 
     min_load_buffers = 1
@@ -54,7 +69,7 @@ def compute_stage_variants_gluon(
 
     min_smem = (
         ab_bytes_per_stage * min_load_buffers
-        + c_bytes_per_stage
+        + c_bytes
         + 8 * min_load_buffers * 2
         + 8 * min_acc_buffers * 2
         + compiler_overhead
@@ -65,12 +80,12 @@ def compute_stage_variants_gluon(
 
     # Pipeline depth dominates: one CTA per SM leaves no spare warps to
     # hide load latency. Bound it by shared memory, not a constant.
-    max_load_buffers = (smem_limit - c_bytes_per_stage) // (ab_bytes_per_stage + 8 * 2)
+    max_load_buffers = (smem_limit - c_bytes) // (ab_bytes_per_stage + 8 * 2)
 
     all_valid = []
     for num_load_buffers in range(max_load_buffers, 0, -1):
         ab_smem = ab_bytes_per_stage * num_load_buffers
-        c_smem = c_bytes_per_stage
+        c_smem = c_bytes
         load_barrier_smem = 8 * num_load_buffers * 2
 
         base_smem = ab_smem + c_smem + load_barrier_smem + compiler_overhead
@@ -115,12 +130,14 @@ def get_grouped_mm_configs(
     Returns:
         List of GluonGroupedMMConfig objects
     """
-    # NUM_STORE_WARPS measured under 1% across 4/8/16, and the deepest
-    # pipeline that fits won on every shape tried, so neither earns a
-    # search dimension. BLOCK_K=32 only wins when offs partitions K,
-    # where a group's K can be far smaller than the tile. The store is
-    # searched both ways: TMA needs a C staging buffer, which costs a
-    # pipeline stage, so which wins is shape-dependent.
+    # NUM_STORE_WARPS follows the store: the sliced TMA store is fastest
+    # with 4 warps, the pointer store keeps 8 since it holds the whole
+    # tile in registers. The deepest pipeline that fits won on every
+    # shape tried, so neither earns a search dimension. BLOCK_K=32 only
+    # wins when offs partitions K, where a group's K can be far smaller
+    # than the tile. The store is searched both ways: TMA needs a C
+    # staging buffer, which costs a pipeline stage, so which wins is
+    # shape-dependent.
     #
     # No EXHAUSTIVE variant: a wider space (more BLOCK_K/BLOCK_M/
     # BLOCK_N/GROUP_SIZE_N values) measured no improvement over this.
@@ -134,7 +151,6 @@ def get_grouped_mm_configs(
         (128, 256),
     ]
     BLOCK_K_vals = [32, 64, 128] if k_is_varying else [64, 128]
-    NUM_STORE_WARP_vals = [8]
     GROUP_SIZE_N_vals = [1, 8]
     USE_TMA_STORE_vals = [False, True]
     USE_TWO_CTA_vals = [False, True]
@@ -144,14 +160,12 @@ def get_grouped_mm_configs(
     for (
         (BLOCK_M, BLOCK_N),
         BLOCK_K,
-        num_store_warps,
         group_size_n,
         use_tma_store,
         use_two_cta,
     ) in itertools.product(
         block_combos,
         BLOCK_K_vals,
-        NUM_STORE_WARP_vals,
         GROUP_SIZE_N_vals,
         USE_TMA_STORE_vals,
         USE_TWO_CTA_vals,
@@ -174,7 +188,7 @@ def get_grouped_mm_configs(
                     BLOCK_K=BLOCK_K,
                     NUM_LOAD_BUFFERS=num_load_buffers,
                     NUM_ACC_BUFFERS=num_acc_buffers,
-                    NUM_STORE_WARPS=num_store_warps,
+                    NUM_STORE_WARPS=4 if use_tma_store else 8,
                     GROUP_SIZE_N=group_size_n,
                     USE_TMA_STORE=use_tma_store,
                     USE_TWO_CTA=use_two_cta,

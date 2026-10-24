@@ -104,6 +104,8 @@ class PartitionArgs:
     NUM_PROGRAMS: gl.constexpr
     GROUP_SIZE_N: gl.constexpr
     USE_TWO_CTA: gl.constexpr
+    EPILOGUE_N: gl.constexpr
+    EPILOGUE_STAGES: gl.constexpr
 
 
 @aggregate
@@ -551,15 +553,20 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
     acc_state = create_counter(0, acc_buf_empty_bars.shape[0])
 
 {%- if USE_TMA_STORE %}
+    EPILOGUE_N: gl.constexpr = pargs.EPILOGUE_N
+    EPILOGUE_STAGES: gl.constexpr = pargs.EPILOGUE_STAGES
     {#- TODO: move the TMA store into a shared helper once other Gluon templates need it. #}
     c_smem = gl.allocate_shared_memory(
-        pargs.output_dtype, [TILE_M, BLOCK_N], pargs.c_smem_layout
+        pargs.output_dtype, [EPILOGUE_STAGES, TILE_M, EPILOGUE_N], pargs.c_smem_layout
     )
 {%- if FUSED_TMA_STORE %}
 {%- for t in TMA_STORES %}
-    {{ t.var }}_smem = c_smem.reinterpret({{ t.dtype }}, [TILE_M, BLOCK_N], pargs.{{ t.var }}_smem_layout)
+    {{ t.var }}_smem = c_smem.reinterpret({{ t.dtype }}, [EPILOGUE_STAGES, TILE_M, EPILOGUE_N], pargs.{{ t.var }}_smem_layout)
 {%- endfor %}
 {%- endif %}
+    epilogue_state = create_counter(0, EPILOGUE_STAGES)
+{%- else %}
+    EPILOGUE_N: gl.constexpr = BLOCK_N
 {%- endif %}
 
     group_iter = create_group_iterator(
@@ -589,7 +596,7 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
             shape=[M, group_iter.n_start_offset + group_iter.n_size],
 {%- endif %}
             strides=[pargs.{{ t.var }}_stride_m, 1],
-            block_shape=[TILE_M, BLOCK_N],
+            block_shape=[TILE_M, EPILOGUE_N],
             layout=pargs.{{ t.var }}_smem_layout,
         )
 {%- endfor %}
@@ -613,74 +620,81 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
 
             _proton_enter_scope("store_work")
             acc_tmem = pargs.acc_tmem_bufs.index(acc_state.index)
-            acc = acc_tmem.load()
-{%- if K_IS_VARYING %}
-            # An empty group gets no MMA, so its accumulator was
-            # never written.
-            acc = gl.where(group_iter.k_size > 0, acc, 0.0)
-{%- endif %}
-
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
             acc_state = acc_state.next()
+
+            for s in gl.static_range(BLOCK_N // EPILOGUE_N):
+                if EPILOGUE_N == BLOCK_N:
+                    acc = acc_tmem.load()
+                else:
+                    acc = acc_tmem.slice(s * EPILOGUE_N, EPILOGUE_N).load()
+{%- if K_IS_VARYING %}
+                # An empty group gets no MMA, so its accumulator was
+                # never written.
+                acc = gl.where(group_iter.k_size > 0, acc, 0.0)
+{%- endif %}
 {%- if not HAS_EPILOGUE_FUSION %}
 
-            c = acc.to(pargs.output_dtype)
+                c = acc.to(pargs.output_dtype)
 {%- endif %}
 
-            mbarrier.arrive(acc_buf_empty_bar, count=1)
+                if s == BLOCK_N // EPILOGUE_N - 1:
+                    mbarrier.arrive(acc_buf_empty_bar, count=1)
+{%- if HAS_EPILOGUE_FUSION or not USE_TMA_STORE %}
 
+                offs_m = gl.arange(0, TILE_M)
+                offs_n = s * EPILOGUE_N + gl.arange(0, EPILOGUE_N)
+{%- endif %}
 {%- if HAS_EPILOGUE_FUSION %}
-            offs_m = gl.arange(0, TILE_M)
-            offs_n = gl.arange(0, BLOCK_N)
 
-            idx_m = (tile_iter.m_offset + offs_m).to(INDEX_DTYPE)[:, None]
-            idx_n = (tile_iter.n_offset + offs_n).to(INDEX_DTYPE)[None, :]
+                idx_m = (tile_iter.m_offset + offs_m).to(INDEX_DTYPE)[:, None]
+                idx_n = (tile_iter.n_offset + offs_n).to(INDEX_DTYPE)[None, :]
 
-            mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
-            mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
-            mask = mask_m[:, None] & mask_n[None, :]
+                mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
+                mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
+                mask = mask_m[:, None] & mask_n[None, :]
 
 {%- if C_IS_2D %}
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("TILE_M", "BLOCK_N"))}}
+                {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=16, val_shape=("TILE_M", "EPILOGUE_N"))}}
 {%- else %}
-            idx_g = group_iter.g.to(INDEX_DTYPE)
-            {{store_output(("idx_g", "idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("TILE_M", "BLOCK_N"))}}
+                idx_g = group_iter.g.to(INDEX_DTYPE)
+                {{store_output(("idx_g", "idx_m", "idx_n"), "acc", "mask", indent_width=16, val_shape=("TILE_M", "EPILOGUE_N"))}}
 {%- endif %}
 {%- endif %}
 {%- if USE_TMA_STORE %}
 {%- for t in TMA_STORES %}
-            tma.store_wait(pendings=0)
 
-            {{ t.var }}_smem.store({{ t.var }})
-
-            fence_async_shared()
+                {{ t.var }}_buf = {{ t.var }}_smem.index(epilogue_state.index)
+                epilogue_state = epilogue_state.next()
+                {#- With several targets of different dtypes, equal ring indices don't alias the same bytes. #}
+                tma.store_wait(pendings={% if TMA_STORES | length == 1 %}EPILOGUE_STAGES - 1{% else %}0{% endif %})
+                {{ t.var }}_buf.store({{ t.var }})
+                fence_async_shared()
 {%- if C_IS_2D %}
-            tma.async_store({{ t.var }}_desc, [tile_iter.m_offset, tile_iter.n_offset], {{ t.var }}_smem)
+                tma.async_store({{ t.var }}_desc, [tile_iter.m_offset, tile_iter.n_offset + s * EPILOGUE_N], {{ t.var }}_buf)
 {%- else %}
-            tma.async_store({{ t.var }}_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], {{ t.var }}_smem)
+                tma.async_store({{ t.var }}_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset + s * EPILOGUE_N], {{ t.var }}_buf)
 {%- endif %}
 {%- endfor %}
 {%- elif not HAS_EPILOGUE_FUSION %}
-            offs_m = gl.arange(0, TILE_M)
-            offs_n = gl.arange(0, BLOCK_N)
 
-            idx_m = (tile_iter.m_offset + offs_m).to({{ INDEX_DTYPE_EXPR }})
-            idx_n = (tile_iter.n_offset + offs_n).to({{ INDEX_DTYPE_EXPR }})
+                idx_m = (tile_iter.m_offset + offs_m).to({{ INDEX_DTYPE_EXPR }})
+                idx_n = (tile_iter.n_offset + offs_n).to({{ INDEX_DTYPE_EXPR }})
 
-            mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
-            mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
-            mask = mask_m[:, None] & mask_n[None, :]
+                mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
+                mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
+                mask = mask_m[:, None] & mask_n[None, :]
 
-            c_ptrs = (
-                pargs.c_ptr
+                c_ptrs = (
+                    pargs.c_ptr
 {%- if not C_IS_2D %}
-                + group_iter.g.to({{ INDEX_DTYPE_EXPR }}) * pargs.c_stride_g
+                    + group_iter.g.to({{ INDEX_DTYPE_EXPR }}) * pargs.c_stride_g
 {%- endif %}
-                + idx_m[:, None] * pargs.c_stride_m
-                + idx_n[None, :] * pargs.c_stride_n
-            )
+                    + idx_m[:, None] * pargs.c_stride_m
+                    + idx_n[None, :] * pargs.c_stride_n
+                )
 
-            gl.store(c_ptrs, c, mask=mask)
+                gl.store(c_ptrs, c, mask=mask)
 {%- endif %}
             _proton_exit_scope("store_work")
 
@@ -716,10 +730,10 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
 
     a_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_K] if A_IS_K_MAJOR else [BLOCK_K, TILE_M], input_dtype, cga_layout=A_CGA_LAYOUT)
     b_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_N, BLOCK_K] if B_IS_K_MAJOR else [BLOCK_K, BLOCK_N], input_dtype, cga_layout=B_CGA_LAYOUT)
-    c_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_N], output_dtype, cga_layout=M_CGA_LAYOUT)
+    c_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, EPILOGUE_N], output_dtype, cga_layout=M_CGA_LAYOUT)
 {%- if FUSED_TMA_STORE %}
 {%- for t in TMA_STORES %}
-    {{ t.var }}_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_N], {{ t.dtype }}, cga_layout=M_CGA_LAYOUT)
+    {{ t.var }}_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, EPILOGUE_N], {{ t.dtype }}, cga_layout=M_CGA_LAYOUT)
 {%- endfor %}
 {%- elif not HAS_EPILOGUE_FUSION %}
 
@@ -819,7 +833,7 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
         {{ t.ptr }},
         shape=[G, M, N],
         strides=[{{ t.strides | join(", ") }}],
-        block_shape=[1, TILE_M, BLOCK_N],
+        block_shape=[1, TILE_M, EPILOGUE_N],
         layout={{ t.var }}_smem_layout,
     )
 {%- endfor %}
@@ -934,6 +948,8 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
         NUM_PROGRAMS,
         GROUP_SIZE_N,
         USE_TWO_CTA,
+        EPILOGUE_N,
+        EPILOGUE_STAGES,
     )
 
     {#- The descriptors' smem scratch is reused for the operand buffers; ordering it once

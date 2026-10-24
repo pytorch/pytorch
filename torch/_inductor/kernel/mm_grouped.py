@@ -125,6 +125,7 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 def gluon_grouped_mm_configs(dtype_AB, g, m, n, k, a_is_2d, b_is_2d):
     from torch._inductor.heuristics.template.gluon import (
+        get_epilogue_subtile,
         get_grouped_mm_configs,
         prune_grouped_mm_configs,
     )
@@ -148,6 +149,12 @@ def gluon_grouped_mm_configs(dtype_AB, g, m, n, k, a_is_2d, b_is_2d):
     configs = []
     for gluon_config in gluon_configs:
         num_ctas = 2 if gluon_config.USE_TWO_CTA else 1
+        epilogue_n, epilogue_stages = get_epilogue_subtile(
+            gluon_config.BLOCK_M,
+            gluon_config.BLOCK_N,
+            gluon_config.USE_TMA_STORE,
+            gluon_config.USE_TWO_CTA,
+        )
         configs.append(
             Config(
                 kwargs={
@@ -160,6 +167,8 @@ def gluon_grouped_mm_configs(dtype_AB, g, m, n, k, a_is_2d, b_is_2d):
                     "GROUP_SIZE_N": gluon_config.GROUP_SIZE_N,
                     "USE_TMA_STORE": gluon_config.USE_TMA_STORE,
                     "USE_TWO_CTA": gluon_config.USE_TWO_CTA,
+                    "EPILOGUE_N": epilogue_n,
+                    "EPILOGUE_STAGES": epilogue_stages,
                     "NUM_PROGRAMS": get_num_sms() // num_ctas,
                 },
                 num_stages=1,  # Dummy value; NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS drive pipelining instead.
