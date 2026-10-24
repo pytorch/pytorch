@@ -656,6 +656,7 @@ class TestGroupBatchFusion(TestCase):
             "stride",
             "mutable",
             "conversion",
+            "conversion_dtype_after_transpose",
             "custom",
             "higher_order",
             "pointwise",
@@ -698,6 +699,10 @@ class TestGroupBatchFusion(TestCase):
                 torch.ops.aten.add_.Tensor, args=(node, 1)
             ),
             "conversion": lambda graph, node: graph.call_method("float", args=(node,)),
+            "conversion_dtype_after_transpose": lambda graph, node: graph.call_method(
+                "to",
+                args=(graph.call_method("transpose", args=(node, 0, 1)), torch.float64),
+            ),
             "custom": lambda graph, node: graph.call_function(
                 torch.ops._batch_linear_lhs_test.require_contiguous.default,
                 args=(node,),
@@ -829,7 +834,18 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         self.assertEqual(subsets, [2])
 
-    @parametrize("chain", ["direct"])
+    @parametrize(
+        "chain",
+        [
+            "direct",
+            "merging_view",
+            "as_strided",
+            "conversion",
+            "unsafe_view",
+            "broadcast",
+            "setitem",
+        ],
+    )
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
@@ -915,6 +931,45 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         self.assertEqual(subsets, [2])
+
+    @parametrize("dynamic", [False, True])
+    @parametrize("use_dropout", [False, True])
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_keeps_attention_fusion(self, dynamic, use_dropout):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q = torch.nn.Linear(64, 64, bias=False)
+                self.k = torch.nn.Linear(64, 64, bias=False)
+                self.v = torch.nn.Linear(64, 64, bias=False)
+
+            def forward(self, x):
+                batch = x.shape[0]
+                shape = (batch // 4, 4, 2, 32)
+                q = self.q(x).view(*shape).transpose(1, 2)
+                k = self.k(x).view(*shape).transpose(1, 2)
+                v = self.v(x).view(*shape).transpose(1, 2)
+                if use_dropout:
+                    q = torch.nn.functional.dropout(q, p=0.0, training=True)
+                return torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [3])
 
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):

@@ -730,6 +730,13 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "layer_norm",
         "native_layer_norm",
         "rms_norm",
+        "scaled_dot_product_attention",
+        "scaled_dot_product_flash_attention",
+        "scaled_dot_product_efficient_attention",
+        "scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_attention_math",
+        "dropout",
+        "native_dropout",
         "size",
         "sym_size",
         "dim",
@@ -806,11 +813,23 @@ def _layout_user_overloads(user: torch.fx.Node):
     return matched
 
 
-def _static_shape(value):
+def _dim_hint(dim):
+    if isinstance(dim, torch.fx.Node):
+        return _dim_hint(dim.meta.get("example_value", dim.meta.get("val")))
+    if isinstance(dim, torch.SymInt):
+        hint = dim.node.hint
+        return hint if isinstance(hint, int) else None
+    if isinstance(dim, int):
+        return dim
+    return None
+
+
+def _shape_hint(value):
     if isinstance(value, torch.Tensor) and value.dim() > 0:
-        shape = tuple(value.shape)
-        if all(isinstance(dim, int) for dim in shape):
-            return shape
+        shape = [_dim_hint(dim) for dim in value.shape]
+        if any(dim is None for dim in shape):
+            return None
+        return tuple(shape)
     return None
 
 
@@ -823,7 +842,9 @@ def _view_target_shape(user: torch.fx.Node):
         size = user.kwargs.get("size")
     if not isinstance(size, (tuple, list)):
         return None
-    dims = list(size)
+    dims = [_dim_hint(dim) for dim in size]
+    if any(dim is None for dim in dims):
+        return None
     if sum(1 for dim in dims if dim == -1) > 1:
         return None
     return tuple(dims)
@@ -833,7 +854,7 @@ def _is_split_only_view(user: torch.fx.Node) -> bool:
     source_node = user.args[0]
     if not isinstance(source_node, torch.fx.Node):
         return False
-    source = _static_shape(source_node.meta.get("example_value"))
+    source = _shape_hint(source_node.meta.get("example_value"))
     target = _view_target_shape(user)
     if source is None or target is None:
         return False
@@ -1012,14 +1033,20 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node) -> bool:
         return True
     if user.op not in ("call_method", "call_function"):
         return True
+    if user.target is torch.nn.functional.dropout:
+        return get_arg_value(user, 3, "inplace") not in (None, False)
     if user.op == "call_method" and user.target in _CONVERSION_METHODS:
-        return _conversion_aliases(user)
+        # Copies with preserve_format keep dense strides, but a strided slice
+        # after transpose is not dense and falls back to a different layout.
+        return True
     ops = _layout_user_overloads(user)
     if not ops or any(op._schema.is_mutable for op in ops):
         return True
     if any(op.namespace != "aten" for op in ops):
         return True
     names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+    if names <= OrderedSet(["_to_copy", "to", "type_as"]):
+        return True
     if names.intersection(_LAYOUT_SENSITIVE_OPS) or any(
         op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
     ):
