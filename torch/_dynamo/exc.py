@@ -522,6 +522,14 @@ class FakeTensorObservedException(ObservedException):
     pass
 
 
+class FakeTensorObservedIndexError(FakeTensorObservedException):
+    """
+    An IndexError raised during fake tensor propagation, observed by Dynamo so
+    that user exception handlers can catch it. If no handler catches it, the
+    top-level InstructionTranslator re-raises it as a plain IndexError.
+    """
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
