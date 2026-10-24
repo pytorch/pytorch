@@ -538,6 +538,29 @@ def annotation_for(tools_id: int) -> dict[str, Any] | None:
         return None if graph is None else graph.annotations.get(tools_id & 0xFFFFFFFF)
 
 
+def transfer_node_annotation(old_tools_id: int, new_tools_id: int) -> None:
+    """Move what is recorded for one capture-graph node to another node of the same
+    graph. Used when a capture-end pass replaces a node (the memset-to-kernel rewrite in
+    ``torch.cuda.graphs``) so a ``mark_kernels`` annotation follows the work. Pending
+    scope ids are rewritten too, for captures that resolve after the pass. Not a public
+    API."""
+    with _REGISTRY_LOCK:
+        for _annotation, tools_ids in _pending_scopes:
+            for i, tools_id in enumerate(tools_ids):
+                if tools_id == old_tools_id:
+                    tools_ids[i] = new_tools_id
+        graph = _GRAPH_ANNOTATIONS.get(old_tools_id >> 32)
+        if graph is None:
+            return
+        old_node, new_node = old_tools_id & 0xFFFFFFFF, new_tools_id & 0xFFFFFFFF
+        if old_node in graph.annotations:
+            graph.annotations[new_node] = graph.annotations.pop(old_node)
+        if old_node in graph.py_stacks:
+            graph.py_stacks[new_node] = graph.py_stacks.pop(old_node)
+        # The replacement is a kernel node, which carries a source node id.
+        graph.sourceless_nodes.discard(old_node)
+
+
 # Node types we annotate (kernels, memcpys, memsets, batch mem ops, event
 # record/wait nodes, and host nodes), as driver node-type enums. Event and host
 # nodes are stream-ordered but do not occupy the device; annotating them lets the

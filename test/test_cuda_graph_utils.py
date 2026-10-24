@@ -191,9 +191,15 @@ class TestMarkKernels(TestCase):
         big = torch.randn(8192, 8192, device="cuda")
         graph = torch.cuda.CUDAGraph(keep_graph=True)
 
-        with torch.cuda.graph(graph, enable_annotations=True):
-            with mark_kernels("reduction"):
-                _ = torch.sum(big)
+        # The default capture-end pass rewrites small memset nodes into fill kernels
+        # (torch.cuda.graphs._rewrite_small_memset_nodes); this test is about the
+        # annotation of memset nodes, so keep them.
+        with unittest.mock.patch.object(
+            torch.cuda.graphs, "_memset_to_kernel_max_bytes", 0
+        ):
+            with torch.cuda.graph(graph, enable_annotations=True):
+                with mark_kernels("reduction"):
+                    _ = torch.sum(big)
 
         raw_graph = graph.raw_cuda_graph()
         _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw_graph))
@@ -221,6 +227,34 @@ class TestMarkKernels(TestCase):
                 lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
             )
             self.assertEqual(annotations[tools_id], [{"name": "reduction"}])
+
+    def test_rewritten_memset_nodes_keep_annotations(self):
+        """The default capture-end pass replaces small memset nodes with fill kernels; a
+        ``mark_kernels`` annotation recorded on the memset follows the replacement node."""
+        from cuda.bindings import driver, runtime as cuda_runtime
+
+        if not torch.cuda.graphs._memset_pass_supported():
+            self.skipTest("memset-to-kernel pass needs cuda-bindings >= 13.2")
+        memset_type = driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_MEMSET
+        bufs = [torch.ones(152, device="cuda") for _ in range(3)]  # 608 B each
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("zero"):
+                for b in bufs:
+                    b.zero_()
+
+        raw_graph = graph.raw_cuda_graph()
+        _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw_graph))
+        nodes, _ = _check_cuda_bindings(
+            cuda_runtime.cudaGraphGetNodes(raw_graph, numNodes=num_nodes)
+        )
+        self.assertEqual(num_nodes, len(bufs))
+        annotations = get_kernel_annotations()
+        for node in nodes[:num_nodes]:
+            self.assertNotEqual(_get_node_type(node), memset_type)
+            tools_id = _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetToolsId(node))
+            self.assertIn(tools_id, annotations)
+            self.assertEqual(annotations[tools_id], [{"name": "zero"}])
 
     @unittest.skipIf(
         not source_node_ids_available(),
