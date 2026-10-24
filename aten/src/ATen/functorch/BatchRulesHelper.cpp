@@ -68,6 +68,17 @@ VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArray
   return result;
 }
 
+Tensor move_cpu_logical_scalar_to_device(
+    const Tensor& tensor, std::optional<int64_t> tensor_bdim, c10::Device device) {
+  // An unbatched CPU 0-dim tensor is already a 0-dim tensor physically, so the
+  // eager semantics apply to it without any copy.
+  if (tensor_bdim.has_value() && tensor.device().is_cpu() && !device.is_cpu() &&
+      rankWithoutBatchDim(tensor, tensor_bdim) == 0) {
+    return tensor.to(device);
+  }
+  return tensor;
+}
+
 Tensor maybePadToLogicalRank(const Tensor& tensor, std::optional<int64_t> has_bdim, int64_t logical_rank) {
   if (!has_bdim) {
     return tensor;
@@ -179,6 +190,8 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
 
   auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
   auto other_ = moveBatchDimToFront(other, other_batch_dim);
+  tensor_ = move_cpu_logical_scalar_to_device(tensor_, tensor_batch_dim, other_.device());
+  other_ = move_cpu_logical_scalar_to_device(other_, other_batch_dim, tensor_.device());
 
   // In the (0D, ND) case, type promotion semantics are different :/
   if (do_type_promotion) {
