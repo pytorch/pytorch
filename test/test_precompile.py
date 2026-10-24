@@ -726,6 +726,7 @@ class TestPrecompile(TestCase):
             "_FRAMES": _b64(frames),
             "_BACKENDS": _b64(backends),
             "_ENTRY_BINDING": _b64(binding),
+            "CUDAGRAPH_CONFIG": {},
             "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
             "TORCH_VERSION": torch.__version__,
         }
@@ -3098,7 +3099,7 @@ class TestPrecompile(TestCase):
         for code in entry.codes:
             code.python_module = module
         python_code, cache = _build_multigraph_artifact(
-            entry, backends, summary, "eager", step
+            entry, backends, summary, "eager", step, {}
         )
         meta = _parse_artifact_metadata(python_code)
         self.assertEqual(meta["TRACER"], "dynamo")
@@ -3132,12 +3133,12 @@ class TestPrecompile(TestCase):
         # Defaults ride in the artifact, so one that does not pickle is refused.
         with mock.patch.object(step, "__kwdefaults__", {"scale": lambda: 2.0}):
             with self.assertRaisesRegex(PrecompileError, "defaults must be picklable"):
-                _build_multigraph_artifact(entry, backends, summary, "eager", step)
+                _build_multigraph_artifact(entry, backends, summary, "eager", step, {})
         # A bypassed entry reaches no continuation; it is refused as bypassed,
         # not as a capture whose continuation is unreachable.
         entry.codes[0].bypassed, entry.codes[0].guarded_codes = True, []
         with self.assertRaisesRegex(PrecompileError, "entry frame was BYPASSED"):
-            _build_multigraph_artifact(entry, backends, summary, "eager", step)
+            _build_multigraph_artifact(entry, backends, summary, "eager", step, {})
 
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_multigraph_artifact_installs_a_frame_the_entry_cannot_reach(self):
@@ -3163,11 +3164,11 @@ class TestPrecompile(TestCase):
             guarded_codes=0,
             backend_graphs=0,
         )
-        python_code, _ = _build_multigraph_artifact(entry, {}, summary, "eager", step)
-        self.assertIn('SERVING_MODE = "installed"', python_code)
-        self.assertIn("UNREACHABLE_WITHOUT_INSTALL = [", python_code)
-        self.assertIn("forward = _build_installed_forward()", python_code)
-        self.assertNotIn("_FRAMES = ", python_code)
+        code, _ = _build_multigraph_artifact(entry, {}, summary, "eager", step, {})
+        self.assertIn('SERVING_MODE = "installed"', code)
+        self.assertIn("UNREACHABLE_WITHOUT_INSTALL = [", code)
+        self.assertIn("forward = _build_installed_forward()", code)
+        self.assertNotIn("_FRAMES = ", code)
 
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
@@ -6166,6 +6167,123 @@ class TestPrecompileDynamoCapture(TestCase):
             load(self.artifact, other_cache)
         with self.assertRaisesRegex(PrecompileError, "tracer|does not match"):
             load(other_artifact, self.cache)
+
+
+_CUDAGRAPH_MODULE = """
+import torch
+
+
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+
+def step(model, x):
+    return (model(x).sin() * 2).cos()
+
+
+def breaking_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
+def calls_breaking_helper(model, x):
+    return breaking_helper(model(x)) + 1
+"""
+
+_CUDAGRAPH_LOADER = """
+import sys
+import torch
+from torch._inductor import cudagraph_trees
+
+tmp, module, artifact, cache, state = sys.argv[1:6]
+sys.path.insert(0, tmp)
+mod = __import__(module)
+saved = torch.load(state)
+model = mod.Model().cuda()
+model.load_state_dict(saved["state_dict"])
+f = torch.compiler.precompile.load(artifact, cache)
+with torch.no_grad():
+    for _ in range(3):
+        torch.compiler.cudagraph_mark_step_begin()
+        torch.testing.assert_close(f(model, saved["x"]), saved["expected"])
+manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
+print("recorded", 0 if manager is None else sum(map(len, manager.roots.values())))
+"""
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@unittest.skipUnless(TEST_CUDA and HAS_TRITON, "needs CUDA + Triton for CUDA graphs")
+@instantiate_parametrized_tests
+class TestPrecompileCudagraphs(TestCase):
+    """A DynamoTracer artifact serves CUDA graphs as its capture compiled them."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.module_name = f"precompile_cudagraph_{uuid.uuid4().hex}"
+        with open(os.path.join(self.dir, self.module_name + ".py"), "w") as f:
+            f.write(_CUDAGRAPH_MODULE)
+        sys.path.insert(0, self.dir)
+        self.addCleanup(sys.path.remove, self.dir)
+        self.mod = importlib.import_module(self.module_name)
+        self.addCleanup(sys.modules.pop, self.module_name, None)
+        self.model = self.mod.Model().cuda()
+        self.x = torch.randn(4, 8, device="cuda")
+
+    def _capture_step(self, fn, **kwargs):
+        with torch.no_grad():
+            with capture(
+                fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs
+            ) as cap:
+                y = cap(self.model, self.x).clone()
+        with open(self.artifact) as f:
+            return y, f.read()
+
+    def _recorded_in_fresh_process(self, expected, env=None):
+        # The number of CUDA graphs the loading process recorded serving it.
+        state = os.path.join(self.dir, "state.pt")
+        torch.save(
+            {"state_dict": self.model.state_dict(), "x": self.x, "expected": expected},
+            state,
+        )
+        argv = [self.dir, self.module_name, self.artifact, self.cache, state]
+        out = subprocess.run(
+            [sys.executable, "-c", _CUDAGRAPH_LOADER, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env={**os.environ, **(env or {})},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return int(out.stdout.split("recorded")[-1])
+
+    @parametrize("serving", ["standalone", "installed"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_artifact_serves_the_cudagraphs_its_capture_compiled(self, serving):
+        mod = self.mod
+        fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            y, code = self._capture_step(fn)
+        self.assertIn(f'SERVING_MODE = "{serving}"', code)
+        self.assertIn("'triton.cudagraphs': True", code)
+        # The loading process leaves triton.cudagraphs at its default (off).
+        self.assertGreater(self._recorded_in_fresh_process(y), 0)
+
+    def test_an_artifact_captured_without_cudagraphs_serves_none(self):
+        y, code = self._capture_step(self.mod.step)
+        self.assertIn("'triton.cudagraphs': False", code)
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
+        self.assertEqual(self._recorded_in_fresh_process(y, env), 0)
 
 
 def _exception_chain(exc: BaseException | None) -> str:

@@ -1761,6 +1761,17 @@ class PrecompileSession(Generic[_P, _R]):
     ) -> None:
         self._fn = fn
         self._backend = backend
+        # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
+        # graphs is decided again when it is post-compiled at load. The artifact
+        # records the capture's choice, and the capture's calls compile under it.
+        self._cudagraph_config: dict[str, bool] = {}
+        if backend == "inductor":
+            from torch._inductor import config as inductor_config
+
+            self._cudagraph_config = {
+                "triton.cudagraphs": inductor_config.triton.cudagraphs,
+                "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
+            }
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -1880,6 +1891,7 @@ class PrecompileSession(Generic[_P, _R]):
             with (
                 _capture_config(),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
+                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 return self._compiled(*args, **kwargs)
         except Exception as e:
@@ -2125,7 +2137,12 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         return _build_multigraph_artifact(
-            self._served_entry()[0], backends, summary, self._backend, self._fn
+            self._served_entry()[0],
+            backends,
+            summary,
+            self._backend,
+            self._fn,
+            self._cudagraph_config,
         )
 
 
