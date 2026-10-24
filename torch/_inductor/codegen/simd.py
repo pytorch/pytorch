@@ -4262,7 +4262,18 @@ class SIMDScheduling(BaseScheduling):
         else:
             coalesce_analysis = None
 
-        return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
+        if torch._inductor.config.triton.cudagraph_kernel_annotations:
+            from torch._inductor.scheduler import get_fused_kernel_module_fqn
+
+            V.graph._current_kernel_module_fqn = get_fused_kernel_module_fqn(nodes)
+        else:
+            V.graph._current_kernel_module_fqn = None
+
+        try:
+            return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
+        finally:
+            # Reset so non-simd kernels don't inherit a stale FQN.
+            V.graph._current_kernel_module_fqn = None
 
     @staticmethod
     def can_use_32bit_indexing(

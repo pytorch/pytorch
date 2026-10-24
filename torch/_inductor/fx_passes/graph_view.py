@@ -92,11 +92,14 @@ class GraphView:
 
 def _clean_stack_name(stack_name: str) -> str:
     """
-    Clean up FX node's nn_module_stack metadata string to match the module name hierarchies
+    Clean up FX node's nn_module_stack metadata string to a dot-separated path.
 
-    Example:
+    Examples:
         Input: "L['self']._modules['layers']['0']._modules['attention']"
         Output: "layers.0.attention"
+
+        Input: "L['self'].networks.1.conv"
+        Output: "networks.1.conv"
     """
     cleaned = re.sub(r"^L\['self'\]\.?", "", stack_name)
     parts = re.findall(r"\['([^']+)'\]", cleaned)
@@ -105,6 +108,11 @@ def _clean_stack_name(stack_name: str) -> str:
 
 def _is_root(stack: str) -> bool:
     return stack == ""
+
+
+def _strip_instance_suffix(name: str) -> str:
+    """Strip the _N uniqueness suffix added by FX to node names (e.g. convolution_1 -> convolution)."""
+    return re.sub(r"_\d+$", "", name)
 
 
 def make_graph_view(
