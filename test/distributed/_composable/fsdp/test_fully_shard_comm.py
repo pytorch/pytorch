@@ -11,6 +11,7 @@ import unittest
 import warnings
 import weakref
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -37,13 +38,18 @@ from torch.distributed.fsdp._fully_shard._all_gather_layout import (
     AllGatherOutputs,
     AllGatherParamMetadata,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGather,
+    ReduceScatterInputLayout,
+    ReduceScatterInputPlan,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     AllGatherResult,
+    DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -742,7 +748,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
         model.set_all_gather_layout(CountingLayout(all_gather_output_fn))
         group = fully_shard.state(model)._fsdp_param_group
-        group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
         model.set_custom_reduce_scatter(CountingReduceScatter())
         inp = torch.randn((2, 8), device=device_type)
         model(inp).sum().backward()
@@ -761,7 +767,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # FSDP frees the copy-in and its gradient copies before the reduce-scatter
         self.assertEqual(num_alive_grads, [0])
         # A callback with the 2.15 signature fails instead of misreading arguments
-        group._prepare_reduce_scatter_inputs = (
+        model.set_reduce_scatter_input_fn(
             lambda fsdp_params, unsharded_grads, world_size: None
         )
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
@@ -3238,6 +3244,143 @@ class TestAllGatherLayoutCopyOut(TestCase):
             self.assertIs(buffer, output)
         for ts, value in zip(outputs.tensors, values):
             self.assertEqual(ts[0].view(value.shape), value)
+
+
+class TestFullyShardRankStride(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _init_models(self):
+        model = nn.Sequential(nn.Linear(5, 3), nn.Linear(3, 2))
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
+        return model, ref_model
+
+    def _check_parity(self, model, ref_model):
+        inp = torch.randn(4, 5)
+        output = model(inp)
+        self.assertEqual(output, ref_model(inp))
+        output.sum().backward()
+        ref_model(inp).sum().backward()
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            dist.all_reduce(ref_param.grad)
+            ref_param.grad.div_(self.world_size)
+            self.assertEqual(param.grad.full_tensor(), ref_param.grad)
+
+    def test_all_gather_rank_stride(self):
+        # The finalizing layout's rank stride sizes the collective, and copy_in
+        # zero-fills each chunk past its payload
+        test = self
+
+        class AlignedAllGather(DefaultAllGather):
+            def __init__(self):
+                self.output_numels = []
+
+            def rank_stride_alignment(self, dtype, group):
+                return 4
+
+            def __call__(self, output_tensor, input_tensor, group, async_op=False):
+                self.output_numels.append(output_tensor.numel())
+                return super().__call__(output_tensor, input_tensor, group, async_op)
+
+        class WideChunks(AllGatherLayout):
+            def prepare_output(self, metadata):
+                test.assertEqual(metadata.rank_stride_alignment, 4)
+                self.input_numel = metadata.input_numel
+                return metadata.input_numel
+
+            def rank_stride(self, input_numel, alignment):
+                return input_numel + alignment - 1
+
+            def finalize_outputs(self, metadata):
+                rows = metadata.all_gather_output.view(metadata.world_size, -1)
+                numel = metadata.output_metadata
+                test.assertEqual(rows[:, numel:], torch.zeros_like(rows[:, numel:]))
+                exact = rows[:, :numel].contiguous().view(-1)
+                return DefaultAllGatherLayout().finalize_outputs(
+                    replace(metadata, all_gather_output=exact)
+                )
+
+        model, ref_model = self._init_models()
+        comm, layout = AlignedAllGather(), WideChunks()
+        model.set_custom_all_gather(comm)
+        model.set_all_gather_layout(layout)
+        self._check_parity(model, ref_model)
+        stride = layout.input_numel + 3
+        self.assertEqual(set(comm.output_numels), {self.world_size * stride})
+
+        class NarrowChunks(AllGatherLayout):
+            def prepare_output(self, metadata):
+                return True
+
+            def rank_stride(self, input_numel, alignment):
+                return input_numel - 1
+
+            def finalize_outputs(self, metadata):
+                raise AssertionError("FSDP finalized a rejected all-gather")
+
+        model, _ = self._init_models()
+        model.set_all_gather_layout(NarrowChunks())
+        with self.assertRaisesRegex(ValueError, "rank stride of"):
+            model(torch.randn(4, 5))
+
+    def test_reduce_scatter_row_width(self):
+        # The layout's rows size the reduce-scatter, and FSDP trims them back to
+        # the padded shards
+        test = self
+
+        class AlignedReduceScatter(DefaultReduceScatter):
+            def __init__(self):
+                self.input_numels = []
+
+            def rank_stride_alignment(self, dtype, group):
+                return 4
+
+            def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
+                self.input_numels.append(input_tensor.numel())
+                args = (output_tensor, input_tensor, group, op, async_op)
+                return super().__call__(*args)
+
+        class WideRows(ReduceScatterInputLayout):
+            def prepare(self, unsharded_grads, metadata):
+                test.assertEqual(metadata.rank_stride_alignment, 4)
+                world_size = metadata.world_size
+                shards_numel = sum(metadata.padded_sharded_numels)
+                self.shards_numel, row_numel = shards_numel, shards_numel + 3
+                exact = DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT.prepare(
+                    unsharded_grads, metadata
+                )
+
+                def copy_in(reduce_scatter_input):
+                    rows = reduce_scatter_input.view(world_size, row_numel)
+                    exact_rows = rows.new_empty((world_size, shards_numel))
+                    exact.copy_in(exact_rows.view(-1))
+                    rows[:, :shards_numel].copy_(exact_rows)
+                    rows[:, shards_numel:].zero_()
+
+                return ReduceScatterInputPlan(row_numel=row_numel, copy_in=copy_in)
+
+        model, ref_model = self._init_models()
+        comm, layout = AlignedReduceScatter(), WideRows()
+        model.set_custom_reduce_scatter(comm)
+        model.set_reduce_scatter_input_fn(layout)
+        hook_numels = []
+        model.set_all_reduce_hook(lambda output: hook_numels.append(output.numel()))
+        self._check_parity(model, ref_model)
+        row_numel = layout.shards_numel + 3
+        self.assertEqual(comm.input_numels, [self.world_size * row_numel])
+        self.assertEqual(hook_numels, [layout.shards_numel])
+
+        class NarrowRows(ReduceScatterInputLayout):
+            def prepare(self, unsharded_grads, metadata):
+                return ReduceScatterInputPlan(row_numel=0, copy_in=lambda input: None)
+
+        model.set_reduce_scatter_input_fn(NarrowRows())
+        with self.assertRaisesRegex(ValueError, "rows of 0 elements"):
+            model(torch.randn(4, 5)).sum().backward()
 
 
 class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
