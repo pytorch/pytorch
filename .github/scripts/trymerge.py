@@ -469,6 +469,9 @@ INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
+# CodeSync's only NEUTRAL conclusion for pytorch: the diff touches paths the export
+# doesn't, and it is not yet marked landed.
+INTERNAL_ONLY_PATHS_TITLE = "Pull Request must be landed through the Diffs tool!"
 # Meta CodeSync creates this check-run in the queued state on every new head commit
 # of a PR it tracks internally, and only ever completes it once someone imports that
 # exact revision, so on a PR that has been rebased -- or was never imported -- it just
@@ -754,6 +757,23 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
+# author_url of comments remembered by remember_comment_author.  Only
+# `comments(last: 5)` selects `author { url }`, and merge()'s retry loop refetches
+# the PR, so without this a merge comment pushed out of that window while CI runs
+# loses the App URL its internal-checks waiver depends on.
+_COMMENT_AUTHOR_URLS: dict[tuple[str, str, int, int], str] = {}
+
+
+def remember_comment_author(pr: GitHubPR, comment_id: int | None) -> None:
+    """Remember the author URL of comment `comment_id` while `pr` still has it,
+    so _unedited_comment_author can supply it after a refetch drops it."""
+    if comment_id is None:
+        return
+    author_url = pr.get_comment_by_id(comment_id).author_url
+    if author_url is not None:
+        _COMMENT_AUTHOR_URLS[(pr.org, pr.project, pr.pr_num, comment_id)] = author_url
+
+
 def _unedited_comment_author(
     pr: GitHubPR, comment_id: int | None
 ) -> tuple[str, str | None] | None:
@@ -767,10 +787,25 @@ def _unedited_comment_author(
     comment = pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
         return None
-    return comment.author_login, comment.author_url
+    author_url = comment.author_url or _COMMENT_AUTHOR_URLS.get(
+        (pr.org, pr.project, pr.pr_num, comment_id)
+    )
+    return comment.author_login, author_url
 
 
-def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> bool:
+META_CODESYNC_APP_URL = "https://github.com/apps/meta-codesync"
+
+
+def can_skip_internal_checks(
+    pr: GitHubPR,
+    comment_id: int | None = None,
+    target: GitHubPR | None = None,
+    *,
+    for_merge: bool = True,
+) -> bool:
+    """Whether the comment `comment_id` on `pr` waives the internal-changes guard
+    for `target` (default `pr`), which may be a PR stacked below it.  The
+    meta-codesync waiver below is for its merge comments only."""
     author = _unedited_comment_author(pr, comment_id)
     if author is None:
         return False
@@ -778,32 +813,66 @@ def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> boo
     if author_login == "facebook-github-bot":
         return True
     # facebook-github-tools is a GitHub App; identify by its app URL.
-    return author_url == "https://github.com/apps/facebook-github-tools"
+    if author_url == "https://github.com/apps/facebook-github-tools":
+        return True
+    # meta-codesync took the co-dev auto-merge over from facebook-github-tools and
+    # only posts it once the internal diff has landed.  CodeSync can recompute its
+    # internal-changes check to NEUTRAL before Phabricator marks the diff closed,
+    # which failed the merge of #201671, so waive NEUTRAL and nothing else: a
+    # reopened or out-of-sync PR is reported as FAILURE and still blocks.  Matched
+    # on app URL because GraphQL spells the login bare ("meta-codesync"), which an
+    # ordinary user could register; a comment never seen in the prefetched window
+    # has no URL and keeps the guard.  The comment vouches only for its own PR's
+    # diff, so a PR stacked below gets no waiver from it.
+    if for_merge and author_url == META_CODESYNC_APP_URL:
+        return _meta_codesync_waives(pr, target)
+    return False
+
+
+def _meta_codesync_waives(pr: GitHubPR, target: GitHubPR | None) -> bool:
+    """meta-codesync's waiver for `target`, given its merge comment on `pr`."""
+    if target is not None and target.pr_num != pr.pr_num:
+        return False
+    check = pr.get_checkrun_conclusions().get(INTERNAL_CHANGES_CHECKRUN_NAME)
+    return (
+        check is not None
+        and check.status == "NEUTRAL"
+        and check.title == INTERNAL_ONLY_PATHS_TITLE
+    )
+
+
+def merge_loop_skips_internal_checks(pr: GitHubPR, comment_id: int | None) -> bool:
+    """The waiver merge()'s own rule checks pass: meta-codesync's only.  Those checks
+    never waived the guard for the older bots, so a plain (non-force) merge from them
+    is still refused while the internal-changes check is not SUCCESS."""
+    # The waiver only matters when the guard would fire; skip the comment lookup
+    # on every retry otherwise.
+    if not pr.has_internal_changes():
+        return False
+    author = _unedited_comment_author(pr, comment_id)
+    return (
+        author is not None
+        and author[1] == META_CODESYNC_APP_URL
+        and _meta_codesync_waives(pr, None)
+    )
 
 
 # Bot identities that auto-merge a co-dev PR once its internal Phabricator diff
-# has landed. `meta-codesync` took this over from `facebook-github-tools`, so
-# both are listed: the older one still appears on long-lived PRs.
+# has landed: the facebook-github-bot account by login, and the GitHub Apps by
+# App URL. `meta-codesync` took this over from `facebook-github-tools`; the older
+# App still appears on long-lived PRs.
 #
-# Matched on login rather than on the App URL that can_skip_internal_checks
-# uses. Only `comments(last: 5)` selects `author { url }` — GH_GET_PR_PREV_COMMENTS
-# and the reviews fragment select `login` alone, so author_url is silently None
-# for any comment older than the prefetched window (see _comment_from_node's
-# `.get("url", None)`). `login` is selected everywhere, and a `[bot]` suffix is
-# unforgeable because GitHub usernames cannot contain brackets.
+# Apps are matched on App URL only: GraphQL, which trymerge reads comments
+# through, spells an App's login bare ("meta-codesync"), and a bare login could be
+# a user account. Only `comments(last: 5)` selects `author { url }`, so a comment
+# outside that window is recognized only if remember_comment_author saw it inside
+# the window earlier.
 #
 # Deliberately NOT reusing can_skip_internal_checks' allowlist. That predicate
 # also waives the "must be landed via Phabricator" guard, so adding an identity
 # to it is a trust decision; this list only decides whether a missing
 # release-notes label is auto-filled.
-CODEV_MERGE_BOT_LOGINS = frozenset(
-    {
-        "facebook-github-bot",
-        "facebook-github-tools[bot]",
-        "meta-codesync[bot]",
-    }
-)
-# Same identities by App URL, for the queries that do select it.
+CODEV_MERGE_BOT_LOGINS = frozenset({"facebook-github-bot"})
 CODEV_MERGE_BOT_APP_URLS = frozenset(
     {
         "https://github.com/apps/facebook-github-tools",
@@ -1489,7 +1558,9 @@ class GitHubPR:
                     pr,
                     repo,
                     skip_mandatory_checks=skip_mandatory_checks,
-                    skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                    skip_internal_checks=can_skip_internal_checks(
+                        self, comment_id, target=pr
+                    ),
                     ignore_current_checks=ignore_current_checks,
                 )
             repo.cherry_pick(rev)
@@ -1617,7 +1688,9 @@ class GitHubPR:
                         pr,
                         repo,
                         skip_mandatory_checks=skip_mandatory_checks,
-                        skip_internal_checks=skip_internal_checks,
+                        skip_internal_checks=can_skip_internal_checks(
+                            self, comment_id, target=pr
+                        ),
                         ignore_current_checks=ignore_current_checks,
                     )
 
@@ -1628,7 +1701,7 @@ class GitHubPR:
             wait_window=greenlight_wait,
             dry_run=dry_run,
             skip_mandatory_checks=skip_mandatory_checks,
-            skip_internal_checks=skip_internal_checks,
+            skip_internal_checks=partial(can_skip_internal_checks, self, comment_id),
             ignore_current_checks=ignore_current_checks,
         )
 
@@ -2220,7 +2293,7 @@ def check_greenlight_reviewed_head_sha(
     wait_window: GreenlightWaitWindow | None,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
-    skip_internal_checks: bool = False,
+    skip_internal_checks: Callable[[GitHubPR], bool] = lambda _: False,
     ignore_current_checks: set[tuple[int, str]] | None = None,
 ) -> None:
     """Block a merge that only greenlight authorizes and that greenlight has not
@@ -2232,6 +2305,7 @@ def check_greenlight_reviewed_head_sha(
 
     The gate arguments are the ones `merge_into` gave the real `find_matching_merge_rule`,
     so that asking whether greenlight's approval is load-bearing asks it of the same gate.
+    skip_internal_checks maps each PR to its own waiver, as the per-PR gates compute it.
 
     The ghstack path lands a cherry-pick of each PR's head rather than the head itself,
     but get_ghstack_prs has already proven the two carry identical content, and the head
@@ -2260,7 +2334,7 @@ def check_greenlight_reviewed_head_sha(
                     stacked,
                     repo,
                     skip_mandatory_checks=skip_mandatory_checks,
-                    skip_internal_checks=skip_internal_checks,
+                    skip_internal_checks=skip_internal_checks(stacked),
                     ignore_current_checks=ignore_current_checks,
                 ),
             )
@@ -3142,7 +3216,9 @@ def try_revert(
             commit_sha,
             author_login=author_login,
             extra_msg=extra_msg,
-            skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+            skip_internal_checks=can_skip_internal_checks(
+                pr, comment_id, for_merge=False
+            ),
             dry_run=dry_run,
         )
         return
@@ -3168,7 +3244,7 @@ def try_revert(
         author_login=author_login,
         extra_msg=extra_msg,
         dry_run=dry_run,
-        skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+        skip_internal_checks=can_skip_internal_checks(pr, comment_id, for_merge=False),
     )
 
 
@@ -3382,8 +3458,19 @@ def merge(
             native_stack=native_stack,
         )
 
-    # Check for approvals
-    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+    # Remember the merge comment's author URL now, while it is normally still among
+    # the prefetched comments: a retry may refetch the PR after newer comments push
+    # it out of that window.
+    remember_comment_author(pr, comment_id)
+    # Check for approvals.  The rule checks raise on has_internal_changes() unless
+    # told to skip it; the waiver reads the current check conclusions, so the retry
+    # loop recomputes it per refetch.
+    find_matching_merge_rule(
+        pr,
+        repo,
+        skip_mandatory_checks=True,
+        skip_internal_checks=merge_loop_skips_internal_checks(pr, comment_id),
+    )
 
     ensure_mergeable_labels(pr, comment_id, dry_run)
 
@@ -3431,7 +3518,12 @@ def merge(
             ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(
-                    pr, repo, ignore_current_checks=ignore_current_checks
+                    pr,
+                    repo,
+                    skip_internal_checks=merge_loop_skips_internal_checks(
+                        pr, comment_id
+                    ),
+                    ignore_current_checks=ignore_current_checks,
                 )
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:
