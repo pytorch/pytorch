@@ -7982,8 +7982,14 @@ def div_prim(a, b):
     # Disable CPU optimization to avoid precision issues.
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
-        # Replace divide by constant with multiply by reciprocal
+        # Like eager CUDA, float32 only multiplies by the reciprocal when it is an
+        # exact power of two; otherwise divide with IEEE rounding.
+        if a.get_dtype() == torch.float32:
+            mantissa, exponent = math.frexp(divisor.value)
+            if mantissa not in (0.5, -0.5) or not -126 <= 1 - exponent <= 127:
+                return _div_rn(a, b)
 
+        # Replace divide by constant with multiply by reciprocal
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
         else:

@@ -352,6 +352,41 @@ class StrictNumericsCompileTest(TestCase):
         self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
         self.assertIn("div_rn", "\n".join(codes))
 
+    @parametrize(
+        "divisor,uses_div_rn",
+        (
+            (6.0, True),
+            (448.0, True),
+            (0.25, False),
+            (-0.25, False),
+            # Power of two whose reciprocal is a normal float32
+            (2.0**126, False),
+            (2.0**-127, False),
+            # Power of two whose reciprocal is subnormal: eager divides
+            (2.0**127, True),
+        ),
+    )
+    def test_float32_div_by_constant_matches_eager(self, device, divisor, uses_div_rn):
+        # Eager CUDA float32 divides by a non-power-of-two scalar with IEEE
+        # rounding, so default compiled code must use div_rn, not x * (1 / s).
+        # Power-of-two divisors keep the exact reciprocal multiply.
+        x = torch.randn(1 << 16, device=device) * 100
+
+        result, codes = run_and_get_code(torch.compile(lambda t: t / divisor), x)
+
+        self.assertEqual(result.view(torch.int32), (x / divisor).view(torch.int32))
+        self.assertEqual("div_rn" in "\n".join(codes), uses_div_rn)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_reduced_float_div_by_constant_uses_reciprocal(self, device, dtype):
+        # Eager half/bfloat16 keep the reciprocal multiply, so compiled must too.
+        x = (torch.randn(1 << 16, device=device) * 100).to(dtype)
+
+        result, codes = run_and_get_code(torch.compile(lambda t: t / 6.0), x)
+
+        self.assertEqual(result.view(torch.int16), (x / 6.0).view(torch.int16))
+        self.assertNotIn("div_rn", "\n".join(codes))
+
 
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON

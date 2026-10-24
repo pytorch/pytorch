@@ -157,6 +157,8 @@ class BoundVars:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
+    """Ops handler computing the range of values each inductor op can produce."""
+
     def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
@@ -270,6 +272,11 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             return x
 
         return cls.trunc(x)
+
+    # div_rn only differs from truediv in the last bit of rounding
+    @classmethod
+    def div_rn(cls, a: Any, b: Any) -> ValueRanges[Any]:
+        return cls.truediv(a, b)
 
     @classmethod
     def sub(cls, a: Any, b: Any) -> ValueRanges[Any]:
