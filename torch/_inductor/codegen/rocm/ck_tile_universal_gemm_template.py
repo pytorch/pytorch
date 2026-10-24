@@ -186,14 +186,51 @@ class CKTileGemmOperation:
         return asdict(self).items()
 
 
+# Block tiles offered to autotune, per architecture.
+#
+# gfx9 keeps the tiles this template has always emitted.
+_GFX9_BLOCK_TILES = ((256, 256, 32), (256, 256, 64))
+_GFX9_COMPV4_BLOCK_TILES = ((256, 256, 32),)
+
+# These come from an internal bf16 autotuning sweep.
+# The set is weighted towards `Mem`, which leads `CompV3` on most shapes and by
+# the wider margins.
+_GFX1250_BLOCK_TILES = (
+    (256, 256, 64),
+    (128, 128, 64),
+    (128, 128, 128),
+    (64, 64, 256),
+)
+# CompV4 asserts DoubleSmemBuffer and returns 2 * Policy::GetSmemSize(), so it
+# takes a single tile at half the staging footprint.
+_GFX1250_COMPV4_BLOCK_TILES = ((128, 128, 64),)
+
+
 @functools.cache
-def ops():
+def ops(
+    warp_tile=(32, 32, 16),
+    block_tiles=_GFX9_BLOCK_TILES,
+    compv4_block_tiles=_GFX9_COMPV4_BLOCK_TILES,
+):
     """
-    Generate the supported instance dataclasses
+    Generate the supported instance dataclasses.
+
+    ``warp_tile`` is the (M, N, K) warp-tile shape emitted for every instance.
+    gfx9 (MFMA) uses (32, 32, 16); gfx1250 (WMMA, wave32) uses (16, 16, 32).
+    The K value is kept as a concrete int here for instance naming/dedup and the
+    (unused) warp-tile divisibility check; ``emit_ck_instance`` renders the K as
+    ``ck_tile::get_k_warp_tile<T, 16>()`` on gfx1250 so CK remains the device-side
+    source of truth.
+
+    ``block_tiles`` and ``compv4_block_tiles`` are the (M, N, K) block tiles to
+    emit; CompV4 takes its own set because it double-buffers LDS. Both default to
+    the gfx9 sets, so callers that do not pass them get the historical instances.
+    All arguments must stay hashable -- this function is ``functools.cache``d.
     """
     import itertools
 
     gemm_dtypes = [(d,) * 3 for d in GEMM_DTYPES]
+    (wt_m, wt_n, wt_k) = warp_tile
 
     compute_v3_instances = [
         CKTileGemmOperation(
@@ -224,9 +261,9 @@ def ops():
             ("Row", "Col", "Row"),
         ]
         for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
-        for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
+        for (tile_m, tile_n, tile_k) in block_tiles
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
-        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
+        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(wt_m, wt_n, wt_k)]
         for m_is_padded in ["true", "false"]
         for n_is_padded in ["true", "false"]
         for k_is_padded in ["true", "false"]
@@ -262,11 +299,10 @@ def ops():
             ("Row", "Col", "Row"),
         ]
         for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
-        for (tile_m, tile_n, tile_k) in [
-            (256, 256, 32)
-        ]  # half the tile size since it has double buffering
+        # half the tile size since it has double buffering
+        for (tile_m, tile_n, tile_k) in compv4_block_tiles
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
-        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
+        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(wt_m, wt_n, wt_k)]
         for m_is_padded in ["true", "false"]
         for n_is_padded in ["true", "false"]
         for k_is_padded in ["true", "false"]
@@ -302,9 +338,9 @@ def ops():
             ("Row", "Col", "Row"),
         ]
         for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
-        for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
+        for (tile_m, tile_n, tile_k) in block_tiles
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
-        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
+        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(wt_m, wt_n, wt_k)]
         for m_is_padded in ["true", "false"]
         for n_is_padded in ["true", "false"]
         for k_is_padded in ["true", "false"]
@@ -416,6 +452,39 @@ class CKTileGemmTemplate(CKTileTemplate):
             input_nodes=input_nodes,
             layout=layout,
         )
+
+    def _target_arch(self) -> str:
+        """Base gfx arch string (e.g. "gfx1250") of the *compile target*, or "" if
+        it cannot be determined.
+
+        This must match the arch that ``compile_command`` passes to
+        ``--offload-arch`` (``config.rocm.arch``), NOT the physical runtime
+        device -- otherwise the rendered source (WMMA macros, warp tile) can be
+        emitted for one arch and compiled for another. Precedence mirrors
+        ``use_ck_template``: ``config.rocm.arch`` wins; the native device arch is
+        only a fallback when it is unset.
+        """
+        if config.rocm.arch:
+            # A single instance is rendered for one arch; a fat multi-arch list
+            # (e.g. gfx942;gfx950;gfx1250) is ambiguous here, so take the first.
+            # The real autotune path compiles per concrete arch, so this is exact
+            # in practice.
+            return config.rocm.arch[0].split(":")[0]
+
+        from ...utils import _rocm_native_device_arch_name
+
+        for node in (self.output_node, *self.input_nodes):
+            device = node.get_layout().device
+            if device is not None and device.type == "cuda":
+                return _rocm_native_device_arch_name(device).split(":")[0]
+        return ""
+
+    def _is_gfx1250(self) -> bool:
+        return self._target_arch() == "gfx1250"
+
+    def _threads_per_warp(self) -> int:
+        # gfx1250 executes wave32; gfx9 arches are wave64.
+        return 32 if self._is_gfx1250() else self.gfx9_threads_per_warp
 
     def header(self) -> IndentedBuffer:
         res = super().header()
@@ -535,9 +604,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 ):
                     return alignment
 
-        threads_per_block = (
-            op.warp_m * op.warp_n * op.warp_k * self.gfx9_threads_per_warp
-        )
+        threads_per_block = op.warp_m * op.warp_n * op.warp_k * self._threads_per_warp()
         a_elements_per_thread = op.tile_m * op.tile_k / threads_per_block
         b_elements_per_thread = op.tile_n * op.tile_k / threads_per_block
 
@@ -834,9 +901,20 @@ class CKTileGemmTemplate(CKTileTemplate):
             constexpr auto scheduler = ck_tile::GemmPipelineScheduler::{scheduler_type};
         """
 
+        fields = asdict(op)
+        if self._is_gfx1250():
+            # On gfx1250 the K warp tile is CK's device-side authority: emit
+            # ck_tile::get_k_warp_tile<T, WarpTileM>() (returns 32 for fp16/bf16,
+            # 64 for 8-bit) instead of the Python-side int, so the compiled kernel
+            # always matches CK's own WMMA shape. The int in `op.warp_tile_k` is
+            # kept only for instance naming/dedup and host-side filtering.
+            fields["warp_tile_k"] = (
+                f"ck_tile::get_k_warp_tile<{op.datatype_a}, {op.warp_tile_m}>()"
+            )
+
         rendered_definition = self._template_from_string(template_definition).render(
             operation_name=op.name(),
-            **asdict(op),
+            **fields,
             rendered_pipeline_problem=rendered_pipeline_problem,
             rendered_scheduler=render_scheduler(op.scheduler),
             rendered_universal_gemm_problem=rendered_universal_gemm_problem,
@@ -880,6 +958,15 @@ class CKTileGemmTemplate(CKTileTemplate):
 */
 """
 
+        if self._is_gfx1250():
+            # Select CK's gfx1250 WMMA path. These must precede every ck_tile
+            # include (the version_comment is emitted before {{headers}}), because
+            # get_k_warp_tile() is guarded by
+            # `#if CK_TILE_USE_WMMA && defined(CK_USE_GFX1250)`.
+            version_comment = (
+                "#define CK_TILE_USE_WMMA 1\n#define CK_USE_GFX1250\n" + version_comment
+            )
+
         kernel_launch = self._template_from_string(self.gemm_kernel_launch).render(
             instance_namespace=op.name(),
             use_v2_api=use_v2_api,
@@ -909,7 +996,24 @@ class CKTileGemmTemplate(CKTileTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        instances = ops()
+        # gfx1250 (WMMA, wave32) needs a 16x16 warp tile; gfx9 arches (MFMA) use
+        # 32x32x16. On gfx1250 the (32,32,16) instances compile to matrix-core-free
+        # stubs and are discarded at autotune, so we replace (not augment) the product.
+        # K=32 is the concrete value get_k_warp_tile<T,16>() returns for fp16/bf16;
+        # emit_ck_instance renders the actual C++ as the function call.
+        #
+        # The block tiles are selected on the same axis: gfx9 keeps its historical
+        # set, gfx1250 gets the tiles that measure well for the pipelines emitted
+        # here. See the block tile constants above ops().
+        if self._is_gfx1250():
+            warp_tile = (16, 16, 32)
+            block_tiles = _GFX1250_BLOCK_TILES
+            compv4_block_tiles = _GFX1250_COMPV4_BLOCK_TILES
+        else:
+            warp_tile = (32, 32, 16)
+            block_tiles = _GFX9_BLOCK_TILES
+            compv4_block_tiles = _GFX9_COMPV4_BLOCK_TILES
+        instances = ops(warp_tile, block_tiles, compv4_block_tiles)
         if not instances:
             raise AssertionError(
                 "No Composable Kernel Universal GEMM instances found. "
