@@ -504,22 +504,28 @@ MXFP8_SCALE_BLOCK = 32
 
 @dataclass(frozen=True)
 class FlyDSLMXFP8GroupedGemmConfig:
-    """Tile shape of the MXFP8 grouped GEMM kernel.
+    """Tile shape and XCD traversal of the MXFP8 grouped GEMM kernel.
 
     The MXFP8 kernel is not a scaled variant of the BF16 grouped kernel and
     does not share its knobs: its contraction step is fixed at 128 elements
     (one scaled-MFMA K), its wave split is fixed at 4x4 over one 256-thread
-    block, and its LDS ping-pong depth is fixed at 2. What remains tunable is
-    the output tile, so that is the whole config.
+    block, and its LDS ping-pong depth is fixed at 2. NUM_XCD=1 disables XCD
+    gathering; larger values gather adjacent logical workers on
+    each XCD. GROUP_M groups row tiles to reuse weights. Autotuning compares
+    the original traversal with XCD gathering, alone and with four-row groups.
     """
 
     BLOCK_R: int = 256
     BLOCK_C: int = 256
+    NUM_XCD: int = 1
+    GROUP_M: int = 1
 
 
 class FlyDSLMXFP8GroupedGemmConfigDict(TypedDict):
     BLOCK_R: int
     BLOCK_C: int
+    NUM_XCD: int
+    GROUP_M: int
 
 
 # Every tile the kernel implements. BLOCK_R below 64 puts a wave-dim half under
@@ -543,6 +549,8 @@ def _make_mxfp8_grouped_gemm_param(
         group_count,
         block_r=int(gemm_config["BLOCK_R"]),
         block_c=int(gemm_config["BLOCK_C"]),
+        num_xcd=int(gemm_config.get("NUM_XCD", 1)),
+        group_m=int(gemm_config.get("GROUP_M", 1)),
     )
 
 
@@ -569,16 +577,24 @@ def is_mxfp8_grouped_gemm_config_valid_for_shape(
             group_count,
             int(gemm_config["BLOCK_R"]),
             int(gemm_config["BLOCK_C"]),
+            num_xcd=int(gemm_config.get("NUM_XCD", 1)),
+            group_m=int(gemm_config.get("GROUP_M", 1)),
         )
         is not None
     )
 
 
-def get_exhaustive_mxfp8_grouped_gemm_configs() -> list[FlyDSLMXFP8GroupedGemmConfig]:
-    """Return every tile the MXFP8 grouped GEMM kernel implements."""
+def get_exhaustive_mxfp8_grouped_gemm_configs(
+    num_xcd: int = 1,
+) -> list[FlyDSLMXFP8GroupedGemmConfig]:
+    """Return every tile with measured traversal candidates for the device."""
     return [
-        FlyDSLMXFP8GroupedGemmConfig(BLOCK_R=block_r, BLOCK_C=block_c)
-        for block_r, block_c in product(_MXFP8_GROUPED_BLOCK_R, _MXFP8_GROUPED_BLOCK_C)
+        FlyDSLMXFP8GroupedGemmConfig(block_r, block_c, xcd, group_m)
+        for block_r, block_c, (xcd, group_m) in product(
+            _MXFP8_GROUPED_BLOCK_R,
+            _MXFP8_GROUPED_BLOCK_C,
+            ((1, 1), (num_xcd, 1), (num_xcd, 4)) if num_xcd > 1 else ((1, 1),),
+        )
     ]
 
 
@@ -615,7 +631,14 @@ def get_mxfp8_grouped_gemm_configs(
     return only the tile ``pick_tile`` chooses.
     """
     if config.flydsl_enable_autotuning:
-        candidates = get_exhaustive_mxfp8_grouped_gemm_configs()
+        if num_cus is None:
+            import torch
+
+            num_cus = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            ).multi_processor_count
+        # A gfx950 XCD exposes 32 CUs; partitions expose fewer XCDs.
+        candidates = get_exhaustive_mxfp8_grouped_gemm_configs(max(1, num_cus // 32))
     else:
         candidates = [get_default_mxfp8_grouped_gemm_config(m, n, group_count, num_cus)]
 

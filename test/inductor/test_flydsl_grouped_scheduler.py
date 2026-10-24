@@ -46,6 +46,19 @@ class TestFlyDSLGroupedSchedulerPolicy(TestCase):
         self.assertIs(
             kernel.cached_launch(*param.key()), kernel.cached_launch(*param.key())
         )
+        swizzled = dataclasses.replace(param, num_xcd=8, group_m=4)
+        self.assertNotEqual(param.__cache_signature__(), swizzled.__cache_signature__())
+        self.assertNotEqual(
+            kernel.make_mxfp8_grouped_gemm_kernel_name(param),
+            kernel.make_mxfp8_grouped_gemm_kernel_name(swizzled),
+        )
+        self.assertIsNot(
+            kernel.cached_launch(*param.key()), kernel.cached_launch(*swizzled.key())
+        )
+        with self.assertRaisesRegex(ValueError, "num_xcd must be positive"):
+            kernel.make_mxfp8_grouped_gemm_param(512, 2048, 8, num_xcd=0)
+        with self.assertRaisesRegex(ValueError, "group_m must be positive"):
+            kernel.make_mxfp8_grouped_gemm_param(512, 2048, 8, group_m=0)
 
 
 @unittest.skipIf(torch.version.hip is None, "requires ROCm")
@@ -62,14 +75,20 @@ class TestFlyDSLGroupedScheduler(TestCase):
         "tile", ((64, 128), (64, 256), (128, 128), (128, 256), (256, 128), (256, 256))
     )
     @parametrize("k", (512, 640, 2048))
-    def test_persistent_tiles(self, device, tile, k):
+    @parametrize(
+        "num_xcd,group_m,grid",
+        ((1, 1, 3), (8, 1, 8), (8, 4, 3), (8, 4, 8), (4, 4, 24), (8, 4, 256)),
+    )
+    def test_persistent_tiles(self, device, tile, k, num_xcd, group_m, grid):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             mxfp8_grouped_gemm_gfx950 as kernel,
         )
         from torch._inductor.runtime.flydsl_cache import flydsl_tensor_arg
 
         n = 384  # Partial column tile for BLOCK_C=256.
-        param = kernel.make_mxfp8_grouped_gemm_param(k, n, 6, *tile)
+        param = kernel.make_mxfp8_grouped_gemm_param(
+            k, n, 6, *tile, num_xcd=num_xcd, group_m=group_m
+        )
         # Same compiled specialization, different routing and token counts.
         for sizes in ([0, 1, 257, 0, 63, 513], [65, 0, 0, 129, 17, 0]):
             a, b, sa, sb, offs, reference = (
@@ -78,11 +97,11 @@ class TestFlyDSLGroupedScheduler(TestCase):
                 )
             )
             output = torch.empty_like(reference)
-            # Non-power-of-two grid, repeated tiles, and empty groups.
+            # Aligned and unaligned grids, both persistence modes, empty groups.
             with mock.patch.object(
                 kernel,
                 "get_mxfp8_grouped_gemm_persistent_grid_size",
-                return_value=3,
+                return_value=grid,
             ):
                 for _ in range(8):
                     output.fill_(float("nan"))
@@ -101,7 +120,7 @@ class TestFlyDSLGroupedScheduler(TestCase):
                         output.float(), reference.float(), atol=6e-2, rtol=6e-2
                     )
 
-    @parametrize("grid", (1, 3, 256))
+    @parametrize("grid", (1, 3, 8, 256))
     def test_empty_routing_leaves_output_untouched(self, device, grid):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             mxfp8_grouped_gemm_gfx950 as kernel,
@@ -113,7 +132,9 @@ class TestFlyDSLGroupedScheduler(TestCase):
                 [0, 17, 0, 0], 512, 384, device=device
             )
         )
-        param = kernel.make_mxfp8_grouped_gemm_param(512, 384, 4, 64, 256)
+        param = kernel.make_mxfp8_grouped_gemm_param(
+            512, 384, 4, 64, 256, num_xcd=8, group_m=4
+        )
         output = torch.full_like(reference, 42)
         offs.zero_()
         with mock.patch.object(
@@ -132,7 +153,8 @@ class TestFlyDSLGroupedScheduler(TestCase):
             )
         self.assertEqual(output, torch.full_like(output, 42))
 
-    def test_persistent_routing_changes_in_place(self, device):
+    @parametrize("grid", (3, 8, 256))
+    def test_persistent_routing_changes_in_place(self, device, grid):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             mxfp8_grouped_gemm_gfx950 as kernel,
         )
@@ -147,10 +169,12 @@ class TestFlyDSLGroupedScheduler(TestCase):
         b_scales = torch.pow(2.0, sb.view(torch.uint8).float() - 127).reshape(
             4, 384, -1
         )
-        param = kernel.make_mxfp8_grouped_gemm_param(2048, 384, 4, 128, 256)
+        param = kernel.make_mxfp8_grouped_gemm_param(
+            2048, 384, 4, 128, 256, num_xcd=8, group_m=4
+        )
         output = torch.empty((1024, 384), device=device, dtype=torch.bfloat16)
         with mock.patch.object(
-            kernel, "get_mxfp8_grouped_gemm_persistent_grid_size", return_value=3
+            kernel, "get_mxfp8_grouped_gemm_persistent_grid_size", return_value=grid
         ):
             for boundaries in (
                 [0, 1, 513, 1024],

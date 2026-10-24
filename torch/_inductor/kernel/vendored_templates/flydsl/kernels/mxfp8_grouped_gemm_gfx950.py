@@ -9,11 +9,11 @@
 # the groups. Raggedness is confined to: the block -> (group, row tile, col
 # tile) mapping, resolved ON DEVICE from `OFFS`; `row0 = m_start + r_base`; and
 # an epilogue mask on `r_ < m_end`, since a row tile may overhang its group.
-# The compile key is (K, N, E, BLOCK_C) only: M is routing-dependent, and keying
-# on it would JIT per step under real routing.
+# The compile key contains output geometry, tile shape, and traversal settings.
+# M is routing-dependent, and keying on it would JIT per step under real routing.
 #
 # Host side caps a row-tile upper bound at one workgroup per CU; workgroups walk
-# actual tiles N-fast, and persistence is compiled away when the bound fits.
+# actual tiles, and persistence is compiled away when the bound fits.
 # Rows past OFFS[-1] are untouched. The short contraction (K/128 = 11-16 steps)
 # is fully unrolled, so `_VmCounter` derives each vmcnt barrier from the ops
 # actually issued rather than a periodic pattern.
@@ -196,6 +196,8 @@ def _compile(
     BLOCK_C: int,
     BLOCK_R: int = BLOCK_R,
     PERSISTENT: bool = True,
+    NUM_XCD: int = 1,
+    GROUP_M: int = 1,
 ):
     """Compile a RAGGED forward grouped GEMM for one (K, N, E) shape.
 
@@ -698,7 +700,7 @@ def _compile(
                 wait_barrier(0)
 
         for_each_grouped_tile_static(
-            OFFS, E, N, BLOCK_R, BLOCK_C, PERSISTENT, compute_tile
+            OFFS, E, N, BLOCK_R, BLOCK_C, PERSISTENT, compute_tile, NUM_XCD, GROUP_M
         )
 
     @flyc.jit
@@ -736,10 +738,17 @@ def _compile(
 
 @functools.lru_cache(maxsize=None)
 def cached_launch(
-    K: int, N: int, E: int, BLOCK_C: int, BLOCK_R: int = 256, PERSISTENT: bool = True
+    K: int,
+    N: int,
+    E: int,
+    BLOCK_C: int,
+    BLOCK_R: int = 256,
+    PERSISTENT: bool = True,
+    NUM_XCD: int = 1,
+    GROUP_M: int = 1,
 ):
-    """Build one of two traversal specializations; token counts remain dynamic."""
-    return _compile(K, N, E, BLOCK_C, BLOCK_R, PERSISTENT=PERSISTENT)
+    """Cache by tile and traversal settings; token counts remain dynamic."""
+    return _compile(K, N, E, BLOCK_C, BLOCK_R, PERSISTENT, NUM_XCD, GROUP_M)
 
 
 def ceildiv(a: int, b: int) -> int:
@@ -761,9 +770,11 @@ class MXFP8GroupedGemmParam:
     block_c: int
     block_r: int
     persistent: bool = True
+    num_xcd: int = 1
+    group_m: int = 1
 
-    def key(self) -> tuple[int, int, int, int, int, bool]:
-        """Only traversal mode, not exact token count, specializes the launcher."""
+    def key(self) -> tuple[int, int, int, int, int, bool, int, int]:
+        """Specialize on geometry and traversal, never on exact token counts."""
         return (
             self.k,
             self.n,
@@ -771,9 +782,11 @@ class MXFP8GroupedGemmParam:
             self.block_c,
             self.block_r,
             self.persistent,
+            self.num_xcd,
+            self.group_m,
         )
 
-    def __cache_signature__(self) -> tuple[int, int, int, int, int, bool]:
+    def __cache_signature__(self) -> tuple[int, int, int, int, int, bool, int, int]:
         return self.key()
 
 
@@ -782,6 +795,8 @@ def make_mxfp8_grouped_gemm_kernel_name(param: MXFP8GroupedGemmParam) -> str:
         f"mxfp8_grouped_gemm_k{param.k}_n{param.n}_e{param.group_count}"
         f"_t{param.block_r}x{param.block_c}"
         f"_persistent{int(param.persistent)}"
+        f"_xcd{param.num_xcd}"
+        f"_gm{param.group_m}"
     )
 
 
@@ -791,6 +806,9 @@ def make_mxfp8_grouped_gemm_param(
     group_count: int,
     block_r: int = BLOCK_R,
     block_c: int = BLOCK_C_DEFAULT,
+    *,
+    num_xcd: int = 1,
+    group_m: int = 1,
 ) -> MXFP8GroupedGemmParam:
     """Validate one (K, N, E, BLOCK_R, BLOCK_C) against what `_compile` accepts.
 
@@ -801,6 +819,10 @@ def make_mxfp8_grouped_gemm_param(
     """
     if k <= 0 or n <= 0 or group_count <= 0:
         raise ValueError(f"degenerate shape K={k}, N={n}, E={group_count}")
+    if num_xcd <= 0:
+        raise ValueError(f"num_xcd must be positive, got {num_xcd}")
+    if group_m <= 0:
+        raise ValueError(f"group_m must be positive, got {group_m}")
     if k % BLOCK_M != 0:
         raise ValueError(f"K ({k}) must be a multiple of {BLOCK_M}")
     if k // BLOCK_M < 4:
@@ -833,15 +855,26 @@ def make_mxfp8_grouped_gemm_param(
         group_count=int(group_count),
         block_c=int(block_c),
         block_r=int(block_r),
+        num_xcd=int(num_xcd),
+        group_m=int(group_m),
     )
 
 
 def make_mxfp8_grouped_gemm_param_and_validate(
-    k: int, n: int, group_count: int, block_r: int, block_c: int
+    k: int,
+    n: int,
+    group_count: int,
+    block_r: int,
+    block_c: int,
+    *,
+    num_xcd: int = 1,
+    group_m: int = 1,
 ) -> MXFP8GroupedGemmParam | None:
     """`make_mxfp8_grouped_gemm_param`, returning None instead of raising."""
     try:
-        return make_mxfp8_grouped_gemm_param(k, n, group_count, block_r, block_c)
+        return make_mxfp8_grouped_gemm_param(
+            k, n, group_count, block_r, block_c, num_xcd=num_xcd, group_m=group_m
+        )
     except ValueError:
         return None
 
