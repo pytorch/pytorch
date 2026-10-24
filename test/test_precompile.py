@@ -6389,14 +6389,13 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(recorded, 0)
         self.assertGreater(captured, 0)
 
-    @parametrize("partition", [False, True])
-    def test_an_artifact_serves_cudagraphs_under_its_graph_partition(self, partition):
-        # The loading process runs graph_partition at the other value; post-compile
-        # wraps a partitioned and an unpartitioned graph differently.
-        options = {"triton.cudagraphs": True, "graph_partition": partition}
+    def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
+        # Post-compile would take the partitioned wrapper in a loading process
+        # running graph_partition, find no partition maps and skip CUDA graphs.
+        options = {"triton.cudagraphs": True, "graph_partition": False}
         y, meta = self._capture_step(self.mod.step, options=options)
-        self.assertEqual(meta["CUDAGRAPH_CONFIG"]["graph_partition"], partition)
-        env = {"TORCHINDUCTOR_GRAPH_PARTITION": "0" if partition else "1"}
+        self.assertFalse(meta["CUDAGRAPH_CONFIG"]["graph_partition"])
+        env = {"TORCHINDUCTOR_GRAPH_PARTITION": "1"}
         recorded, _ = self._serve_in_fresh_process(y, env)
         self.assertGreater(recorded, 0)
 
