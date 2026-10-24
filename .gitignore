@@ -201,6 +201,7 @@ docs/source/scripts/lr_scheduler_images/
 *.so
 *.dylib
 *.dll
+temp_auto_push.bat
 
 # Compiled Static libraries
 *.lai
@@ -309,9 +310,6 @@ tools/bazel
 
 # Visual Studio Code files
 .vs
-/.vscode/*
-!/.vscode/extensions.json
-!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py
@@ -409,3 +407,5 @@ CLAUDE.local.md
 /debug_*.py
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
+.gitignore
+branch_structure.json
