@@ -229,6 +229,42 @@ class SuperVariable(VariableTracker):
             ],
         )
 
+    def _bind_classmethod(
+        self,
+        tx: "InstructionTranslatorBase",
+        method: classmethod,  # type: ignore[type-arg]
+        source: Source | None,
+    ) -> VariableTracker:
+        if self.objvar is None:
+            raise AssertionError("super() requires objvar to bind classmethod")
+        if isinstance(self.objvar, variables.UserDefinedClassVariable):
+            # super().classmethod is called from a classmethod itself. So,
+            # super was converted to super(__class__, cls) in bytecode and
+            # therefore we have to propagate the cls.
+            cls_variable = self.objvar
+        else:
+            # current function is an instance method, therefore super was
+            # converted to super(__class__, self). We have to find
+            # type(self) to bind the cls to the parent classmethod.
+            # Note that it can't be the self.typevar because __class__ is
+            # the class where the method is defined, which could be
+            # different from type(self) with polymorphism.
+            cls_source = None
+            if self.objvar.source:
+                cls_source = TypeSource(self.objvar.source)
+            cls_variable = VariableTracker.build(
+                tx,
+                self.objvar.value_type,  # type: ignore[attr-defined]
+                cls_source,
+            )
+        fn_vt = VariableTracker.build(
+            tx,
+            method.__func__,
+            source=source and AttrSource(source, "__func__"),
+            realize=True,
+        )
+        return variables.UserMethodVariable(fn_vt, cls_variable)
+
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -241,6 +277,10 @@ class SuperVariable(VariableTracker):
         # requires the attr name to walk the mro and find the actual source (and
         # not just AttrSource).
         value, source = self._resolved_getattr_and_source(tx, name)
+        if isinstance(value, classmethod) and isinstance(
+            value.__func__, types.FunctionType
+        ):
+            return self._bind_classmethod(tx, value, source)
         if not variables.ConstantVariable.is_literal(value):
             return GetAttrVariable(self, name, py_type=type(value))
         if source:
@@ -337,37 +377,9 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            if isinstance(self.objvar, variables.UserDefinedClassVariable):
-                # super().classmethod is called from a classmethod itself. So,
-                # super was converted to super(__class__, cls) in bytecode and
-                # therefore we have to propagate the cls.
-                cls_variable = self.objvar
-            else:
-                # current function is an instance method, therefore super was
-                # converted to super(__class__, self). We have to find
-                # type(self) to bind the cls to the parent classmethod.
-                # Note that it can't be the self.typevar because __class__ is
-                # the class where the method is defined, which could be
-                # different from type(self) with polymorphism.
-                cls_source = None
-                if self.objvar.source:
-                    cls_source = TypeSource(self.objvar.source)
-                cls_variable = VariableTracker.build(
-                    tx,
-                    self.objvar.value_type,  # type: ignore[attr-defined]
-                    cls_source,
-                )
-            if source is None:
-                raise AssertionError(
-                    "source must not be None for classmethod resolution"
-                )
-            fn_vt = VariableTracker.build(
-                tx,
-                inner_fn.__func__,
-                source=AttrSource(source, "__func__"),
-                realize=True,
+            return self._bind_classmethod(tx, inner_fn, source).call_function(
+                tx, args, kwargs
             )
-            return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
             # With a class objvar, either objvar is super()'s su_obj_type, so
