@@ -338,6 +338,24 @@ class MetaTensorDescriber:
             # put it in for accuracy
             storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
+            if is_view and (base := t._base) is not None:
+                # set_() can rebind a tensor's storage without clearing the
+                # stale _base link; a genuine view still shares its base's
+                # storage, so a mismatch means the view metadata is stale and
+                # the tensor must be built standalone from its own storage.
+                # Only meaningful for plain dense tensors: a nested tensor
+                # repacks values/offsets, so a genuine NT view need not share
+                # its base's storage. Sparse layouts throw on untyped_storage()
+                # (values() of a sparse tensor reports the sparse parent as
+                # _base), so the alias test only runs on strided pairs.
+                if (
+                    not is_nested
+                    and not base.is_nested
+                    and t.layout == torch.strided
+                    and base.layout == torch.strided
+                    and base.untyped_storage()._cdata != t.untyped_storage()._cdata
+                ):
+                    is_view = False
 
         stride = None
         if not (
