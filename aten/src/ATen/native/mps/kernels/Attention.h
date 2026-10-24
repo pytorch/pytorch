@@ -28,8 +28,8 @@ static_assert(
 // instantiate the kernels for each. Head dims above the widest tile run on
 // 128 (kChunkTile): the QK dim in 128-wide chunks, V/O in 128-wide column
 // slabs. The 256 MPP tile (kMppWideTile) is register-bound on Apple10, where
-// the chunked 128 tile runs 1.7x faster, so it only serves an exact 256 head
-// dim on earlier GPUs.
+// the chunked 128 tile runs faster, so it only serves an exact 256 head dim
+// on earlier GPUs.
 C10_METAL_CONSTEXPR ::c10::metal::array<int, 9> kPrefillTiles =
     {32, 64, 72, 80, 96, 128, 160, 192, 256};
 C10_METAL_CONSTEXPR ::c10::metal::array<int, 3> kMppTiles = {64, 96, 128};
