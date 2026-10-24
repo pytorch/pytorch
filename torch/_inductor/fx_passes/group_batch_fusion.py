@@ -653,6 +653,15 @@ _OPERATOR_TO_ATEN = {
     operator.neg: torch.ops.aten.neg,
     operator.pow: torch.ops.aten.pow,
     operator.matmul: torch.ops.aten.matmul,
+    torch.nn.functional.leaky_relu: torch.ops.aten.leaky_relu,
+    torch.nn.functional.hardswish: torch.ops.aten.hardswish,
+    torch.nn.functional.elu: torch.ops.aten.elu,
+    torch.nn.functional.gelu: torch.ops.aten.gelu,
+    torch.nn.functional.hardsigmoid: torch.ops.aten.hardsigmoid,
+    torch.nn.functional.hardtanh: torch.ops.aten.hardtanh,
+    torch.nn.functional.relu6: torch.ops.aten.relu6,
+    torch.nn.functional.selu: torch.ops.aten.selu,
+    torch.nn.functional.celu: torch.ops.aten.celu,
 }
 
 # Aliases that never merge source dimensions are traversable: their users are
@@ -672,6 +681,14 @@ _NON_MERGING_ALIAS_OPS = OrderedSet(
         "t",
         "transpose",
         "unsqueeze",
+        "unbind",
+        "unflatten",
+        "expand",
+        "movedim",
+        "swapaxes",
+        "swapdims",
+        "split_with_sizes",
+        "tensor_split",
     ]
 )
 
@@ -751,9 +768,15 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
 )
 
 
+def _node_value(value):
+    if isinstance(value, torch.fx.Node):
+        return value.meta.get("example_value", value.meta.get("val"))
+    return value
+
+
 def _fake_value(value):
     if isinstance(value, torch.fx.Node):
-        return _fake_value(value.meta.get("example_value", value.meta.get("val")))
+        return _fake_value(_node_value(value))
     if isinstance(value, (list, tuple)):
         return type(value)(_fake_value(item) for item in value)
     if isinstance(value, dict):
@@ -769,7 +792,7 @@ def _layout_user_overloads(user: torch.fx.Node):
     # packet before resolving the overload from the example values.
     if target in (torch.nn.functional.relu, torch.nn.functional.silu):
         if get_arg_value(user, 1, "inplace") not in (None, False):
-            return ()
+            return []
         args = args[:1]
         kwargs.pop("inplace", None)
         target = (
@@ -779,7 +802,7 @@ def _layout_user_overloads(user: torch.fx.Node):
         )
     elif target is torch.nn.functional.softmax:
         if get_arg_value(user, 1, "dim") is None:
-            return ()
+            return []
         args = (*args[:2], *args[3:])
         kwargs.pop("_stacklevel", None)
         target = torch.ops.aten.softmax
@@ -795,10 +818,10 @@ def _layout_user_overloads(user: torch.fx.Node):
         target = _OPERATOR_TO_ATEN[target]
     elif isinstance(target, str):
         if not hasattr(torch.Tensor, target):
-            return ()
+            return []
         target = getattr(torch.ops.aten, target, None)
         if target is None:
-            return ()
+            return []
     if not args and "input" in kwargs:
         args = (kwargs.pop("input"),)
     if isinstance(target, torch._ops.OpOverload):
@@ -809,11 +832,11 @@ def _layout_user_overloads(user: torch.fx.Node):
     else:
         qualname = torch.jit._builtins._find_builtin(target)
         if qualname is None:
-            return ()
+            return []
         namespace, _, op_name = qualname.partition("::")
         packet = getattr(getattr(torch.ops, namespace, None), op_name, None)
         if not isinstance(packet, torch._ops.OpOverloadPacket):
-            return ()
+            return []
     try:
         overload_name = torch._C._jit_resolve_packet(
             qualname,
@@ -821,15 +844,13 @@ def _layout_user_overloads(user: torch.fx.Node):
             **_fake_value(kwargs),
         )
     except RuntimeError:
-        return ()
+        return []
     overload = getattr(packet, overload_name, None)
     return [overload] if overload is not None else ()
 
 
 def _dim_value(dim):
-    if isinstance(dim, torch.fx.Node):
-        return dim.meta.get("example_value", dim.meta.get("val"))
-    return dim
+    return _node_value(dim)
 
 
 def _shape_value(value):
@@ -863,13 +884,12 @@ def _is_split_only_view(user: torch.fx.Node) -> bool:
     source_node = get_arg_value(user, 0, "input")
     if not isinstance(source_node, torch.fx.Node):
         return False
-    source = _shape_value(source_node.meta.get("example_value"))
+    source = _shape_value(_node_value(source_node))
     target = _view_target_shape(user)
     if source is None or target is None:
         return False
     if any(isinstance(dim, int) and dim == -1 for dim in target):
-        # Infer the -1 dimension only when every dimension is static.
-        if not all(isinstance(dim, int) for dim in (*source, *target)):
+        if sum(1 for dim in target if isinstance(dim, int) and dim == -1) > 1:
             return False
         total = 1
         for dim in source:
@@ -878,9 +898,12 @@ def _is_split_only_view(user: torch.fx.Node) -> bool:
         for dim in target:
             if dim != -1:
                 known *= dim
-        if known == 0 or total % known:
+        if not statically_known_true(known != 0):
             return False
-        target = tuple(total // known if dim == -1 else dim for dim in target)
+        inferred = total // known
+        if not statically_known_true(inferred * known == total):
+            return False
+        target = tuple(inferred if dim == -1 else dim for dim in target)
     src = [dim for dim in source if not _is_one(dim)]
     tgt = [dim for dim in target if not _is_one(dim)]
     index = 0
@@ -903,13 +926,11 @@ def _memory_format(user: torch.fx.Node):
     return user.kwargs.get("memory_format")
 
 
-def _is_conversion_user(user: torch.fx.Node, ops=None) -> bool:
+def _is_conversion_user(user: torch.fx.Node, ops) -> bool:
     if user.op == "call_method":
         return user.target in _CONVERSION_METHODS
     if user.op != "call_function":
         return False
-    if ops is None:
-        ops = _layout_user_overloads(user)
     if not ops:
         return False
     return OrderedSet(op.overloadpacket.__name__ for op in ops) <= OrderedSet(
@@ -917,13 +938,11 @@ def _is_conversion_user(user: torch.fx.Node, ops=None) -> bool:
     )
 
 
-def _is_contiguous_user(user: torch.fx.Node, ops=None) -> bool:
+def _is_contiguous_user(user: torch.fx.Node, ops) -> bool:
     if user.op == "call_method":
         return user.target == "contiguous"
     if user.op != "call_function":
         return False
-    if ops is None:
-        ops = _layout_user_overloads(user)
     return bool(ops) and OrderedSet(
         op.overloadpacket.__name__ for op in ops
     ) == OrderedSet(["contiguous"])
@@ -936,13 +955,11 @@ def _contiguous_aliases(user: torch.fx.Node) -> bool:
     return _memory_format(user) in (None, torch.contiguous_format)
 
 
-def _direct_is_mutable(user: torch.fx.Node, ops=None) -> bool:
+def _direct_is_mutable(user: torch.fx.Node, ops) -> bool:
     if user.op not in ("call_method", "call_function"):
         return False
     if user.op == "call_function" and user.target is operator.getitem:
         return False
-    if ops is None:
-        ops = _layout_user_overloads(user)
     if ops:
         if any(op._schema.is_mutable for op in ops):
             return True
@@ -955,7 +972,7 @@ def _direct_is_mutable(user: torch.fx.Node, ops=None) -> bool:
     return _is_mutable_node(user.target)
 
 
-def _allowed_alias(user: torch.fx.Node, ops=None) -> bool:
+def _allowed_alias(user: torch.fx.Node, ops) -> bool:
     # Traversable alias: safe only when it cannot merge dimensions.
     if user.op == "call_function" and user.target is operator.getitem:
         return True
@@ -967,8 +984,6 @@ def _allowed_alias(user: torch.fx.Node, ops=None) -> bool:
         return False
     if user.op != "call_function":
         return False
-    if ops is None:
-        ops = _layout_user_overloads(user)
     if not ops:
         return False
     names = OrderedSet(op.overloadpacket.__name__ for op in ops)
@@ -997,7 +1012,7 @@ def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
     # mutation.
     if user.op not in ("call_method", "call_function"):
         return False
-    results = _tensor_values(user.meta.get("example_value"))
+    results = _tensor_values(_node_value(user))
     if not results:
         # Missing metadata: the mutation scan assumes an alias, while the
         # layout walk treats it as a terminal safe op.
@@ -1005,10 +1020,10 @@ def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
     sources = []
     for arg in user.args:
         if isinstance(arg, torch.fx.Node):
-            sources.extend(_tensor_values(arg.meta.get("example_value")))
+            sources.extend(_tensor_values(_node_value(arg)))
     for arg in user.kwargs.values():
         if isinstance(arg, torch.fx.Node):
-            sources.extend(_tensor_values(arg.meta.get("example_value")))
+            sources.extend(_tensor_values(_node_value(arg)))
     if not sources:
         return assume_alias
     return any(_is_alias_of(source, result) for source in sources for result in results)
@@ -1038,7 +1053,7 @@ def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
     return False
 
 
-def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops=None) -> bool:
+def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops) -> bool:
     """Return True if fusing the producer would change this user's semantics.
 
     Fusion replaces a contiguous ``[M, N_i]`` linear output with
@@ -1056,8 +1071,6 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops=None) -> bool:
         return True
     if user.target is torch.nn.functional.dropout:
         return get_arg_value(user, 3, "inplace") not in (None, False)
-    if ops is None:
-        ops = _layout_user_overloads(user)
     if _is_conversion_user(user, ops):
         # A copying conversion produces dense output with the same dimension
         # order. A no-op conversion aliases the input and is traversed by the
@@ -1098,11 +1111,14 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             else None
         )
         if _is_contiguous_user(user, ops):
-            if not _contiguous_aliases(user) or _has_mutable_alias_user(user):
+            if not _contiguous_aliases(user):
                 return True
-            # contiguous() may be a no-op alias (for example on an already
-            # contiguous row), so inspect its users for layout reads too.
-            pending.extend(user.users)
+            # contiguous() may return the input itself; only then can its users
+            # observe the fused layout. A real copy is terminal safe.
+            if _is_aliasing_user(user):
+                if _has_mutable_alias_user(user):
+                    return True
+                pending.extend(user.users)
             continue
         if _allowed_alias(user, ops):
             pending.extend(user.users)

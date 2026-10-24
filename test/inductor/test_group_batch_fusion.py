@@ -677,6 +677,19 @@ class TestGroupBatchFusion(TestCase):
             "conversion_dtype_after_transpose",
             "conversion_noop_after_transpose",
             "contiguous_as_strided",
+            "transpose_output",
+            "transpose_merge_view",
+            "split_view_mutation",
+            "getitem_output",
+            "transpose_contiguous_merge_view",
+            "unflatten",
+            "unbind",
+            "expand",
+            "movedim",
+            "swapaxes",
+            "split_with_sizes",
+            "tensor_split",
+            "leaky_relu",
             "reshape_kwargs",
             "out_user",
             "dropout_eval_output",
@@ -729,6 +742,25 @@ class TestGroupBatchFusion(TestCase):
             result = graph.call_method("double", args=(node,))
             result.meta["example_value"] = node.meta["example_value"].double()
             return result
+
+        def transpose_output(graph, node):
+            return graph.output(transpose(graph, node))
+
+        def transpose_merge_view(graph, node):
+            return graph.call_method("view", args=(transpose(graph, node), -1))
+
+        def split_view_mutation(graph, node):
+            view = graph.call_method("view", args=(node, 2, 2, 6))
+            return graph.call_method("mul_", args=(view, 2))
+
+        def getitem_output(graph, node):
+            return graph.output(graph.call_function(operator.getitem, args=(node, 0)))
+
+        def transpose_contiguous_merge_view(graph, node):
+            transposed = transpose(graph, node)
+            copied = graph.call_method("contiguous", args=(transposed,))
+            copied.meta["example_value"] = transposed.meta["example_value"].contiguous()
+            return graph.call_method("view", args=(copied, -1))
 
         def out_user(graph, node):
             out = graph.placeholder("out")
@@ -784,6 +816,35 @@ class TestGroupBatchFusion(TestCase):
                 torch.reshape,
                 kwargs={"input": node, "shape": (2, 2, 6)},
             ),
+            "transpose_output": transpose_output,
+            "transpose_merge_view": transpose_merge_view,
+            "split_view_mutation": split_view_mutation,
+            "getitem_output": getitem_output,
+            "transpose_contiguous_merge_view": transpose_contiguous_merge_view,
+            "unflatten": lambda graph, node: graph.call_method(
+                "unflatten", args=(node, -1, (2, 3))
+            ),
+            "unbind": lambda graph, node: graph.call_function(
+                torch.unbind, args=(node, 0)
+            ),
+            "expand": lambda graph, node: graph.call_method(
+                "expand", args=(node, 4, 6)
+            ),
+            "movedim": lambda graph, node: graph.call_method(
+                "movedim", args=(node, 0, 1)
+            ),
+            "swapaxes": lambda graph, node: graph.call_method(
+                "swapaxes", args=(node, 0, 1)
+            ),
+            "split_with_sizes": lambda graph, node: graph.call_function(
+                torch.ops.aten.split_with_sizes.default, args=(node, [3, 3], 1)
+            ),
+            "tensor_split": lambda graph, node: graph.call_function(
+                torch.tensor_split, args=(node, 2), kwargs={"dim": 1}
+            ),
+            "leaky_relu": lambda graph, node: graph.call_function(
+                torch.nn.functional.leaky_relu, args=(node, 0.1)
+            ),
             "out_user": out_user,
             "dropout_eval_output": lambda graph, node: graph.output(
                 dropout(graph, node, False)
@@ -835,6 +896,15 @@ class TestGroupBatchFusion(TestCase):
             "conversion_dtype",
             "conversion_dtype_after_transpose",
             "reshape_kwargs",
+            "transpose_contiguous_merge_view",
+            "unflatten",
+            "unbind",
+            "expand",
+            "movedim",
+            "swapaxes",
+            "split_with_sizes",
+            "tensor_split",
+            "leaky_relu",
         }
 
         graph = torch.fx.Graph()
@@ -1074,6 +1144,47 @@ class TestGroupBatchFusion(TestCase):
 
         module = M().eval()
         _check_lhs_fusion(self, module, [3], torch.randn(32, 64))
+
+    @parametrize("dynamic", [False, True])
+    @_lhs_fusion_config
+    def test_batch_linear_lhs_keeps_symbolic_neg_one_view(self, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q = torch.nn.Linear(64, 64, bias=False)
+                self.k = torch.nn.Linear(64, 64, bias=False)
+
+            def forward(self, x):
+                batch = x.shape[0]
+                q = self.q(x).view(batch, -1, 32).transpose(1, 2)
+                k = self.k(x).view(batch, -1, 32).transpose(1, 2)
+                return torch.sin(q), torch.cos(k)
+
+        module = M().eval()
+        _check_lhs_fusion(self, module, [2], torch.randn(32, 64), dynamic=dynamic)
+
+    @_lhs_fusion_config
+    def test_batch_linear_lhs_skips_mutation_behind_view(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.large(x)
+                view = large.view(32, 4, 12).transpose(0, 1)
+                view.mul_(2)
+                return (
+                    torch.sin(view),
+                    torch.cos(large),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
 
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
