@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import os
 import threading
 import unittest
@@ -106,6 +107,77 @@ class TestFlyDSLTemplate(TestCase):
         ):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIsNone(reason)
+
+    @contextlib.contextmanager
+    def _usable_runtime_without_hip(self):
+        # The mocked answer must not outlive the caller; later classes consult
+        # runtime_available() without clearing the cache themselves.
+        self.addCleanup(flydsl_utils._check_runtime_available.cache_clear)
+        with (
+            mock.patch.object(flydsl_utils._cuda, "is_built", return_value=True),
+            mock.patch.object(
+                flydsl_utils,
+                "_flydsl_runtime_unavailable_reason",
+                return_value=None,
+            ),
+            mock.patch.object(torch.version, "hip", None),
+        ):
+            flydsl_utils._check_runtime_available.cache_clear()
+            yield
+
+    def test_runtime_available_without_hip(self):
+        """The shared gate passes on a non-HIP build with a usable runtime."""
+        with self._usable_runtime_without_hip():
+            self.assertTrue(flydsl_utils._check_runtime_available())
+
+    def _vendored_flydsl_gemm_enabled(self, hip):
+        from torch._inductor.utils import use_flydsl_gemm_template
+
+        layout = FixedLayout(torch.device("cuda"), torch.float16, [128, 128], [128, 1])
+        arch_fn = (
+            "torch._inductor.codegen.flydsl.flydsl_scheduling._get_flydsl_device_arch"
+        )
+        with (
+            inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="ATEN,FLYDSL",
+            ),
+            mock.patch.object(torch.version, "hip", hip),
+            mock.patch("torch._inductor.utils.is_gpu", return_value=True),
+            mock.patch("torch._inductor.utils.is_big_gpu", return_value=True),
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+            mock.patch(arch_fn, return_value="gfx950"),
+        ):
+            return use_flydsl_gemm_template(layout)
+
+    def test_vendored_gemm_gate_accepts_hip_gfx950(self):
+        """Vendored gfx950 GEMM stays enabled on ROCm."""
+        self.assertTrue(self._vendored_flydsl_gemm_enabled("6.2.4"))
+
+    def test_vendored_gemm_gate_rejects_without_hip(self):
+        """Vendored gfx950 GEMM stays disabled when torch.version.hip is None."""
+        self.assertFalse(self._vendored_flydsl_gemm_enabled(None))
+
+    def test_stub_template_appends_choice_without_hip(self):
+        """A third-party FlyDSL template can still be offered without HIP."""
+        template_name = f"flydsl_stub_ext_{id(self)}"
+        self.addCleanup(FlyDSLTemplate.all_templates.pop, template_name, None)
+        choice = mock.Mock()
+        graph = SimpleNamespace(cpp_wrapper=False, aot_mode=False)
+        with (
+            V.set_graph_handler(graph),
+            self._usable_runtime_without_hip(),
+            mock.patch.object(
+                FlyDSLTemplate, "_template_from_string", return_value=mock.Mock()
+            ),
+        ):
+            template = FlyDSLTemplate(name=template_name, source="stub")
+            with mock.patch.object(template, "generate", return_value=choice):
+                choices = []
+                result = template.maybe_append_choice(choices)
+
+        self.assertIsNone(result)
+        self.assertEqual(choices, [choice])
 
     def test_unavailable_runtime_declines_choice(self):
         template_name = f"flydsl_unavailable_test_{id(self)}"
