@@ -47,6 +47,7 @@ class TestNativeMatmul(TestCase):
         example_inputs: tuple[torch.Tensor],
         kernel_count: int,
         dot_count: int,
+        where_count: int | None = None,
     ):
         f = torch.compile(f)
         code = run_and_get_triton_code(f, *example_inputs)
@@ -55,6 +56,8 @@ class TestNativeMatmul(TestCase):
         FileCheck().check_count("@triton.jit", kernel_count, exactly=True).check_count(
             "tl.dot", dot_count, exactly=True
         ).run(code)
+        if where_count is not None:
+            self.assertEqual(code.count("tl.where("), where_count)
 
     def test_matmul(self):
         def f(x, y):
@@ -66,7 +69,7 @@ class TestNativeMatmul(TestCase):
         y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y))
-        self._check_code(f, (x, y), 1, 1)
+        self._check_code(f, (x, y), 1, 1, where_count=0)
 
     def test_mm_1d_expand(self):
         def f(x, y, M, K):
@@ -78,7 +81,7 @@ class TestNativeMatmul(TestCase):
         y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y, M, K))
-        self._check_code(f, (x, y, M, K), 1, 1)
+        self._check_code(f, (x, y, M, K), 1, 1, where_count=0)
 
     def test_mm_2_expand(self):
         def f(x, y, M, K):
@@ -90,7 +93,7 @@ class TestNativeMatmul(TestCase):
         y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y, M, K))
-        self._check_code(f, (x, y, M, K), 1, 1)
+        self._check_code(f, (x, y, M, K), 1, 1, where_count=0)
 
     def test_matmul_fp16(self):
         def f(x, y):
@@ -106,7 +109,7 @@ class TestNativeMatmul(TestCase):
         # but same() uses the single value to assign both, resulting in
         # Accuracy failed: allclose not within tol=0.0001.
         self._check_equal(f, (x, y), tol=1e-3)
-        self._check_code(f, (x, y), 1, 1)
+        self._check_code(f, (x, y), 1, 1, where_count=0)
 
     def test_reduction_mask_zeroout(self):
         def f(x, y):
@@ -117,7 +120,7 @@ class TestNativeMatmul(TestCase):
         y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y))
-        self._check_code(f, (x, y), 1, 1)
+        self._check_code(f, (x, y), 1, 1, where_count=2)
 
     def test_3mm_add(self):
         def f(x, y, z, w, r, t):
@@ -132,7 +135,7 @@ class TestNativeMatmul(TestCase):
         t = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y, z, w, r, t))
-        self._check_code(f, (x, y, z, w, r, t), 1, 3)
+        self._check_code(f, (x, y, z, w, r, t), 1, 3, where_count=0)
 
     def test_mm_complex(self):
         def f(x, y, z, w):
@@ -146,7 +149,7 @@ class TestNativeMatmul(TestCase):
         w = rand_strided((M, N), (N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y, z, w))
-        self._check_code(f, (x, y, z, w), 1, 1)
+        self._check_code(f, (x, y, z, w), 1, 1, where_count=1)
 
     def test_batchmatmul(self):
         def f(x, y):
@@ -158,7 +161,7 @@ class TestNativeMatmul(TestCase):
         y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y))
-        self._check_code(f, (x, y), 1, 1)
+        self._check_code(f, (x, y), 1, 1, where_count=0)
 
     def test_bmm_vertical_fusion(self):
         def f(x, y):
@@ -187,7 +190,7 @@ class TestNativeMatmul(TestCase):
         w = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
 
         self._check_equal(f, (x, y, z, w))
-        self._check_code(f, (x, y, z, w), 1, 2)
+        self._check_code(f, (x, y, z, w), 1, 2, where_count=0)
 
     def test_bmm_fusion_complex1(self):
         # Out[O[b,i],j] += Input[I[b,i],r] * Weight[W[b],r,j] * Val[b,i]
@@ -214,7 +217,9 @@ class TestNativeMatmul(TestCase):
         out = torch.zeros((N_out, J), device=GPU_TYPE)
 
         self._check_equal(f, (inp, weight, val, I_idx, W_idx, O_idx, out))
-        self._check_code(f, (inp, weight, val, I_idx, W_idx, O_idx, out), 1, 1)
+        self._check_code(
+            f, (inp, weight, val, I_idx, W_idx, O_idx, out), 1, 1, where_count=3
+        )
 
     def test_bmm_fusion_complex2(self):
         # out[Ai[g],m,n] += Av[g,m,k,p] * B[Ak[g,p],k,n]
@@ -237,7 +242,7 @@ class TestNativeMatmul(TestCase):
         out = torch.zeros((NA, M, N), device=GPU_TYPE)
 
         self._check_equal(f, (Av, B, Ai, Ak, out))
-        self._check_code(f, (Av, B, Ai, Ak, out), 1, 1)
+        self._check_code(f, (Av, B, Ai, Ak, out), 1, 1, where_count=2)
 
     def test_bmm_large_batch_reversed_pid(self):
         def f(x, y):
@@ -256,6 +261,7 @@ class TestNativeMatmul(TestCase):
         ).check("tl.program_id(1)").check(
             "pid_y, pid_x = tl.swizzle2d(pid_mn //"
         ).check("yoffset = pid_y * YBLOCK").check("xoffset = pid_x * XBLOCK").run(code)
+        self.assertNotIn("tl.where(", code)
 
     def test_bmm_no_z_broadcast(self):
         def f(x, y):
@@ -274,6 +280,7 @@ class TestNativeMatmul(TestCase):
         ).check("tl.arange(0, YBLOCK)[None, :, None, None]").check(
             "tl.arange(0, XBLOCK)[None, None, :, None]"
         ).check("tl.arange(0, R0_BLOCK)[None, None, None, :]").run(code)
+        self.assertNotIn("tl.where(", code)
 
 
 @unittest.skipUnless(
@@ -318,6 +325,69 @@ class TestNativeMatmulCodegen(TestCase):
             )
         )
 
+    def _check_masked_values(self, f, inputs, where_count, descriptor=True):
+        if descriptor and not has_triton_tma_device():
+            self.skipTest("Tensor descriptors are not supported")
+        with inductor_config.patch(
+            {
+                "triton.native_matmul": True,
+                "triton.persistent_reductions": False,
+                "triton.use_tensor_descriptor": descriptor,
+                "triton.enable_host_side_tma": False,
+                "assume_aligned_inputs": True,
+                "force_disable_caches": True,
+            }
+        ):
+            compiled = torch.compile(f, fullgraph=True)
+            code = run_and_get_triton_code(compiled, *inputs)
+            self.assertEqual(compiled(*inputs), f(*inputs), atol=1e-3, rtol=1e-3)
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self.assertEqual(code.count("tl.dot("), 1)
+        self.assertEqual(code.count(".load(["), 2 if descriptor else 0)
+        self.assertEqual(code.count("tl.where("), where_count)
+
+    @parametrize("descriptor", [False, True])
+    def test_matmul_masked_value_prologue(self, device, descriptor):
+        def f(a, b):
+            a = (a.float() + 1 - 1).half()
+            b = (b.float() + 2 - 2).half()
+            return a @ b
+
+        inputs = (
+            torch.randn((33, 72), device=device, dtype=torch.float16),
+            torch.randn((72, 136), device=device, dtype=torch.float16),
+        )
+        self._check_masked_values(f, inputs, where_count=0, descriptor=descriptor)
+
+    @parametrize("repeat_both", [False, True])
+    def test_tma_repeat_masked_values(self, device, repeat_both):
+        def f(a, b):
+            if repeat_both:
+                b = b.repeat(9, 1)
+            return a.repeat(1, 9) @ b
+
+        inputs = (
+            torch.full(
+                (33, 8),
+                1.0 if repeat_both else float("inf"),
+                device=device,
+                dtype=torch.float16,
+            ),
+            torch.ones(
+                (8 if repeat_both else 72, 136), device=device, dtype=torch.float16
+            ),
+        )
+        self._check_masked_values(f, inputs, where_count=2 if repeat_both else 1)
+
+    def test_tma_retained_quotient_masked_values(self, device):
+        def f(a, b):
+            return a[:, :, None].expand(33, 36, 2).reshape(33, 72) @ b
+
+        a = torch.full((33, 40), float("inf"), device=device, dtype=torch.float16)
+        a = a[:, :36]
+        b = torch.ones((72, 136), device=device, dtype=torch.float16)
+        self._check_masked_values(f, (a, b), where_count=0)
+
     @inductor_config.patch(
         {
             "triton.native_matmul": True,
@@ -345,6 +415,7 @@ class TestNativeMatmulCodegen(TestCase):
         self.assertEqual(compiled(a, b), f(a, b), atol=0.016, rtol=0.016)
         self.assertNotIn(".to(tl.int64)", code)
         FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+        FileCheck().check_not("tl.where(").run(code)
 
     @inductor_config.patch(
         {
@@ -368,6 +439,7 @@ class TestNativeMatmulCodegen(TestCase):
         code = run_and_get_triton_code(compiled, a, b)
         self.assertEqual(compiled(a, b), f(a, b), atol=1e-3, rtol=1e-3)
         FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+        FileCheck().check_not("tl.where(").run(code)
         FileCheck().check("tl.swizzle2d").check(
             "tl.cdiv(ynumel, YBLOCK), tl.cdiv(xnumel, XBLOCK), 8)"
         ).run(code)
@@ -394,6 +466,7 @@ class TestNativeMatmulCodegen(TestCase):
         code = run_and_get_triton_code(compiled, a, b)
         self.assertEqual(compiled(a, b), f(a, b), atol=0.016, rtol=0.016)
         FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
+        FileCheck().check_not("tl.where(").run(code)
         FileCheck().check("zoffset = tl.program_id(0)").check(
             "pid_mn = tl.program_id(2)"
         ).check("tl.program_id(1)").check("tl.swizzle2d(pid_mn //").run(code)
@@ -426,6 +499,7 @@ class TestNativeMatmulCodegen(TestCase):
         FileCheck().check_count("if pid_y <", 2, exactly=True).run(code)
         FileCheck().check_count("tl.swizzle2d", 2, exactly=True).run(code)
         FileCheck().check("pid_offset = pid // 2").run(code)
+        self.assertNotIn("tl.where(", code)
 
     @inductor_config.patch(
         {
@@ -458,6 +532,7 @@ class TestNativeMatmulCodegen(TestCase):
         FileCheck().check("tl.swizzle2d").check(
             "tl.num_programs(1) * tl.num_programs(2)"
         ).run(code)
+        self.assertNotIn("tl.where(", code)
 
 
 if HAS_GPU:

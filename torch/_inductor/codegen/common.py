@@ -36,6 +36,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
+from ..masked_value_propagation import MaskedValuePropagationOpsHandler
 from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..shape_propagation import ShapePropagationOpsHandler
 from ..utils import (
@@ -2168,6 +2169,7 @@ class CSEVariable:
         self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
         self.shape = shape
+        self.masked_value: torch.Tensor | None = None
 
     def __str__(self) -> str:
         return self.name
@@ -2920,6 +2922,7 @@ class CSEProxy(DefaultHandler):
         from ..bounds import ValueRangeAnalysis
 
         self.vr_analysis = ValueRangeAnalysis()
+        self.masked_value_handler = MaskedValuePropagationOpsHandler()
         self.kernel = kernel
         self.parent_handler = parent_handler
 
@@ -2954,6 +2957,23 @@ class CSEProxy(DefaultHandler):
             # maybe there are some exceptions on mps?
             if output_dtype is None:
                 raise AssertionError("expected output_dtype to be not None")
+
+        masked_value = None
+        if backend == "triton":
+
+            def arg_to_masked_value(arg: Any) -> Any:
+                if isinstance(arg, OpsValue):
+                    arg = arg.value
+                if isinstance(arg, CSEVariable):
+                    return arg.masked_value
+                return arg
+
+            masked_args, masked_kwargs = pytree.tree_map(
+                arg_to_masked_value, (args, kwargs)
+            )
+            masked_value = getattr(self.masked_value_handler, name)(
+                *masked_args, **masked_kwargs
+            )
 
         output_idx = 0
 
@@ -2991,6 +3011,7 @@ class CSEProxy(DefaultHandler):
             )
 
             csevar.update_on_args(name, args, kwargs)
+            self._record_masked_value(csevar, masked_value)
 
             if (
                 config.test_configs.runtime_triton_dtype_assert
@@ -3014,6 +3035,14 @@ class CSEProxy(DefaultHandler):
         result = pytree.tree_map(do_cse, value)
         self.kernel.record_op_trace(name, args, kwargs, result)
         return result
+
+    def _record_masked_value(
+        self, var: CSEVariable, value: torch.Tensor | None
+    ) -> None:
+        if var.masked_value is None and value is not None and var.dtype is not None:
+            var.masked_value = self.masked_value_handler.to_dtype(
+                value, var.dtype, use_compute_types=False
+            )
 
     def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
         """
