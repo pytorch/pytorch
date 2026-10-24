@@ -3362,6 +3362,15 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_get_fp32_precision_unresolved",
+      [](const std::string& backend, const std::string& op) {
+        auto p = at::globalContext().float32PrecisionUnresolved(
+            at::str2backend(backend), at::str2op(op));
+        return p == at::Float32Precision::DEFAULT ? std::string("default")
+                                                  : at::precision2str(p);
+      });
+
+  py_module.def(
       "_set_fp32_precision_setter",
       [](const std::string& backend,
          const std::string& op,

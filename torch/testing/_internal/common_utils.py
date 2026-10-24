@@ -6794,10 +6794,10 @@ def _fp32_precision_flag_specs():
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
         ("torch.backends.cudnn.conv.fp32_precision",
-            lambda: torch.backends.cudnn.conv.fp32_precision,  # type: ignore[attr-defined]
+            lambda: torch._C._get_fp32_precision_unresolved("cuda", "conv"),
             lambda v: setattr(torch.backends.cudnn.conv, "fp32_precision", v)),
         ("torch.backends.cudnn.rnn.fp32_precision",
-            lambda: torch.backends.cudnn.rnn.fp32_precision,  # type: ignore[attr-defined]
+            lambda: torch._C._get_fp32_precision_unresolved("cuda", "rnn"),
             lambda v: setattr(torch.backends.cudnn.rnn, "fp32_precision", v)),
         ("torch.backends.mkldnn.matmul.fp32_precision",
             lambda: torch.backends.mkldnn.matmul.fp32_precision,  # type: ignore[attr-defined]
