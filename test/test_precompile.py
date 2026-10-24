@@ -4944,6 +4944,8 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, tracer=make_fx, mode="reduce-overhead")
         with self.assertRaisesRegex(PrecompileError, "cannot serve CUDA graphs"):
             self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph_policy": None})
         for key in ("size_asserts", "scalar_asserts"):
             with self.assertRaisesRegex(PrecompileError, "always compiles with"):
                 self._capture(single, tracer=make_fx, options={key: False})
@@ -6390,6 +6392,15 @@ class TestPrecompileCudagraphs(TestCase):
                 self.mod.step, options={"triton.cudagraphs": False}
             )
         self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        self.assertEqual(self._serve_in_fresh_process(y), (0, 0))
+
+    def test_a_graph_options_kept_out_of_cudagraphs_serves_without_one(self):
+        # The capture decides a graph cannot run as a CUDA graph and that decision
+        # ships with the graph, though CUDAGRAPH_CONFIG turns CUDA graphs on.
+        force_off = {"force_disable_cudagraph_TESTING_ONLY": True}
+        options = {"triton.cudagraphs": True, **force_off}
+        y, meta = self._capture_step(self.mod.step, options=options)
+        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
         self.assertEqual(self._serve_in_fresh_process(y), (0, 0))
 
     def test_an_artifact_captured_without_cudagraphs_serves_none(self):
