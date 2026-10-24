@@ -35,7 +35,8 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   } else if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
-    // precision compared to computing the division.
+    // precision compared to computing the division. If 1/b overflows or is
+    // subnormal in opmath (tiny or huge b), divide by b instead.
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
           using accscalar_t = at::acc_type<scalar_t, true>;
@@ -46,6 +47,12 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 
           auto inv_b = accscalar_t(1.0) / b;
           iter.remove_operand(2);
+          if (C10_UNLIKELY(!is_usable_reciprocal(inv_b))) {
+            gpu_kernel(iter, [b] GPU_LAMBDA(scalar_t a) -> scalar_t {
+              return c10::div_floor_floating(static_cast<accscalar_t>(a), b);
+            });
+            return;
+          }
           gpu_kernel(iter, [b, inv_b] GPU_LAMBDA(scalar_t a) -> scalar_t {
             auto mod = std::fmod(a, b);
             auto div = (a - mod) * inv_b;
