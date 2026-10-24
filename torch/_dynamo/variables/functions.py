@@ -449,7 +449,14 @@ class BaseUserFunctionVariable(VariableTracker):
             attr = args[0].as_python_constant()
             getset = self.lookup_tp_getset_member(attr)
             if getset is not None:
-                getset.setter(self, tx, args[1] if name == "__setattr__" else None)
+                if self.python_type() is types.MethodType:
+                    readonly_setter(self, tx, None)
+                owner = (
+                    self._get_mutation_owner(tx)
+                    if istype(self, UserFunctionVariable)
+                    else self
+                )
+                getset.setter(owner, tx, args[1] if name == "__setattr__" else None)
                 return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx,
@@ -603,7 +610,9 @@ class BaseUserFunctionVariable(VariableTracker):
             "__doc__": self.get_doc,
             "__module__": self.get_module,
         }[name]
-        return VariableTracker.build(tx, getter())
+        return VariableTracker.build(
+            tx, getter(), self.source and AttrSource(self.source, name)
+        )
 
     tp_getset = {
         "__defaults__": GetSet(_get_defaults, unmodeled_setter),
@@ -636,11 +645,15 @@ class BaseUserFunctionVariable(VariableTracker):
     tp_members = {
         "__doc__": Member(
             lambda s, tx: s._get_metadata(tx, "__doc__"),
-            getset_set("__doc__"),
+            lambda s, tx, v: store_attr_mutation(
+                tx, s, "__doc__", ConstantVariable.create(None) if v is None else v
+            ),
         ),
         "__module__": Member(
             lambda s, tx: s._get_metadata(tx, "__module__"),
-            getset_set("__module__"),
+            lambda s, tx, v: store_attr_mutation(
+                tx, s, "__module__", ConstantVariable.create(None) if v is None else v
+            ),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
     }
@@ -708,16 +721,9 @@ class BaseUserFunctionVariable(VariableTracker):
         if se_result is not None:
             return se_result
 
-        result = False
-
         if name in fn_known_dunder_attrs or name == "__dict__":
-            result = True
-        else:
-            try:
-                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
-            except NotImplementedError:
-                result = False
-        return VariableTracker.build(tx, result)
+            return ConstantVariable.create(True)
+        return super().call_obj_hasattr(tx, name)
 
     def closure_vars(
         self, tx: "InstructionTranslatorBase"
@@ -760,22 +766,26 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_value_for_setattr(self) -> object | None:
         return self.fn
 
+    def _get_mutation_owner(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        side_effects = tx.output.side_effects
+        if self.fn in side_effects:
+            owner = side_effects[self.fn]
+            if owner is not self and self.source is not None:
+                from .builder import VariableBuilder
+
+                VariableBuilder(tx, self.source)._reuse_tracked_variable(self.fn)
+            return owner
+        elif self.source is not None:
+            side_effects.track_object_existing(self.fn, self)
+        return self
+
     def get_dict_vt(
         self, tx: "InstructionTranslatorBase"
     ) -> "variables.DunderDictVariable":
-        side_effects = tx.output.side_effects
-        if not istype(self, UserFunctionVariable):
-            return super().get_dict_vt(tx)
-        if self.fn in side_effects:
-            owner = side_effects[self.fn]
+        if istype(self, UserFunctionVariable):
+            owner = self._get_mutation_owner(tx)
             if owner is not self:
-                if self.source is not None:
-                    from .builder import VariableBuilder
-
-                    VariableBuilder(tx, self.source)._reuse_tracked_variable(self.fn)
                 self.dict_vt = owner.get_dict_vt(tx)
-        elif self.source is not None:
-            side_effects.track_object_existing(self.fn, self)
         return super().get_dict_vt(tx)
 
     def __init__(
@@ -940,12 +950,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def read_func_slot(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Reads self.fn directly, bypassing side effects: callers (_get_defaults
-        # etc.) only reach here when the corresponding VT field (self.defaults,
-        # self.closure, ...) is still None, i.e. that slot has never been
-        # mutated. A mutation always sets the field directly (see
-        # _set_annotations et al.), so once set this path is never taken again
-        # for that slot.
+        if istype(self, UserFunctionVariable) and self.fn in tx.output.side_effects:
+            pending = load_pending_mutation(tx, self._get_mutation_owner(tx), name)
+            if pending is not None:
+                return pending
         return VariableTracker.build(
             tx, getattr(self.fn, name), self.source and AttrSource(self.source, name)
         )
@@ -3142,6 +3150,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_name(self) -> str:
         return self.wrapper_obj.__name__
 
+    def get_doc(self) -> str | None:
+        return self.wrapper_obj.__doc__
+
     def get_qualname(self) -> str:
         # Before 3.11 the base falls back to co_name, since code objects have no
         # co_qualname; the wrapper carries the real qualname either way.
@@ -3300,6 +3311,9 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
 
     def get_name(self) -> str:
         return self.fn.get_name()
+
+    def get_doc(self) -> str | None:
+        return self.fn.get_doc()
 
     def get_qualname(self) -> str:
         return self.fn.get_qualname()
@@ -5414,6 +5428,15 @@ class StaticMethodVariable(VariableTracker):
             self.descriptor,
             (UserDefinedObjectVariable, variables.UserDefinedClassVariable),
         ) and bool(side_effects.store_attr_mutations.get(self.descriptor))
+        if custom_getters:
+            # The constructor can run before the callable's attributes are
+            # replayed. Restore the complete snapshot to preserve its key order.
+            codegen.dup_top()
+            codegen.append_output(codegen.create_load_attr("__dict__"))
+            codegen.load_method("clear")
+            codegen.call_method(0)
+            codegen.append_output(create_instruction("POP_TOP"))
+            codegen.clear_tos()
         for name, value in self.initial_dict.items():
             annotations_changed = (
                 name == "__annotations__"

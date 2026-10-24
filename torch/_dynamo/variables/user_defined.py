@@ -4813,38 +4813,31 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # ExceptionVariable.reconstruct hardcodes `from builtins import
+    def _reconstruct_exception(self, codegen: "PyCodegen") -> None:
+        # ExceptionVariable._reconstruct_exception hardcodes `from builtins import
         # <name>`, which is only correct for the true builtin exceptions it
         # was designed to model. self.exc_type here is an arbitrary
         # user-defined class, so import it from its actual defining module
         # instead.
-        from .constant import ConstantVariable
-
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 self.exc_type.__module__, self.exc_type.__name__
             )
         )
-        codegen.foreach(self.args)
-        codegen.call_function(len(self.args), False)
+        codegen.foreach(self.initial_args)
+        codegen.call_function(len(self.initial_args), False)
 
-        def codegen_attr(name: str) -> None:
-            attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
-                codegen.dup_top()
-                codegen(attr)
-                codegen.extend_output(codegen.rot_n(2))
-                codegen.store_attr(name)
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        ExceptionVariable.reconstruct(self, codegen)
 
-        codegen_attr("__context__")
-        codegen_attr("__cause__")
-        codegen_attr("__suppress_context__")
+    def get_reconstruction_attributes(self) -> dict[str, VariableTracker]:
+        # A custom constructor can set non-default exception chaining slots.
+        return {
+            "__context__": self.__context__,
+            "__cause__": self.__cause__,
+            "__suppress_context__": self.__suppress_context__,
+            **super().get_reconstruction_attributes(),
+        }
 
 
 class InspectVariable(UserDefinedObjectVariable):

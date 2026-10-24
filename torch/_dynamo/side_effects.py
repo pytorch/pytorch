@@ -2101,6 +2101,11 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     # reverse order.
     side_effect_occurred = False
     mutations = []
+    if isinstance(var.mutation_type, AttributeMutationNew):
+        mutations.extend(
+            (name, value, AttrMutationKind.GENERIC_SETATTR)
+            for name, value in var.get_reconstruction_attributes().items()
+        )
     for name, value in side_effects.store_attr_mutations.get(var, {}).items():
         kind = side_effects.get_attr_mutation_kind(var, name)
         if name in side_effects.attr_mutation_overlaps.get(var, {}):

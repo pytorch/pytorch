@@ -2265,6 +2265,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return False
 
+    def get_reconstruction_attributes(self) -> dict[str, VariableTracker]:
+        """Return slots to restore after all new objects have been constructed.
+
+        Entries are applied in insertion order, before explicit attribute
+        mutations. Values may refer to other new objects, including self.
+        """
+        return {}
+
     def is_proxy(self) -> bool:
         try:
             self.as_proxy()
@@ -2324,6 +2332,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             )
         ):
             value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            if isinstance(value, variables.DeletedVariable) and (
+                tx.output.side_effects.has_pending_mutation_of_attr(
+                    self, name, AttrMutationKind.INSTANCE_DICT
+                )
+            ):
+                # Removing an instance entry can reveal an attribute on its class.
+                return None
             return variables.ConstantVariable.create(
                 not isinstance(value, variables.DeletedVariable)
             )

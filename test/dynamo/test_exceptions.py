@@ -29,6 +29,13 @@ class CustomException(Exception):
     pass
 
 
+class CustomExceptionWithChaining(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+        self.__cause__ = ValueError("default cause")
+        self.__context__ = RuntimeError("default context")
+
+
 class CustomExceptionMeta(type):
     def __instancecheck__(cls, instance):
         return True
@@ -2005,7 +2012,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         got, expected = getattr(opt_fn(x), attr), getattr(fn(x), attr)
         self.assertEqual(comparable(got), comparable(expected))
 
-    @unittest.expectedFailure
     def test_exception_store_attr_survives_escape(self):
         # STORE_ATTR rather than the setattr builtin, and several writes at once.
         def fn(x):
@@ -2020,9 +2026,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(got.args, expected.args)
         self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
 
-    # ExceptionVariable.reconstruct skips any ConstantVariable-valued attribute,
-    # so a deliberate write is indistinguishable from the untouched default.
-    @unittest.expectedFailure
     def test_builtin_exception_constant_attr_survives_escape(self):
         def fn(x):
             e = ValueError("x")
@@ -2032,6 +2035,68 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         got = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(got.__suppress_context__, fn(x).__suppress_context__)
+
+    @parametrize(
+        "kind", ["builtin", "custom", "stop_iteration", "attribute_error", "name_error"]
+    )
+    @parametrize("slot", ["__cause__", "__context__", "args"])
+    @parametrize("cycle", ["none", "self", "pair"])
+    def test_exception_reconstruction_dependencies(self, kind, slot, cycle):
+        exception_type = {
+            "builtin": ValueError,
+            "custom": CustomException,
+            "stop_iteration": StopIteration,
+            "attribute_error": AttributeError,
+            "name_error": NameError,
+        }[kind]
+
+        def fn(x):
+            outer = exception_type("outer")
+            inner = ValueError("inner")
+            target = outer if cycle == "self" else inner
+            setattr(outer, slot, (target,) if slot == "args" else target)
+            if cycle == "pair":
+                setattr(inner, slot, (outer,) if slot == "args" else outer)
+            outer.__suppress_context__ = False
+            if kind == "stop_iteration":
+                outer.value = target
+            elif kind == "attribute_error":
+                outer.obj = target
+            elif kind == "name_error":
+                outer.name = target
+            return x + 1, outer, inner
+
+        x = torch.randn(3)
+        out, outer, inner = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(out, x + 1)
+        target = outer if cycle == "self" else inner
+        value = getattr(outer, slot)
+        self.assertIs(value[0] if slot == "args" else value, target)
+        if cycle == "pair":
+            value = getattr(inner, slot)
+            self.assertIs(value[0] if slot == "args" else value, outer)
+        self.assertFalse(outer.__suppress_context__)
+        if kind == "stop_iteration":
+            self.assertIs(outer.value, target)
+        elif kind == "attribute_error":
+            self.assertIs(outer.obj, target)
+        elif kind == "name_error":
+            self.assertIs(outer.name, target)
+
+    def test_exception_clear_constructor_chaining(self):
+        def fn(x):
+            exc = CustomExceptionWithChaining("outer")
+            exc.__cause__ = None
+            exc.__context__ = None
+            exc.__suppress_context__ = False
+            return x + 1, exc
+
+        x = torch.randn(3)
+        out, exc = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(out, x + 1)
+        self.assertIsNone(exc.__cause__)
+        self.assertIsNone(exc.__context__)
+        self.assertFalse(exc.__suppress_context__)
 
     def test_escaping_exception_defaults_unchanged(self):
         def fn(x):

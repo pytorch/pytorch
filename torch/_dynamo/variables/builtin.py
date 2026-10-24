@@ -1333,12 +1333,15 @@ class BuiltinVariable(BaseBuiltinVariable):
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is StopIteration:
-                    return variables.StopIterationVariable(fn, args, kwargs)
+                    result = variables.StopIterationVariable(fn, args, kwargs)
                 elif fn is AttributeError:
-                    return variables.AttributeErrorVariable(fn, args, kwargs)
+                    result = variables.AttributeErrorVariable(fn, args, kwargs)
                 elif fn is NameError:
-                    return variables.NameErrorVariable(fn, args, kwargs)
-                return variables.ExceptionVariable(fn, args, kwargs)
+                    result = variables.NameErrorVariable(fn, args, kwargs)
+                else:
+                    result = variables.ExceptionVariable(fn, args, kwargs)
+                tx.output.side_effects.track_attribute_mutation_new(result)
+                return result
 
             return create_exception_class_object
 
