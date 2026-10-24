@@ -671,6 +671,7 @@ if not torch._C._autograd_init():
 # Import all native method/classes
 from torch._C._autograd import (
     _add_metadata_json,
+    _close_global_callback_session,
     _disable_profiler,
     _disable_profiler_legacy,
     _enable_profiler,

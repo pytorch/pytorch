@@ -314,6 +314,14 @@ class GlobalCallbackSession {
     active_.store(true);
   }
 
+  void markClosedAtExit() {
+    closed_at_exit_.store(true);
+  }
+
+  bool closedAtExit() const {
+    return closed_at_exit_.load();
+  }
+
   // Session generation, stamped into each callback's ObserverContext at enter
   // and re-checked at exit. A mismatch means the stamping session was torn down
   // (its RecordQueue and event freed), so the exit drops itself.
@@ -372,33 +380,38 @@ class GlobalCallbackSession {
   std::atomic<bool> active_{false};
   std::atomic<int64_t> in_flight_{0};
   std::atomic<uint64_t> generation_{0};
+  std::atomic<bool> closed_at_exit_{false};
   std::mutex mutex_;
   std::condition_variable cv_; // guarded by mutex_
 };
 
-GlobalCallbackSession global_callback_session;
+// We use a leaky singleton because callbacks still check it during exit.
+GlobalCallbackSession& globalCallbackSession() {
+  static auto* session = new GlobalCallbackSession();
+  return *session;
+}
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
   // Fast bail once teardown has begun, before taking an in-flight ref, so the
   // drain in disableProfiler() always converges.
-  if (!global_callback_session.isActive()) {
+  if (!globalCallbackSession().isActive()) {
     return nullptr;
   }
 
-  global_callback_session.enter();
+  globalCallbackSession().enter();
 
   // Release the ref when this function returns (success or early bail), so the
   // in-flight window is just this enter's getGlobal() + begin_op() critical
   // section.
   auto in_flight_guard =
-      c10::make_scope_exit([] { global_callback_session.exit(); });
+      c10::make_scope_exit([] { globalCallbackSession().exit(); });
 
   // Re-check after the increment. This is the handshake that makes teardown
   // safe: if disableProfiler() cleared active concurrently, its drain is
   // guaranteed to observe our increment and wait if and only if we still
   // observe active true here.
-  if (!global_callback_session.isActive()) {
+  if (!globalCallbackSession().isActive()) {
     return nullptr;
   }
 
@@ -412,7 +425,7 @@ std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     // Stamp the current session so a straddling exit (begin_op here, exit after
     // this session is torn down) drops itself on mismatch instead of writing
     // through a freed event_.
-    ctx->session_generation_ = global_callback_session.generation();
+    ctx->session_generation_ = globalCallbackSession().generation();
   }
   return ctx;
 }
@@ -499,21 +512,25 @@ void onFunctionExitGlobal(
   // Balance the correlation id pushed at begin_op on every path below,
   // including the teardown and stale-session early exits that skip event
   // finalization.
-  auto correlation_guard =
-      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
+  auto correlation_guard = c10::make_scope_exit([&] {
+    // Kineto may already be destroyed once the session is closed at exit.
+    if (!globalCallbackSession().closedAtExit()) {
+      maybePopCorrelationId(fn, ctx_ptr);
+    }
+  });
 
   // Take this exit's own in-flight ref, paired here because
   // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
   // getGlobal() + RecordQueue write, never the op body, so the drain cannot
   // block on it.
-  global_callback_session.enter();
+  globalCallbackSession().enter();
   auto in_flight_guard =
-      c10::make_scope_exit([] { global_callback_session.exit(); });
+      c10::make_scope_exit([] { globalCallbackSession().exit(); });
 
   // Re-check after the increment, mirroring onFunctionEnterGlobal: if teardown
   // began concurrently the queue may already be finalized/freed, so skip the
   // write (the event keeps its start and gets no end).
-  if (!global_callback_session.isActive()) {
+  if (!globalCallbackSession().isActive()) {
     return;
   }
 
@@ -528,7 +545,7 @@ void onFunctionExitGlobal(
   // event_. In that case, we don't need to do any exit cleanup.
   auto* kineto_ctx =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
-  if (kineto_ctx->session_generation_ != global_callback_session.generation()) {
+  if (kineto_ctx->session_generation_ != globalCallbackSession().generation()) {
     return;
   }
 
@@ -564,7 +581,7 @@ void pushGlobalProfilingCallbacks(
   // Arm the drain gate before the global callback and fire on any thread. If
   // this is a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
-  global_callback_session.activate(new_session);
+  globalCallbackSession().activate(new_session);
 
   state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
 }
@@ -867,6 +884,20 @@ void enableProfiler(
   }
 }
 
+void closeGlobalCallbackSession() {
+  auto& session = globalCallbackSession();
+  session.markClosedAtExit();
+  if (!session.drain()) {
+    // A global callback is wedged. Pop the global state so a later
+    // disableProfiler() doesn't finalize the trace while that callback is
+    // still writing to it.
+    LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
+    if (auto state_ptr = ProfilerStateBase::pop(/*global=*/true)) {
+      state_ptr->removeCallback();
+    }
+  }
+}
+
 bool isProfilerEnabledInMainThread() {
   return profilerStateInfo() != nullptr;
 }
@@ -899,7 +930,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   // for in-flight ones to finish before popping and finalizing the state, else
   // a worker thread can mutate the record queue while finalizeTrace() reads
   // and frees it.
-  if (!global_callback_session.drain()) {
+  if (!globalCallbackSession().drain()) {
     // The drain timed out: an in-flight global callback is wedged or dead, so
     // we cannot finalize (reading the queue would race the live callback and
     // reintroduce the use-after-free). We still pop the state and remove the
