@@ -7722,6 +7722,20 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cuda
     @skip_on_xpu
+    @skip_on_mps
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_cpu_low_precision_non_divisible_seqlen(self, device, dtype):
+        # test real fp16/bf16 cpu kernels at a sequence length that is not a multiple of block size
+        qkv = [torch.randn(B, H, 299, D, device=device, dtype=dtype) for _ in range(3)]
+        block_mask = create_block_mask(noop_mask, B, H, 299, 299, device=device)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+        golden_out = attention(*query_key_value_clones(*qkv, torch.float64))
+        ref_out = attention(*qkv)
+        self._check_out(golden_out, ref_out, torch.compile(attention)(*qkv))
+
+    @supported_platform
+    @skip_on_cuda
+    @skip_on_xpu
     @skip_on_mps  # asserts on the CPU C++ template's generated code
     @common_utils.parametrize("qkv_source", ["input", "bshd_buffer", "linear"])
     @common_utils.parametrize("q_len", [1, 256])
