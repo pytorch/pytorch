@@ -4065,6 +4065,74 @@ class TestBinaryUfuncsDevice(TestCase):
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
+    @onlyOn("cpu")
+    @dtypes(*_unsigned_int_types)
+    @parametrize("op", [torch.add, torch.sub])
+    def test_add_sub_unsigned(self, device, dtype, op):
+        modulus = torch.iinfo(dtype).max + 1
+        lhs = [0, 1, modulus - 1]
+        rhs = [0, 1, 2, modulus // 2, modulus - 1]
+        left = torch.tensor(lhs, dtype=dtype, device=device)[:, None]
+        right = torch.tensor(rhs, dtype=dtype, device=device)[None, :]
+        sign = 1 if op is torch.add else -1
+        for alpha in (-3, -1, 0, 1, 3, modulus - 1):
+            with self.subTest(alpha=alpha):
+                expected = torch.tensor(
+                    [[(a + sign * alpha * b) % modulus for b in rhs] for a in lhs],
+                    dtype=dtype,
+                    device=device,
+                )
+                self.assertEqual(op(left, right, alpha=alpha), expected)
+                output = torch.empty((6, 10), dtype=dtype, device=device)[::2, ::2]
+                self.assertIs(op(left, right, alpha=alpha, out=output), output)
+                self.assertEqual(output, expected)
+                inplace = left.expand(3, 5).clone().t().contiguous().t()
+                getattr(inplace, op.__name__ + "_")(right, alpha=alpha)
+                self.assertEqual(inplace, expected)
+                alias = left.expand(3, 5).clone()
+                op(alias, right, alpha=alpha, out=alias)
+                self.assertEqual(alias, expected)
+
+    @onlyOn("cpu")
+    @dtypes(*_unsigned_int_types)
+    @parametrize("op", [torch.add, torch.sub])
+    def test_add_sub_unsigned_scalars_and_aliases(self, device, dtype, op):
+        modulus = torch.iinfo(dtype).max + 1
+        sign = 1 if op is torch.add else -1
+        scalar = torch.tensor(modulus - 1, dtype=dtype, device=device)
+        self.assertEqual(
+            op(scalar, 2),
+            torch.tensor(
+                (modulus - 1 + sign * 2) % modulus, dtype=dtype, device=device
+            ),
+        )
+        for size in (0, 1, 7, 16, 33):
+            with self.subTest(size=size):
+                values = [(modulus - 1 - i) % modulus for i in range(size)]
+                tensor = torch.tensor(values, dtype=dtype, device=device)
+                expected = torch.tensor(
+                    [(v + sign * 3 * v) % modulus for v in values],
+                    dtype=dtype,
+                    device=device,
+                )
+                self.assertEqual(op(tensor, tensor, alpha=3), expected)
+                op(tensor, tensor, alpha=3, out=tensor)
+                self.assertEqual(tensor, expected)
+
+    @onlyOn("cpu")
+    @dtypes(*_unsigned_int_types)
+    @parametrize("op", [torch.add, torch.sub])
+    def test_add_sub_unsigned_alpha_validation(self, device, dtype, op):
+        tensor = torch.ones(2, dtype=dtype, device=device)
+        for alpha, message in (
+            (True, "Boolean alpha only supported"),
+            (1.5, "alpha must not be a floating point number"),
+            (1j, "alpha must not be a floating point number"),
+        ):
+            with self.subTest(alpha=alpha):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    op(tensor, tensor, alpha=alpha)
+
     def test_add(self, device):
         dtypes = floating_and_complex_types()
         for dtype in dtypes:
