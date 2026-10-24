@@ -5,6 +5,7 @@ import enum
 import inspect
 import logging
 import operator
+import os
 import sys
 import traceback
 import types
@@ -186,8 +187,8 @@ def _register_stack_trace_anchor(fn: Callable[..., Any]) -> None:
 class TracerBase:
     graph: Graph
     record_stack_traces: bool = False
-    # When record_stack_traces is True, only record stack traces
-    # with forward function names.
+    # When record_stack_traces is True, only record stack frames from
+    # forward functions and the non-torch code they call.
     # This helps when we want stack trace back to model code
     _record_forward_stack_traces_only: bool = False
     # Feature flag for mutable schema checking
@@ -300,15 +301,19 @@ class TracerBase:
         # for the recorded stack trace
         user_frames: list[traceback.FrameSummary] = []
         if self._record_forward_stack_traces_only:
-            user_frames = [
-                frame
-                for frame in user_stack_summary
+            torch_dir = os.path.join(os.path.dirname(torch.__file__), "")
+            in_forward = False
+            for frame in user_stack_summary:
                 if (
                     frame.name == "forward"
                     or frame.filename.endswith("torch/__init__.py")
                     or (frame.filename, frame.name) in _STACK_TRACE_ANCHORS
-                )
-            ]
+                ):
+                    in_forward = True
+                    user_frames.append(frame)
+                elif in_forward and not frame.filename.startswith(torch_dir):
+                    # Non-torch code called from forward(), e.g. a helper method
+                    user_frames.append(frame)
         else:
             first_forward = -1
             for i, frame in enumerate(user_stack_summary):
