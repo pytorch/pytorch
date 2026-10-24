@@ -10,20 +10,12 @@
 // they can be unit tested without pulling in ATen or CUDA. Pure integer,
 // character and string logic -- no ATen or CUDA dependencies.
 //
-// Two sites share the transpose/tightness rules and must not drift apart:
-//   * ShouldWildcardLd* in GemmCommon.h decides whether an ld may be replaced
-//     by '*' when a logical dim is dynamic. It checks a SINGLE shape inline
-//     (ld == its logical extent) because there is no second shape to compare.
-//   * LdMayVary + LdsCompatibleWhen*Varies below compare TWO shapes when only
-//     one logical dim differs, requiring tightness in both.
-// What is shared is UsesMForLda/UsesKForLdb (which ld tracks which dim) and
-// the tightness principle (a padded ld is not a function of m/n/k); the call
-// shapes differ because the inputs differ.
+// These rules must not drift from ShouldWildcardLd* in GemmCommon.h, which
+// applies the same principle -- a padded ld is not a function of m/n/k -- to a
+// single shape, where the functions here compare two.
 //
-// This header also hosts the signature parser (ParseGemmShape) and the
-// borrow-compatibility check (NearestLargerMatch) used by
-// TuningResultsManager::LookupNearest, so the grammar lives next to the rules
-// and both are covered by the same unit test.
+// Also hosts the signature parser and borrow check used by
+// TuningResultsManager::LookupNearest, so the grammar sits next to the rules.
 
 namespace at::cuda::tunable {
 
@@ -127,14 +119,10 @@ struct GemmShape {
   std::string suffix;  // tail after ldc (e.g. scaled_mm "_rw_1_bias_BFloat16")
 };
 
-// Parse a token that must be a whole non-negative decimal integer. Unlike
-// std::stoll this neither throws nor accepts a prefix match: "12abc", " 12",
-// "+12" and "" are all rejected, so a malformed signature cannot parse as ok.
-// It also matters for cost: every wildcard ('*') entry in the results map is
-// offered to this parser on every LookupNearest call, and throwing an
-// exception per candidate to reject them is far more expensive than a failed
-// from_chars. A leading '-' is rejected too -- no dim or leading dim is
-// negative, so that is a malformed signature rather than a value to accept.
+// Parse a token that must be a whole non-negative decimal integer. Rejects
+// prefix matches ("12abc"), signs and empties, so a malformed signature cannot
+// parse as ok. Must not throw either: every wildcard entry in the results map
+// reaches this on every LookupNearest call.
 inline bool ParseWholeInt(const std::string& tok, int64_t& out) {
   if (tok.empty() || tok.front() == '-') {
     return false;

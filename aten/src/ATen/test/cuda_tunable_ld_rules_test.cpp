@@ -190,9 +190,8 @@ TEST(TunableLdRules, ParseRejectsMalformed) {
 }
 
 TEST(TunableLdRules, ParseRequiresWholeTokens) {
-  // A token has to be consumed entirely. std::stoll accepted all of these as
-  // a prefix match, so a malformed signature parsed as ok and borrowed against
-  // a dim it never stated.
+  // A token has to be consumed entirely, or a malformed signature parses as
+  // ok and borrows against a dim it never stated.
   EXPECT_FALSE(ParseSig("NN_12abc_512_256_ld_12_256_12").ok);
   EXPECT_FALSE(ParseSig("NN_1024_512_256_ld_1024_256_1024abc").ok);
   EXPECT_FALSE(ParseSig("NN_+12_512_256_ld_12_256_12").ok);
