@@ -443,6 +443,17 @@ class BaseUserFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__") and args[0].is_python_constant():
+            # func_setattro is PyObject_GenericSetAttr, so a read-only member
+            # like __closure__ raises AttributeError instead of being written
+            # into __dict__.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c
+            attr = args[0].as_python_constant()
+            entry = (
+                self.lookup_tp_getset_member(attr) if isinstance(attr, str) else None
+            )
+            if entry is not None and entry.setter is readonly_setter:
+                readonly_setter(self, tx, None)
         if name == "__setattr__":
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
