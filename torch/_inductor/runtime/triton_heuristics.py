@@ -12,6 +12,7 @@ import hashlib
 import importlib
 import inspect
 import itertools
+import json
 import logging
 import math
 import operator
@@ -3714,6 +3715,11 @@ def hash_configs(configs: list[Config]):
         hasher.update(
             f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
+        if extra_options := getattr(cfg, "extra_options", None):
+            # Preserve existing hashes when no backend-specific options exist.
+            hasher.update(
+                f"extra_options={json.dumps(extra_options, sort_keys=True)}\n".encode()
+            )
     return hasher.hexdigest()
 
 

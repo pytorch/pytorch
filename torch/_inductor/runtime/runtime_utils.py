@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import math
 import operator
 from typing import Any, TYPE_CHECKING
@@ -83,6 +84,10 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     # discards a capped config as a duplicate of the uncapped one.
     if getattr(cfg, "maxnreg", None) is not None:
         items.append(("maxnreg", cfg.maxnreg))
+    if extra_options := getattr(cfg, "extra_options", None):
+        # Match the cache's JSON representation, including nested options and
+        # tuples that are restored as lists. Dict insertion order is irrelevant.
+        items.append(("extra_options", json.dumps(extra_options, sort_keys=True)))
     return tuple(items)
 
 
