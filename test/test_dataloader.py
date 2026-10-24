@@ -151,6 +151,15 @@ def _clone_collate(b):
     return [x.clone() for x in b]
 
 
+def _collate_without_shared_allocation(batch):
+    with mock.patch.object(
+        torch.storage.TypedStorage,
+        "_new_shared",
+        side_effect=AssertionError("Ragged batch allocated shared storage"),
+    ):
+        return dataloader.default_collate(batch)
+
+
 # collate_fn that returns the batch of sparse coo tensors cloned
 def _sparse_coo_collate(b):
     lst = []
@@ -2930,6 +2939,19 @@ except RuntimeError as e:
         batch = [["X"], ["X", "X"]]
         self.assertRaises(RuntimeError, lambda: dataloader.default_collate(batch))
         self.assertRaises(RuntimeError, lambda: dataloader.default_collate(batch[::-1]))
+
+    def test_default_collate_mismatched_shapes_no_allocation(self):
+        loader = self._get_data_loader(
+            (torch.empty(2), torch.empty(1)),
+            batch_size=2,
+            num_workers=1,
+            multiprocessing_context="spawn",
+            collate_fn=_collate_without_shared_allocation,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, r"got \[2\] at entry 0 and \[1\] at entry 1"
+        ):
+            next(iter(loader))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):
