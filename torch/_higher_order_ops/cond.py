@@ -713,12 +713,29 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_alias_and_mutation,
+        has_potential_input_alias_or_mutation,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        # Auto-functionalization supports operand mutation, but a branch output that
+        # aliases an input is still unsupported.  _check_alias_and_mutation below is
+        # skipped on this path, so enforce its aliasing half here.
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            aliases, _ = has_potential_input_alias_or_mutation(
+                branch,
+                ctx.unwrap_tensors(inputs),
+                pre_dispatch=ctx.mode.pre_dispatch,
+            )
+            if aliases:
+                raise RuntimeError(
+                    f"{branch_name} might be aliasing the input or the output!"
+                )
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,
