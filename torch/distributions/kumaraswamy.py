@@ -81,13 +81,14 @@ class Kumaraswamy(TransformedDistribution):
 
     @property
     def mode(self) -> Tensor:
-        # Evaluate in log-space for numerical stability.
-        log_mode = (
-            self.concentration0.reciprocal() * (-self.concentration0).log1p()
-            - (-self.concentration0 * self.concentration1).log1p()
-        )
-        log_mode[(self.concentration0 < 1) | (self.concentration1 < 1)] = nan
-        return log_mode.exp()
+        # mode = ((a - 1) / (a * b - 1)) ** (1 / a) with a = concentration1 and
+        # b = concentration0. Evaluate in log-space for numerical stability.
+        a, b = self.concentration1, self.concentration0
+        valid = (a >= 1) & (b >= 1) & ((a > 1) | (b > 1))
+        safe_a = torch.where(valid, a, torch.full_like(a, 2.0))
+        safe_b = torch.where(valid, b, torch.full_like(b, 2.0))
+        log_mode = ((safe_a - 1).log() - (safe_a * safe_b - 1).log()) / safe_a
+        return torch.where(valid, log_mode.exp(), torch.full_like(log_mode, nan))
 
     @property
     def variance(self) -> Tensor:
