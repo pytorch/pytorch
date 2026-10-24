@@ -22,7 +22,9 @@ import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
     xfailIfPy314Plus,
 )
 
@@ -726,6 +728,7 @@ class StopCompares:
         raise DoNotTestEq
 
 
+@instantiate_parametrized_tests
 class ContainsOrderTest(torch._dynamo.test_case.TestCase):
     """
     Sequence __contains__ must compare elements in order via
@@ -744,6 +747,196 @@ class ContainsOrderTest(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         torch._dynamo.config.enable_trace_unittest = self.old
         return super().tearDown()
+
+    @parametrize("container_kind", ["list", "tuple", "dict_values", "dict_items"])
+    @parametrize("result", [1, 0, "yes", "", [1], []])
+    def test_contains_nonbool_eq_returns_bool(self, container_kind, result):
+        class EqResult:
+            def __eq__(self, other):
+                return result
+
+        def fn(x, obj):
+            if container_kind == "list":
+                container, key = [obj], 1
+            elif container_kind == "tuple":
+                container, key = (obj,), 1
+            elif container_kind == "dict_values":
+                container, key = {0: obj}.values(), 1
+            else:
+                container, key = {0: obj}.items(), (0, 1)
+            return x + 1, key in container
+
+        x = torch.ones(1)
+        obj = EqResult()
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = compiled(x, obj)
+        self.assertIs(type(actual[1]), bool)
+        self.assertEqual(actual, expected)
+
+    def test_contains_truthy_eq_short_circuits(self):
+        class TruthyEq:
+            def __eq__(self, other):
+                return "yes"
+
+        def fn(x, obj):
+            return x + 1, 1 in [obj, StopCompares()]
+
+        x = torch.ones(1)
+        obj = TruthyEq()
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+
+    def test_contains_nonbool_eq_truth_error_propagates(self):
+        class TruthError:
+            def __bool__(self):
+                raise ValueError("comparison truth failed")
+
+        class EqResult:
+            def __eq__(self, other):
+                return TruthError()
+
+        def fn(x, obj):
+            try:
+                result = 1 in [obj]
+            except ValueError as exc:
+                return x + 1, str(exc)
+            return x - 1, str(result)
+
+        obj = EqResult()
+        with self.assertRaisesRegex(ValueError, "comparison truth failed"):
+            bool(obj == 1)
+        x = torch.ones(1)
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+
+    def test_contains_nonbool_eq_invalid_bool_raises(self):
+        class InvalidBool:
+            def __bool__(self):
+                return 1
+
+        class EqResult:
+            def __eq__(self, other):
+                return InvalidBool()
+
+        def fn(x, obj):
+            try:
+                result = 1 in [obj]
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, str(result)
+
+        obj = EqResult()
+        with self.assertRaisesRegex(TypeError, "__bool__ should return bool"):
+            bool(obj == 1)
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_contains_notimplemented_uses_reflected_eq(self):
+        class Left:
+            def __eq__(self, other):
+                return NotImplemented
+
+        class Right:
+            def __eq__(self, other):
+                return "reflected match"
+
+        def fn(x, left, right):
+            return x + 1, right in [left]
+
+        x = torch.ones(1)
+        left, right = Left(), Right()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+
+    def test_contains_symbolic_eq(self):
+        class ShapeEq:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __eq__(self, other):
+                return self.tensor.size(0) == other
+
+        def fn(x):
+            return x + 1, 2 in [ShapeEq(x)]
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (2, 4):
+            x = torch.ones(size)
+            actual = compiled(x)
+            self.assertIs(type(actual[1]), bool)
+            self.assertEqual(actual, fn(x))
+
+    def test_plain_eq_keeps_nonbool_result(self):
+        class EqResult:
+            def __eq__(self, other):
+                return "raw comparison"
+
+            def __ne__(self, other):
+                return "raw inequality"
+
+        def fn(x, obj):
+            return x + 1, obj == 1, obj != 1
+
+        x = torch.ones(1)
+        obj = EqResult()
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+
+    @parametrize("container_kind", ["list", "tuple"])
+    def test_container_eq_truth_coercion_preserves_raw_ordering(self, container_kind):
+        class EqResult:
+            def __eq__(self, other):
+                return ""
+
+            def __lt__(self, other):
+                return "raw ordering"
+
+        def fn(x, obj):
+            left = [obj] if container_kind == "list" else (obj,)
+            right = [1] if container_kind == "list" else (1,)
+            return x + 1, left == right, left != right, left < right
+
+        x = torch.ones(1)
+        obj = EqResult()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = compiled(x, obj)
+        self.assertIs(actual[1], False)
+        self.assertIs(actual[2], True)
+        self.assertEqual(actual[3], "raw ordering")
+        self.assertEqual(actual, fn(x, obj))
+
+    def test_membership_identity_skips_raising_eq(self):
+        class RaisesEq:
+            def __eq__(self, other):
+                raise ValueError("identity must skip comparison")
+
+        def fn(x, obj):
+            return x + 1, obj in [obj], x in [x]
+
+        x = torch.ones(2)
+        obj = RaisesEq()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_contains_nonbool_eq_falsy_then_truthy(self):
+        class EqResult:
+            def __init__(self, result):
+                self.result = result
+
+            def __eq__(self, other):
+                return self.result
+
+        def fn(x):
+            return x + 1, 1 in [EqResult(""), EqResult("yes"), StopCompares()]
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
 
     @make_dynamo_test
     def test_list_contains_short_circuits_before_raising_eq(self):
