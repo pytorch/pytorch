@@ -1,10 +1,13 @@
 # Owner(s): ["module: inductor"]
 import gc
 import os
+import pickle
 import random
+import shutil
 import tempfile
 import unittest
 import weakref
+from functools import partial
 from types import SimpleNamespace
 from unittest import mock
 
@@ -12,6 +15,7 @@ import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.static_triton_launcher import (
     _STATIC_LAUNCHER_REGISTRY,
     register_statically_launched_kernel,
@@ -23,6 +27,7 @@ from torch._inductor.runtime.static_triton_launcher import (
 from torch._inductor.runtime.triton_compat import (
     CompiledKernel,
     JITFunction,
+    OutOfResources,
     tl,
     triton,
 )
@@ -36,7 +41,7 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_cuda_tma_device
 
 
 if HAS_XPU_AND_TRITON:
@@ -55,7 +60,9 @@ def _patched_getitem(self, grid):
 
 class TestStaticTritonLauncherUnit(TestCase):
     @staticmethod
-    def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
+    def _global_scratch_kernel(
+        kernel_cls=StaticallyLaunchedCudaKernel, **metadata_overrides
+    ):
         fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
         src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
         metadata = SimpleNamespace(
@@ -65,6 +72,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             global_scratch_size=32,
             global_scratch_align=16,
         )
+        metadata.__dict__.update(metadata_overrides)
 
         class FakeCompiledKernel(SimpleNamespace):
             launch_enter_hook = None
@@ -80,6 +88,33 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel = kernel_cls(compiled_kernel)
         kernel.function = 1
         return kernel
+
+    def test_tensor_memory_limit(self):
+        make_kernel = partial(self._global_scratch_kernel, global_scratch_size=0)
+        for version in [(3, 5), (3, 8), (3, 9)]:
+            with mock.patch(
+                "torch._inductor.runtime.static_triton_launcher.get_triton_version",
+                return_value=version,
+            ):
+                for arch in [75, 80, 86, 89, 90, 100, 101, 103, 107, 110, 120, 121]:
+                    limit = 576 if arch == 107 and version >= (3, 8) else 512
+                    target = SimpleNamespace(arch=arch)
+                    with self.subTest(arch=arch, version=version):
+                        make_kernel(tmem_size=limit, target=target)
+                        with self.assertRaises(OutOfResources) as error:
+                            make_kernel(tmem_size=limit + 1, target=target)
+                        self.assertEqual(
+                            error.exception.args, (limit + 1, limit, "tensor memory")
+                        )
+        for metadata in [{}, {"target": None}, {"target": SimpleNamespace()}]:
+            with self.subTest(metadata=metadata):
+                make_kernel(tmem_size=512, **metadata)
+                with self.assertRaises(OutOfResources) as error:
+                    make_kernel(tmem_size=513, **metadata)
+                self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
+        for size in [None, 0]:
+            make_kernel(tmem_size=size)
+        make_kernel()
 
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
@@ -303,6 +338,78 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner, result = self._autotuner_with_static_cubin(b"cubin")
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
+
+    def _can_statically_launch(self, kernel_name, filenames):
+        from torch._inductor.runtime.hints import HeuristicType
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory)
+        metadata_group = {}
+        for filename in filenames:
+            path = os.path.join(directory, filename)
+            with open(path, "wb") as f:
+                f.write(b"binary")
+            metadata_group[filename] = path
+        fn = SimpleNamespace(__name__=kernel_name, arg_names=["out"], params=[])
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
+            src=SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={}),
+            metadata=SimpleNamespace(num_warps=4, shared=0, num_ctas=1),
+            metadata_group=metadata_group,
+            hash="ab" * 32,
+            asm={"cubin": b"binary"},
+        )
+        with torch._inductor.config.patch(use_static_triton_launcher=True):
+            static_kernel = StaticTritonCompileResult.can_statically_launch(
+                compiled_kernel,
+                {},
+                {"device_type": "cuda", "device": 0},
+                HeuristicType.POINTWISE,
+            )
+        return static_kernel, metadata_group
+
+    @skipIfRocm
+    def test_static_launch_takes_cubin_from_metadata_group(self):
+        # Triton truncates long cache filenames, so the kernel symbol does not
+        # name the binary.
+        static_kernel, metadata_group = self._can_statically_launch(
+            "kernel_with_a_long_name", ["kernel_with.cubin", "kernel_with.json"]
+        )
+        self.assertEqual(static_kernel.cubin_path, metadata_group["kernel_with.cubin"])
+        self.assertEqual(static_kernel.cubin_filename, "kernel_with.cubin")
+
+        restored = pickle.loads(pickle.dumps(static_kernel))
+        self.assertIsNone(restored.cubin_path)
+        self.assertEqual(restored.cubin_filename, "kernel_with.cubin")
+
+        restored.cubin_raw = b"binary"
+        result = object.__new__(StaticTritonCompileResult)
+        result.kernel = restored
+        result.compile_meta = {"device": 0, "device_type": "cuda"}
+        with (
+            tempfile.TemporaryDirectory() as cache_dir,
+            mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": cache_dir}),
+        ):
+            result.reload_cubin_path()
+            self.assertEqual(
+                restored.cubin_path,
+                os.path.join(
+                    cache_dir, triton_hash_to_path_key("ab" * 32), "kernel_with.cubin"
+                ),
+            )
+            with open(restored.cubin_path, "rb") as f:
+                self.assertEqual(f.read(), b"binary")
+
+    @skipIfRocm
+    def test_static_launch_rejects_ambiguous_metadata_group(self):
+        for filenames in (["kernel.json"], ["kernel.cubin", "kernel_1.cubin"]):
+            with self.subTest(filenames=filenames):
+                static_kernel, _ = self._can_statically_launch("kernel", filenames)
+                self.assertIsNone(static_kernel)
 
 
 @requires_gpu_and_triton
@@ -1266,8 +1373,8 @@ class TestFastCudaLauncherCompileResult(TestCase):
 
     @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
     @unittest.skipIf(
-        not has_triton_tma_device(),
-        "requires Triton device-side TMA support",
+        not has_triton_cuda_tma_device(),
+        "requires Triton device-side TMA support on CUDA",
     )
     @torch._inductor.config.patch(
         {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}

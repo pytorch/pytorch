@@ -1259,17 +1259,13 @@ def wait_for_process(p, timeout=None):
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
-        exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
-        # try to handle the case where p.wait(timeout=5) times out as well as
-        # otherwise the wait() call in the finally block can potentially hang
+            p.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
-        if exit_status is not None:
-            return exit_status
-        else:
+            # Still alive after the grace period; the finally's wait() would hang.
             p.kill()
+        # Re-raised even when pytest exits in the grace period, so the caller sees
+        # a timeout (retry_shell's 124), not the interrupted run's exit code.
         raise
     except:
         p.kill()
@@ -1916,11 +1912,16 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# The CI job's test config, such as default, distributed or periodic
+TEST_CONFIG: str | None = TestEnvironment.def_setting(
+    "TEST_CONFIG",
+    env_var="TEST_CONFIG",
+)
 # Enables tests that run only in the periodic-strict CI workflow (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: os.getenv("TEST_CONFIG") == "periodic",
+    implied_by_fn=lambda: TEST_CONFIG == "periodic",
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -2209,6 +2210,25 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     if not isinstance(msg, str):
         raise AssertionError("Are you using skipIfFreeThreaded correctly?")
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
+
+
+def skipIfCppFakeTensor(reason):
+    if not isinstance(reason, str):
+        raise AssertionError("please provide a reason")
+    from torch._dynamo import config
+
+    return unittest.skipIf(config.use_cpp_fake_tensor, reason)
+
+
+_CppFakeExpectedT = TypeVar("_CppFakeExpectedT")
+
+
+def expectedIfCppFakeTensor(
+    cpp_expected: _CppFakeExpectedT, python_expected: _CppFakeExpectedT
+) -> _CppFakeExpectedT:
+    from torch._dynamo import config
+
+    return cpp_expected if config.use_cpp_fake_tensor else python_expected
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
