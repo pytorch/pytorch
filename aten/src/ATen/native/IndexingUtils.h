@@ -20,6 +20,13 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   " does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
 }
 
+// Called for uint8 masks reaching expandTensors. Treating uint8 index tensors
+// as masks is deprecated, see https://github.com/pytorch/pytorch/issues/201370
+[[maybe_unused]] static void uint8_index_deprecated() {
+  TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
+  " please use a dtype torch.bool instead.");
+}
+
 [[maybe_unused]] static std::vector<Tensor> expandTensors(
     const Tensor& self,
     IOptTensorListRef indices,
@@ -34,8 +41,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
       const auto& index = *index_opt;
       if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
         if (index.scalar_type() == kByte) {
-          TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
-          " please use a dtype torch.bool instead.");
+          uint8_index_deprecated();
         }
         // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
         // corresponding dimensions in self
