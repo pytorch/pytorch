@@ -538,6 +538,139 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             f(x, Items())[1],
         )
 
+    @make_dynamo_test
+    def test_join(self):
+        self.assertEqual(self.type2test(b"").join([]), b"")
+        self.assertEqual(self.type2test(b"").join([b""]), b"")
+        for lst in [[b"abc"], [b"a", b"bc"], [b"ab", b"c"], [b"a", b"b", b"c"]]:
+            lst = list(map(self.type2test, lst))
+            self.assertEqual(self.type2test(b"").join(lst), b"abc")
+            self.assertEqual(self.type2test(b"").join(tuple(lst)), b"abc")
+            self.assertEqual(self.type2test(b"").join(iter(lst)), b"abc")
+
+        dot_join = self.type2test(b".:").join
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([bytearray(b"ab"), b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([b"ab", bytearray(b"cd")]), b"ab.:cd")
+        self.assertEqual(dot_join(x for x in (b"a", b"b")), b"a.:b")
+
+        # The result is a new bytearray, not the separator.
+        out = dot_join([b"ab", b"cd"])
+        self.assertIsInstance(out, self.type2test)
+        out += b"ef"
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        self.assertRaises(TypeError, self.type2test(b" ").join, None)
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            self.type2test(b" ").join(0)
+        dot_join = self.type2test(b".:").join
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            dot_join([bytearray(b"ab"), "cd", b"ef"])
+
+    def test_join_error_propagates_from_iterator(self):
+        # PySequence_Fast consumes the whole iterable before any item is
+        # type-checked, so an exception raised mid-iteration reaches the caller
+        # instead of being replaced by join's own error.
+        def f(sep):
+            def gen():
+                yield b"A"
+                raise RuntimeError("boom")
+
+            try:
+                sep.join(gen())
+            except RuntimeError as e:
+                return str(e)
+            return None
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(bytearray(b",")),
+            f(bytearray(b",")),
+        )
+
+    def test_join_separator_mutation_matches_cpython(self):
+        # join holds a temporary export on the separator. CPython rejects only
+        # the mutations that resize it, and validates arguments before the
+        # resize, so each case compares the compiled result with eager.
+        def run(op, sep_data=b",", compiled=False):
+            def f(sep):
+                def it():
+                    op(sep)
+                    yield b"A"
+
+                try:
+                    sep.join(it())
+                except Exception as e:
+                    return type(e).__name__, str(e), bytes(sep)
+                return "ok", bytes(sep), bytes(sep)
+
+            sep = bytearray(sep_data)
+            if compiled:
+                return torch.compile(f, backend="eager", fullgraph=True)(sep)
+            return f(sep)
+
+        cases = [
+            ("extend empty", lambda s: s.extend(b"")),
+            ("extend empty list", lambda s: s.extend([])),
+            ("extend one", lambda s: s.extend(b"x")),
+            ("append out of range", lambda s: s.append(300)),
+            ("append byte", lambda s: s.append(65)),
+            ("imul 1", lambda s: s.__imul__(1)),
+            ("imul 0", lambda s: s.__imul__(0)),
+            ("iadd empty", lambda s: s.__iadd__(b"")),
+            ("iadd one", lambda s: s.__iadd__(b"x")),
+        ]
+        with torch._dynamo.config.patch(cache_size_limit=32):
+            for name, op in cases:
+                with self.subTest(name=name):
+                    self.assertEqual(run(op, compiled=True), run(op))
+
+            # An empty separator has nothing to resize, so repeating it is
+            # allowed even though the count is greater than one.
+            def repeat_empty(sep):
+                sep.__imul__(2)
+
+            self.assertEqual(
+                run(repeat_empty, sep_data=b"", compiled=True),
+                run(repeat_empty, sep_data=b""),
+            )
+
+        cnt = CompileCounter()
+
+        def g(sep, x):
+            x = x + 1
+
+            def it():
+                sep.append(65)
+                yield b"A"
+
+            try:
+                sep.join(it())
+            except BufferError:
+                return "caught", x
+            return "ok", x
+
+        self.assertEqual(
+            torch.compile(g, backend=cnt, fullgraph=True)(
+                bytearray(b","), torch.ones(1)
+            ),
+            ("caught", torch.tensor([2.0])),
+        )
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_input_bytearray_join(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(sep, ba, items):
+            return sep.join([ba, b"x"]), sep.join(items)
+
+        self.assertEqual(
+            fn(bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")]),
+            (bytearray(b"ab-x"), bytearray(b"ab-cd")),
+        )
+
     def test_append_extend_arg_mutation(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(ba, x):

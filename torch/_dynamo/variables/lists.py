@@ -2222,6 +2222,8 @@ class ByteArrayVariable(VariableTracker):
             new_data = self.data * n
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
+        if len(new_data) != len(self.data):
+            self._raise_if_join_exported(tx)
         tx.output.side_effects.mutation(self)
         # New buffer — do not mutate a sourced live object during tracing.
         self.data = new_data
@@ -2266,6 +2268,8 @@ class ByteArrayVariable(VariableTracker):
                 "mutation_type."
             )
         other_data = self._concat_operand(tx, other)
+        if other_data:
+            self._raise_if_join_exported(tx)
         tx.output.side_effects.mutation(self)
         # Assign a new buffer so tracing never mutates a sourced live object.
         # Side-effect replay writes the final contents back via old[:] = new.
@@ -2441,6 +2445,17 @@ class ByteArrayVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return ConstantVariable.create(result)
 
+    def _raise_if_join_exported(self, tx: "InstructionTranslatorBase") -> None:
+        # bytearray_join holds a temporary export on the separator, so an
+        # iterator that resizes it mid-join must see BufferError. The traced
+        # copy has no exports, so the export is tracked on the variable.
+        if getattr(self, "_join_exported", False):
+            raise_observed_exception(
+                BufferError,
+                tx,
+                args=["Existing exports of data: object cannot be re-sized"],
+            )
+
     def bytearray_append(
         self,
         tx: "InstructionTranslatorBase",
@@ -2458,6 +2473,9 @@ class ByteArrayVariable(VariableTracker):
             new_data.append(item.as_python_constant())
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=list(e.args))
+        # The byte is validated first and the buffer is resized second, so an
+        # exported separator only rejects the store after the value is checked.
+        self._raise_if_join_exported(tx)
         tx.output.side_effects.mutation(self)
         # New buffer: do not mutate a sourced live object during tracing.
         self.data = new_data
@@ -2519,9 +2537,60 @@ class ByteArrayVariable(VariableTracker):
             new_data.extend(values)
         except (TypeError, ValueError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
+        if len(new_data) != len(self.data):
+            self._raise_if_join_exported(tx)
         tx.output.side_effects.mutation(self)
         self.data = new_data
         return ConstantVariable.create(None)
+
+    def bytearray_join(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_join: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        iterable = args[0]
+        if not vt_is_iterable(iterable):
+            raise_type_error(tx, "can only join an iterable")
+        # _PyBytes_Join materializes the iterable with PySequence_Fast before
+        # the first item is type-checked, so an iterator that raises outranks a
+        # bad item it already yielded. Sequences are already materialized.
+        if isinstance(iterable, (variables.ListVariable, variables.TupleVariable)):
+            items = list(iterable.items)
+        else:
+            items = []
+            exported = getattr(self, "_join_exported", False)
+            self._join_exported = True
+            try:
+                iterator = generic_getiter(tx, iterable)
+                while True:
+                    try:
+                        item = pyiter_next(tx, iterator)
+                    except ObservedUserStopIteration:
+                        handle_observed_exception(tx)
+                        break
+                    items.append(item)
+            finally:
+                self._join_exported = exported
+        parts: list[bytes] = []
+        for i, item in enumerate(items):
+            if isinstance(item, ByteArrayVariable):
+                parts.append(bytes(item.data))
+                continue
+            if not item.is_python_constant():
+                return None
+            const = item.as_python_constant()
+            if not isinstance(const, (bytes, bytearray)):
+                raise_type_error(
+                    tx,
+                    f"sequence item {i}: expected a bytes-like object, "
+                    f"{item.python_type_name()} found",
+                )
+            parts.append(bytes(const))
+        return ByteArrayVariable(
+            self.data.join(parts), mutation_type=ValueMutationNew()
+        )
 
     tp_methods = {
         "index": Method(bytearray_index),
@@ -2531,6 +2600,7 @@ class ByteArrayVariable(VariableTracker):
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
         "extend": Method(bytearray_extend),
+        "join": Method(bytearray_join),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
