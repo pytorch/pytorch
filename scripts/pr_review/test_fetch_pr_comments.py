@@ -399,9 +399,9 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(item["role"], fpc.AUTOMATED)
         self.assertEqual(len(item["body"]), fpc.MAX_REVIEW_BODY + len(" [truncated]"))
 
-    def test_a_kept_reply_keeps_the_finding_it_answers(self):
+    def test_a_replys_finding_never_takes_a_persons_place(self):
         issue = [
-            comment("maint", body="y" * 3000, when=f"2026-01-{i:02d}")
+            comment("maint", id=20 + i, body="y" * 3000, when=f"2026-01-{i:02d}")
             for i in range(1, 6)
         ]
         api = FakeApi(
@@ -417,9 +417,26 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 2000):
             out = fpc.collect(api, REPO, PR)
         ids = [i["id"] for i in out["items"]]
-        self.assertIn(11, ids)
-        self.assertIn(10, ids)
+        # Every person's comment; the reply's long finding is skipped and the
+        # small latest-review body still fits.
+        self.assertEqual(ids, [50, 21, 22, 23, 24, 25, 11])
         self.assertTrue(out["truncated"])
+
+    def test_a_replied_to_finding_comes_first_among_findings(self):
+        big = fpc.MARKER + "\n" + "x" * 3000
+        api = FakeApi(
+            inline=[
+                finding(cid=10, when="2025-12-01", body="z" * 2500),
+                comment("author", id=11, in_reply_to_id=10, when="2026-02-01"),
+            ],
+            reviews=[{**ours(body=big), "submitted_at": "2026-03-01"}],
+        )
+        full = fpc.collect(api, REPO, PR)
+        # Room for the reply and either the finding or the body, not both.
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", len(fpc.dumps(full)) - 2000):
+            out = fpc.collect(api, REPO, PR)
+        # The newer latest-review body would come first in its group.
+        self.assertEqual([i["id"] for i in out["items"]], [10, 11])
 
     def test_a_finding_that_does_not_fit_does_not_hide_smaller_ones(self):
         big = fpc.MARKER + "\n" + "x" * 9000

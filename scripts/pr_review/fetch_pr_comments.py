@@ -19,13 +19,13 @@ and maintainers, read for the newest ``MAX_REACTION_LOOKUPS`` reacted comments
 (reactions to a review body have no REST endpoint and are not read), and
 ``reactions_truncated`` is set when a limit or a failed lookup may have left
 some out. Bodies are capped. If the conversation is too long, ``truncated`` is
-set and items are selected in two phases. First, people's comments, newest
-first, each with the finding it replies to if both fit; the first comment that
-does not fit even alone ends selection, and older comments and findings not
-already selected are left out. Then, only if all
-of them fit, earlier findings: those with a reply or reaction seen and the
-latest review body, then the rest, newest first within each group, skipping
-any that does not fit. Kept items are written in time order.
+set and items are selected in two phases. First, people's comments alone,
+newest first; the first that does not fit ends selection, and older comments
+and every finding are left out. Then, only if all of them fit, earlier
+findings are considered in this order, each kept if it fits and skipped if
+not: those a kept reply answers (in the order of the replies), then those with
+a reaction seen and the latest review body, then the rest, each group newest
+first. Kept items are written in time order.
 
 Every failure is fatal except a 404 on a permission check (that user is not a
 maintainer) and any failure while reading a comment's reactions, including the
@@ -315,7 +315,6 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "items": [],
     }
     size = len(dumps(envelope))
-    # A reply from a person is kept with the finding it answers when both fit.
     findings = {
         i["id"]: n
         for n, i in enumerate(items)
@@ -324,22 +323,22 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
 
     def take(n: int) -> bool:
         nonlocal size
-        parent = findings.get(items[n].get("in_reply_to_id"))
-        # With the finding it replies to if both fit, else alone.
-        for unit in ((n, parent), (n,)) if parent is not None else ((n,),):
-            unit = [m for m in unit if m not in kept]
-            grow = sum(len(dumps(items[m])) + 1 for m in unit)
-            if len(kept) + len(unit) <= MAX_ITEMS and size + grow <= MAX_TOTAL_BYTES:
-                size += grow
-                kept.extend(unit)
-                return True
-        return False
+        if n in kept:
+            return True
+        grow = len(dumps(items[n])) + 1
+        if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
+            return False
+        size += grow
+        kept.append(n)
+        return True
 
-    # People's comments are cut strictly oldest first. Earlier findings are
-    # considered only if every person's comment fit, and one that does not fit
-    # is skipped so that smaller ones after it can still be kept.
+    # People's comments alone, cut strictly oldest first, so a finding never
+    # takes a person's place. Earlier findings follow only if every person's
+    # comment fit: first those a kept reply answers, then the groups above, and
+    # one that does not fit is skipped so that smaller ones can still be kept.
     if all(take(n) for n in groups[0]):
-        for n in groups[1] + groups[2]:
+        replied_to = [findings.get(items[n].get("in_reply_to_id")) for n in kept]
+        for n in [m for m in replied_to if m is not None] + groups[1] + groups[2]:
             take(n)
     omitted = len(items) - len(kept)
     return {
