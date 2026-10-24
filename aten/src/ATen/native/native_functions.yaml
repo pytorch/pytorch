@@ -12470,6 +12470,7 @@
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
     CUDA: adaptive_max_pool3d_out_cuda
+    MPS: adaptive_max_pool3d_out_mps
     XPU: adaptive_max_pool3d_out_xpu
 
 # Return: (Tensor output, Tensor indices)
@@ -12483,6 +12484,7 @@
   dispatch:
     CPU: adaptive_max_pool3d_backward_out_cpu
     CUDA: adaptive_max_pool3d_backward_out_cuda
+    MPS: adaptive_max_pool3d_backward_out_mps
     XPU: adaptive_max_pool3d_backward_out_xpu
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
