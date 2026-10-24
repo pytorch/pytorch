@@ -2442,6 +2442,17 @@ class TestMetaKernelRegistrations(TestCase):
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_linalg_cholesky_ex_out_dtype_mismatch(self):
+        # Like the eager structured kernel, the meta must reject an out= dtype
+        # that differs from the result, even when the cast would be safe.
+        A = torch.empty(3, 3, device="meta")
+        L = torch.empty(3, 3, dtype=torch.float64, device="meta")
+        info = torch.empty((), dtype=torch.int32, device="meta")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.linalg.cholesky_ex(A, out=(L, info))
+
     def test_grid_sampler_2d_cpu_fallback_meta(self):
         # The meta kernels' whole contract is output metadata, so compare
         # shape/stride/dtype against eager for the forward and both backward

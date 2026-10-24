@@ -990,6 +990,54 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
             self.assertEqual(count_recompiles(out_fn), 2)
 
+    def test_linalg_composite_does_not_overrecompile(self):
+        # linalg.norm, linalg.matrix_norm and linalg.cholesky(out=) are
+        # CompositeImplicitAutograd ops whose C++ kernels used to call sizes()
+        # on symbolic tensors (or, for cholesky's out=, hit
+        # aten.linalg_cholesky_ex.L, which lacked a meta function). That
+        # specialized the dynamic dim, so they recompiled on every new shape.
+        def norm(a, out):
+            return torch.linalg.norm(a, ord=-1, dim=(0, 1))
+
+        def norm_out(a, out):
+            return torch.linalg.norm(a, ord=-1, dim=(0, 1), out=out)
+
+        # ord > 0 over an empty dim takes the zeros branch of linalg_matrix_norm
+        def norm_empty_dim(a, out):
+            return torch.linalg.norm(a, ord=1, dim=(0, 1))
+
+        def matrix_norm_out(a, out):
+            return torch.linalg.matrix_norm(a, ord=-1, dim=(0, 1), out=out)
+
+        def cholesky_out(a, out):
+            return torch.linalg.cholesky(a, out=out)
+
+        def norm_inputs(n):
+            return torch.randn(4, 4, n), torch.empty(n)
+
+        def empty_dim_inputs(n):
+            return torch.randn(4, 0, n), torch.empty(n)
+
+        def cholesky_inputs(n):
+            x = torch.randn(n, 3, 3)
+            return x @ x.mT + 3 * torch.eye(3), torch.empty(n, 3, 3)
+
+        cases = [
+            (norm, norm_inputs),
+            (norm_out, norm_inputs),
+            (norm_empty_dim, empty_dim_inputs),
+            (matrix_norm_out, norm_inputs),
+            (cholesky_out, cholesky_inputs),
+        ]
+        for fn, make_inputs in cases:
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, dynamic=None)
+            for n in range(4, 10):
+                a, out = make_inputs(n)
+                self.assertEqual(opt(a, out), fn(a, out.clone()))
+            self.assertEqual(cnt.frame_count, 2, msg=fn.__name__)
+
 
 class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
     # Float constant guards must be value-identity (bitwise), not IEEE eq:

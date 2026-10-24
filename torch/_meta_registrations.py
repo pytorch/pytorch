@@ -1419,7 +1419,8 @@ def cholesky_inverse(self: Tensor, upper: bool = False) -> Tensor:
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
-@register_meta(aten.linalg_cholesky_ex.default)
+@register_meta([aten.linalg_cholesky_ex.default, aten.linalg_cholesky_ex.L])
+@out_wrapper("L", "info", exact_dtype=True)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
     squareCheckInputs(A, "linalg.cholesky")
     checkFloatingOrComplex(A, "linalg.cholesky")
