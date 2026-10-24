@@ -45,7 +45,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.5": "9",
 }
 
-ROCM_ARCHES = ["10.0", "10.1"]
+ROCM_ARCHES = ["10.1", "10.2"]
 
 
 class RocmPreviewLane(NamedTuple):
@@ -128,8 +128,9 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
     },
     # dependency on latest patch version for (major, minor)
-    "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
+    # release candidate; switch to ==10.2.* once 10.2 is released
+    "10.2": ("rocm[libraries,device-all]==10.2.0rc0"),
     # binary_populate_env.sh appends ==<pin> at build time, so pin bumps
     # don't change generated workflows.
     ROCM_PREVIEW.arch: (
