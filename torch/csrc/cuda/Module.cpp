@@ -1012,7 +1012,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       segmentDict[total_size_s] = seg.size;
       segmentDict[allocated_size_s] = seg.allocated ? seg.size : 0;
       segmentDict[active_size_s] = seg.active ? seg.size : 0;
-      segmentDict[requested_size_s] = seg.size;
+      segmentDict[requested_size_s] = seg.active ? seg.requested_size : 0;
       segmentDict[stream_s] = int64_t(0);
       segmentDict[segment_type_s] = small_s;
       segmentDict[segment_pool_id] = seg.owner_private_pool_id;
@@ -1026,7 +1026,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       py::dict blockDict;
       blockDict[address_s] = seg.address;
       blockDict[size_s] = seg.size;
-      blockDict[requested_size_s] = seg.size;
+      blockDict[requested_size_s] = seg.requested_size;
       blockDict[state_s] =
           (seg.allocated ? active_allocated_s
                          : (seg.active ? active_pending_free_s : inactive_s));
@@ -1376,11 +1376,10 @@ void* callPythonAllocator(
   if (!Py_IsInitialized() || Py_IsFinalizing()) {
     return nullptr;
   }
-  c10::cuda::CUDAStreamGuard stream_guard(
-      c10::cuda::getStreamFromExternal(stream, device));
   py::gil_scoped_acquire gil;
-  py::object result = py::reinterpret_borrow<py::object>(
-      getPythonAllocatorCallback(state, 0))(size);
+  py::object result =
+      py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 0))(
+          size, device, reinterpret_cast<uintptr_t>(stream));
   if (result.is_none()) {
     return nullptr;
   }
@@ -1411,12 +1410,13 @@ void callPythonDeallocator(
         message);
   };
   try {
-    c10::cuda::CUDAStreamGuard stream_guard(
-        c10::cuda::getStreamFromExternal(stream, device));
     py::gil_scoped_acquire gil;
     try {
       py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
-          reinterpret_cast<uintptr_t>(ptr), size);
+          reinterpret_cast<uintptr_t>(ptr),
+          size,
+          device,
+          reinterpret_cast<uintptr_t>(stream));
     } catch (const std::exception& e) {
       // Report the Python error while the GIL is still held, but do not let a
       // cleanup callback throw through allocator teardown.

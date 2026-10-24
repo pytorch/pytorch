@@ -358,8 +358,18 @@ class Match:
         # pyrefly: ignore [bad-context-manager]
         with context:
             if trace_fn is None:
+                # Under compile-on-one-rank the graph stays rank-agnostic until
+                # post_grad's respecialize_current_device_nodes, so a replacement
+                # spliced in before then must not bake the compiling rank's device.
+                rank_agnostic = bool(
+                    self.graph.find_nodes(
+                        op="call_function", target=torch.ops.coor.current_device.default
+                    )
+                )
                 trace_fn = functools.partial(
-                    fwd_only, run_functional_passes=run_functional_passes
+                    fwd_only,
+                    run_functional_passes=run_functional_passes,
+                    is_replacement=rank_agnostic,
                 )
 
             if should_propagate_eager_input_vals(self.nodes):
@@ -949,13 +959,24 @@ def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
     return defaults
 
 
+_AUTO_FUNCTIONALIZED = (
+    torch.ops.higher_order.auto_functionalized,
+    torch.ops.higher_order.auto_functionalized_v2,
+)
+
+
 def _has_undeclared_non_default_kwarg(
-    target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
+    node: torch.fx.Node, declared: Mapping[str, Any]
 ) -> bool:
     # Patterns don't bind kwargs they don't declare, so matching a node that sets
     # one (e.g. add's alpha) would silently drop it from the replacement.
     # Patterns must declare any kwarg they accept (dtype, memory_format, ...).
-    undeclared = [(k, v) for k, v in kwargs.items() if k not in declared]
+    target = node.target
+    if target in _AUTO_FUNCTIONALIZED and node.args:
+        # functionalization passes every arg of the wrapped op as a kwarg,
+        # defaults included, so compare against the wrapped op's schema
+        target = node.args[0]
+    undeclared = [(k, v) for k, v in node.kwargs.items() if k not in declared]
     if not isinstance(target, torch._ops.OpOverload):
         # without a schema we can't tell which values are defaults
         return bool(undeclared)
@@ -1088,7 +1109,7 @@ class _TargetArgsExpr(_TargetExpr):
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         # raw kwargs, since normalization fills in every default
-        if _has_undeclared_non_default_kwarg(node.target, node.kwargs, self.kwargs):
+        if _has_undeclared_non_default_kwarg(node, self.kwargs):
             return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
         _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
@@ -3131,17 +3152,26 @@ def fwd_only(
     *,
     run_functional_passes: bool = True,
     get_decomp_fn: Callable[..., Any] = select_decomp_table,
+    is_replacement: bool = False,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
+    import contextlib
+
     from torch.compiler import config as compiler_config
 
-    # Patterns are device-agnostic templates traced with fixed example tensors; keep the
-    # compile-on-one-rank device handling out of pattern tracing so make_fx's single-device
-    # check only validates real user graphs, not these internal fixed-device templates.
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with (
+    # A pattern template is matched against, never spliced in, so tracing it with a
+    # fixed example device is fine -- and CooR's single-device check would reject it.
+    # A replacement spliced into a still rank-agnostic graph has to be traced with
+    # CooR live or it bakes a rank-specific device into that graph.
+    coor_ctx = (
+        contextlib.nullcontext()
+        if is_replacement
         # pyrefly: ignore [missing-attribute]
-        compiler_config.patch(compile_on_one_rank=False),
+        else compiler_config.patch(compile_on_one_rank=False)
+    )
+    with (
+        coor_ctx,
         enable_python_dispatcher(),
         preserve_node_meta(),
     ):
