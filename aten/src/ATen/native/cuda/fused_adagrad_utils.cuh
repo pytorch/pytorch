@@ -47,7 +47,7 @@ C10_DEVICE inline void adagrad_math(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename step_t = float>
 struct FusedAdagradMathFunctor {
   using opmath_t = at::opmath_type<scalar_t>;
 
@@ -72,7 +72,7 @@ struct FusedAdagradMathFunctor {
 
     const auto corrected_lr = [&]() -> double {
       auto* step_count =
-          reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
+          reinterpret_cast<const step_t*>(tl.state_steps_addresses[tensor_loc]);
       const auto denom = 1 + (*step_count - 1) * lr_decay;
       const auto corrected_lr = lr_double / denom;
       return corrected_lr;
