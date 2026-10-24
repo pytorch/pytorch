@@ -26,6 +26,15 @@ namespace {
 
 constexpr const char* kOp = "gemm_nn_f32";
 
+// Compare entries by key rather than with EXPECT_EQ on the entries themselves.
+// ResultEntry::operator== already compares only the key, but passing entries to
+// EXPECT_EQ makes gtest print them on failure via the operator<< declared as a
+// friend in Tunable.h. That friend declaration does not pick up the class's
+// TORCH_CUDA_CPP_API, so the symbol is not exported and the test fails to link.
+std::string Key(const ResultEntry& entry) {
+  return entry.GetKey();
+}
+
 // A specialized (non-Default) donor entry, as produced by tuning. The time is
 // the donor shape's, measured when the donor was tuned.
 ResultEntry Donor(const char* key, double time_ms = 1.0) {
@@ -124,11 +133,11 @@ TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
   SeedDonor(mgr);
 
   ctx->EnableNearestMatch(false);
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
 
   ctx->EnableTuning(true);
   ctx->EnableNearestMatch(true);
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
 }
 
 TEST_F(TunableNearestTest, BorrowsClosestDonor) {
@@ -139,7 +148,7 @@ TEST_F(TunableNearestTest, BorrowsClosestDonor) {
   mgr.Add(kOp, kCSig, Donor("k64"));
   mgr.Add(kOp, "NN_128_512_256_ld_128_256_128", Donor("k128"));
   const ResultEntry got = mgr.LookupNearest(kOp, kQSig);
-  EXPECT_EQ(got, Donor("k64"));
+  EXPECT_EQ(Key(got), Key(Donor("k64")));
 }
 
 TEST_F(TunableNearestTest, SkipsDefaultDonors) {
@@ -151,7 +160,7 @@ TEST_F(TunableNearestTest, SkipsDefaultDonors) {
   TuningResultsManager mgr;
   mgr.Add(kOp, "NN_48_512_256_ld_48_256_48", ResultEntry::Default());
   mgr.Add(kOp, kCSig, Donor("k64"));
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
 }
 
 TEST_F(TunableNearestTest, TieBreakIsDeterministic) {
@@ -167,7 +176,7 @@ TEST_F(TunableNearestTest, TieBreakIsDeterministic) {
   mgr.Add(kOp, kCSig, Donor("k64"));
   const ResultEntry got = mgr.LookupNearest(kOp, kQSig);
   // "NN_32_544_..." < "NN_64_512_..." lexicographically.
-  EXPECT_EQ(got, Donor("n544"));
+  EXPECT_EQ(Key(got), Key(Donor("n544")));
 }
 
 TEST_F(TunableNearestTest, ResultIsNotMemoized) {
@@ -178,9 +187,9 @@ TEST_F(TunableNearestTest, ResultIsNotMemoized) {
   ctx->EnableTuning(false);
   TuningResultsManager mgr;
   mgr.Add(kOp, kCSig, Donor("k64"));
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
-  EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
-  EXPECT_EQ(mgr.LookupNearest(kOp, kQSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Null()));
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
 }
 
 TEST_F(TunableNearestTest, RecordBorrowedBecomesExactHit) {
@@ -188,10 +197,10 @@ TEST_F(TunableNearestTest, RecordBorrowedBecomesExactHit) {
   TempResultsFile results("tunableop-exact-hit-");
   TuningResultsManager mgr;
   SeedDonor(mgr);
-  EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Null()));
   mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
   // The recorded borrow is an ordinary exact hit from then on.
-  EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(Donor("k64")));
 }
 
 TEST_F(TunableNearestTest, RecordBorrowedIgnoresPolicyFlags) {
@@ -206,7 +215,7 @@ TEST_F(TunableNearestTest, RecordBorrowedIgnoresPolicyFlags) {
   ctx->EnableRecordBorrowed(false);
   TuningResultsManager mgr;
   mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
-  EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(Donor("k64")));
 }
 
 TEST_F(TunableNearestTest, RecordBorrowedPersistsWhileTuningIsOff) {
@@ -257,11 +266,11 @@ TEST_F(TunableNearestTest, RecordBorrowedFirstWriteWins) {
 
   mgr.RecordBorrowed(kOp, kQSig, Validated("first", /*measured_ms=*/2.5));
   mgr.RecordBorrowed(kOp, kQSig, Validated("second", /*measured_ms=*/3.5));
-  EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("first"));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(Donor("first")));
 
   mgr.Add(kOp, kCSig, Donor("k64"));
   mgr.RecordBorrowed(kOp, kCSig, Validated("usurper", /*measured_ms=*/4.5));
-  EXPECT_EQ(mgr.Lookup(kOp, kCSig), Donor("k64"));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kCSig)), Key(Donor("k64")));
 
   const std::string content = results.Contents();
   EXPECT_NE(content.find("first"), std::string::npos);
