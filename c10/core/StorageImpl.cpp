@@ -112,8 +112,9 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
         resizable);
   }
 
-  // Create a c10::StorageImpl object.
-  if (data_ptr != nullptr) {
+  // A null DataPtr can represent an empty external buffer. Without an
+  // allocator, preserve the supplied-buffer construction path.
+  if (data_ptr != nullptr || allocator == nullptr) {
     return c10::make_intrusive<c10::StorageImpl>(
         use_byte_size,
         std::move(size_bytes),

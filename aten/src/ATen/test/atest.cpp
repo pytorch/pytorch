@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/util/irange.h>
 
+#include <array>
 #include <iostream>
 using namespace std;
 using namespace at;
@@ -217,6 +219,81 @@ TEST_F(atest, fmod_tensor_operators) {
   run_binary_ops_test<
       at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       fmod_out, x_float, y_float, exp_tensor, INTFLOAT);
+}
+
+TEST_F(atest, from_blob_empty_without_deleter) {
+  auto t = from_blob(nullptr, {0}, kFloat);
+
+  ASSERT_TRUE(t.defined());
+  EXPECT_TRUE(t.is_cpu());
+  EXPECT_EQ(t.scalar_type(), kFloat);
+  EXPECT_EQ(t.sizes(), IntArrayRef({0}));
+  EXPECT_EQ(t.numel(), 0);
+  EXPECT_EQ(t.data_ptr(), nullptr);
+  EXPECT_EQ(t.storage().nbytes(), 0);
+  EXPECT_EQ(t.storage().allocator(), nullptr);
+  EXPECT_FALSE(t.storage().resizable());
+}
+
+namespace {
+
+int from_blob_storage_factory_calls = 0;
+
+c10::intrusive_ptr<c10::StorageImpl> make_from_blob_storage_impl(
+    c10::StorageImpl::use_byte_size_t use_byte_size,
+    c10::SymInt size_bytes,
+    c10::DataPtr data_ptr,
+    c10::Allocator* allocator,
+    bool resizable) {
+  ++from_blob_storage_factory_calls;
+  return c10::make_intrusive<c10::StorageImpl>(
+      use_byte_size,
+      std::move(size_bytes),
+      std::move(data_ptr),
+      allocator,
+      resizable);
+}
+
+} // namespace
+
+TEST_F(atest, from_blob_privateuse1_storage_factory) {
+  // Storage factories cannot be unregistered, so also support repeated tests.
+  if (c10::GetStorageImplCreate(kPrivateUse1) == nullptr) {
+    c10::SetStorageImplCreate(kPrivateUse1, &make_from_blob_storage_impl);
+  }
+  ASSERT_EQ(
+      c10::GetStorageImplCreate(kPrivateUse1), &make_from_blob_storage_impl);
+
+  std::array<float, 3> data = {1, 2, 3};
+  const Device device(kPrivateUse1, 0);
+  const auto calls_before = from_blob_storage_factory_calls;
+  int deleter_calls = 0;
+  void* deleted_pointer = nullptr;
+  {
+    Storage shared_storage;
+    {
+      auto t = from_blob(
+          data.data(),
+          {3},
+          [&](void* pointer) {
+            ++deleter_calls;
+            deleted_pointer = pointer;
+          },
+          TensorOptions().dtype(kFloat).device(device),
+          device);
+      EXPECT_EQ(from_blob_storage_factory_calls, calls_before + 1);
+      EXPECT_EQ(t.device(), device);
+      EXPECT_EQ(t.data_ptr(), data.data());
+      EXPECT_EQ(t.storage().nbytes(), data.size() * sizeof(float));
+      EXPECT_FALSE(t.storage().resizable());
+      EXPECT_EQ(deleter_calls, 0);
+      shared_storage = t.storage();
+    }
+    EXPECT_EQ(shared_storage.data(), data.data());
+    EXPECT_EQ(deleter_calls, 0);
+  }
+  EXPECT_EQ(deleter_calls, 1);
+  EXPECT_EQ(deleted_pointer, data.data());
 }
 
 // TEST_CASE( "atest", "[]" ) {
