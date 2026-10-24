@@ -5359,20 +5359,41 @@ class MutationLayoutSHOULDREMOVE(Layout):
                 unsafe_alias = False
 
         if not unsafe_alias:
-            node = Pointwise.create(
-                device=src.get_device(),
-                dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
-                ranges=[
-                    V.graph.sizevars.check_equals_and_simplify(a, b)
-                    for a, b in zip(src.get_size(), dst.get_size())
-                ],
-            )
-            if not isinstance(node, (BaseView, MutableBox)):
-                raise AssertionError(
-                    "Expected isinstance(node, (BaseView, MutableBox))"
+
+            def copy_of(x: IRNode) -> IRNode:
+                node = Pointwise.create(
+                    device=x.get_device(),
+                    dtype=x.get_dtype(),
+                    inner_fn=x.make_loader(),
+                    ranges=[
+                        V.graph.sizevars.check_equals_and_simplify(a, b)
+                        for a, b in zip(x.get_size(), dst.get_size())
+                    ],
                 )
-            src = node.data
+                if not isinstance(node, (BaseView, MutableBox)):
+                    raise AssertionError(
+                        "Expected isinstance(node, (BaseView, MutableBox))"
+                    )
+                return node.data
+
+            copy = copy_of(src)
+            # The copy loads src through its loader, which inlines src when it
+            # is a computation that isn't realized, possibly behind a view. If
+            # that reads dst at other elements, compute src into a buffer of
+            # its own first. A view of a realized buffer is left alone: eager
+            # copy_ rejects one that overlaps dst.
+            base = src
+            while isinstance(base, (TensorBox, BaseView)):
+                base = base.data
+            loops = copy.data if isinstance(copy, StorageBox) else None
+            if (
+                isinstance(base, StorageBox)
+                and not IRNode.is_realized_node(base.data)
+                and isinstance(loops, Pointwise)
+                and not cls._reads_only_where_it_writes(loops, dst)
+            ):
+                copy = copy_of(ExternKernel.copy_input(src))
+            src = copy
 
         src.realize()
         if not hasattr(src, "data"):
