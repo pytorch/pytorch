@@ -304,6 +304,9 @@ struct AllocatorRegisterer {
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
+  MemoryReportingInfoBase();
+  ~MemoryReportingInfoBase() override;
+
   /**
    * alloc_size corresponds to the size of the ptr.
    *
