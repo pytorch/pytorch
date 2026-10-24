@@ -1578,7 +1578,7 @@ def logaddexp(
 @_apply_docstring_templates
 def norm(
     input: Tensor | MaskedTensor,
-    ord: float | None = 2.0,
+    ord: float = 2.0,
     dim: DimOrDims = None,
     *,
     keepdim: bool | None = False,
