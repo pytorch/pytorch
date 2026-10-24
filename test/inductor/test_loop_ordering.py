@@ -17,6 +17,7 @@ from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.simd import MemoryCoalescing, SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
+from torch._inductor.inductor_prims import force_stride_order
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
     _iter_loop_state_nodes,
@@ -46,6 +47,22 @@ from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 # set so that metrics appear
 torch._logging.set_logs(inductor_metrics=True)
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
+
+@contextlib.contextmanager
+def scoped_add_one(namespace):
+    with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+        lib.define("add_one_(Tensor(a!) x) -> ()")
+
+        @torch.library.impl(lib, "add_one_", "CompositeExplicitAutograd")
+        def add_one_(x):
+            x.add_(1)
+
+        @torch.library.impl(lib, "add_one_", "Meta")
+        def add_one_meta(x):
+            return None
+
+        yield getattr(torch.ops, namespace).add_one_
 
 
 if HAS_GPU:
@@ -731,6 +748,143 @@ class LoopOrderingTest(TestCase):
         # fake dependencies after loop reordering, we may get exception that
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
+
+    def test_inplace_transpose_copy(self):
+        def f(x):
+            x.copy_(x.transpose(-1, -2) * 1.0)
+            return x
+
+        x = torch.rand(80000, 5, 5, device=self.device)
+        expected = f(x.clone())
+        actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_inplace_pointwise_transpose_copy(self):
+        def f(x):
+            x.copy_((x + 1).transpose(-1, -2))
+            return x
+
+        x = torch.rand(80000, 5, 5, device=self.device)
+        expected = f(x.clone())
+        actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_inplace_foreach_transpose_copy(self):
+        def f(x):
+            torch._foreach_copy_([x], [x.transpose(-1, -2) * 1.0])
+            return x
+
+        x = torch.rand(80000, 5, 5, device=self.device)
+        expected = f(x.clone())
+        actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_inplace_transpose_copy_through_view(self):
+        def f(base):
+            x = base.transpose(-1, -2)
+            x.copy_(x.transpose(-1, -2) * 1.0)
+            return base
+
+        x = torch.rand(80000, 5, 5, device=self.device)
+        expected = f(x.clone())
+        actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_inplace_transpose_copy_after_mutation(self):
+        with scoped_add_one("test_loop_ordering") as add_one_:
+
+            def f(x):
+                add_one_(x)
+                x.copy_(x.transpose(-1, -2) * 1.0)
+                return x
+
+            x = torch.rand(80000, 5, 5, device=self.device)
+            expected = f(x.clone())
+            actual = torch.compile(f)(x.clone())
+            self.assertEqual(actual, expected)
+            self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_pruned_mutation_dep_after_sibling_reordering(self):
+        def f(x):
+            y = realize(x.transpose(-1, -2) * 1.0)
+            y = force_stride_order(y, (25, 1, 5))
+            z = y.contiguous()
+            x.copy_(y)
+            return x, z
+
+        def reorder_producer(nodes):
+            self.assertEqual(len(nodes), 4)
+            scheduler = nodes[0].scheduler
+            scheduler.prune_redundant_deps(nodes)
+            score = scheduler.shared_data_after_reordering_loop(nodes[1], nodes[2])
+            self.assertGreaterEqual(score, 0)
+            return nodes
+
+        x = torch.rand(80000, 5, 5, device=self.device)
+        expected = f(x.clone())
+        with inductor_config.patch(_pre_fusion_custom_pass=reorder_producer):
+            actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_pruned_weak_dep_survives_chained_fusion(self):
+        def f(x):
+            x.copy_(x * 2.0)
+            return x + 1.0
+
+        def check_fused_node(nodes):
+            # The final reader of x cannot join the fused mutating group:
+            # it must observe the copy only after that mutation finishes.
+            self.assertEqual(len(nodes), 2)
+            self.assertTrue(any(isinstance(node, FusedSchedulerNode) for node in nodes))
+            self.assertEqual(
+                sum(
+                    len(leaf._pruned_weak_deps)
+                    for node in nodes
+                    for leaf in node.get_nodes()
+                ),
+                1,
+            )
+            return nodes
+
+        x = torch.rand(1024, device=self.device)
+        expected = f(x.clone())
+        with inductor_config.patch(_post_fusion_custom_pass=check_fused_node):
+            actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_pruned_weak_dep_checks_fused_siblings(self):
+        def f(x):
+            producer = realize(x * 2.0)
+            sibling = realize(torch.roll(x, 1) + 3.0)
+            x.copy_(producer)
+            return x, sibling
+
+        def inspect(nodes):
+            scheduler = nodes[0].scheduler
+            scheduler.prune_redundant_deps(nodes)
+            self.assertEqual(len(nodes), 4)
+            fused_reader = FusedSchedulerNode.fuse(nodes[0], nodes[1])
+            self.assertEqual(len(nodes[3]._pruned_weak_deps), 1)
+            self.assertFalse(
+                scheduler._pruned_weak_deps_still_fusable(fused_reader, nodes[3])
+            )
+            fused_mutator = FusedSchedulerNode.fuse(nodes[1], nodes[3])
+            self.assertFalse(
+                scheduler._pruned_weak_deps_still_fusable(nodes[0], fused_mutator)
+            )
+            return nodes
+
+        x = torch.rand(1024, device=self.device)
+        expected = f(x.clone())
+        with inductor_config.patch(_pre_fusion_custom_pass=inspect):
+            actual = torch.compile(f)(x.clone())
+        self.assertEqual(actual, expected)
 
     def test_different_broadcast_shapes(self):
         def f(x, y, c):
