@@ -100,7 +100,7 @@ def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
         return r
 
     if t == BaseType(BaseTy.Scalar):
-        return NamedCType(binds, compute_t)
+        return NamedCType(binds, BaseCType(api_types.opmath_t))
     elif t == BaseType(BaseTy.Tensor):
         return NamedCType(binds, compute_t)
     else:
