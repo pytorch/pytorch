@@ -227,9 +227,9 @@ def maybe_copy_to(
         return result
     elif isinstance(result, torch.Tensor):
         if result.shape != out.shape:
-            can_fit = result.numel() == 1 and out.ndim == 0
-            if promote_scalar_result and can_fit:
-                result = result.squeeze()
+            # NumPy assigns a scalar quantile/percentile result into `out` with broadcasting
+            if promote_scalar_result and result.numel() == 1:
+                result = result.reshape(()).expand(out.shape)
             else:
                 raise ValueError(
                     f"Bad size of the out array: out.shape = {out.shape}"
