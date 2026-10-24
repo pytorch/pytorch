@@ -1475,7 +1475,7 @@ if(EMSCRIPTEN)
   string(
     APPEND
     CMAKE_CXX_FLAGS
-    " -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0"
+    " -Wno-implicit-function-declaration -DEMSCRIPTEN -fexceptions"
   )
 endif()
 
