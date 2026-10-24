@@ -458,6 +458,16 @@ _sync_cache_decision_cross_ranks = False
 # "all" - no filtering, everything saved for backward.
 saved_tensors_hooks_filtering_mode = "donated"
 
+# Where inlined saved_tensors_hooks graphs are placed.
+# False: all pack hooks at the end of the forward graph and all unpack hooks at
+# the start of the backward graph, the same points where eager
+# save_for_backward and ctx.saved_tensors run them.
+# True: each pack hook right after the last forward use of its saved tensor
+# (including uses of its views), and each unpack hook right before the first
+# backward use of its result. This frees the original saved tensor as early as
+# possible and allocates the unpacked tensor as late as possible.
+saved_tensors_hooks_place_at_use = False
+
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
