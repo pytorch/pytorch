@@ -464,8 +464,6 @@ class TestTunableOpPretune(TestCase):
         # bias_addmm is only chosen for broadcast (stride-0) bias, which the
         # density guard rejects: rebuilding its metas densely would tune a
         # layout runtime never asks for. Excluded from _TUNABLEOP_GEMM_CHOICES.
-        from types import SimpleNamespace
-
         s = sympy.Symbol("s_biasaddmm", positive=True, integer=True)
         m, k, n = s, 256, 512
         winner = _FakeWinner(
