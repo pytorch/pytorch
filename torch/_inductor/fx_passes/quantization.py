@@ -8,6 +8,7 @@ import operator
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..lowering import lowerings as L, require_channels_last
@@ -1131,6 +1132,43 @@ def _register_quantization_reshape():
     )
 
 
+# Device types on which the weight-only-quant (WOQ) int8pack-mm fusion may
+# fire. Third-party backends that implement aten._weight_int8pack_mm can opt
+# in via the register/unregister functions below.
+_woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"])
+
+# NB: the concat-linear int8 fusion deliberately has no registration hook:
+# the ``cat([w1, w2, w3])`` subgraph it matches is only produced by the
+# freezing pass's int8_woq_fusion_replacement
+# (torch/_inductor/fx_passes/freezing_patterns.py), whose
+# check_int8_woq_concat_linear_weights extra_check rejects non-CPU inputs and
+# additionally requires config.cpp.enable_concat_linear, so a registered
+# third-party device type could never reach the check below.
+
+
+def register_woq_int8pack_fusion_device(device_type: str) -> None:
+    """Enable the WOQ int8pack-mm fusion on ``device_type``.
+
+    Meant for third-party backends that implement the
+    ``aten._weight_int8pack_mm`` operator. Registration is an explicit
+    opt-in; the default allowlist (cpu/cuda/xpu) is unchanged. Must be called
+    before the first compile: the registry is not part of the
+    FX-graph/AOTAutograd cache keys, so artifacts compiled under a different
+    registry state are reused as-is.
+    """
+    _woq_int8pack_fusion_devices.add(device_type)
+
+
+def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
+    """Disable the WOQ int8pack-mm fusion on ``device_type``.
+
+    Removes ``device_type`` from the allowlist (e.g. to restore the default
+    state in test teardown). The same caching caveat as
+    :func:`register_woq_int8pack_fusion_device` applies.
+    """
+    _woq_int8pack_fusion_devices.discard(device_type)
+
+
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
         if not config.cpp.enable_concat_linear:
@@ -1189,7 +1227,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda", "xpu")
+            and x.device.type in _woq_int8pack_fusion_devices
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1498,6 +1536,8 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
         if (
             not node._erased
             and isinstance(node.meta.get("val"), torch.Tensor)
+            # Intentionally CPU-only: the fused op
+            # aten._weight_int4pack_mm_for_cpu is a CPU-specific ATen op.
             and node.meta["val"].device.type == "cpu"
         ):
             act = node.args[0]
