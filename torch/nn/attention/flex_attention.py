@@ -19,7 +19,7 @@ from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
 import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
-from torch._higher_order_ops.utils import setup_compilation_env
+from torch._higher_order_ops.utils import _hop_compile_and_call, setup_compilation_env
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
@@ -2656,29 +2656,19 @@ def flex_attention(
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
-    with setup_compilation_env() as backend:
-        if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
-            flex_fn = _flex_attention_hop_wrapper
-        else:
-            flex_fn = torch.compile(
-                _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-            )
-
-        out, lse, max_scores = flex_fn(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
-            scale,
-            kernel_options,
-        )
+    args = (query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options)
+    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+        with setup_compilation_env():
+            out, lse, max_scores = _flex_attention_hop_wrapper(*args)
+    else:
+        out, lse, max_scores = _hop_compile_and_call(_flex_attention_hop_wrapper, args)
+    # Outside dynamo the HOP runs its eager implementation, which returns log2
+    # stats for every BACKEND.
     return _finalize_outputs(
         out,
         lse,
         max_scores,
         return_aux=return_aux,
         return_lse=return_lse,
-        stats_are_log2=_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
-        or kernel_options["BACKEND"] != "FLASH",
+        stats_are_log2=True,
     )
