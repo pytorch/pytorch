@@ -853,6 +853,56 @@ class TestUserDefinedClassDict(TestCase):
 class TestClassSetattr(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_set_doc(self):
+        def fn():
+            class X:
+                "elephant"
+
+            X.__doc__ = "banana"
+
+            try:
+                type(list).__dict__["__doc__"].__set__(list, "blah")
+            except TypeError as e:
+                set_error = str(e)
+
+            try:
+                type(X).__dict__["__doc__"].__delete__(X)
+            except TypeError as e:
+                delete_error = str(e)
+
+            return X.__doc__, set_error, delete_error
+
+        def type_doc_error(operation):
+            try:
+                operation()
+            except TypeError as e:
+                return str(e)
+            raise AssertionError("expected type.__doc__ descriptor to raise TypeError")
+
+        expected_errors = (
+            type_doc_error(
+                lambda: type(list).__dict__["__doc__"].__set__(list, "blah")
+            ),
+            type_doc_error(
+                lambda: type.__dict__["__doc__"].__delete__(type("X", (), {}))
+            ),
+        )
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, ("banana", *expected_errors))
+
+    def test_class_doc_setattr_persists(self):
+        class MyClass:
+            "original"
+
+        def fn():
+            MyClass.__doc__ = "updated"
+            return MyClass.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), "updated")
+        self.assertEqual(MyClass.__doc__, "updated")
+
     def test_setattr_class_attribute(self):
         class MyModule:
             x = 10
