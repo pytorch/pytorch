@@ -818,7 +818,9 @@ class _TestTunableMatmulRequest(_TestBenchmarkRequest):
         b = torch.randn(64, 64, device="cuda")
         torch.cuda.synchronize()
         start = time.perf_counter()
-        c = torch.matmul(a, b)
+        # Result deliberately unused: the point is that the op runs, so the
+        # child's TunableOp manager tunes and records it.
+        torch.matmul(a, b)
         torch.cuda.synchronize()
         return (time.perf_counter() - start) * 1000.0
 
