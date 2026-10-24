@@ -1624,17 +1624,14 @@ py::object dispatchDTensorOp(
   }
 
   const auto& operator_name = op.operator_name();
-  // Simple analysis of function schema to determine if this is an
-  // inplace variant. It might not be entirely correct, but it's good
-  // enough for now.
-  const bool is_inplace_op =
-      !operator_name.name.empty() && operator_name.name.back() == '_';
   const auto& schema_arguments = op.schema().arguments();
-  const bool is_out_variant_op = !is_inplace_op &&
-      std::any_of(
-          schema_arguments.begin(),
-          schema_arguments.end(),
-          [](const c10::Argument& argument) { return argument.is_out(); });
+  const bool is_out_variant_op = std::any_of(
+      schema_arguments.begin(),
+      schema_arguments.end(),
+      [](const c10::Argument& argument) { return argument.is_out(); });
+  const bool is_inplace_op = !operator_name.name.empty() &&
+      operator_name.name.back() == '_' && op.schema().is_mutable() &&
+      !is_out_variant_op;
 
   // Fast path for default or view ops.
   const auto output_spec =
