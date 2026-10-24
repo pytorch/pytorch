@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import collections
-import functools
 import logging
 import operator
 from collections import OrderedDict
@@ -12,9 +11,8 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
-from torch.fx.operator_schemas import get_signature_for_torch_op, normalize_function
+from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
-from torch.utils._inspect import _fast_bind
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
@@ -753,74 +751,22 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
 )
 
 
-@functools.lru_cache(None)
-def _overload_for_schema(name: str, overload_name: str):
-    namespace, _, op_name = name.partition("::")
-    namespace_ops = getattr(torch.ops, namespace, None)
-    packet = getattr(namespace_ops, op_name, None)
-    if packet is None:
-        return None
-    try:
-        return getattr(packet, overload_name or "default")
-    except AttributeError:
-        return None
-
-
-def _value_kind(value):
+def _fake_value(value):
     if isinstance(value, torch.fx.Node):
-        value = value.meta.get("example_value", value.meta.get("val"))
-    if isinstance(value, torch.Tensor):
-        return "tensor"
-    if isinstance(value, torch.SymInt):
-        return "symint"
-    if isinstance(value, bool):
-        return "bool"
-    if isinstance(value, int):
-        return "int"
-    if isinstance(value, float):
-        return "float"
-    if isinstance(value, (list, tuple)) and all(
-        isinstance(item, torch.Tensor) for item in value
-    ):
-        return "tensor"
-    return None
-
-
-def _schema_kind(typ):
-    text = str(typ)
-    if "Tensor" in text:
-        return "tensor"
-    if "SymInt" in text:
-        return "symint"
-    if text.endswith("Scalar") or text in ("int", "float", "bool", "complex", "number"):
-        return "scalar"
-    return None
-
-
-def _args_match_schema(schema, args) -> bool:
-    # _fast_bind only checks arity and keyword names; reject overloads whose
-    # argument kinds contradict the traced values (sin.int for a Tensor input).
-    for argument, value in zip(schema.arguments, args):
-        kind = _value_kind(value)
-        expected = _schema_kind(argument.type)
-        if kind is None or expected is None:
-            continue
-        if expected == "tensor" and kind != "tensor":
-            return False
-        if expected == "symint" and kind not in ("symint", "int"):
-            return False
-        if expected == "scalar" and kind not in ("bool", "int", "float", "symint"):
-            return False
-    return True
+        return _fake_value(value.meta.get("example_value", value.meta.get("val")))
+    if isinstance(value, (list, tuple)):
+        return type(value)(_fake_value(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _fake_value(item) for key, item in value.items()}
+    return value
 
 
 def _layout_user_overloads(user: torch.fx.Node):
     target = user.target
     args = tuple(user.args)
     kwargs = dict(user.kwargs)
-    # These Python wrappers are not C builtins, so operator_schemas cannot
-    # resolve them. The table is deliberately partial: other F.* wrappers stay
-    # unrecognized and therefore conservatively reject fusion.
+    # These Python wrappers are not C builtins, so map them to their ATen
+    # packet before resolving the overload from the example values.
     if target in (torch.nn.functional.relu, torch.nn.functional.silu):
         if get_arg_value(user, 1, "inplace") not in (None, False):
             return ()
@@ -853,22 +799,31 @@ def _layout_user_overloads(user: torch.fx.Node):
         target = getattr(torch.ops.aten, target, None)
         if target is None:
             return ()
-    signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
-    if not signatures or not schemas:
-        return ()
-    matched = []
-    for signature, schema in zip(signatures, schemas):
-        try:
-            _fast_bind(signature, *args, **kwargs)
-        except TypeError:
-            continue
-        if not _args_match_schema(schema, args):
-            continue
-        overload = _overload_for_schema(schema.name, schema.overload_name)
-        if overload is None:
+    if not args and "input" in kwargs:
+        args = (kwargs.pop("input"),)
+    if isinstance(target, torch._ops.OpOverload):
+        return [target]
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        qualname = target._qualified_op_name
+        packet = target
+    else:
+        qualname = torch.jit._builtins._find_builtin(target)
+        if qualname is None:
             return ()
-        matched.append(overload)
-    return matched
+        namespace, _, op_name = qualname.partition("::")
+        packet = getattr(getattr(torch.ops, namespace, None), op_name, None)
+        if not isinstance(packet, torch._ops.OpOverloadPacket):
+            return ()
+    try:
+        overload_name = torch._C._jit_resolve_packet(
+            qualname,
+            *_fake_value(args),
+            **_fake_value(kwargs),
+        )
+    except RuntimeError:
+        return ()
+    overload = getattr(packet, overload_name, None)
+    return [overload] if overload is not None else ()
 
 
 def _dim_value(dim):
@@ -886,10 +841,10 @@ def _shape_value(value):
 def _view_target_shape(user: torch.fx.Node):
     if len(user.args) > 2:
         size = user.args[1:]
-    elif len(user.args) > 1:
-        size = user.args[1]
     else:
-        size = user.kwargs.get("size")
+        size = get_arg_value(user, 1, "size")
+        if size is None:
+            size = get_arg_value(user, 1, "shape")
     if not isinstance(size, (tuple, list)):
         return None
     dims = tuple(_dim_value(dim) for dim in size)
@@ -905,7 +860,7 @@ def _is_one(dim) -> bool:
 
 
 def _is_split_only_view(user: torch.fx.Node) -> bool:
-    source_node = user.args[0]
+    source_node = get_arg_value(user, 0, "input")
     if not isinstance(source_node, torch.fx.Node):
         return False
     source = _shape_value(source_node.meta.get("example_value"))
@@ -1145,6 +1100,9 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         if _is_contiguous_user(user, ops):
             if not _contiguous_aliases(user) or _has_mutable_alias_user(user):
                 return True
+            # contiguous() may be a no-op alias (for example on an already
+            # contiguous row), so inspect its users for layout reads too.
+            pending.extend(user.users)
             continue
         if _allowed_alias(user, ops):
             pending.extend(user.users)
