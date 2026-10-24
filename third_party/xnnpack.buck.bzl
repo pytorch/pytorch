@@ -23,8 +23,8 @@ XNN_BASE_PREPROCESSOR_FLAGS = [
     "ovr_config//os:windows": [],
 })
 
-# Opt in with `buck build -c xnnpack.enable_arm64_kleidiai=true <target>`.
-_XNNPACK_KLEIDIAI_ENABLED = read_bool("xnnpack", "enable_arm64_kleidiai", False)
+# Opt out with `buck build -c xnnpack.enable_arm64_kleidiai=false <target>`.
+_XNNPACK_KLEIDIAI_ENABLED = read_bool("xnnpack", "enable_arm64_kleidiai", True)
 
 # Zip kernels are patched back in internally.
 ZIP_SCALAR_SRCS = [
