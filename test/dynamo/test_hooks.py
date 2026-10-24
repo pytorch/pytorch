@@ -19,6 +19,11 @@ from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils.hooks import RemovableHandle
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 def compiler_fn(gm):
     return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=True)
 
@@ -315,7 +320,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             y.register_hook(lambda grad: grad + 1)
             return y.sum()
 
-        x_compiled = torch.randn(4, requires_grad=True)
+        x_compiled = torch.randn(4, device=device_type, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         result_compiled = compiled_fn(x_compiled)
         result_compiled.backward()
@@ -421,13 +426,13 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         glb_list.clear()
         glb_dict.clear()
-        x_eager = torch.ones(4, requires_grad=True)
+        x_eager = torch.ones(4, device=device_type, requires_grad=True)
         result_eager = fn(x_eager)
         result_eager.backward()
 
         glb_list.clear()
         glb_dict.clear()
-        x_compiled = torch.ones(4, requires_grad=True)
+        x_compiled = torch.ones(4, device=device_type, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         result_compiled = compiled_fn(x_compiled)
         result_compiled.backward()
@@ -466,11 +471,11 @@ def forward(self, L_x_ : torch.Tensor):
             w = y * 3  # Use y AFTER hook
             return (z + w).sum()
 
-        x_eager = torch.ones(2, requires_grad=True)
+        x_eager = torch.ones(2, device=device_type, requires_grad=True)
         result_eager = fn(x_eager)
         result_eager.backward()
 
-        x_compiled = torch.ones(2, requires_grad=True)
+        x_compiled = torch.ones(2, device=device_type, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         result_compiled = compiled_fn(x_compiled)
         result_compiled.backward()
@@ -508,11 +513,11 @@ def forward(self, L_x_ : torch.Tensor):
             y.register_hook(lambda g: None)
             return y.sum()
 
-        x_eager = torch.ones(4, requires_grad=True)
+        x_eager = torch.ones(4, device=device_type, requires_grad=True)
         result_eager = fn(x_eager)
         result_eager.backward()
 
-        x_compiled = torch.ones(4, requires_grad=True)
+        x_compiled = torch.ones(4, device=device_type, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         result_compiled = compiled_fn(x_compiled)
         result_compiled.backward()
@@ -528,11 +533,11 @@ def forward(self, L_x_ : torch.Tensor):
             w = y * 3  # Use y AFTER hook
             return (z + w).sum()
 
-        x_eager = torch.ones(2, requires_grad=True)
+        x_eager = torch.ones(2, device=device_type, requires_grad=True)
         result_eager = fn(x_eager)
         result_eager.backward()
 
-        x_compiled = torch.ones(2, requires_grad=True)
+        x_compiled = torch.ones(2, device=device_type, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         result_compiled = compiled_fn(x_compiled)
         result_compiled.backward()
@@ -574,11 +579,11 @@ def forward(self, L_x_ : torch.Tensor):
             y.register_hook(lambda g: g + 1)
             return result.sum() + y.sum()
 
-        x_eager = torch.ones(6, requires_grad=True)
+        x_eager = torch.ones(6, device=device_type, requires_grad=True)
         result_eager = fn(x_eager)
         result_eager.backward()
 
-        x_compiled = torch.ones(6, requires_grad=True)
+        x_compiled = torch.ones(6, device=device_type, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         result_compiled = compiled_fn(x_compiled)
         result_compiled.backward()
@@ -1056,16 +1061,16 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertEqual(x.grad, b * 5)
 
         # Eager values
-        x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
-        y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        x = torch.tensor([0.5, 0.5, 0.5], device=device_type, requires_grad=True)
+        y = torch.tensor([1.0, 2.0, 3.0], device=device_type, requires_grad=True)
         test_fn(reg_and_mul)
 
         # Compiled
         for backend in ["eager", "aot_eager", "inductor"]:
             for compiled_bwd in [False, True]:
                 torch._dynamo.reset()
-                x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
-                y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+                x = torch.tensor([0.5, 0.5, 0.5], device=device_type, requires_grad=True)
+                y = torch.tensor([1.0, 2.0, 3.0], device=device_type, requires_grad=True)
 
                 cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
                 compiled_fn = torch.compile(reg_and_mul, backend=cnts, fullgraph=True)

@@ -4279,7 +4279,7 @@ class GraphModule(torch.nn.Module):
             y = ctx.__enter__()
             return x + y, ctx
 
-        x = torch.tensor([1.0])
+        x = torch.tensor([1.0], device=device_type)
         expected = fn(x)
         result = torch.compile(fn, backend="eager", fullgraph=False)(x)
         self.assertEqual(expected[0], result[0])
