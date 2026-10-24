@@ -527,8 +527,12 @@ PLAT_TO_VCVARS = {
 
 min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
 
+def _windows_arch() -> str:
+    return 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64'
+
+
 def _windows_cuda_lib_dir() -> str:
-    return os.path.join('lib', 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64')
+    return os.path.join('lib', _windows_arch())
 
 
 def _cuda_major_minor() -> str | None:
@@ -541,94 +545,188 @@ def _cuda_major_minor() -> str | None:
     return str(ver)
 
 
+def _cuda_version_key(name: str) -> tuple[int, int] | None:
+    major, sep, minor = name.partition('.')
+    if (
+        not sep
+        or '.' in minor
+        or not major.isascii()
+        or not minor.isascii()
+        or not major.isdigit()
+        or not minor.isdigit()
+    ):
+        return None
+    return int(major), int(minor)
+
+
+def _preferred_version_dir(
+    parent: str,
+    wanted: str | None,
+    is_usable,
+    *,
+    allow_other_major: bool = True,
+) -> str | None:
+    # Exact torch CUDA version, then the newest minor of that major, then the
+    # newest version. Numeric order, so 13.10 ranks after 13.2.
+    if not os.path.isdir(parent):
+        return None
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return None
+    parsed = []
+    for name in names:
+        key = _cuda_version_key(name)
+        path = os.path.join(parent, name)
+        if key is None or not os.path.isdir(path) or not is_usable(path):
+            continue
+        parsed.append((key, path))
+    if not parsed:
+        return None
+    wanted_key = _cuda_version_key(wanted) if wanted else None
+    if wanted_key is not None:
+        for key, path in parsed:
+            if key == wanted_key:
+                return path
+        same_major = [item for item in parsed if item[0][0] == wanted_key[0]]
+        if same_major:
+            return max(same_major)[1]
+        if not allow_other_major:
+            return None
+    return max(parsed)[1]
+
+
 def _cudnn_include_dir() -> str | None:
-    # cuDNN 9 Windows CUDA 13+ packages keep headers under include/<major.minor>/.
+    # cuDNN 9 packages for CUDA 13+ keep headers under include/<major.minor>/.
     if CUDNN_HOME is None:
         return None
     flat = os.path.join(CUDNN_HOME, 'include')
     if os.path.isfile(os.path.join(flat, 'cudnn.h')):
         return flat
-    ver = _cuda_major_minor()
-    if ver:
-        nested = os.path.join(flat, ver)
-        if os.path.isfile(os.path.join(nested, 'cudnn.h')):
-            return nested
+    chosen = _preferred_version_dir(
+        flat,
+        _cuda_major_minor(),
+        lambda path: os.path.isfile(os.path.join(path, 'cudnn.h')),
+    )
+    if chosen is not None:
+        return chosen
     if os.path.isdir(flat):
-        try:
-            names = sorted(os.listdir(flat))
-        except OSError:
-            names = []
-        for name in names:
-            nested = os.path.join(flat, name)
-            if os.path.isfile(os.path.join(nested, 'cudnn.h')):
-                return nested
         return flat
     return None
+
+
+def _has_cudnn_dll(path: str) -> bool:
+    if not os.path.isdir(path):
+        return False
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    return any(name.lower().startswith('cudnn') and name.lower().endswith('.dll') for name in names)
 
 
 def _cudnn_library_dir() -> str | None:
     if CUDNN_HOME is None:
         return None
-    ver = _cuda_major_minor()
     libname = 'cudnn.lib' if IS_WINDOWS else 'libcudnn.so'
+    wanted = _cuda_major_minor()
     if IS_WINDOWS:
-        arch = 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64'
-        candidates = []
-        if ver:
-            candidates.append(os.path.join(CUDNN_HOME, 'lib', ver, arch))
-        candidates.append(os.path.join(CUDNN_HOME, 'lib', arch))
-    else:
-        candidates = []
-        if ver:
-            candidates.append(os.path.join(CUDNN_HOME, 'lib', ver))
-        candidates.append(os.path.join(CUDNN_HOME, 'lib64'))
-        candidates.append(os.path.join(CUDNN_HOME, 'lib'))
-    for path in candidates:
-        if os.path.isfile(os.path.join(path, libname)):
-            return path
-    for path in candidates:
-        if os.path.isdir(path):
-            return path
+        arch = _windows_arch()
+
+        def usable(path: str) -> bool:
+            return os.path.isfile(os.path.join(path, arch, libname))
+
+        root = os.path.join(CUDNN_HOME, 'lib')
+        chosen = _preferred_version_dir(root, wanted, usable, allow_other_major=False)
+        if chosen is not None:
+            return os.path.join(chosen, arch)
+        flat = os.path.join(root, arch)
+        if os.path.isfile(os.path.join(flat, libname)):
+            return flat
+        chosen = _preferred_version_dir(root, wanted, usable)
+        if chosen is not None:
+            return os.path.join(chosen, arch)
+        if os.path.isdir(flat):
+            return flat
+        return None
+
+    def usable_posix(path: str) -> bool:
+        return os.path.isfile(os.path.join(path, libname))
+
+    root = os.path.join(CUDNN_HOME, 'lib')
+    chosen = _preferred_version_dir(root, wanted, usable_posix, allow_other_major=False)
+    if chosen is not None:
+        return chosen
+    flats = (os.path.join(CUDNN_HOME, 'lib64'), root)
+    for flat in flats:
+        if os.path.isfile(os.path.join(flat, libname)):
+            return flat
+    chosen = _preferred_version_dir(root, wanted, usable_posix)
+    if chosen is not None:
+        return chosen
+    for flat in flats:
+        if os.path.isdir(flat):
+            return flat
     return None
 
 
 def _cudnn_bin_dir() -> str | None:
     if CUDNN_HOME is None or not IS_WINDOWS:
         return None
-    ver = _cuda_major_minor()
-    arch = 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64'
-    candidates = []
-    if ver:
-        candidates.append(os.path.join(CUDNN_HOME, 'bin', ver, arch))
-    candidates.append(os.path.join(CUDNN_HOME, 'bin', arch))
-    candidates.append(os.path.join(CUDNN_HOME, 'bin'))
-    for path in candidates:
-        if os.path.isdir(path):
-            return path
+    arch = _windows_arch()
+    wanted = _cuda_major_minor()
+
+    def usable(path: str) -> bool:
+        return _has_cudnn_dll(os.path.join(path, arch))
+
+    root = os.path.join(CUDNN_HOME, 'bin')
+    chosen = _preferred_version_dir(root, wanted, usable, allow_other_major=False)
+    if chosen is not None:
+        return os.path.join(chosen, arch)
+    for flat in (os.path.join(root, arch), root):
+        if _has_cudnn_dll(flat):
+            return flat
+    chosen = _preferred_version_dir(root, wanted, usable)
+    if chosen is not None:
+        return os.path.join(chosen, arch)
+    for flat in (os.path.join(root, arch), root):
+        if os.path.isdir(flat):
+            return flat
     return None
 
 
+# (bin path, os.add_dll_directory cookie). The cookie must stay referenced.
 _CUDNN_DLL_DIR_HANDLES: list = []
 
 
-def _add_cudnn_runtime_dir() -> None:
+def _prepend_cudnn_bin_path() -> None:
     bin_dir = _cudnn_bin_dir()
     if not bin_dir:
         return
-    path_entries = os.getenv('PATH', '').split(';')
-    already = any(
-        os.path.exists(p) and os.path.samefile(p, bin_dir)
-        for p in path_entries if p
-    )
-    if not already:
-        os.environ['PATH'] = f"{bin_dir};{os.getenv('PATH', '')}"
-    if hasattr(os, 'add_dll_directory'):
+    for entry in os.getenv('PATH', '').split(';'):
+        if not entry or not os.path.exists(entry):
+            continue
         try:
-            if not any(getattr(handle, 'path', None) == bin_dir for handle in _CUDNN_DLL_DIR_HANDLES):
-                # Keep the cookie alive for the process; discarding it unloads the dir.
-                _CUDNN_DLL_DIR_HANDLES.append(os.add_dll_directory(bin_dir))
+            if os.path.samefile(entry, bin_dir):
+                return
         except OSError:
-            pass
+            continue
+    os.environ['PATH'] = f"{bin_dir};{os.getenv('PATH', '')}"
+
+
+def _add_cudnn_dll_directory() -> None:
+    # Extension-module loading on Windows does not search PATH. A standalone
+    # executable is a subprocess, so it inherits PATH and not this cookie.
+    bin_dir = _cudnn_bin_dir()
+    if not bin_dir or not hasattr(os, 'add_dll_directory'):
+        return
+    if any(path == bin_dir for path, _handle in _CUDNN_DLL_DIR_HANDLES):
+        return
+    try:
+        handle = os.add_dll_directory(bin_dir)
+    except OSError:
+        return
+    _CUDNN_DLL_DIR_HANDLES.append((bin_dir, handle))
 
 
 def get_cxx_compiler():
@@ -3164,14 +3262,14 @@ def _get_exec_path(module_name, path, with_cuda=False, with_cudnn=False):
         )
         if not torch_lib_in_path:
             os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
-    if with_cuda or with_cudnn:
-        _add_cudnn_runtime_dir()
+    if with_cudnn:
+        _prepend_cudnn_bin_path()
     return os.path.join(path, f'{module_name}{EXEC_EXT}')
 
 
 def _import_module_from_library(module_name, path, is_python_module, with_cuda=False, with_cudnn=False):
-    if with_cuda or with_cudnn:
-        _add_cudnn_runtime_dir()
+    if with_cudnn:
+        _add_cudnn_dll_directory()
     filepath = os.path.join(path, f"{module_name}{LIB_EXT}")
     if is_python_module:
         # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
