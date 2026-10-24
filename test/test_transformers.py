@@ -1177,6 +1177,28 @@ class TestTransformersAccelerator(NNTestCase):
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
+    def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
+        # The fused kernel always returns a contiguous tensor, so its meta rule
+        # must not hand back the strides of a non-contiguous src: inductor asserts
+        # the fallback's runtime metadata against them.
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=4,
+            dim_feedforward=64,
+            dropout=0.0,
+            batch_first=True,
+        ).to(device).eval()
+
+        x = torch.rand(4, 64, 16, device=device).transpose(1, 2).contiguous().transpose(1, 2)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+        self.assertEqual(eager_out, compiled_out)
+
 
 
     @onlyAccelerator
