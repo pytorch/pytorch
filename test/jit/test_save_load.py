@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import clear_class_registry, JitTestCase
+from torch.jit._serialization import validate_map_location
 
 
 class TestSaveLoad(JitTestCase):
@@ -1203,3 +1204,51 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_jit.py")
+
+
+class TestMapLocationValidation(JitTestCase):
+    """Issue #197803: torch.jit.load map_location validation should cover
+    every registered accelerator backend, not just CUDA."""
+
+    def test_none_passes_through(self):
+        self.assertEqual(validate_map_location(None), None)
+
+    def test_cpu_passes_through(self):
+        self.assertEqual(validate_map_location("cpu"), torch.device("cpu"))
+        self.assertEqual(validate_map_location("cpu:0"), torch.device("cpu:0"))
+
+    def test_meta_passes_through(self):
+        self.assertEqual(
+            validate_map_location(torch.device("meta")), torch.device("meta")
+        )
+
+    def test_cuda_unavailable_or_oob_raises(self):
+        # CUDA keeps its original validation behavior (regression guard).
+        count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        with self.assertRaises(RuntimeError):
+            validate_map_location(f"cuda:{count + 100}")
+
+    def test_xpu_unavailable_raises(self):
+        # The new behavior: unavailable non-CUDA accelerators raise early.
+        if torch.xpu.is_available():
+            self.skipTest("requires xpu to be unavailable")
+        with self.assertRaises(RuntimeError):
+            validate_map_location("xpu:0")
+
+    def test_mocked_backend_oob_index_raises(self):
+        from unittest import mock
+
+        with mock.patch.object(torch.xpu, "is_available", return_value=True), mock.patch.object(
+            torch.xpu, "device_count", return_value=2
+        ):
+            with self.assertRaises(RuntimeError):
+                validate_map_location("xpu:5")
+
+    def test_mocked_backend_valid_index_passes(self):
+        from unittest import mock
+
+        with mock.patch.object(torch.xpu, "is_available", return_value=True), mock.patch.object(
+            torch.xpu, "device_count", return_value=2
+        ):
+            device = validate_map_location("xpu:1")
+            self.assertEqual(device.type, "xpu")
