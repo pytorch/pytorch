@@ -26,6 +26,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 class TestCollectiveUtils(MultiProcessTestCase):
     hw_classification = HardwareClassification.GENERIC
 
