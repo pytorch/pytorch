@@ -37,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1213,6 +1214,42 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 class DecompOneOffTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyNativeDeviceTypes
+    @parametrize(
+        "input_dtype,param_dtype",
+        [
+            (torch.float32, torch.float32),
+            (torch.float32, torch.float16),
+            (torch.bfloat16, torch.float32),
+            (torch.float16, torch.float32),
+        ],
+    )
+    def test_layer_norm_param_dtype_matches_eager(
+        self, device, input_dtype, param_dtype
+    ):
+        # Which weight/bias dtypes eager accepts differs by backend (CPU takes a
+        # bf16/fp16 input with fp32 params, CUDA does not), so assert that the ref
+        # agrees with eager rather than a fixed outcome.
+        input = torch.randn(4, 8, dtype=input_dtype, device=device)
+        weight = torch.randn(8, dtype=param_dtype, device=device)
+        bias = torch.randn(8, dtype=param_dtype, device=device)
+
+        def run(fn):
+            try:
+                return fn(input, (8,), weight, bias, 1e-5)
+            except RuntimeError:
+                return None
+
+        eager = run(torch.native_layer_norm)
+        ref = run(torch._refs.native_layer_norm)
+        self.assertEqual(
+            ref is None,
+            eager is None,
+            msg=f"ref and eager disagree on {input_dtype} input, {param_dtype} params",
+        )
+        if input_dtype == param_dtype:
+            self.assertEqual(ref[0], eager[0])
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
