@@ -52,16 +52,11 @@ namespace at::cuda::tunable {
 
 namespace {
 
-// Hard kill switches for compile-time borrowing, read once at startup.
-//
-// These are deliberately env-only and deliberately separate from the
-// nearest_match_enable_ / record_borrowed_enable_ members. Those members are
-// mutable process-global policy that the reuse pass sets for itself, and
-// gating the manager on them would make one caller's policy change what other
-// callers and other threads do. An env var fixed before main() cannot: it is
-// either off for the whole process or absent. Checking it at the point of
-// action means the switch holds for every caller, including one that forgets
-// to consult IsNearestMatchEnabled()/IsRecordBorrowedEnabled() first.
+// Hard kill switches for compile-time borrowing, read once at startup. Env-only
+// and separate from the mutable policy members: fixed before main(), so unlike
+// those it cannot let one caller's policy change what other callers see.
+// Checked at the point of action so it holds even for a caller that never
+// consults IsNearestMatchEnabled()/IsRecordBorrowedEnabled().
 bool NearestMatchDisabledByEnv() {
   static const bool disabled =
       c10::utils::get_env("PYTORCH_TUNABLEOP_NEAREST_MATCH") == "0";
