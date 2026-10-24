@@ -67,6 +67,83 @@ def scale_for_fp8(
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 
 
+def _sdpa_scores(query, key, attn_bias, is_causal, scale):
+    scores = query @ key.transpose(-2, -1) * scale
+    if is_causal:
+        causal_mask = torch.ones(
+            query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+        ).tril()
+        scores = scores.masked_fill(~causal_mask, float("-inf"))
+    if attn_bias is not None:
+        scores = scores + attn_bias
+    return scores
+
+
+# Reference kernels for the overrideable SDPA ops, which have no CPU/CUDA kernels.
+def _sdpa_overrideable_fwd(
+    query,
+    key,
+    value,
+    attn_bias=None,
+    dropout_p=0.0,
+    is_causal=False,
+    return_debug_mask=False,
+    *,
+    scale=None,
+):
+    scale = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    scores = _sdpa_scores(query, key, attn_bias, is_causal, scale)
+    logsumexp = scores.logsumexp(dim=-1)
+    out = (scores - logsumexp.unsqueeze(-1)).exp() @ value
+    philox_seed = torch.zeros((), dtype=torch.long)
+    philox_offset = torch.zeros((), dtype=torch.long)
+    return (
+        out,
+        logsumexp,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        query.size(-2),
+        key.size(-2),
+        philox_seed,
+        philox_offset,
+        None,  # debug_attn_mask
+    )
+
+
+def _sdpa_overrideable_bwd(
+    grad_out,
+    query,
+    key,
+    value,
+    attn_bias,
+    grad_input_mask,
+    out,
+    logsumexp,
+    cum_seq_q,
+    cum_seq_k,
+    max_q,
+    max_k,
+    dropout_p,
+    is_causal,
+    philox_seed,
+    philox_offset,
+    *,
+    scale=None,
+):
+    scale = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    scores = _sdpa_scores(query, key, attn_bias, is_causal, scale)
+    probs = (scores - logsumexp.unsqueeze(-1)).exp()
+    grad_value = probs.transpose(-2, -1) @ grad_out
+    grad_probs = grad_out @ value.transpose(-2, -1)
+    grad_scores = probs * (grad_probs - (grad_out * out).sum(-1, keepdim=True))
+    grad_query = grad_scores @ key * scale
+    grad_key = grad_scores.transpose(-2, -1) @ query * scale
+    grad_attn_bias = (
+        None if attn_bias is None else grad_scores.sum_to_size(attn_bias.shape)
+    )
+    return grad_query, grad_key, grad_value, grad_attn_bias
+
+
 class DistMatrixOpsTest(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
@@ -978,6 +1055,64 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
                     query.grad.zero_()
                     key.grad.zero_()
                     value.grad.zero_()
+
+    @with_comms
+    def test_scaled_dot_product_fused_attention_overrideable(self):
+        if self.device_type not in ("cpu", "cuda"):
+            self.skipTest(f"reference kernel is not registered for {self.device_type}")
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        sdpa_op = torch.ops.aten._scaled_dot_product_fused_attention_overrideable
+        # bsz, n_heads, slen, head_dim
+        qkv_shape = (4, 8, 8, 16)
+        query = torch.rand(qkv_shape, device=self.device_type, requires_grad=True)
+        key = torch.rand(qkv_shape, device=self.device_type, requires_grad=True)
+        value = torch.rand(qkv_shape, device=self.device_type, requires_grad=True)
+        attn_bias = torch.rand(
+            (4, 8, 8, 8), device=self.device_type, requires_grad=True
+        )
+
+        placement_specs = [(Replicate(),), (Shard(0),), (Shard(1),)]
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            dispatch_key = self.device_type.upper()
+            lib.impl(
+                "_scaled_dot_product_fused_attention_overrideable",
+                _sdpa_overrideable_fwd,
+                dispatch_key,
+            )
+            lib.impl(
+                "_scaled_dot_product_fused_attention_overrideable_backward",
+                _sdpa_overrideable_bwd,
+                dispatch_key,
+            )
+            for use_attn_bias, input_placements in itertools.product(
+                (False, True), placement_specs
+            ):
+                inputs = [query, key, value] + ([attn_bias] if use_attn_bias else [])
+                dist_inputs = [
+                    distribute_tensor(t, device_mesh, input_placements) for t in inputs
+                ]
+                if not use_attn_bias:
+                    inputs.append(None)
+                    dist_inputs.append(None)
+
+                out = sdpa_op(*inputs, is_causal=True)[0]
+                with comm_mode:
+                    dist_out = sdpa_op(*dist_inputs, is_causal=True)[0]
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                self.assertEqual(dist_out.placements, input_placements)
+                self.assertEqual(dist_out.full_tensor(), out)
+
+                out.sum().backward()
+                with comm_mode:
+                    dist_out.sum().backward()
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                for t, dist_t in zip(inputs, dist_inputs):
+                    if t is None:
+                        continue
+                    self.assertEqual(dist_t.grad.placements, input_placements)
+                    self.assertEqual(dist_t.grad.full_tensor(), t.grad)
+                    t.grad = None
 
     @skip_unless_torch_gpu
     @with_comms()
