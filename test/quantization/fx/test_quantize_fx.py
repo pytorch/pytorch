@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 # ruff: noqa: F841
 
+from functools import wraps
 from collections import OrderedDict
 import contextlib
 import torch
@@ -154,9 +155,8 @@ from torch.ao.quantization.observer import (
 )
 
 # test utils
-from hypothesis import given, settings
-from hypothesis import strategies as st
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
+from torch.testing._internal import common_device_type
 from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
@@ -193,6 +193,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     IS_ARM64,
     skipIfTorchDynamo,
+    HardwareClassification
 )
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -9374,89 +9375,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
 
 class TestQuantizeFxModels(QuantizationTestCase):
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
-    def test_static_gpu_convert_basic(self):
+    hw_classification = HardwareClassification.GENERIC
 
-        class Net(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.relu1 = nn.ReLU()
-                self.conv1 = nn.Conv2d(1, 6, 5)
-                self.linear1 = nn.Linear(120, 1)
 
-            def forward(self, x):
-                x = self.relu1(self.conv1(x))
-                y = self.linear1(x.view(-1))
-                return y
 
-        input = torch.randn((5, 1, 6, 6)).to('cuda')
-        example_inputs = (input,)
-        model = Net().to('cuda').eval()
-        qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
-        model_prepared = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
-        model_prepared(*example_inputs)
-        model_quantized = convert_to_reference_fx(model_prepared)
-        out = model_quantized(*example_inputs)
-        self.assertEqual(out.device.type, 'cuda')
-
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
-    def test_switch_device_prepare_convert(self):
-
-        class Net(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.relu1 = nn.ReLU()
-                self.conv1 = nn.Conv2d(1, 6, 5)
-                self.linear1 = nn.Linear(120, 1)
-
-            def forward(self, x):
-                x = self.relu1(self.conv1(x))
-                y = self.linear1(x.view(-1))
-                return y
-
-        for device in ['cuda', 'cpu']:
-            device_after = 'cuda' if device == 'cpu' else 'cpu'
-            input = torch.randn((5, 1, 6, 6)).to(device)
-            model = Net().to(device).eval()
-            qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
-            model_prepared = prepare_fx(model, qconfig_dict, example_inputs=(input,))
-            model_prepared(input)
-            model_prepared.to(device_after)
-            model_quantized = convert_to_reference_fx(model_prepared)
-            out = model_quantized(input.to(device_after))
-            self.assertEqual(out.device.type, device_after)
-
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
-    def test_prepare_serialize_switch_device_convert(self):
-        class Net(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv1 = nn.Conv2d(1, 6, 5)
-                self.linear1 = nn.Linear(120, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                y = self.linear1(x.view(-1))
-                return y
-
-        for device in ['cuda', 'cpu']:
-            for device_after in ['cuda', 'cpu']:
-                input = torch.randn((5, 1, 6, 6)).to(device)
-                model = Net().to(device).eval()
-                qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
-                model_prepared_first = prepare_fx(model, qconfig_dict, example_inputs=(input,))
-                model_prepared_second = prepare_fx(model, qconfig_dict, example_inputs=(input,))
-                model_prepared_first(input)
-                state_dict = model_prepared_first.state_dict()
-                del model_prepared_first
-                model_prepared_second.load_state_dict(state_dict)
-                model_prepared_second.to(device_after)
-                model_quantized = convert_to_reference_fx(model_prepared_second)
-                out = model_quantized(input.to(device_after))
-                self.assertEqual(out.device.type, device_after)
 
     @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
@@ -9818,13 +9740,92 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.checkNoQconfig(model)
             checkQuantized(quant_model)
 
-    @given(
-        device=st.sampled_from(
-            ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
-        )
-    )
-    @settings(deadline=None)
-    @override_qengines
+
+class TestQuantizeFxModelsAccelerator(QuantizationTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIfNoFBGEMM
+    @common_device_type.onlyAccelerator
+    def test_static_accelerator_convert_basic(self, device):
+        class Net(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.relu1 = nn.ReLU()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.relu1(self.conv1(x))
+                y = self.linear1(x.view(-1))
+                return y
+
+        input = torch.randn((5, 1, 6, 6)).to(device)
+        example_inputs = (input,)
+        model = Net().to(device).eval()
+        qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
+        model_prepared = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
+        model_prepared(*example_inputs)
+        model_quantized = convert_to_reference_fx(model_prepared)
+        out = model_quantized(*example_inputs)
+        self.assertEqual(out.device.type, torch.device(device).type)
+
+    @skipIfNoFBGEMM
+    @common_device_type.onlyAccelerator
+    def test_switch_device_prepare_convert(self, device):
+        class Net(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.relu1 = nn.ReLU()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.relu1(self.conv1(x))
+                y = self.linear1(x.view(-1))
+                return y
+
+        for start_device in [device, 'cpu']:
+            device_after = "cpu" if start_device == device else device
+            input = torch.randn((5, 1, 6, 6)).to(start_device)
+            model = Net().to(start_device).eval()
+            qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
+            model_prepared = prepare_fx(model, qconfig_dict, example_inputs=(input,))
+            model_prepared(input)
+            model_prepared.to(device_after)
+            model_quantized = convert_to_reference_fx(model_prepared)
+            out = model_quantized(input.to(device_after))
+            self.assertEqual(out.device.type, torch.device(device_after).type)
+
+    @skipIfNoFBGEMM
+    @common_device_type.onlyAccelerator
+    def test_prepare_serialize_switch_device_convert(self, device):
+        class Net(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                y = self.linear1(x.view(-1))
+                return y
+
+        for start_device in [device, 'cpu']:
+            for device_after in [device, 'cpu']:
+                input = torch.randn((5, 1, 6, 6)).to(start_device)
+                model = Net().to(start_device).eval()
+                qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
+                model_prepared_first = prepare_fx(model, qconfig_dict, example_inputs=(input,))
+                model_prepared_second = prepare_fx(model, qconfig_dict, example_inputs=(input,))
+                model_prepared_first(input)
+                state_dict = model_prepared_first.state_dict()
+                del model_prepared_first
+                model_prepared_second.load_state_dict(state_dict)
+                model_prepared_second.to(device_after)
+                model_quantized = convert_to_reference_fx(model_prepared_second)
+                out = model_quantized(input.to(device_after))
+                self.assertEqual(out.device.type, torch.device(device_after).type)
+
     def test_qat_functional_linear(self, device):
         if torch.backends.quantized.engine not in ('fbgemm', 'qnnpack'):
             return
@@ -9933,6 +9934,10 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out_ref = converted_ref(inp)
 
             torch.testing.assert_close(out, out_ref)
+    test_qat_functional_linear = wraps(test_qat_functional_linear)(override_qengines(test_qat_functional_linear))
+
+common_device_type.instantiate_device_type_tests(TestQuantizeFxModelsAccelerator, globals())
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
