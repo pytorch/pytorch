@@ -13090,6 +13090,20 @@ class TestAutogradForwardMode(TestCase):
             self.assertFalse("tangent=" in str(b_primal))
             self.assertFalse("tangent=" in str(b_tangent))
 
+    def test_print_below_adinplaceorview(self):
+        # A __torch_dispatch__ handler can run inside an autograd kernel's
+        # AutoDispatchBelowADInplaceOrView region and print its args there.
+        # Forward AD is not tracked in that region, so printing must not try to
+        # unpack the dual (which reaches _fw_primal's inference-mode-only stub).
+        a = torch.tensor([1.0, 2.0])
+        with fwAD.dual_level():
+            b = fwAD.make_dual(a, torch.rand(2))
+            with torch._C._AutoDispatchBelowADInplaceOrView():
+                self.assertEqual(str(a), "tensor([1., 2.])")
+                self.assertEqual(str(b), "tensor([1., 2.])")
+            # Printing is unchanged outside of that region.
+            self.assertTrue("tangent=" in str(b))
+
     def test_basic_packing_unpacking(self):
         foo = torch.rand(2)
         bar = torch.rand(2)
