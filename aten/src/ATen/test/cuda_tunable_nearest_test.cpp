@@ -26,14 +26,24 @@ namespace {
 
 constexpr const char* kOp = "gemm_nn_f32";
 
-// A specialized (non-Default) donor entry, as produced by tuning.
-ResultEntry Donor(const char* key) {
-  return ResultEntry(std::string(key), /*time=*/1.0);
+// A specialized (non-Default) donor entry, as produced by tuning. The time is
+// the donor shape's, measured when the donor was tuned.
+ResultEntry Donor(const char* key, double time_ms = 1.0) {
+  return ResultEntry(std::string(key), time_ms);
 }
 
 // Tight m=32 and m=64 NN GEMMs (k=256, n=512): the 32-shape borrows the 64.
 constexpr const char* kQSig = "NN_32_512_256_ld_32_256_32";
 constexpr const char* kCSig = "NN_64_512_256_ld_64_256_64";
+constexpr const char* kQBlasSig =
+    "- { function: matmul, M: 32, N: 512, K: 256 }";
+
+// What the reuse pass hands to RecordBorrowed: the winning key, with the time
+// and BLAS signature measured on the BORROWER's params. Recording the donor's
+// entry instead would file the donor's numbers under the borrower's signature.
+ResultEntry Validated(const char* key, double measured_ms) {
+  return ResultEntry(std::string(key), measured_ms, std::string(kQBlasSig));
+}
 
 struct FlagGuard {
   FlagGuard() {
@@ -104,15 +114,10 @@ class TunableNearestTest : public ::testing::Test {
 };
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
-  // Calling LookupNearest is itself the opt-in: TunableOp dispatch resolves
-  // through Lookup and never reaches it, so it answers the question asked
-  // rather than re-deciding from the reuse pass's mutable policy flags.
-  // Whether borrowing applies at all -- including "never while tuning" -- is
-  // the pass's call, and it only reaches here on its non-tuning path.
-  //
-  // This is about the policy flags only. PYTORCH_TUNABLEOP_NEAREST_MATCH=0 is
-  // a hard kill switch and IS honoured here; it is read once at startup, so
-  // covering it needs a subprocess.
+  // Calling LookupNearest is itself the opt-in: dispatch never reaches it, so
+  // it answers the question asked rather than re-deciding from the pass's
+  // mutable policy flags. The env kill switch IS still honoured here; covering
+  // that needs a subprocess, since it is read once at startup.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TuningResultsManager mgr;
@@ -184,7 +189,7 @@ TEST_F(TunableNearestTest, RecordBorrowedBecomesExactHit) {
   TuningResultsManager mgr;
   SeedDonor(mgr);
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), ResultEntry::Null());
-  mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
+  mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
   // The recorded borrow is an ordinary exact hit from then on.
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
 }
@@ -200,7 +205,7 @@ TEST_F(TunableNearestTest, RecordBorrowedIgnoresPolicyFlags) {
   ctx->EnableTuning(false);
   ctx->EnableRecordBorrowed(false);
   TuningResultsManager mgr;
-  mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
+  mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("k64"));
 }
 
@@ -213,9 +218,29 @@ TEST_F(TunableNearestTest, RecordBorrowedPersistsWhileTuningIsOff) {
   getTuningContext()->EnableTuning(false);
   {
     TuningResultsManager mgr;
-    mgr.RecordBorrowed(kOp, kQSig, Donor("k64"));
+    mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
   }
   EXPECT_NE(results.Contents().find(kQSig), std::string::npos);
+}
+
+TEST_F(TunableNearestTest, RecordBorrowedPersistsTheBorrowersMeasurement) {
+  // The line written under the borrower's signature carries the borrower's own
+  // measurement: the key may come from the donor, the time and BLAS signature
+  // never do. Otherwise an offline tool replaying that line would benchmark the
+  // donor's shape believing it was the borrower's.
+  FlagGuard g;
+  TempResultsFile results("tunableop-measurement-");
+  getTuningContext()->EnableTuning(false);
+  {
+    TuningResultsManager mgr;
+    // Donor tuned at 9.0 ms on its own (larger) shape.
+    mgr.Add(kOp, kCSig, Donor("k64", /*time_ms=*/9.0));
+    // Same kernel re-measured at 2.5 ms on the borrower's shape.
+    mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
+  }
+  const std::string content = results.Contents();
+  EXPECT_NE(content.find("k64,2.5"), std::string::npos) << content;
+  EXPECT_EQ(content.find("k64,9"), std::string::npos) << content;
 }
 
 TEST_F(TunableNearestTest, RecordBorrowedFirstWriteWins) {
@@ -230,12 +255,12 @@ TEST_F(TunableNearestTest, RecordBorrowedFirstWriteWins) {
   ctx->EnableTuning(false);
   TuningResultsManager mgr;
 
-  mgr.RecordBorrowed(kOp, kQSig, Donor("first"));
-  mgr.RecordBorrowed(kOp, kQSig, Donor("second"));
+  mgr.RecordBorrowed(kOp, kQSig, Validated("first", /*measured_ms=*/2.5));
+  mgr.RecordBorrowed(kOp, kQSig, Validated("second", /*measured_ms=*/3.5));
   EXPECT_EQ(mgr.Lookup(kOp, kQSig), Donor("first"));
 
   mgr.Add(kOp, kCSig, Donor("k64"));
-  mgr.RecordBorrowed(kOp, kCSig, Donor("usurper"));
+  mgr.RecordBorrowed(kOp, kCSig, Validated("usurper", /*measured_ms=*/4.5));
   EXPECT_EQ(mgr.Lookup(kOp, kCSig), Donor("k64"));
 
   const std::string content = results.Contents();
@@ -245,11 +270,10 @@ TEST_F(TunableNearestTest, RecordBorrowedFirstWriteWins) {
 }
 
 TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
-  // RecordBorrowed overrides the write rule for itself only. Add()'s rule --
-  // write during tuning unless the run is merely collecting untuned shapes --
-  // must be unchanged no matter what the reuse-pass flags say, because Add()
-  // is on every GEMM's path on every thread. Both combinations below wrote
-  // nothing before nearest-match existed and must still write nothing.
+  // RecordBorrowed overrides the write rule for itself only. Add() is on every
+  // GEMM's path on every thread, so its rule -- write during tuning unless the
+  // run is only collecting untuned shapes -- must hold whatever the reuse-pass
+  // flags say. Neither combination below writes anything.
   FlagGuard g;
   auto* ctx = getTuningContext();
   ctx->EnableNearestMatch(true);

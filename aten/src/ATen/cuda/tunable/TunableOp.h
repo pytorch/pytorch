@@ -52,12 +52,9 @@ class TunableOp {
       ResultEntry result = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
 
-      // Hoisted so the failure log below can reuse them. TUNABLE_LOG1 expands
-      // to Log(1, ...), which evaluates its arguments before checking the log
-      // level, so recomputing Signature() (a typeid lookup) and
-      // params->Signature() (a sprintf) there would cost every failing call
-      // even at verbosity 0. Empty when TunableOp is disabled, which is how
-      // the log knows there is no resolved solution to name.
+      // TUNABLE_LOG evaluates its arguments before checking the level, so the
+      // failure log below reuses these rather than recomputing them. Empty
+      // while TunableOp is disabled: there is no resolved solution to name.
       std::string op_sig;
       std::string concrete_sig;
 
@@ -139,13 +136,12 @@ class TunableOp {
       TORCH_CHECK(op != nullptr);
       const auto status = op->Call(params);
       if (status != OK && !op_sig.empty()) {
-        // Deliberately no retry on Default here. Every caller -- gemm, bgemm,
-        // gemm-and-bias and scaled gemm -- already reads a non-OK status as
-        // "use my own non-tunable path", so a retry here would duplicate the
-        // one the caller is about to make and mask which candidate failed.
-        // The failure is not cached either: a tuned entry that fails is a
-        // defect worth seeing on every call.
-        TUNABLE_LOG1("solution ", result, " failed for ", op_sig, "(",
+        // No retry on Default: every caller already treats a non-OK status as
+        // "use my own non-tunable path", so retrying here would duplicate the
+        // fallback and hide which candidate failed. Level 2 like the other
+        // per-call messages above -- a solution that keeps failing would
+        // otherwise log on every GEMM at verbosity 1.
+        TUNABLE_LOG2("solution ", result, " failed for ", op_sig, "(",
             concrete_sig, "), returning non-OK for caller fallback");
       }
       return status;
