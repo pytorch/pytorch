@@ -322,6 +322,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         log.debug("TunableOp worker machinery failed: %s", e)
         return Outcome(None, "error")
 
+
 # Per-process record of laddered GEMMs: (kernel name, traced input/output meta
 # signatures, worker scope). A transformer with N identical layers would
 # otherwise run the whole ladder N times, and again on every recompile;
@@ -438,11 +439,7 @@ def maybe_range_pretune(winner) -> None:
         # Resolved from the choice, not the caller name, so _dtype / v2 / bias
         # variants route correctly.
         bias_first = choice_name in ("addmm", "addmm_dtype", "baddbmm")
-        a, b = (
-            (nodes[1], nodes[2])
-            if bias_first
-            else (nodes[0], nodes[1])
-        )
+        a, b = (nodes[1], nodes[2]) if bias_first else (nodes[0], nodes[1])
         a_sz = a.get_size()
         b_sz = b.get_size()
     except (IndexError, AttributeError):
@@ -517,9 +514,7 @@ def maybe_range_pretune(winner) -> None:
             return None
 
     try:
-        sigs = [_node_sig(n) for n in winner.input_nodes] + [
-            _node_sig(winner.layout)
-        ]
+        sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
         try:
             scope = (torch.cuda.current_device(), resolve_filename(0))
         except Exception:
@@ -638,9 +633,7 @@ def maybe_range_pretune(winner) -> None:
 
     def _as_buffer(node: Any) -> Any:
         return (
-            ir.Buffer(name="fake", layout=node)
-            if isinstance(node, ir.Layout)
-            else node
+            ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
         )
 
     def _is_densely_packed(node: Any) -> bool:
@@ -655,15 +648,11 @@ def maybe_range_pretune(winner) -> None:
         n = _as_buffer(node)
         real_strides = [
             int(x)
-            for x in sizevars.optimization_hints(
-                get_strides_with_layout_constraints(n)
-            )
+            for x in sizevars.optimization_hints(get_strides_with_layout_constraints(n))
         ]
         real_sizes = [int(x) for x in sizevars.optimization_hints(n.get_size())]
         order = ir.get_stride_order(real_strides)
-        dense = [
-            int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)
-        ]
+        dense = [int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)]
         return real_strides == dense
 
     try:
@@ -709,9 +698,7 @@ def maybe_range_pretune(winner) -> None:
     try:
         for v in buckets:
             sized_bmreq: Any = copy.copy(winner.bmreq)
-            sized_bmreq.input_tensor_meta = [
-                _meta_at(n, v) for n in winner.input_nodes
-            ]
+            sized_bmreq.input_tensor_meta = [_meta_at(n, v) for n in winner.input_nodes]
             sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v)
             # TunableOp cannot tune under CUDA-graph capture. copy.copy keeps
             # both flags: benchmark_with_cudagraphs (set per-choice) and
@@ -791,9 +778,7 @@ def maybe_range_pretune(winner) -> None:
         # out, and be killed again -- a flat 5s produced 334 timeouts and 334
         # kills where the shared budget produced 7. Letting the first bucket
         # have the budget absorbs the cold start instead of fighting it.
-        outcome = submit(
-            BenchmarkJob(bmreq, tuning=True), timeout=remaining
-        )
+        outcome = submit(BenchmarkJob(bmreq, tuning=True), timeout=remaining)
         if config.aten_tunableop_pretune_debug:
             # Per-bucket cost, which nothing else records: only failures are
             # logged today, so the cost of the buckets that SUCCEED -- and

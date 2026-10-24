@@ -62,9 +62,7 @@ class _FakeGraph:
 
 
 def _buffer(name, sizes, strides):
-    return ir.Buffer(
-        name=name, layout=ir.FixedLayout(DEVICE, DTYPE, sizes, strides)
-    )
+    return ir.Buffer(name=name, layout=ir.FixedLayout(DEVICE, DTYPE, sizes, strides))
 
 
 def _contiguous_strides(sizes):
@@ -117,9 +115,7 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
         stack.enter_context(
             mock.patch("torch._inductor.tunableop.submit", side_effect=_record)
         )
-        stack.enter_context(
-            mock.patch("torch._inductor.tunableop.BenchmarkJob", _Job)
-        )
+        stack.enter_context(mock.patch("torch._inductor.tunableop.BenchmarkJob", _Job))
         stack.enter_context(config.patch({"aten_tunableop_ladder": ladder}))
         yield submitted
 
@@ -517,9 +513,7 @@ class TestTunableOpPretune(TestCase):
 
         s = sympy.Symbol("s_hook", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
-        with mock.patch(
-            "torch._inductor.tunableop.maybe_range_pretune"
-        ) as pretune:
+        with mock.patch("torch._inductor.tunableop.maybe_range_pretune") as pretune:
             _sa._maybe_pretune_tunableop(winner)
             pretune.assert_called_once_with(winner)
             pretune.reset_mock()
@@ -545,6 +539,7 @@ class TestTunableOpPretune(TestCase):
         sched = mock.Mock(spec=Scheduler)
         sched.nodes = [sched_node]
         sched._has_layout_conflict_for_template.return_value = True
+
         # The finalizer calls output_node() after the ladder hook and then
         # replaces the node -- deep IR machinery this test does not cover.
         # Raise a sentinel there: reaching it proves the hook already fired.
@@ -552,9 +547,7 @@ class TestTunableOpPretune(TestCase):
             pass
 
         winner.output_node = mock.Mock(side_effect=_Stop)
-        with mock.patch(
-            "torch._inductor.tunableop.maybe_range_pretune"
-        ) as pretune:
+        with mock.patch("torch._inductor.tunableop.maybe_range_pretune") as pretune:
             with self.assertRaises(_Stop):
                 Scheduler.finalize_multi_template_buffers(sched)
             pretune.assert_called_once_with(winner)
