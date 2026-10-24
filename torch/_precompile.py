@@ -1884,7 +1884,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "TRACER",
         "SERVING_MODE",
         "_ALLOW_SERVE_TIME_COMPILES",
-        "CUDAGRAPH_CONFIG",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
     }
@@ -2286,7 +2285,6 @@ def _build_multigraph_python_source(
     entry_binding: dict[str, Any] | None,
     mode: str,
     unreachable: list[str],
-    cudagraph_config: dict[str, bool],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2314,11 +2312,6 @@ def _build_multigraph_python_source(
         # load(allow_serve_time_compiles=True) flips this to True before exec.
         buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
-    buf.writeline(
-        "# The inductor CUDA graph config the capture compiled under. Load wraps"
-    )
-    buf.writeline("# the subgraphs by it, not by the loading process's config.")
-    buf.writeline(f"CUDAGRAPH_CONFIG = {cudagraph_config!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
     buf.writeline("")
@@ -2440,7 +2433,6 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    cudagraph_config: dict[str, bool],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2460,15 +2452,7 @@ def _build_multigraph_artifact(
     mode = "installed" if unreachable else "standalone"
     binding = _entry_binding(entry_fn) if mode == "standalone" else None
     python_code = _build_multigraph_python_source(
-        entry,
-        frames,
-        backends,
-        summary,
-        backend,
-        binding,
-        mode,
-        unreachable,
-        cudagraph_config,
+        entry, frames, backends, summary, backend, binding, mode, unreachable
     )
     inductor_bundle = None
     if backend != "eager":
@@ -3429,10 +3413,7 @@ def capture(
     whenever grad is enabled (a ``.backward()`` in ``fn`` graph-breaks and
     re-runs at serve time through the live autograd engine, accumulating
     ``.grad`` like eager); serve the artifact under the grad mode it was
-    captured in. A :class:`DynamoTracer` inductor capture compiles its calls
-    under ``torch._inductor.config.triton.cudagraphs`` and
-    ``triton.cudagraph_trees`` as they are when ``capture()`` is called, and
-    records them in the artifact's ``CUDAGRAPH_CONFIG``.
+    captured in.
 
     .. note::
 
@@ -3558,13 +3539,6 @@ def load(
     nothing, so the rest of the call from that frame on, its callees included,
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
-
-    The graphs a :class:`DynamoTracer` artifact ships run as CUDA graphs
-    exactly when its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading
-    process's ``torch._inductor.config.triton.cudagraphs`` and
-    ``triton.cudagraph_trees`` say; the rest of the CUDA graph config is the
-    loading process's, and so is all of it for a serve-time compile
-    (``allow_serve_time_compiles``), like the rest of the Inductor config.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve
