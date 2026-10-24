@@ -84,6 +84,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(atan);
   UNARY_POINTWISE_ALL(atanh);
   UNARY_POINTWISE_ALL(bitwise_not);
+  UNARY_POINTWISE(bitwise_count);
   UNARY_POINTWISE_ALL(ceil);
   UNARY_POINTWISE_ALL(cos);
   UNARY_POINTWISE_ALL(cosh);
