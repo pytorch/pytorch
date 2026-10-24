@@ -15,6 +15,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <ATen/native/mps/operations/GemmHeuristics.h>
+#include <c10/util/safe_conv.h>
 
 #include <fmt/format.h>
 #include <bit>
@@ -383,9 +384,9 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
     return result.zero_();
   }
 
-  const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
-  const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
-  const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
+  const auto m = c10::safe_conv<uint32_t>(self.size(0), "self.size(0)");
+  const auto k = c10::safe_conv<uint32_t>(self.size(1), "self.size(1)");
+  const auto n = c10::safe_conv<uint32_t>(mat2.size(1), "mat2.size(1)");
   constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
   constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
   // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
@@ -1093,7 +1094,7 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
   const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
   const auto A_ = A.reshape({batch, n, n});
   const auto X = result.view({batch, n, n});
-  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
+  const auto threads = c10::safe_conv<uint32_t>(batch, "uint32_t");
   const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
                                   .A_rstride = A_.stride(1),
                                   .A_cstride = A_.stride(2),
@@ -2069,12 +2070,12 @@ static GeqrfParams<> get_geqrf_params(const Tensor& A, const Tensor& tau) {
   TORCH_CHECK_NOT_IMPLEMENTED(A.dim() <= c10::metal::max_ndim, "MPS QR: at most ", c10::metal::max_ndim, " dims");
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(A) && canUse32BitIndexMath(tau),
                               "MPS QR requires tensors addressable with 32-bit indices");
-  GeqrfParams params{.num_batch_dims = c10::checked_convert<int32_t>(A.dim() - 2, "int32_t")};
+  GeqrfParams params{.num_batch_dims = c10::safe_conv<int32_t>(A.dim() - 2, "int32_t")};
   for (const auto dim : c10::irange(A.dim())) {
-    params.A_sizes[dim] = c10::checked_convert<uint32_t>(A.size(dim), "uint32_t");
-    params.A_strides[dim] = c10::checked_convert<uint32_t>(A.stride(dim), "uint32_t");
+    params.A_sizes[dim] = c10::safe_conv<uint32_t>(A.size(dim), "uint32_t");
+    params.A_strides[dim] = c10::safe_conv<uint32_t>(A.stride(dim), "uint32_t");
     if (dim < tau.dim()) {
-      params.tau_strides[dim] = c10::checked_convert<uint32_t>(tau.stride(dim), "uint32_t");
+      params.tau_strides[dim] = c10::safe_conv<uint32_t>(tau.stride(dim), "uint32_t");
     }
   }
   return params;
