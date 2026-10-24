@@ -1679,18 +1679,18 @@ at::Tensor _convolution(
       check_input_same_type_as_parameters(input, weight, bias);
       output = at::miopen_convolution(
           input.contiguous(backend_memory_format), weight, bias, params.padding, params.stride,
-          params.dilation, params.groups, params.benchmark, params.deterministic);
+          params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
       break;
     case ConvBackend::MiopenDepthwise:
       output = at::miopen_depthwise_convolution(
           input.contiguous(backend_memory_format), weight, bias, params.padding, params.stride,
-          params.dilation, params.groups, params.benchmark, params.deterministic);
+          params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
       break;
     case ConvBackend::MiopenTranspose:
       check_input_same_type_as_parameters(input, weight, bias);
       output = at::miopen_convolution_transpose(
           input.contiguous(backend_memory_format), weight, bias, params.padding, params.output_padding,
-          params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+          params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
       break;
     case ConvBackend::Mkldnn:
 #if AT_MKLDNN_ENABLED()
@@ -2267,14 +2267,14 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         miopen_convolution_backward_stub(
           input.device().type(),
           input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
-          params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
+          params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32, output_mask);
       break;
     case ConvBackend::MiopenDepthwise:
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
           miopen_depthwise_convolution_backward_stub(
             input.device().type(),
             input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
-            params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
+            params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32, output_mask);
       break;
     case ConvBackend::MiopenTranspose:
       check_input_same_type_as_parameters(input, weight);
@@ -2282,7 +2282,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         miopen_convolution_transpose_backward_stub(
           input.device().type(),
           input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
-          params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
+          params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32, output_mask);
       break;
     case ConvBackend::Mkldnn:
       TORCH_CHECK(!weight.is_mkldnn(),
