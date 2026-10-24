@@ -365,6 +365,8 @@ class UniformQuantizationObserverBase(ObserverBase):
         # to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code
         # seems unlikely to change (last update over 1 year ago) and when torchscript is fully deprecated we can refactor.
         # TODO(jakeszwe, jerryzh168)
+        if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+            return self._calculate_qparams_compiled(min_val, max_val)
         if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor(
                 [0], device=min_val.device.type
@@ -425,6 +427,55 @@ class UniformQuantizationObserverBase(ObserverBase):
                 )
 
         return scale, zero_point
+
+    def _calculate_qparams_compiled(
+        self, min_val: torch.Tensor, max_val: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Same computation as _calculate_qparams without the data-dependent parts
+        # (check_min_max_valid and the float()/int() conversions of scalars).
+        device = min_val.device
+        default_scale = torch.ones(1, dtype=torch.float32, device=device)
+        default_zero_point = torch.zeros(1, dtype=torch.int64, device=device)
+        if min_val.numel() == 0 or max_val.numel() == 0:
+            return default_scale, default_zero_point
+
+        quant_min, quant_max = self.quant_min, self.quant_max
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            or self.qscheme == torch.per_channel_symmetric
+        ):
+            max_val_pos = torch.max(-min_val_neg, max_val_pos)
+            scale = max_val_pos / (float(quant_max - quant_min) / 2)
+            scale = torch.max(scale, self.eps)
+            if self.dtype in [torch.quint8, torch.uint8]:
+                if self.has_customized_qrange:
+                    zero_point = zero_point.new_full(
+                        zero_point.size(), (quant_min + quant_max) // 2
+                    )
+                else:
+                    zero_point = zero_point.new_full(zero_point.size(), 128)
+            elif self.dtype == torch.uint16:
+                zero_point = zero_point.new_full(zero_point.size(), 2**15)
+        elif self.qscheme == torch.per_channel_affine_float_qparams:
+            scale = (max_val - min_val) / float(quant_max - quant_min)
+            scale = torch.where(scale > self.eps, scale, torch.ones_like(scale))
+            zero_point = -1 * min_val / scale
+        else:
+            scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
+            scale = torch.max(scale, self.eps)
+            zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
+            zero_point = torch.clamp(zero_point, quant_min, quant_max)
+
+        if min_val.dim() == 0:
+            # A scalar min/max that was never observed gives the default values.
+            observed = ~((min_val == float("inf")) & (max_val == float("-inf")))
+            scale = torch.where(observed, scale, default_scale[0])
+            zero_point = torch.where(observed, zero_point, default_zero_point[0])
+        return scale.reshape(-1), zero_point.reshape(-1)
 
     @torch.jit.export
     def reset_min_max_vals(self):
@@ -672,7 +723,22 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
-        if min_val == float("inf") and max_val == float("-inf"):
+        if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+            # Branchless version of the initialization check below: comparing the
+            # buffers against inf is data-dependent control flow.
+            min_val_cur, max_val_cur = torch.aminmax(x)
+            uninitialized = (min_val == float("inf")) & (max_val == float("-inf"))
+            min_val = torch.where(
+                uninitialized,
+                min_val_cur,
+                min_val + self.averaging_constant * (min_val_cur - min_val),
+            )
+            max_val = torch.where(
+                uninitialized,
+                max_val_cur,
+                max_val + self.averaging_constant * (max_val_cur - max_val),
+            )
+        elif min_val == float("inf") and max_val == float("-inf"):
             min_val, max_val = torch.aminmax(x)
         else:
             min_val_cur, max_val_cur = torch.aminmax(x)
@@ -760,6 +826,20 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                 "Cannot reduce range for symmetric quantization for quint8"
             )
 
+    def _set_min_max(self, min_val, max_val):
+        if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+            # Resizing a module buffer in place is not traceable, so replace it
+            # when the number of channels changes.
+            if self.min_val.shape != min_val.shape:
+                self.min_val = torch.empty_like(min_val, dtype=self.min_val.dtype)
+            if self.max_val.shape != max_val.shape:
+                self.max_val = torch.empty_like(max_val, dtype=self.max_val.dtype)
+        else:
+            self.min_val.resize_(min_val.shape)
+            self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
+
     def forward(self, x_orig):
         return self._forward(x_orig)
 
@@ -785,10 +865,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
             min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
             min_val = torch.min(min_val_cur, min_val)
             max_val = torch.max(max_val_cur, max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+        self._set_min_max(min_val, max_val)
         return x_orig
 
     @torch.jit.export
@@ -977,10 +1054,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+        self._set_min_max(min_val, max_val)
         return x_orig
 
 
