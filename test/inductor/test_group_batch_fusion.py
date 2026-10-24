@@ -656,7 +656,10 @@ class TestGroupBatchFusion(TestCase):
             "stride",
             "mutable",
             "conversion",
+            "conversion_dtype",
             "conversion_dtype_after_transpose",
+            "conversion_noop_after_transpose",
+            "out_user",
             "dropout_eval_output",
             "dropout_eval_mutation",
             "dropout_eval_merge_view",
@@ -685,6 +688,35 @@ class TestGroupBatchFusion(TestCase):
             result = graph.call_method("contiguous", args=(node,))
             result.meta["example_value"] = node.meta["example_value"]
             return result
+
+        def transpose(graph, node):
+            result = graph.call_method("transpose", args=(node, 0, 1))
+            result.meta["example_value"] = node.meta["example_value"].transpose(0, 1)
+            return result
+
+        def conversion(graph, node, copy):
+            source = transpose(graph, node)
+            if copy:
+                result = graph.call_method("to", args=(source, torch.float64))
+                result.meta["example_value"] = source.meta["example_value"].to(
+                    torch.float64
+                )
+            else:
+                result = graph.call_method("float", args=(source,))
+                result.meta["example_value"] = source.meta["example_value"]
+            return result
+
+        def conversion_dtype(graph, node):
+            result = graph.call_method("double", args=(node,))
+            result.meta["example_value"] = node.meta["example_value"].double()
+            return result
+
+        def out_user(graph, node):
+            out = graph.placeholder("out")
+            out.meta["example_value"] = torch.empty(4, 6)
+            return graph.call_function(
+                torch.ops.aten.sin.out, args=(node,), kwargs={"out": out}
+            )
 
         def dropout(graph, node, training, p=0.1):
             result = graph.call_function(
@@ -716,11 +748,17 @@ class TestGroupBatchFusion(TestCase):
             "mutable": lambda graph, node: graph.call_function(
                 torch.ops.aten.add_.Tensor, args=(node, 1)
             ),
-            "conversion": lambda graph, node: graph.call_method("float", args=(node,)),
-            "conversion_dtype_after_transpose": lambda graph, node: graph.call_method(
-                "to",
-                args=(graph.call_method("transpose", args=(node, 0, 1)), torch.float64),
+            "conversion": lambda graph, node: graph.call_method(
+                "mul_", args=(conversion(graph, node, False), 2)
             ),
+            "conversion_dtype": conversion_dtype,
+            "conversion_dtype_after_transpose": lambda graph, node: conversion(
+                graph, node, True
+            ),
+            "conversion_noop_after_transpose": lambda graph, node: graph.call_method(
+                "mul_", args=(conversion(graph, node, False), 2)
+            ),
+            "out_user": out_user,
             "dropout_eval_output": lambda graph, node: graph.output(
                 dropout(graph, node, False)
             ),
@@ -768,6 +806,8 @@ class TestGroupBatchFusion(TestCase):
             "size",
             "contiguous",
             "dropout_training",
+            "conversion_dtype",
+            "conversion_dtype_after_transpose",
         }
 
         graph = torch.fx.Graph()
@@ -1047,6 +1087,37 @@ class TestGroupBatchFusion(TestCase):
                     torch.sin(self.a(x)),
                     torch.cos(self.b(x)),
                 )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_out_user(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.large(x)
+                out = torch.empty_like(large)
+                torch.sin(large, out=out)
+                return out, torch.sin(self.a(x)), torch.cos(self.b(x))
 
         module = M().eval()
         x = torch.randn(32, 64)

@@ -524,6 +524,10 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._layout_sensitive_users: dict[torch.fx.Node, bool] = {}
+
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
@@ -556,7 +560,12 @@ class BatchLinearLHSFusion(BatchFusion):
                     )
                 ):
                     return None
-            if _has_layout_sensitive_user(node):
+            if node in self._layout_sensitive_users:
+                layout_sensitive = self._layout_sensitive_users[node]
+            else:
+                layout_sensitive = _has_layout_sensitive_user(node)
+                self._layout_sensitive_users[node] = layout_sensitive
+            if layout_sensitive:
                 return None
             group_key = ("batch_linear_lhs", bias is not None, input)
         else:
@@ -564,6 +573,7 @@ class BatchLinearLHSFusion(BatchFusion):
         return group_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
+        self._layout_sensitive_users.clear()
         batch_nodes = []
         batch_input = None
         batch_weights, batch_weights_meta = [], []
@@ -756,6 +766,54 @@ def _overload_for_schema(name: str, overload_name: str):
         return None
 
 
+def _value_kind(value):
+    if isinstance(value, torch.fx.Node):
+        value = value.meta.get("example_value", value.meta.get("val"))
+    if isinstance(value, torch.Tensor):
+        return "tensor"
+    if isinstance(value, torch.SymInt):
+        return "symint"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(item, torch.Tensor) for item in value
+    ):
+        return "tensor"
+    return None
+
+
+def _schema_kind(typ):
+    text = str(typ)
+    if "Tensor" in text:
+        return "tensor"
+    if "SymInt" in text:
+        return "symint"
+    if text.endswith("Scalar") or text in ("int", "float", "bool", "complex", "number"):
+        return "scalar"
+    return None
+
+
+def _args_match_schema(schema, args) -> bool:
+    # _fast_bind only checks arity and keyword names; reject overloads whose
+    # argument kinds contradict the traced values (sin.int for a Tensor input).
+    for argument, value in zip(schema.arguments, args):
+        kind = _value_kind(value)
+        expected = _schema_kind(argument.type)
+        if kind is None or expected is None:
+            continue
+        if expected == "tensor" and kind != "tensor":
+            return False
+        if expected == "symint" and kind not in ("symint", "int"):
+            return False
+        if expected == "scalar" and kind not in ("bool", "int", "float", "symint"):
+            return False
+    return True
+
+
 def _layout_user_overloads(user: torch.fx.Node):
     target = user.target
     args = tuple(user.args)
@@ -804,6 +862,8 @@ def _layout_user_overloads(user: torch.fx.Node):
             _fast_bind(signature, *args, **kwargs)
         except TypeError:
             continue
+        if not _args_match_schema(schema, args):
+            continue
         overload = _overload_for_schema(schema.name, schema.overload_name)
         if overload is None:
             return ()
@@ -811,23 +871,15 @@ def _layout_user_overloads(user: torch.fx.Node):
     return matched
 
 
-def _dim_hint(dim):
+def _dim_value(dim):
     if isinstance(dim, torch.fx.Node):
-        return _dim_hint(dim.meta.get("example_value", dim.meta.get("val")))
-    if isinstance(dim, torch.SymInt):
-        hint = dim.node.hint
-        return hint if isinstance(hint, int) else None
-    if isinstance(dim, int):
-        return dim
-    return None
+        return dim.meta.get("example_value", dim.meta.get("val"))
+    return dim
 
 
-def _shape_hint(value):
+def _shape_value(value):
     if isinstance(value, torch.Tensor) and value.dim() > 0:
-        shape = [_dim_hint(dim) for dim in value.shape]
-        if any(dim is None for dim in shape):
-            return None
-        return tuple(shape)
+        return tuple(value.shape)
     return None
 
 
@@ -840,50 +892,53 @@ def _view_target_shape(user: torch.fx.Node):
         size = user.kwargs.get("size")
     if not isinstance(size, (tuple, list)):
         return None
-    dims = [_dim_hint(dim) for dim in size]
-    if any(dim is None for dim in dims):
+    dims = tuple(_dim_value(dim) for dim in size)
+    if any(not isinstance(dim, (int, torch.SymInt)) for dim in dims):
         return None
-    if sum(1 for dim in dims if dim == -1) > 1:
-        return None
-    return tuple(dims)
+    return dims
+
+
+def _is_one(dim) -> bool:
+    if isinstance(dim, int):
+        return dim == 1
+    return statically_known_true(dim == 1)
 
 
 def _is_split_only_view(user: torch.fx.Node) -> bool:
     source_node = user.args[0]
     if not isinstance(source_node, torch.fx.Node):
         return False
-    source = _shape_hint(source_node.meta.get("example_value"))
+    source = _shape_value(source_node.meta.get("example_value"))
     target = _view_target_shape(user)
     if source is None or target is None:
         return False
-    total = 1
-    for dim in source:
-        total *= dim
-    if -1 in target:
+    if any(isinstance(dim, int) and dim == -1 for dim in target):
+        # Infer the -1 dimension only when every dimension is static.
+        if not all(isinstance(dim, int) for dim in (*source, *target)):
+            return False
+        total = 1
+        for dim in source:
+            total *= dim
         known = 1
         for dim in target:
             if dim != -1:
-                if not isinstance(dim, int):
-                    return False
                 known *= dim
         if known == 0 or total % known:
             return False
         target = tuple(total // known if dim == -1 else dim for dim in target)
-    if not all(isinstance(dim, int) and dim >= 0 for dim in target):
-        return False
-    src = [dim for dim in source if dim != 1]
-    tgt = [dim for dim in target if dim != 1]
+    src = [dim for dim in source if not _is_one(dim)]
+    tgt = [dim for dim in target if not _is_one(dim)]
     index = 0
     for dim in src:
         if index >= len(tgt):
             return False
         product = tgt[index]
         index += 1
-        while product < dim and index < len(tgt):
-            product *= tgt[index]
+        while not statically_known_true(product == dim):
+            if statically_known_true(product > dim) or index >= len(tgt):
+                return False
+            product = product * tgt[index]
             index += 1
-        if product != dim:
-            return False
     return index == len(tgt)
 
 
@@ -893,12 +948,27 @@ def _memory_format(user: torch.fx.Node):
     return user.kwargs.get("memory_format")
 
 
-def _is_contiguous_user(user: torch.fx.Node) -> bool:
+def _is_conversion_user(user: torch.fx.Node, ops=None) -> bool:
+    if user.op == "call_method":
+        return user.target in _CONVERSION_METHODS
+    if user.op != "call_function":
+        return False
+    if ops is None:
+        ops = _layout_user_overloads(user)
+    if not ops:
+        return False
+    return OrderedSet(op.overloadpacket.__name__ for op in ops) <= OrderedSet(
+        ["_to_copy", "to", "type_as"]
+    )
+
+
+def _is_contiguous_user(user: torch.fx.Node, ops=None) -> bool:
     if user.op == "call_method":
         return user.target == "contiguous"
     if user.op != "call_function":
         return False
-    ops = _layout_user_overloads(user)
+    if ops is None:
+        ops = _layout_user_overloads(user)
     return bool(ops) and OrderedSet(
         op.overloadpacket.__name__ for op in ops
     ) == OrderedSet(["contiguous"])
@@ -911,12 +981,13 @@ def _contiguous_aliases(user: torch.fx.Node) -> bool:
     return _memory_format(user) in (None, torch.contiguous_format)
 
 
-def _direct_is_mutable(user: torch.fx.Node) -> bool:
+def _direct_is_mutable(user: torch.fx.Node, ops=None) -> bool:
     if user.op not in ("call_method", "call_function"):
         return False
     if user.op == "call_function" and user.target is operator.getitem:
         return False
-    ops = _layout_user_overloads(user)
+    if ops is None:
+        ops = _layout_user_overloads(user)
     if ops:
         if any(op._schema.is_mutable for op in ops):
             return True
@@ -929,7 +1000,7 @@ def _direct_is_mutable(user: torch.fx.Node) -> bool:
     return _is_mutable_node(user.target)
 
 
-def _allowed_alias(user: torch.fx.Node) -> bool:
+def _allowed_alias(user: torch.fx.Node, ops=None) -> bool:
     # Traversable alias: safe only when it cannot merge dimensions.
     if user.op == "call_function" and user.target is operator.getitem:
         return True
@@ -941,7 +1012,8 @@ def _allowed_alias(user: torch.fx.Node) -> bool:
         return False
     if user.op != "call_function":
         return False
-    ops = _layout_user_overloads(user)
+    if ops is None:
+        ops = _layout_user_overloads(user)
     if not ops:
         return False
     names = OrderedSet(op.overloadpacket.__name__ for op in ops)
@@ -999,22 +1071,27 @@ def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
         if user in visited:
             continue
         visited.add(user)
-        if _direct_is_mutable(user):
+        ops = (
+            _layout_user_overloads(user)
+            if user.op in ("call_method", "call_function")
+            else None
+        )
+        if _direct_is_mutable(user, ops):
             return True
         if _is_aliasing_user(user, assume_alias=True):
             pending.extend(user.users)
     return False
 
 
-def _direct_layout_user_is_sensitive(user: torch.fx.Node) -> bool:
+def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops=None) -> bool:
     """Return True if fusing the producer would change this user's semantics.
 
     Fusion replaces a contiguous ``[M, N_i]`` linear output with
     ``getitem(split(mm(...), dim=1))``, which has row stride ``sum(N)``. A
     user is sensitive when it can observe that layout or alias it: graph
-    outputs, mutations and ``out=`` calls, conversions (whose preserve-format
-    copies can change layout after a permuted alias), stride/storage/contiguity
-    queries, merging views, and unknown ops.
+    outputs, mutations and ``out=`` calls, stride/storage/contiguity queries,
+    merging views, and unknown ops. Copying conversions are layout-safe;
+    no-op conversions alias the input and are traversed by the caller.
     Pointwise and known layout-independent ops stay eligible; unknown is
     sensitive so new op forms are rejected rather than miscompiled.
     """
@@ -1024,24 +1101,24 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node) -> bool:
         return True
     if user.target is torch.nn.functional.dropout:
         return get_arg_value(user, 3, "inplace") not in (None, False)
-    if user.op == "call_method" and user.target in _CONVERSION_METHODS:
-        # Copies with preserve_format keep dense strides, but a strided slice
-        # after transpose is not dense and falls back to a different layout.
-        return True
-    ops = _layout_user_overloads(user)
+    if ops is None:
+        ops = _layout_user_overloads(user)
+    if _is_conversion_user(user, ops):
+        # A copying conversion produces dense output with the same dimension
+        # order. A no-op conversion aliases the input and is traversed by the
+        # caller instead of being accepted here.
+        return False
     if not ops or any(op._schema.is_mutable for op in ops):
         return True
     if any(op.namespace != "aten" for op in ops):
         return True
     names = OrderedSet(op.overloadpacket.__name__ for op in ops)
-    if names <= OrderedSet(["_to_copy", "to", "type_as"]):
-        return True
     if names.intersection(_LAYOUT_SENSITIVE_OPS) or any(
         op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
     ):
         return True
     return not (
-        any(torch.Tag.pointwise in op.tags for op in ops)
+        all(torch.Tag.pointwise in op.tags for op in ops)
         or all(op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops)
     )
 
@@ -1060,13 +1137,18 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         if user in visited:
             continue
         visited.add(user)
-        if _is_contiguous_user(user):
+        ops = (
+            _layout_user_overloads(user)
+            if user.op in ("call_method", "call_function")
+            else None
+        )
+        if _is_contiguous_user(user, ops):
             if not _contiguous_aliases(user) or _has_mutable_alias_user(user):
                 return True
             continue
-        if _allowed_alias(user):
+        if _allowed_alias(user, ops):
             pending.extend(user.users)
-        elif _direct_layout_user_is_sensitive(user):
+        elif _direct_layout_user_is_sensitive(user, ops):
             return True
         elif _is_aliasing_user(user):
             # Safe ops that return the input itself (eval or p=0 dropout) must
