@@ -1309,7 +1309,9 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device,
                     data.dtype,
                     *self.static_sizes_strides(data),
-                    is_pinned=_is_cpu_strided_tensor_pinned(data),
+                    is_pinned=_is_cpu_strided_tensor_pinned(data)
+                    or name
+                    in getattr(self.module, "meta", {}).get("pinned_constants", ()),
                 ),
             )
         )
@@ -1699,7 +1701,9 @@ class GraphLowering(torch.fx.Interpreter):
                     value.tolist(),
                     dtype=value.dtype,
                     device=value.device,
-                    pin_memory=_is_cpu_strided_tensor_pinned(value),
+                    pin_memory=_is_cpu_strided_tensor_pinned(value)
+                    or target
+                    in getattr(self.module, "meta", {}).get("pinned_constants", ()),
                 )
 
         return self.add_tensor_constant(value, target)
