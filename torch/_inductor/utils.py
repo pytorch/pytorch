@@ -108,15 +108,16 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-T = TypeVar("T")
-
-
-# Defined before the torch._dynamo import below to avoid a circular import
-# when pulled in from dynamo; hence the lazy registry imports in the bodies.
+# GPU_TYPES is derived from the device interface registry so that a backend
+# advertising BackendFeature.GPU is included automatically, instead of a
+# hand-maintained device-name list. Defined before the torch._dynamo imports
+# below to avoid a circular import when pulled in from dynamo; hence the lazy
+# registry imports in the bodies.
 def _gpu_types() -> list[str]:
     """Freshly scan the DeviceInterface registry for GPU-class device types,
-    skipping indexed aliases such as "cuda:0". Production code should use the
-    GPU_TYPES snapshot below; this scan exists to compute it and for tests.
+    skipping indexed aliases such as "cuda:0". Production code should use
+    the GPU_TYPES snapshot below; this scan exists to compute it, to refresh
+    it when a backend registers, and for tests.
     """
     from torch._dynamo.device_interface import get_registered_device_interfaces
 
@@ -125,6 +126,23 @@ def _gpu_types() -> list[str]:
         for name, device_interface in get_registered_device_interfaces()
         if ":" not in name and device_interface.is_gpu()
     ]
+
+
+# Refreshed in place on every registration (register_interface_for_device
+# fires _registry_change_callbacks); in-place update keeps from-imported
+# references live.
+GPU_TYPES: list[str] = _gpu_types()
+
+
+def _refresh_gpu_types() -> None:
+    GPU_TYPES[:] = _gpu_types()
+    get_gpu_type.cache_clear()
+
+
+from torch._dynamo.device_interface import _registry_change_callbacks
+
+
+_registry_change_callbacks.append(_refresh_gpu_types)
 
 
 def _device_is_available(device: str) -> bool:
@@ -141,6 +159,12 @@ def _device_is_available(device: str) -> bool:
         return get_interface_for_device(device).is_available()
     except NotImplementedError:
         return False
+
+
+T = TypeVar("T")
+
+
+from torch._dynamo.device_interface import get_interface_for_device
 
 
 @functools.cache
@@ -211,7 +235,6 @@ def should_use_thread_workers() -> bool:
         )
 
 
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -241,16 +264,6 @@ log = logging.getLogger(__name__)
 # that represents an explicit post-GEMM scalar multiply.  Unlike the public
 # operator argument, this scale must still be applied for BF16 output.
 FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
-
-# Scanned exactly once, when this module is imported. Safe because both
-# registration paths precede any import of inductor: autoloaded out-of-tree
-# backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
-# of torch/__init__.py) and explicit ones at their package import (e.g.
-# `import torch_npu`), while in-tree backends are registered by
-# init_device_reg() inside the scan itself. Registering after this module is
-# imported is not supported (see register_interface_for_device).
-GPU_TYPES: list[str] = _gpu_types()
-
 
 _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 
