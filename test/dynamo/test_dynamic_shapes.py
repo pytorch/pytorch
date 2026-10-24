@@ -80,6 +80,7 @@ tests = [
     test_aot_autograd.AotAutogradFallbackTests,
     test_sdpa.TestSDPA,
 ]
+tests.extend(test_functions.get_function_device_test_classes())
 for test in tests:
     make_dynamic_cls(test)
 del test

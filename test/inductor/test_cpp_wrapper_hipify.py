@@ -100,6 +100,9 @@ class TestCppWrapperHipify(TestCase):
                     hipFuncAttributeMaxDynamicSharedMemorySize,
                     sharedMemBytes
                 ))
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
+                }
             }
 
             static inline hipFunction_t loadKernel(
