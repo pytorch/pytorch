@@ -268,7 +268,9 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
   # disable timeout due to shard not balance for xpu
-  export NO_TEST_TIMEOUT=True
+  if [[ "$TEST_CONFIG" != distributed ]]; then
+    export NO_TEST_TIMEOUT=True
+  fi
 elif [[ "$BUILD_ENVIRONMENT" == *pallas-tpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="tpu"
 fi
