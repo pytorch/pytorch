@@ -1326,7 +1326,9 @@ class DistributionsTestCase(TestCase):
         samples_per_bin = len(samples) // num_bins
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin**-0.5
-        threshold = stddev * scipy.special.erfinv(1 - 2 * failure_rate / num_bins)
+        # Two-sided standard-normal quantile. scipy.special.erfinv(p) needs a
+        # sqrt(2) factor to be a z-score, so the old threshold was too tight.
+        threshold = stddev * scipy.stats.norm.ppf(1 - failure_rate / (2 * num_bins))
         message = f"{message}.sample() is biased:\n{bins}"
         for bias in bins:
             self.assertLess(-threshold, bias, message)
