@@ -444,4 +444,3 @@ TEST(TunableNearestParse, RealScaledGemmRejectsDifferingSuffix) {
   ASSERT_TRUE(c.ok);
   EXPECT_FALSE(NearestLargerMatch(q, c, delta));
 }
-
