@@ -44,7 +44,7 @@ inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
   if (at::_isnan(z)) {
     return z;
   }
-  return z < 0 ? c10::pi<double> : 0;
+  return std::signbit(static_cast<float>(z)) ? c10::pi<double> : 0;
 }
 
 template<>
