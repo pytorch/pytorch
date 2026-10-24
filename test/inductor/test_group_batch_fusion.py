@@ -645,6 +645,277 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
+    @parametrize(
+        "case",
+        [
+            "output",
+            "merge_view",
+            "split_view",
+            "transpose",
+            "getitem",
+            "stride",
+            "mutable",
+            "conversion",
+            "custom",
+            "higher_order",
+            "pointwise",
+            "size",
+            "contiguous",
+            "contiguous_mutation",
+        ],
+    )
+    def test_batch_linear_lhs_direct_user_classification(self, case):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        def contiguous(graph, node):
+            result = graph.call_method("contiguous", args=(node,))
+            result.meta["example_value"] = node.meta["example_value"]
+            return result
+
+        builders = {
+            "output": lambda graph, node: graph.output(node),
+            "merge_view": lambda graph, node: graph.call_method(
+                "view", args=(node, -1)
+            ),
+            "split_view": lambda graph, node: graph.call_method(
+                "view", args=(node, 2, 2, 6)
+            ),
+            "transpose": lambda graph, node: graph.call_method(
+                "transpose", args=(node, 0, 1)
+            ),
+            "getitem": lambda graph, node: graph.call_function(
+                operator.getitem, args=(node, 0)
+            ),
+            "stride": lambda graph, node: graph.call_function(
+                torch.ops.aten.sym_stride.int, args=(node, 0)
+            ),
+            "mutable": lambda graph, node: graph.call_function(
+                torch.ops.aten.add_.Tensor, args=(node, 1)
+            ),
+            "conversion": lambda graph, node: graph.call_method("float", args=(node,)),
+            "custom": lambda graph, node: graph.call_function(
+                torch.ops._batch_linear_lhs_test.require_contiguous.default,
+                args=(node,),
+            ),
+            "higher_order": lambda graph, node: graph.call_function(
+                triton_kernel_wrapper_mutation, kwargs={"kwargs": {"input": node}}
+            ),
+            "pointwise": lambda graph, node: graph.call_function(
+                torch.ops.aten.sin, args=(node,)
+            ),
+            "size": lambda graph, node: graph.call_method("size", args=(node, 0)),
+            "contiguous": contiguous,
+            "contiguous_mutation": lambda graph, node: graph.call_method(
+                "mul_", args=(contiguous(graph, node), 2)
+            ),
+        }
+        safe = {
+            "split_view",
+            "transpose",
+            "getitem",
+            "pointwise",
+            "size",
+            "contiguous",
+        }
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(4, 6)
+        builders[case](graph, linear)
+        self.assertEqual(_has_layout_sensitive_user(linear), case not in safe)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_direct_custom_op(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 192, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return (
+                    _require_contiguous(self.large(x)),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
+    @parametrize("alias", ["transpose", "permute"])
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_keeps_split_view_fusion(self, alias):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                # Splitting dims never merges strides, so this stays viewable
+                # on the fused slice. Pointwise use keeps the layout unobserved;
+                # returning the view directly is rejected by the output guard.
+                q = self.large(x).view(8, 4, 3, 16)
+                q = q.transpose(1, 2) if alias == "transpose" else q.permute(0, 2, 1, 3)
+                return torch.sin(q), torch.sin(self.a(x)), torch.cos(self.b(x))
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [3])
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_merging_view(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                # Merging dims needs contiguous input, which the fused slice
+                # is not, so this projection must stay unfused.
+                return (
+                    self.large(x).view(-1),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
+    @parametrize("chain", ["direct"])
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_contiguous_alias_mutation(self, chain):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                # Eager contiguous() returns the already-contiguous output, so
+                # a mutation behind any alias also updates the tensor used by
+                # cos(). Fusing would make contiguous() a copy and hide it.
+                large = self.large(x)
+                mutated = large.contiguous()
+                if chain == "merging_view":
+                    mutated = mutated.view(-1)
+                elif chain == "as_strided":
+                    mutated = mutated.as_strided((1536,), (1,))
+                elif chain == "conversion":
+                    mutated = mutated.float()
+                elif chain == "unsafe_view":
+                    mutated = torch.ops.aten._unsafe_view.default(mutated, [1536])
+                elif chain == "broadcast":
+                    mutated = torch.broadcast_tensors(mutated, mutated)[0]
+                elif chain == "setitem":
+                    mutated[0] = 0
+                mutated.mul_(2)
+                return (
+                    torch.sin(mutated),
+                    torch.cos(large),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_preserve_format(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                # Eager 2-D output is contiguous, so preserve_format returns
+                # self; on a fused slice ATen raises instead.
+                large = self.large(x).contiguous(memory_format=torch.preserve_format)
+                return (
+                    torch.sin(large),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
@@ -677,8 +948,26 @@ class TestGroupBatchFusion(TestCase):
         bias.meta["val"] = torch.randn(6)
         linear = graph.call_function(torch._C._nn.linear, args=(input, weight, bias))
         linear.meta["example_value"] = torch.randn(4, 6)
-        graph.output(linear)
+        graph.output(graph.call_function(torch.sin, args=(linear,)))
         self.assertIsNone(BatchLinearLHSFusion().match(linear))
+
+    @parametrize("width", [0, 6])
+    def test_batch_linear_lhs_rejects_zero_width(self, width):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        graph = torch.fx.Graph()
+        input = graph.placeholder("input")
+        weight = graph.placeholder("weight")
+        input.meta["example_value"] = torch.randn(4, 8)
+        weight.meta["example_value"] = torch.randn(width, 8)
+        linear = graph.call_function(torch.nn.functional.linear, args=(input, weight))
+        linear.meta["example_value"] = torch.randn(4, width)
+        graph.output(graph.call_function(torch.sin, args=(linear,)))
+        rule = BatchLinearLHSFusion()
+        if width == 0:
+            self.assertIsNone(rule.match(linear))
+        else:
+            self.assertIsNotNone(rule.match(linear))
 
     @parametrize("invalid_projection", ["bias_width", "bias_rank"])
     @torch._inductor.config.patch(
@@ -714,7 +1003,7 @@ class TestGroupBatchFusion(TestCase):
 
             def forward(self, x):
                 bad = tuple(
-                    torch.nn.functional.linear(x, weight, bias)
+                    torch.sin(torch.nn.functional.linear(x, weight, bias))
                     for weight, bias in zip(self.bad_weights, self.bad_biases)
                 )
                 return torch.sin(self.a(x)), torch.cos(self.b(x)), *bad
@@ -759,7 +1048,8 @@ class TestGroupBatchFusion(TestCase):
                     for w in self.valid_weights
                 )
                 empty = tuple(
-                    torch.nn.functional.linear(x, w) for w in self.empty_weights
+                    torch.sin(torch.nn.functional.linear(x, w))
+                    for w in self.empty_weights
                 )
                 return *valid, *empty
 
@@ -1534,7 +1824,9 @@ class TestGroupBatchFusion(TestCase):
             torch.nn.functional.linear, args=(x_node, w_node)
         )
         linear_node.meta["example_value"] = torch.randn(2, z)
-        graph.output(linear_node)
+        # A bare linear output is rejected by the graph-output guard, so wrap
+        # it in a pointwise op to keep the plain-tensor positive control valid.
+        graph.output(graph.call_function(torch.sin, args=(linear_node,)))
 
         # match() must return None (skip) for a subclass weight.
         result = fusion.match(linear_node)
