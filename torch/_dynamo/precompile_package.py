@@ -1758,9 +1758,11 @@ class PrecompileSession(Generic[_P, _R]):
         | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
+        inductor_options: dict[str, Any] | None = None,
     ) -> None:
         self._fn = fn
         self._backend = backend
+        self._inductor_options = inductor_options or {}
         # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
         # graphs is decided again when it is post-compiled at load. The artifact
         # records the capture's choice, and the capture's calls compile under it.
@@ -1772,6 +1774,11 @@ class PrecompileSession(Generic[_P, _R]):
                 "triton.cudagraphs": inductor_config.triton.cudagraphs,
                 "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
             }
+            self._cudagraph_config.update(
+                (k, v)
+                for k, v in self._inductor_options.items()
+                if k in self._cudagraph_config
+            )
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -1867,8 +1874,13 @@ class PrecompileSession(Generic[_P, _R]):
         # Its own cache region: a function captured (or compiled) earlier in
         # this process would otherwise serve its existing cache entries, and
         # this package would record nothing.
+        compiler: str | torch._TorchCompileInductorWrapper = self._backend
+        if self._inductor_options:
+            compiler = torch._TorchCompileInductorWrapper(
+                None, self._inductor_options, self._dynamic
+            )
         self._compiled = torch._dynamo.optimize(
-            self._backend,
+            compiler,
             package=self._package,
             guard_filter_fn=self._guard_filter_fn,
             dynamic=self._dynamic,
@@ -2154,6 +2166,7 @@ def precompile_capture(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
+    inductor_options: dict[str, Any] | None = None,
 ) -> PrecompileSession[_P, _R]:
     """Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2191,4 +2204,5 @@ def precompile_capture(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         dynamic=dynamic,
+        inductor_options=inductor_options,
     )

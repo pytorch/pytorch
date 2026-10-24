@@ -4928,6 +4928,40 @@ class TestPrecompileDynamoCapture(TestCase):
             load(artifact, cache)(self.model, self.x2), single(self.model, self.x2)
         )
 
+    def test_mode_and_options_are_checked_like_torch_compile(self):
+        single = self.mod.single
+        options = {"size_asserts": True}
+        with self.assertRaisesRegex(ValueError, "Either mode or options"):
+            self._capture(single, mode="reduce-overhead", options=options)
+        with self.assertRaisesRegex(ValueError, "backend='eager' takes neither"):
+            self._capture(single, backend="eager", mode="reduce-overhead")
+        with self.assertRaisesRegex(RuntimeError, "Unexpected optimization option"):
+            self._capture(single, options={"no_such_option": True})
+        with self.assertRaisesRegex(RuntimeError, "Unrecognized mode"):
+            self._capture(single, mode="no-such-mode")
+        with self.assertRaisesRegex(PrecompileError, "cannot serve CUDA graphs"):
+            self._capture(single, tracer=MakeFxTracer(), mode="reduce-overhead")
+
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_options_reach_the_inductor_compile(self, tracer):
+        from torch._functorch import aot_autograd
+        from torch._inductor import compile_fx
+
+        options = {"max_autotune_gemm_backends": "ATEN"}
+        if tracer == "make_fx":
+            target, name, kwarg = aot_autograd, "compile_to_python", "options"
+        else:
+            target, name, kwarg = compile_fx, "compile_fx", "config_patches"
+        single, x = self.mod.single, self.x2
+        tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
+        with mock.patch.object(target, name, wraps=getattr(target, name)) as spy:
+            with self._capture(single, tracer=tracer_obj, options=options) as cap:
+                cap(self.model, x)
+        seen = [c.kwargs[kwarg] for c in spy.call_args_list if kwarg in c.kwargs]
+        self.assertTrue(seen)
+        for patches in seen:
+            self.assertEqual(patches["max_autotune_gemm_backends"], "ATEN")
+
     # The crossref harness keeps a dispatch mode active while the capture runs,
     # and Dynamo guards on that state; a fresh process has no such mode, so
     # every variant would miss there.
@@ -6278,6 +6312,29 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertIn("'triton.cudagraphs': True", code)
         # The loading process leaves triton.cudagraphs at its default (off).
         self.assertGreater(self._recorded_in_fresh_process(y), 0)
+
+    @parametrize("how", ["mode", "options"])
+    @parametrize("serving", ["standalone", "installed"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_reduce_overhead_serves_cudagraphs(self, how, serving):
+        mod = self.mod
+        fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
+        if how == "mode":
+            kwargs = {"mode": "reduce-overhead"}
+        else:
+            kwargs = {"options": {"triton.cudagraphs": True}}
+        y, code = self._capture_step(fn, **kwargs)
+        self.assertIn(f'SERVING_MODE = "{serving}"', code)
+        self.assertIn("'triton.cudagraphs': True", code)
+        self.assertGreater(self._recorded_in_fresh_process(y), 0)
+
+    def test_options_override_the_ambient_cudagraph_config(self):
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            y, code = self._capture_step(
+                self.mod.step, options={"triton.cudagraphs": False}
+            )
+        self.assertIn("'triton.cudagraphs': False", code)
+        self.assertEqual(self._recorded_in_fresh_process(y), 0)
 
     def test_an_artifact_captured_without_cudagraphs_serves_none(self):
         y, code = self._capture_step(self.mod.step)
