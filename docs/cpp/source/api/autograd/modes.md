@@ -134,9 +134,9 @@ it provides better performance. Key differences:
 
 ## Migrating from AutoNonVariableTypeMode
 
-The legacy `AutoNonVariableTypeMode` guard (now renamed to
-`AutoDispatchBelowADInplaceOrView`) was commonly used for inference workloads
-but is unsafe — it can silently bypass safety checks and produce wrong results.
+The legacy `AutoNonVariableTypeMode` guard was deprecated in 1.9 and removed in
+2.16. It was commonly used for inference workloads but is unsafe: it can
+silently bypass safety checks and produce wrong results.
 
 - **For inference-only workloads** (e.g. loading a pretrained JIT model and
   running inference in C++ runtime), use `c10::InferenceMode` as a drop-in
