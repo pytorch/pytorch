@@ -502,6 +502,12 @@ class TestOperatorsDevice(TestCase):
                 {torch.float32: tol(atol=1e-05, rtol=8e-04)},
                 device_type="cuda",
             ),
+            tol1("linalg.lstsq", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol2(
+                "linalg.lstsq",
+                "grad_oriented",
+                {torch.float32: tol(atol=4e-05, rtol=5e-05)},
+            ),
             tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
@@ -645,6 +651,12 @@ class TestOperatorsDevice(TestCase):
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=1e-04, rtol=1.3e-06)},
                 device_type="cuda",
+            ),
+            tol1("linalg.lstsq", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol2(
+                "linalg.lstsq",
+                "grad_oriented",
+                {torch.float32: tol(atol=4e-05, rtol=5e-05)},
             ),
             tol1(
                 "linalg.tensorsolve",
