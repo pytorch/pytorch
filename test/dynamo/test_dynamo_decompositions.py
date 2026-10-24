@@ -878,16 +878,16 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
 
 @xfailIfNoAcceleratorTriton
-class TestDynamoDecompositionsCUDAOnly(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestDynamoDecompositionsAcceleratorOnly(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    def test_addcdiv_scalar_value_cuda(self, device):
-        """Compiled addcdiv_ with scalar value matches eager on CUDA.
+    def test_addcdiv_scalar_value(self, device):
+        """Compiled addcdiv_ with scalar value matches eager on CUDA/XPU.
 
         Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
-        which nvcc can optimize differently than separate div + fma kernels.
+        which nvcc/icpx can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
         x = torch.randn(64, 64, device=device)
@@ -903,11 +903,11 @@ class TestDynamoDecompositionsCUDAOnly(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    def test_addcdiv_tensor_value_cuda(self, device):
-        """Compiled addcdiv_ with tensor value matches eager on CUDA.
+    def test_addcdiv_tensor_value(self, device):
+        """Compiled addcdiv_ with tensor value matches eager on CUDA/XPU.
 
         Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
-        which nvcc can optimize differently than separate div + fma kernels.
+        which nvcc/icpx can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
         x = torch.randn(64, 64, device=device)
@@ -923,11 +923,14 @@ class TestDynamoDecompositionsCUDAOnly(TestCase):
         self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(TestDynamoDecompositionsNumerics, globals())
 instantiate_device_type_tests(
-    TestDynamoDecompositionsCUDAOnly,
+    TestDynamoDecompositionsNumerics, globals(), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDynamoDecompositionsAcceleratorOnly,
     globals(),
-    only_for="cuda",
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
