@@ -13,13 +13,13 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
+import weakref
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
     _CacheEntry as CacheEntry,
-    _ExtraState as ExtraState,
     _FrameAction as FrameAction,
     _FrameExecStrategy as FrameExecStrategy,
     _PyInterpreterFrame as DynamoFrameType,
@@ -62,8 +62,7 @@ class GuardFn(Protocol):
     verbose_code_parts: list[str]
     global_scope: dict[str, object]
     guard_fail_fn: Callable[[GuardFail], None] | None
-    cache_entry: CacheEntry | None
-    extra_state: ExtraState | None
+    code_ref: weakref.ReferenceType[types.CodeType] | None
 
     # maps locals of user function to bool
     def __call__(self, f_locals: dict[str, object]) -> bool: ...
