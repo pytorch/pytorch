@@ -52,6 +52,8 @@ class AllGatherInputMetadata:
     collective's dtype (bytes for a uint8 buffer of mixed payload dtypes).
     ``input_outer_sizes`` gives, for each payload, the product of its dims
     before the dim that ranks are concatenated along.
+    ``rank_stride_alignment`` is the element count that the comm prefers each
+    rank's chunk to be a multiple of (see :meth:`AllGatherLayout.rank_stride`).
     """
 
     input_split_sizes: list[int]
@@ -60,6 +62,7 @@ class AllGatherInputMetadata:
     world_size: int
     dtype: torch.dtype
     device: torch.device
+    rank_stride_alignment: int = 1
 
 
 @dataclass(kw_only=True)
@@ -194,17 +197,31 @@ class AllGatherLayout(ABC):
         """Pack into independent input storage without modifying the output.
 
         The signature matches the native rank-major copy-in operator.
+        ``all_gather_input_numel`` is :meth:`rank_stride`, and the elements past
+        the payload are zero.
         """
         all_gather_input = torch.empty(
             (all_gather_input_numel,),
             dtype=all_gather_output.dtype,
             device=all_gather_output.device,
         )
+        payload_numel = sum(all_gather_input_split_sizes)
         torch._foreach_copy_(
-            torch.split(all_gather_input, all_gather_input_split_sizes),
+            torch.split(all_gather_input[:payload_numel], all_gather_input_split_sizes),
             all_gather_inputs,
         )
+        all_gather_input[payload_numel:].zero_()
         return all_gather_input, all_gather_output
+
+    def rank_stride(self, input_numel: int, alignment: int) -> int:
+        """Return each rank's chunk size in the collective, at least ``input_numel``.
+
+        FSDP calls this on the layout that finalizes the call, with the comm's
+        ``rank_stride_alignment``, allocates ``world_size`` chunks and passes the
+        size to ``copy_in`` as ``all_gather_input_numel``. The default keeps each
+        chunk exact.
+        """
+        return input_numel
 
     @abstractmethod
     def finalize_outputs(self, metadata: AllGatherFinalizeMetadata) -> AllGatherOutputs:

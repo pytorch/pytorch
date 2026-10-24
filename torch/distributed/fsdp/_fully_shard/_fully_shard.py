@@ -25,9 +25,11 @@ from ._fsdp_api import (
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
+    ReduceScatterInputLayout,
 )
 from ._fsdp_collectives import (
-    _default_reduce_scatter_input_fn,
+    _CallbackReduceScatterInputLayout,
+    DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT,
     DefaultAllGather,
     ProcessGroupAllocAllGather,
     SymmMemAllGather,
@@ -1019,7 +1021,11 @@ class FSDPModule:
             fsdp_param_group._all_gather_comm = comm
 
     def set_reduce_scatter_input_fn(
-        self, fn: Callable | None, /, *, recurse: bool = True
+        self,
+        fn: Callable | ReduceScatterInputLayout | None,
+        /,
+        *,
+        recurse: bool = True,
     ) -> None:
         r"""Set the function that prepares reduce-scatter inputs.
 
@@ -1037,22 +1043,30 @@ class FSDPModule:
         run under ``torch.no_grad()`` on the current stream, also when
         ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients afterward,
         so keep neither. See :mod:`torch.distributed.fsdp.experimental` for a
-        native implementation.
+        native implementation. ``fn`` may instead be a reduce-scatter input
+        layout, whose plan also chooses the width of each rank's row, e.g. to
+        align it to what the comm prefers.
 
         Args:
-            fn (Optional[Callable]): Function returning the copy-in function, or
-                ``None`` to restore the default.
+            fn (Optional[Union[Callable, ReduceScatterInputLayout]]): Function
+                returning the copy-in function, a layout, or ``None`` to restore
+                the default.
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
-        fn = _default_reduce_scatter_input_fn if fn is None else fn
+        if fn is None:
+            layout = DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT
+        elif isinstance(fn, ReduceScatterInputLayout):
+            layout = fn
+        else:
+            layout = _CallbackReduceScatterInputLayout(fn)
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
+                    fsdp_param_group._reduce_scatter_input_layout = layout
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True

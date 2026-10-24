@@ -23,7 +23,12 @@ from ._all_gather_layout import (
     DEFAULT_ALL_GATHER_LAYOUT,
     DefaultAllGatherLayout,
 )
-from ._fsdp_api import _ReduceOp
+from ._fsdp_api import (
+    _ReduceOp,
+    ReduceScatterInputLayout,
+    ReduceScatterInputMetadata,
+    ReduceScatterInputPlan,
+)
 from ._fsdp_common import _to_dtype_if_needed
 from ._fsdp_param import FSDPParam, ShardedState
 
@@ -47,6 +52,9 @@ class AllGatherResult(NamedTuple):
     # Kept until the collective completes, since a custom layout may pack it
     # into storage independent of the output
     all_gather_input: torch.Tensor | None = None
+    # Elements per rank's chunk of all_gather_output, at least the sum of
+    # all_gather_input_split_sizes (see AllGatherLayout.rank_stride)
+    rank_stride: int | None = None
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -286,9 +294,15 @@ def all_gather_copy_in_cuda(
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
     )
-    foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
+    payload_numel = sum(inp_split_sizes)
+    payload = all_gather_input
+    if payload_numel < all_gather_input_numel:  # padded up to the rank stride
+        payload = all_gather_input[:payload_numel]
+    foreach_copy_dsts = torch.split(payload, inp_split_sizes)
     with torch.no_grad():
         torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        if payload_numel < all_gather_input_numel:
+            all_gather_input[payload_numel:].zero_()
     return all_gather_input, all_gather_output
 
 
@@ -401,6 +415,7 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
+        alignment = all_gather_comm.rank_stride_alignment(dtype, group)
         if isinstance(layout, DefaultAllGatherLayout):
             # It always packs with its copy_in into rank-major output
             copy_in, call_layout, output_metadata = layout.copy_in, layout, None
@@ -413,17 +428,20 @@ def foreach_all_gather(
                     world_size=world_size,
                     dtype=dtype,
                     device=device,
+                    rank_stride_alignment=alignment,
                 )
             )
+        rank_stride = call_layout.rank_stride(all_gather_input_numel, alignment)
+        if rank_stride < all_gather_input_numel:
+            raise ValueError(
+                f"all-gather layout returned a rank stride of {rank_stride} "
+                f"elements for an input of {all_gather_input_numel} elements"
+            )
         all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            (rank_stride * world_size,), dtype=dtype, device=device
         )
         all_gather_input, all_gather_output = copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
+            all_gather_inputs, all_gather_output, inp_split_sizes, rank_stride, rank
         )
         del param_all_gather_inputs, all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
@@ -446,6 +464,7 @@ def foreach_all_gather(
         call_layout,
         output_metadata,
         all_gather_input,
+        rank_stride,
     )
 
 
@@ -651,12 +670,16 @@ def foreach_all_gather_copy_out(
 
 
 # Note [Reduce-scatter input fn]
-# copy_in = fn(unsharded_grads, shard_dims=..., world_size=...) runs before FSDP
-# allocates the reduce-scatter input and may replace entries of unsharded_grads.
-# copy_in(reduce_scatter_input) then fills that flat buffer so that, viewed as
-# (world_size, -1), row r holds each gradient's padded shard r in order, cast to the
-# buffer's dtype. Both run under no_grad on the current stream, also for a single
-# rank; FSDP frees copy_in and the gradients afterward, so keep neither.
+# FSDP prepares the reduce-scatter input with a ReduceScatterInputLayout, whose
+# plan gives the width of each rank's row (see ReduceScatterInputPlan). A callback
+# installed with set_reduce_scatter_input_fn keeps rows exactly as wide as the
+# padded shards: copy_in = fn(unsharded_grads, shard_dims=..., world_size=...)
+# runs before FSDP allocates the reduce-scatter input and may replace entries of
+# unsharded_grads. copy_in(reduce_scatter_input) then fills that flat buffer so
+# that, viewed as (world_size, -1), row r holds each gradient's padded shard r in
+# order, cast to the buffer's dtype. Both run under no_grad on the current stream,
+# also for a single rank; FSDP frees copy_in and the gradients afterward, so keep
+# neither.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     *,
@@ -670,6 +693,37 @@ def _default_reduce_scatter_input_fn(
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
+
+
+class _CallbackReduceScatterInputLayout(ReduceScatterInputLayout):
+    """A callback of Note [Reduce-scatter input fn], which keeps rows exact."""
+
+    def __init__(self, fn: Callable) -> None:
+        self.fn = fn
+
+    def prepare(
+        self,
+        unsharded_grads: list[torch.Tensor],
+        metadata: ReduceScatterInputMetadata,
+    ) -> ReduceScatterInputPlan:
+        copy_in = self.fn(
+            unsharded_grads,
+            shard_dims=metadata.shard_dims,
+            world_size=metadata.world_size,
+        )
+        row_numel = sum(metadata.padded_sharded_numels)
+        return ReduceScatterInputPlan(row_numel=row_numel, copy_in=copy_in)
+
+
+class DefaultReduceScatterInputLayout(_CallbackReduceScatterInputLayout):
+    """FSDP's reduce-scatter copy-in, with rows exactly as wide as the padded
+    shards."""
+
+    def __init__(self) -> None:
+        super().__init__(_default_reduce_scatter_input_fn)
+
+
+DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT = DefaultReduceScatterInputLayout()
 
 
 @torch.no_grad()
@@ -690,7 +744,7 @@ def foreach_reduce(
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,
-    prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+    reduce_scatter_input_layout: ReduceScatterInputLayout = DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -725,21 +779,38 @@ def foreach_reduce(
 
     shard_dims = [p.fsdp_placement.dim for p in fsdp_params]
     padded_sharded_numels = [p.padded_sharded_param_size.numel() for p in fsdp_params]
-    # See Note [Reduce-scatter input fn]
-    copy_in = prepare_reduce_scatter_inputs(
-        unsharded_grads, shard_dims=shard_dims, world_size=world_size
+    alignment = 1
+    if world_size > 1:
+        alignment = reduce_scatter_comm.rank_stride_alignment(
+            reduce_dtype, reduce_scatter_group
+        )
+    # See Note [Reduce-scatter input fn]; the numels are a copy that the plan may keep
+    plan = reduce_scatter_input_layout.prepare(
+        unsharded_grads,
+        ReduceScatterInputMetadata(
+            shard_dims=shard_dims,
+            padded_sharded_numels=list(padded_sharded_numels),
+            world_size=world_size,
+            dtype=reduce_dtype,
+            rank_stride_alignment=alignment,
+        ),
     )
-    reduce_scatter_output_numel = sum(padded_sharded_numels)
+    shards_numel, row_numel = sum(padded_sharded_numels), plan.row_numel
+    if row_numel < shards_numel:
+        raise ValueError(
+            f"reduce-scatter input layout returned rows of {row_numel} elements "
+            f"for {shards_numel} elements of padded shards"
+        )
     reduce_scatter_input = reduce_scatter_comm.allocate(
-        (reduce_scatter_output_numel * world_size,),
+        (row_numel * world_size,),
         dtype=reduce_dtype,
         device=device,
     )
 
-    copy_in(reduce_scatter_input)
+    plan.copy_in(reduce_scatter_input)
     # Only after the copy-in finishes can we free the gradients, including any
-    # that copy_in holds
-    del copy_in
+    # that the plan holds
+    del plan
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
@@ -747,7 +818,7 @@ def foreach_reduce(
 
     with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_comm.allocate(
-            (reduce_scatter_output_numel,),
+            (row_numel,),
             dtype=reduce_dtype,
             device=device,
         )
@@ -767,6 +838,8 @@ def foreach_reduce(
             else:
                 reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
+        if row_numel > shards_numel:  # later ops see only the padded shards
+            reduce_output = reduce_output[:shards_numel]
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
             # Accumulations must run in the reduce-scatter stream
