@@ -152,11 +152,23 @@ class Comm(ABC):
         """
         ...
 
+    def rank_stride_alignment(
+        self, dtype: torch.dtype, group: dist.ProcessGroup
+    ) -> int:
+        """Return the element count that each rank's chunk of this collective
+        should be a multiple of, which FSDP's layouts may pad each chunk up to.
+        The default, 1, keeps each chunk as large as its payload."""
+        return 1
+
 
 class AllGather(Comm):
     """
     Interface for all_gather comm primitive
     """
+
+    # A weak reference to the parameter group whose all-gather layout installed
+    # this comm, set by FSDP
+    _fsdp_param_group: Callable[[], object] | None = None
 
     @abstractmethod
     def __call__(
@@ -182,6 +194,58 @@ class ReduceScatter(Comm):
         op: _ReduceOp,
         async_op: bool = False,
     ) -> dist.Work | None: ...
+
+
+@dataclass(kw_only=True)
+class ReduceScatterInputMetadata:
+    """Arguments of :meth:`ReduceScatterInputLayout.prepare`, keyword-only so
+    that adding fields does not change the method's signature.
+
+    ``padded_sharded_numels`` gives each gradient's padded shard numel, and
+    ``rank_stride_alignment`` is the element count that the reduce-scatter comm
+    prefers each rank's row to be a multiple of.
+    """
+
+    shard_dims: list[int]
+    padded_sharded_numels: list[int]
+    world_size: int
+    dtype: torch.dtype
+    rank_stride_alignment: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class ReduceScatterInputPlan:
+    """The width of each rank's row and the copy-in that fills the rows.
+
+    ``copy_in(reduce_scatter_input)`` fills a buffer of ``world_size *
+    row_numel`` elements so that, viewed as ``(world_size, row_numel)``, row
+    ``r`` holds each gradient's padded shard ``r`` in order, cast to the
+    buffer's dtype, followed by zeros. ``row_numel`` is at least the sum of the
+    padded shard numels and must be the same on every rank.
+    """
+
+    row_numel: int
+    copy_in: Callable[[torch.Tensor], None]
+
+
+class ReduceScatterInputLayout(ABC):
+    """Packs a parameter group's gradients into its reduce-scatter input.
+
+    FSDP calls :meth:`prepare` and the plan's ``copy_in`` under
+    ``torch.no_grad()`` on the current stream, also for a single rank, and
+    trims each rank's reduced row back to its padded shards. FSDP frees the plan
+    and the gradients after the copy-in, so keep neither.
+    """
+
+    @abstractmethod
+    def prepare(
+        self,
+        unsharded_grads: list[torch.Tensor],
+        metadata: ReduceScatterInputMetadata,
+    ) -> ReduceScatterInputPlan:
+        """Return the plan, possibly replacing entries of ``unsharded_grads``,
+        e.g. with reordered copies, before FSDP allocates the input."""
+        ...
 
 
 @dataclass
