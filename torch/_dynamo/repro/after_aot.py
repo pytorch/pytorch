@@ -687,8 +687,11 @@ if "__compile_source__" in globals():
                     written_triton_imports.add(import_line)
                 continue
 
-            if isinstance(val, TritonConstexpr) and getattr(val, "value", None):
-                result += f"{name} = tl.constexpr({val.value})\n"
+            if isinstance(val, TritonConstexpr):
+                value = getattr(val, "value", None)
+                if value is None:
+                    continue
+                result += f"{name} = tl.constexpr({value!r})\n"
             elif isinstance(val, (int, float, str, bool)):
                 result += f"{name} = {val!r}\n"
             else:
