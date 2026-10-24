@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -27,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    skipIfXpu,
     slowTest,
     TestCase,
 )
@@ -294,7 +296,7 @@ class TestSortAndSelectDevice(TestCase):
                     )
 
                     # assert stride is preserved
-                    if self.device_type == "cuda":
+                    if self.device_type in ("cuda", "xpu"):
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
                         self.assertEqual(r1.values.stride(), t.stride())
@@ -409,7 +411,7 @@ class TestSortAndSelectDevice(TestCase):
                 # binary strings
                 yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
 
-            if self.device_type == "cuda":
+            if self.device_type in ("cuda", "xpu"):
                 return
 
             yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
@@ -505,6 +507,7 @@ class TestSortAndSelectDevice(TestCase):
         expected = torch.sort(ref, stable=True, dim=1, descending=True)
         self.assertEqual(out, expected)
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)
@@ -870,6 +873,7 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(sort_topk, topk[0])  # check values
         self.assertEqual(sort_topk, a[topk[1]])  # check indices
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
     def test_topk_integral(self, device, dtype):
         small = 10
@@ -916,6 +920,7 @@ class TestSortAndSelectDevice(TestCase):
                         f"dtype={dtype} largest={largest}",
                     )
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     @dtypes(torch.bfloat16, torch.half)
     def test_topk_lower_precision(self, device, dtype):
         small = 10
@@ -924,7 +929,9 @@ class TestSortAndSelectDevice(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor(
@@ -961,6 +968,7 @@ class TestSortAndSelectDevice(TestCase):
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
+    @dtypesIfXPU(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
@@ -1224,6 +1232,7 @@ class TestSortAndSelectDevice(TestCase):
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
+    @dtypesIfXPU(*all_types_and(torch.half))
     def test_isin(self, device, dtype):
         def assert_isin_equal(a, b):
             # Compare to the numpy reference implementation.
@@ -1742,7 +1751,7 @@ class TestSortAndSelectCUDA(TestCase):
         self.assertEqual(data[indices[tail]], values[tail])
 
 
-instantiate_device_type_tests(TestSortAndSelectDevice, globals())
+instantiate_device_type_tests(TestSortAndSelectDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
