@@ -27,11 +27,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
+        # Except on xpu, 3.12 builds a single abi3 wheel covering 3.12+, so
+        # 3.13/3.14/3.15 need no job of their own. Free-threaded builds cannot
+        # use the limited API, so 3.14t and 3.15t stay version-specific. xpu
+        # keeps a wheel per version: the triton-xpu.txt pin does not compile
+        # against the 3.12 limited API. Keep in sync with ABI3 below.
+        py_vers: ${{ fromJSON(inputs.device != 'xpu' && '["3.11", "3.12", "3.14t", "3.15t"]' || '["3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t"]') }}
     timeout-minutes: 40
     env:
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ inputs.device }}
+      ABI3: ${{ inputs.device != 'xpu' }}
       PLATFORM: 'manylinux_2_28_x86_64'
     steps:
       - name: Add sudo shim
@@ -71,9 +77,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.10)
-            PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
-            ;;
           3.11)
             PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
             ;;
@@ -101,6 +104,14 @@ jobs:
             ;;
           esac
 
+          # Tag the 3.12 build abi3 so one wheel serves 3.12+, as
+          # triton-lang/triton's own wheels.yml does. triton's setup.py reads
+          # this and overrides bdist_wheel's tag to cp312-abi3. It has no
+          # free-threaded guard, so it must stay off for 3.14t/3.15t.
+          if [[ "${ABI3}" == "true" && "${PY_VERS}" == "3.12" ]]; then
+            export TRITON_STABLE_ABI=ON
+          fi
+
           # Put the selected interpreter's bin dir on PATH so the pip-installed
           # cmake (and python/pip) are found by triton's setup.py. In the original
           # docker-exec env this was on PATH; in container: mode it is not.
@@ -113,7 +124,7 @@ jobs:
           fi
 
           yum install -y zlib-devel zip
-          "${PYTHON_EXECUTABLE}" -m pip install -U setuptools==78.1.0 pybind11==3.0.1 auditwheel wheel
+          "${PYTHON_EXECUTABLE}" -m pip install -U setuptools==78.1.0 pybind11==3.0.1 nanobind==2.10.2 auditwheel wheel
           "${PYTHON_EXECUTABLE}" -m pip install -U cmake --force-reinstall
 
           if [[ ("${{ inputs.device }}" == "cuda" || "${{ inputs.device }}" == "rocm" || "${{ inputs.device }}" == "aarch64" ) ]]; then

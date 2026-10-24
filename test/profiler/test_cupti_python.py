@@ -4,10 +4,16 @@ import ctypes
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 # These tests drive the real libcupti through _PyLibCupti, so they import its symbols;
@@ -15,13 +21,58 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 # additionally requires a loaded libcupti >= 13.3 (the v2 user-defined-record API the wrapper
 # targets) -- e.g. the 13.3 wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
 if TEST_CUPTI:
-    from torch.profiler._cupti.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
+    from torch.profiler._cuspy.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
 
 
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
+@instantiate_parametrized_tests
 class TestPyLibCupti(TestCase):
     def test_get_version(self):
         self.assertGreaterEqual(pylibcupti().get_version(), 130300)
+
+    @parametrize(
+        "runtime,outcome",
+        [
+            (120400, "unavailable"),
+            (130300, "warning"),
+            (130400, "ok"),
+            (130500, "ok"),
+            (140000, "unavailable"),
+        ],
+    )
+    def test_stub_version_compatibility(self, runtime, outcome):
+        from torch.profiler._cuspy import cupti_python
+        from torch.profiler._cuspy.observers.base import CuspyObserver
+
+        lib = pylibcupti()._lib
+        wrapper = cupti_python._PyLibCupti
+        with (
+            patch.object(cupti_python, "BUILD_CUPTI_API_VERSION", 130400),
+            patch.object(wrapper, "get_version", return_value=runtime),
+        ):
+            if outcome == "unavailable":
+                with (
+                    patch(
+                        "torch.profiler._cuspy.core.Cuspy",
+                        side_effect=lambda: wrapper(lib),
+                    ),
+                    self.assertLogs(
+                        "torch.profiler._cuspy.observers.base", level="WARNING"
+                    ) as logs,
+                ):
+                    obs = CuspyObserver([])
+                self.assertFalse(obs.available)
+                self.assertIn("requires CUPTI major version 13", logs.output[0])
+            elif outcome == "warning":
+                with self.assertLogs(cupti_python.logger, level="WARNING") as logs:
+                    wrapper(lib)
+                self.assertIn(
+                    f"CUPTI API version {runtime}, but its stubs were generated with CUPTI API version 130400",
+                    logs.output[0],
+                )
+            else:
+                with self.assertNoLogs(cupti_python.logger, level="WARNING"):
+                    wrapper(lib)
 
     def test_get_next_record_fn_address(self):
         # cuptiActivityGetNextRecord_v2 is present on >= 13.2, so its address (used
@@ -79,14 +130,14 @@ class TestPyLibCupti(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_v2_activity_lifecycle(self):
         # Drive the subscription-scoped wrapper surface against real libcupti, the
-        # same sequence the monitor runs: push/pop external correlation, arm UDR
+        # same sequence Cuspy runs: push/pop external correlation, arm UDR
         # with the native buffer callbacks, enable/disable kinds with field
         # selections, flush, and read the dropped-record count.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.records import FIELD_REGISTRY
+        from torch.profiler._cuspy.records import FIELD_REGISTRY
 
-        monitor_ext = torch._C._profiler._cupti_monitor
+        cuspy_ext = torch._C._profiler._cuspy
         torch.cuda.init()
         lib = pylibcupti()
         try:
@@ -103,8 +154,8 @@ class TestPyLibCupti(TestCase):
             )
             lib.arm_user_defined_records(
                 sub,
-                monitor_ext.buffer_request_callback_address(),
-                monitor_ext.buffer_complete_callback_address(),
+                cuspy_ext.buffer_request_callback_address(),
+                cuspy_ext.buffer_complete_callback_address(),
             )
             # CONCURRENT_KERNEL + RUNTIME; enabling RUNTIME also exercises
             # disable_noisy_runtime_apis (best-effort, inside activity_enable).
@@ -139,7 +190,7 @@ class TestPyLibCupti(TestCase):
         script = (
             "import sys, torch\n"
             "torch.cuda.init()\n"
-            "from torch.profiler._cupti.cupti_python import pylibcupti, CuptiError\n"
+            "from torch.profiler._cuspy.cupti_python import pylibcupti, CuptiError\n"
             "lib = pylibcupti()\n"
             "try:\n"
             "    lib.activity_enable_hw_trace(True)\n"
@@ -156,13 +207,13 @@ class TestPyLibCupti(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_finalize_in_subprocess(self):
-        # finalize() is cuptiFinalize -- a global, process-wide teardown the monitor
+        # finalize() is cuptiFinalize -- a global, process-wide teardown Cuspy
         # never calls. Run it in a child (which inherits this process's libcupti via
         # LD_PRELOAD) so it can't tear CUPTI down for sibling tests; a clean exit
         # means the wrapper's call + rc-check succeeded.
         script = (
             "import torch; torch.cuda.init(); "
-            "from torch.profiler._cupti.cupti_python import pylibcupti; "
+            "from torch.profiler._cuspy.cupti_python import pylibcupti; "
             "pylibcupti().finalize()"
         )
         proc = subprocess.run(

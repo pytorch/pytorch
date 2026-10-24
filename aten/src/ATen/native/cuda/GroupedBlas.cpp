@@ -10,25 +10,20 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
-#include <ATen/cuda/tunable/TunableGemm.h>
-#include <ATen/native/Resize.h>
-#include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
-#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/native/cuda/CublasGroupedArgs.h>
 #endif
-#include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
+#include <ATen/native/hip/ck_tile_group_gemm.h>
 #endif
 #include <ATen/ceil_div.h>
 
@@ -45,15 +40,11 @@
 #include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_grouped_mm_native.h>
 #include <ATen/ops/_scaled_grouped_mm_v2_native.h>
-#include <ATen/ops/_scaled_mm_native.h>
-#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/copy_native.h>
-#include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/gelu.h>
@@ -62,8 +53,6 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/ones.h>
-#include <ATen/ops/scalar_tensor_native.h>
-#include <ATen/ops/vdot_native.h>
 #endif
 
 using at::blas::ScalingType;
@@ -745,6 +734,32 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
   }
 }
 
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
+// Inputs group_gemm_ck_tile handles; anything else falls through to the next grouped mm path.
+static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
+  const auto dtype = mat_a.scalar_type();
+  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf)) { // no dtype mixing yet
+    return false;
+  }
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  const int64_t group_count = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : mat_a.size(0));
+  if (group_count > 1024) {
+    return false;
+  }
+  // After group_gemm_ck_tile's layout canonicalization, the contiguous dim of A and B must be 16-byte aligned.
+  const int64_t M = mat_a.size(-2), K = mat_a.size(-1), N = mat_b.size(-1);
+  bool a_row_major = !check_valid_strides_and_return_transposed(mat_a);
+  bool b_row_major = !check_valid_strides_and_return_transposed(mat_b);
+  if (a_is_2d && b_is_2d) { a_row_major = false; b_row_major = true; }
+  else if (a_is_2d) { a_row_major = true; }
+  else if (b_is_2d) { a_row_major = true; b_row_major = false; }
+  else if (!a_row_major && !b_row_major) { a_row_major = true; }
+  const int64_t vector_elems = 16 / mat_a.element_size();
+  return (a_row_major ? K : M) % vector_elems == 0 && (b_row_major ? N : K) % vector_elems == 0;
+}
+#endif
+
 Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
@@ -778,8 +793,12 @@ std::optional<c10::ScalarType> out_dtype) {
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 #if defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+  // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+  if (at::globalContext().rocmAllowGroupGemmCkTile() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})
+      && ck_tile_group_gemm_supported(mat_a, mat_b, offs)) {
+    at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
+  } else if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);

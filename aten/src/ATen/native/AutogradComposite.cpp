@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -45,7 +44,7 @@ Tensor _new_zeros_with_same_feature_meta(
     int64_t self_num_batch_dims) {
   auto other_sizes = other.sym_sizes();
   auto other_strides = other.sym_strides();
-  auto other_storage_offset = other.storage_offset();
+  auto other_storage_offset = other.sym_storage_offset();
   auto other_storage_numel = other.storage().sym_nbytes() / c10::SymInt(other.itemsize());
 
   if (self_num_batch_dims == 0) {
