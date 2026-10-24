@@ -739,6 +739,26 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     out = x[idx]
                 self.checkType(out, "cpu", [4])
 
+    @skipIfTorchDynamo("uses torch.compile")
+    @parametrize("dtype", [torch.bool, torch.uint8])
+    def test_mask_index_torch_compile(self, dtype):
+        def fn(t, idx):
+            return t[idx]
+
+        t = torch.tensor([1.0, 2.0, 3.0])
+        idx = torch.tensor([0, 1, 1], dtype=dtype)
+        try:
+            out = torch.compile(fn, backend="aot_eager", fullgraph=True)(t, idx)
+        finally:
+            torch._dynamo.reset()
+        self.assertEqual(out, fn(t, idx))
+
+    def test_int8_index_rejected(self):
+        with FakeTensorMode():
+            x = torch.empty(3)
+            with self.assertRaisesRegex((RuntimeError, IndexError), "byte or bool"):
+                x[torch.tensor([0, 1], dtype=torch.int8)]
+
     @skipIfCppFakeTensor("exercises Python FakeTensor item memo internals")
     def test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo(self):
         shape_env = ShapeEnv()
@@ -4432,7 +4452,7 @@ class TestFakeTensorDispatchCache(TestCase):
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
 
-            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
+            idx_tensor1 = torch.tensor([1, 0, 1, 0], dtype=torch.uint8)
             self.assertRaises(
                 DynamicOutputShapeException,
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
