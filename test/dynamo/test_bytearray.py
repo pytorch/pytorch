@@ -14,6 +14,12 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
+# CPython's test_translate builds this table with item assignment, so build
+# it once at import time instead.
+_rosetta = bytearray(range(256))
+_rosetta[ord("o")] = ord("e")
+
+
 class Indexable:
     def __init__(self, value=0):
         self.value = value
@@ -536,6 +542,72 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
             f(x, Items())[1],
+        )
+
+    @make_dynamo_test
+    def test_replace(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a"), b"massassappa")
+        self.assertEqual(b.replace(b"ss", b"x"), b"mixixippi")
+        self.assertEqual(b.replace(b"i", b"a", 2), b"massassippi")
+        self.assertEqual(b.replace(b"i", b"a", 0), b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a", -1), b"massassappa")
+        self.assertEqual(b.replace(b"", b"-"), b"-m-i-s-s-i-s-s-i-p-p-i-")
+        self.assertEqual(b.replace(b"x", b"y"), b"mississippi")
+        self.assertEqual(b.replace(bytearray(b"ss"), b"x"), b"mixixippi")
+        self.assertEqual(b, b"mississippi")
+        self.assertIsInstance(b.replace(b"i", b"a"), self.type2test)
+
+    @make_dynamo_test
+    def test_replace_errors(self):
+        b = self.type2test(b"a b")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(32, b"")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(b"a", 32)
+        with self.assertRaisesRegex(
+            TypeError, "'bytes' object cannot be interpreted as an integer"
+        ):
+            b.replace(b"a", b"b", b"0")
+
+    @make_dynamo_test
+    def test_translate(self):
+        b = self.type2test(b"hello")
+        self.assertEqual(b.translate(_rosetta), b"helle")
+        self.assertEqual(b.translate(_rosetta, b"l"), b"hee")
+        self.assertEqual(b.translate(_rosetta, delete=b"l"), b"hee")
+        self.assertEqual(b.translate(None, b"e"), b"hllo")
+        self.assertEqual(b, b"hello")
+        self.assertIsInstance(b.translate(_rosetta), self.type2test)
+        with self.assertRaisesRegex(
+            ValueError, "translation table must be 256 characters long"
+        ):
+            b.translate(bytes(range(255)))
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(_rosetta, 1)
+
+    def test_replace_translate_single_frame(self):
+        cnt = CompileCounter()
+
+        def f(ba, table, x):
+            x = x + 1
+            return ba.replace(b"a", b"z"), ba.translate(table), x * 2
+
+        compiled = torch.compile(f, backend=cnt)
+        table = bytearray(range(256))
+        expected = f(bytearray(b"ab"), table, torch.ones(1))
+        self.assertEqual(compiled(bytearray(b"ab"), table, torch.ones(1)), expected)
+        # The tensor op keeps the call inside a single compiled frame.
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_input_bytearray_replace_translate(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba, table):
+            return ba.replace(b"a", b"z"), ba.translate(table, b"b")
+
+        self.assertEqual(
+            fn(bytearray(b"ab"), bytearray(range(256))),
+            (bytearray(b"zb"), bytearray(b"a")),
         )
 
     def test_append_extend_arg_mutation(self):

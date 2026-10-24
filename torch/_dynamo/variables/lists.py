@@ -2523,6 +2523,40 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(None)
 
+    def bytearray_replace(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_replace: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            result = self.data.replace(*const_args, **const_kwargs)
+        except AsPythonConstantNotImplementedError:
+            return None
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ByteArrayVariable(result, mutation_type=ValueMutationNew())
+
+    def bytearray_translate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_translate: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            result = self.data.translate(*const_args, **const_kwargs)
+        except AsPythonConstantNotImplementedError:
+            return None
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ByteArrayVariable(result, mutation_type=ValueMutationNew())
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
@@ -2531,6 +2565,8 @@ class ByteArrayVariable(VariableTracker):
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
         "extend": Method(bytearray_extend),
+        "replace": Method(bytearray_replace),
+        "translate": Method(bytearray_translate),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
