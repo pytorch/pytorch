@@ -135,6 +135,198 @@ class SaveGpuKernelSchemaTest(TestCase):
         self.assertEqual(params["shared_mem"], 1024)
 
 
+class LazyCompileParamCacheCollisionTest(TestCase):
+    """Unit tests for #199612: prevent CudaKernelParamCache collision in lazy compile."""
+
+    def setUp(self):
+        super().setUp()
+        from torch._inductor.codecache import CudaKernelParamCache
+
+        CudaKernelParamCache.cache_clear()
+
+    def tearDown(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+
+        CudaKernelParamCache.cache_clear()
+        super().tearDown()
+
+    def test_cache_set_and_get_signature_distinction(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+
+        sig_a = {"in_ptr0": "*fp32", "in_ptr1": "*fp32", "out_ptr0": "*fp32"}
+        params_a = {
+            "mangled_name": "triton_poi_fused_add_mul_0_hashA",
+            "num_warps": 4,
+            "shared_mem": 1024,
+            "triton_meta": {"signature": sig_a},
+            "kernel_hash": "hash_aaa",
+        }
+
+        sig_c = {
+            "in_ptr0": "*fp32",
+            "in_ptr1": "*fp32",
+            "in_ptr2": "*fp32",
+            "out_ptr0": "*fp32",
+        }
+        params_c = {
+            "mangled_name": "triton_poi_fused_add_mul_0_hashC",
+            "num_warps": 8,
+            "shared_mem": 2048,
+            "triton_meta": {"signature": sig_c},
+            "kernel_hash": "hash_ccc",
+        }
+
+        with patch("torch._inductor.codecache.write", return_value=("", "/fake/path/bin")):
+            CudaKernelParamCache.set("triton_poi_fused_add_mul_0", params_a, b"cubin_a", "cubin")
+            CudaKernelParamCache.set("triton_poi_fused_add_mul_0", params_c, b"cubin_c", "cubin")
+
+        # Flat lookup returns the latest entry (Kernel C) for backward compatibility
+        self.assertEqual(
+            CudaKernelParamCache.get("triton_poi_fused_add_mul_0")["mangled_name"],
+            "triton_poi_fused_add_mul_0_hashC",
+        )
+
+        # Lookup with signature for Kernel A returns Kernel A
+        res_a = CudaKernelParamCache.get("triton_poi_fused_add_mul_0", signature=sig_a)
+        self.assertIsNotNone(res_a)
+        self.assertEqual(res_a["mangled_name"], "triton_poi_fused_add_mul_0_hashA")
+
+        # Lookup with signature for Kernel C returns Kernel C
+        res_c = CudaKernelParamCache.get("triton_poi_fused_add_mul_0", signature=sig_c)
+        self.assertIsNotNone(res_c)
+        self.assertEqual(res_c["mangled_name"], "triton_poi_fused_add_mul_0_hashC")
+
+        # Lookup with non-existent signature returns None rather than wrong entry
+        sig_unknown = {"in_ptr0": "*fp64"}
+        self.assertIsNone(
+            CudaKernelParamCache.get("triton_poi_fused_add_mul_0", signature=sig_unknown)
+        )
+
+    def test_cache_clear(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+
+        sig_a = {"in_ptr0": "*fp32"}
+        params_a = {
+            "mangled_name": "kernel_a",
+            "triton_meta": {"signature": sig_a},
+        }
+        with patch("torch._inductor.codecache.write", return_value=("", "/fake/path/bin")):
+            CudaKernelParamCache.set("kernel_a", params_a, b"cubin_a", "cubin")
+
+        self.assertIsNotNone(CudaKernelParamCache.get("kernel_a", signature=sig_a))
+        CudaKernelParamCache.cache_clear()
+        self.assertIsNone(CudaKernelParamCache.get("kernel_a", signature=sig_a))
+        self.assertIsNone(CudaKernelParamCache.get("kernel_a"))
+
+    def test_run_triton_kernel_with_autotune_uses_kernel_params_on_fast_path(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.runtime.triton_lazy_compile import (
+            run_triton_kernel_with_autotune,
+        )
+
+        sig_a = {"in_ptr0": "*fp32", "in_ptr1": "*fp32", "out_ptr0": "*fp32"}
+        autotuner_a = MagicMock(spec=CachingAutotuner)
+        autotuner_a.inductor_meta = {"kernel_name": "triton_poi_fused_add_mul_0"}
+        autotuner_a.triton_meta = {"signature": sig_a}
+        autotuner_a.kernel_hash = "hash_aaa"
+        launcher_a = MagicMock()
+        launcher_a.config = None
+        autotuner_a.launchers = [launcher_a]
+
+        params_a = {
+            "mangled_name": "mangled_A",
+            "num_warps": 4,
+            "shared_mem": 1024,
+            "cubin_path": "/path/to/cubin_A.cubin",
+            "runtime_bin_path": "/path/to/cubin_A.cubin",
+            "global_scratch": 0,
+            "profile_scratch": 0,
+            "tensordesc_meta": [],
+            "triton_meta": {"signature": sig_a},
+            "kernel_hash": "hash_aaa",
+        }
+        autotuner_a.cuda_kernel_saved = True
+        autotuner_a.cuda_kernel_params = params_a
+
+        sig_c = {
+            "in_ptr0": "*fp32",
+            "in_ptr1": "*fp32",
+            "in_ptr2": "*fp32",
+            "out_ptr0": "*fp32",
+        }
+        params_c = {
+            "mangled_name": "mangled_C",
+            "num_warps": 8,
+            "shared_mem": 2048,
+            "cubin_path": "/path/to/cubin_C.cubin",
+            "runtime_bin_path": "/path/to/cubin_C.cubin",
+            "global_scratch": 0,
+            "profile_scratch": 0,
+            "tensordesc_meta": [],
+            "triton_meta": {"signature": sig_c},
+            "kernel_hash": "hash_ccc",
+        }
+        with patch("torch._inductor.codecache.write", return_value=("", "/path/to/cubin_C.cubin")):
+            CudaKernelParamCache.set("triton_poi_fused_add_mul_0", params_c, b"cubin_c", "cubin")
+
+        pending_kernels = {"triton_poi_fused_add_mul_0": autotuner_a}
+        result = run_triton_kernel_with_autotune(
+            pending_kernels,
+            "triton_poi_fused_add_mul_0",
+            stream=None,
+            args=[MagicMock(), MagicMock(), MagicMock()],
+        )
+
+        self.assertEqual(result.cubin_path, "/path/to/cubin_A.cubin")
+        self.assertEqual(result.mangled_name, "mangled_A")
+        self.assertEqual(result.num_warps, 4)
+        self.assertEqual(result.shared_mem, 1024)
+
+    def test_caching_autotuner_fast_path_bypasses_when_store_cubin_not_saved(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        autotuner = CachingAutotuner.__new__(CachingAutotuner)
+        autotuner._cached_launcher = MagicMock(return_value="fast_result")
+        autotuner.inductor_meta = {"store_cubin": True}
+        autotuner.device_props = MagicMock()
+        autotuner.device_props.type = "cuda"
+        autotuner.cuda_kernel_saved = False
+        autotuner.cpu_kernel_saved = False
+
+        condition = (
+            autotuner._cached_launcher is not None
+            and not (
+                autotuner.inductor_meta.get("store_cubin")
+                and (
+                    not autotuner.cpu_kernel_saved
+                    if autotuner.device_props.type == "cpu"
+                    else not autotuner.cuda_kernel_saved
+                )
+            )
+        )
+        self.assertFalse(
+            condition,
+            "Fast path must NOT be taken when store_cubin is True but kernel not yet saved",
+        )
+
+        autotuner.cuda_kernel_saved = True
+        condition_after_save = (
+            autotuner._cached_launcher is not None
+            and not (
+                autotuner.inductor_meta.get("store_cubin")
+                and (
+                    not autotuner.cpu_kernel_saved
+                    if autotuner.device_props.type == "cpu"
+                    else not autotuner.cuda_kernel_saved
+                )
+            )
+        )
+        self.assertTrue(
+            condition_after_save, "Fast path CAN be taken after kernel is saved"
+        )
+
+
 # =========================================================================
 # E2E tests: AOTI pipeline → save_gpu_kernel schema integration
 # Requires GPU + torch + inductor. Run via buck2 on H100.

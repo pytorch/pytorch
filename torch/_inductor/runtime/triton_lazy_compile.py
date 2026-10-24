@@ -173,7 +173,15 @@ def run_triton_kernel_with_autotune(
         raise RuntimeError("Kernel run did not produce any launchers")
     launcher = kernel_fn.launchers[0]
 
-    cached_params: dict[str, Any] | None = CudaKernelParamCache.get(kernel_name)
+    cached_params: dict[str, Any] | None = getattr(
+        kernel_fn, "cuda_kernel_params", None
+    )
+    if cached_params is None:
+        cached_params = CudaKernelParamCache.get(
+            kernel_name,
+            signature=kernel_fn.triton_meta.get("signature"),
+            kernel_hash=getattr(kernel_fn, "kernel_hash", None),
+        )
     if cached_params is None:
         raise RuntimeError(f"Failed to get cached params for kernel {kernel_name}")
 
@@ -197,7 +205,10 @@ def run_triton_kernel_with_autotune(
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
 
-    config = config_to_dict(launcher.config) if launcher.config else {}
+    config = (
+        cached_params.get("config")
+        or (config_to_dict(launcher.config) if launcher.config else {})
+    )
 
     # For combo/foreach kernels, the autotuned config may have empty kwargs
     # (e.g., the foreach heuristic only tunes num_warps, not XBLOCK).
