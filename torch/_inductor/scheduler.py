@@ -7011,17 +7011,21 @@ class Scheduler:
         name_to_ancestors: dict[str, OrderedSet[str]] = {}
         for node in self.nodes:
             ancestors: OrderedSet[str] = OrderedSet()
+            op_names = node.get_operation_names()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
                 # A node can transiently depend on a buffer it also writes (a
                 # self-edge, e.g. from a mutating op whose read and write
-                # resolve to the same buffer). A node is never its own
-                # ancestor, so skip it rather than KeyError on itself.
-                if dep_node_name == node.get_name():
+                # resolve to the same buffer) or on an operation within the
+                # same grouped node. A node is never its own ancestor, so
+                # skip it rather than KeyError on itself.
+                if dep_node_name == node.get_name() or dep_node_name in op_names:
                     continue
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
+            for op_name in op_names:
+                name_to_ancestors[op_name] = ancestors
             node.ancestors = ancestors
 
         for order, node in enumerate(self.nodes):
