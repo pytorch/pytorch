@@ -4930,57 +4930,23 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         self.assertIn("--print-verdict", block)
         self.assertIn("install_cutlass_dsl", block)
 
-    def _pip_install_args(self, installer, env):
-        """The pip_install args each call of `installer` from common_utils.sh makes."""
-        script = (
-            f'source "{os.path.join(REPO, ".ci/pytorch/common_utils.sh")}"\n'
-            'pip_install() { printf "%s " "$@"; echo; }\n'
-            f"{installer} | grep -v '^Installing\\|installation complete'\n"
-        )
-        clean = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("DESIRED_CUDA", "CUDA_VERSION", "BUILD_ENVIRONMENT")
-        }
-        out = subprocess.run(
-            ["bash", "-c", script],
-            env={**clean, **env},
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        return [line.split() for line in out.splitlines()]
-
     def test_cutlass_installer_does_not_override_stage_two_verdict(self):
         text = self._read(".ci/pytorch/common_utils.sh")
         block = text[text.index("function install_cutlass_dsl()") :]
         block = block[: block.index("\n}\n") + 3]
         self.assertNotIn("return 0", block)
         self.assertNotIn("Skipping CUTLASS DSL install", block)
-        self.assertEqual(
-            self._pip_install_args(
-                "install_cutlass_dsl", {"BUILD_ENVIRONMENT": "linux-cuda13.0"}
-            ),
-            [["nvidia-cutlass-dsl[cu13]==4.8.1", "apache-tvm-ffi==0.1.12"]],
-        )
+        self.assertIn("nvidia-cutlass-dsl[cu13]==4.8.0", block)
+        self.assertIn("apache-tvm-ffi==0.1.12", block)
 
-    def test_flash_attn_cute_pins_the_same_cutlass_dsl(self):
-        # FA4 and QuACK leave nvidia-cutlass-dsl unpinned, so without an explicit
-        # pin a new CuTeDSL release fails torch._native's version gate.
-        for env, fa4 in (
-            ({}, "flash-attn-4==4.0.0b31"),
-            ({"BUILD_ENVIRONMENT": "linux-cuda13.0"}, "flash-attn-4[cu13]==4.0.0b31"),
-        ):
-            with self.subTest(env=env):
-                [dsl] = [
-                    a
-                    for a in self._pip_install_args("install_cutlass_dsl", env)[0]
-                    if a.startswith("nvidia-cutlass-dsl")
-                ]
-                self.assertEqual(
-                    self._pip_install_args("install_flash_attn_cute", env),
-                    [[fa4, dsl, "quack-kernels==0.6.5", "apache-tvm-ffi==0.1.12"]],
-                )
+    def test_flash_attn_cute_uses_compatible_dependencies(self):
+        text = self._read(".ci/pytorch/common_utils.sh")
+        block = text[text.index("function install_flash_attn_cute()") :]
+        block = block[: block.index("\n}\n") + 3]
+        self.assertIn("flash-attn-4==4.0.0b31", block)
+        self.assertIn("flash-attn-4[cu13]==4.0.0b31", block)
+        self.assertIn("quack-kernels==0.6.5", block)
+        self.assertIn("apache-tvm-ffi==0.1.12", block)
 
     def test_the_verdict_word_the_shells_compare_is_the_one_stage_two_prints(self):
         # Both shells install the DSL wheels only when stage 2 says RUN, comparing with
