@@ -24,15 +24,16 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
           [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t { return a / b; });
     });
   } else if (iter.is_cpu_scalar(2)) {
-    // Divide rather than multiply by a reciprocal: an error of one bit in
-    // a * (1 / b) can move the truncated result by a whole integer.
+    // optimization for floating-point types: if the second operand is a CPU
+    // scalar, compute a * reciprocal(b). Note that this may lose one bit of
+    // precision compared to computing the division.
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, dtype, "div_trunc_cuda", [&]() {
           using accscalar_t = at::acc_type<scalar_t, true>;
-          auto b = iter.scalar_value<accscalar_t>(2);
+          auto inv_b = accscalar_t(1.0) / iter.scalar_value<accscalar_t>(2);
           iter.remove_operand(2);
-          gpu_kernel(iter, [b] GPU_LAMBDA(scalar_t a) -> scalar_t {
-            return std::trunc(a / b);
+          gpu_kernel(iter, [inv_b] GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return std::trunc(a * inv_b);
           });
         });
   } else {

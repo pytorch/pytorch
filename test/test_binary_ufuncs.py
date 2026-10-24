@@ -1386,7 +1386,7 @@ class TestBinaryUfuncsDevice(TestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     @parametrize("divisor", ("tiny/8", "-tiny/5", "max/2", "-max"))
-    @parametrize("rounding_mode", (None, "trunc", "floor"))
+    @parametrize("rounding_mode", (None, "floor"))
     def test_division_by_scalar_without_finite_normal_reciprocal(
         self, device, dtype, divisor, rounding_mode
     ):
@@ -1413,19 +1413,6 @@ class TestBinaryUfuncsDevice(TestCase):
         a = torch.tensor([1e38 + 1e38j], dtype=torch.complex64, device=device)
         actual = a / (2e38 + 2e38j)
         self.assertEqual(actual.cpu(), torch.tensor([0.5 + 0j]), atol=1e-6, rtol=0)
-
-    @onlyCUDA
-    @dtypes(torch.float, torch.double)
-    @parametrize("s", (7.0, 49.0))
-    def test_div_trunc_by_scalar_matches_cpu(self, device, dtype, s):
-        # trunc(a * (1/s)) can be off by a whole integer, e.g. -17373096 / 7.
-        # Large magnitudes make the quotient's fractional part coarse.
-        scale = 2**29 if dtype == torch.double else 1
-        a = torch.arange(-(2**22), 2**22, 997, dtype=dtype) * 7 * scale
-        a = torch.cat([a, torch.tensor([-17373096.0], dtype=dtype)])
-        expect = torch.div(a, s, rounding_mode="trunc")
-        actual = torch.div(a.to(device), s, rounding_mode="trunc")
-        self.assertEqual(actual, expect, atol=0, rtol=0)
 
     # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message

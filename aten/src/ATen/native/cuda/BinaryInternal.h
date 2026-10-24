@@ -48,9 +48,11 @@ bool is_usable_reciprocal(T inv_b) {
   return inv_b == T(0) || std::isnormal(inv_b);
 }
 
-// Complex keeps the reciprocal: dividing by a huge complex b in opmath can
-// overflow the intermediate c + d * (d / c) and return 0, which is worse than
-// the precision a subnormal reciprocal loses.
+// Complex keeps the reciprocal, so complex divisors are not fixed here:
+// c10::complex division computes 1 / (c + d * (d / c)) itself, so dividing
+// would still give inf for a tiny b (e.g. complex(1e-39, 0) in complex64) and
+// would overflow to 0 for a huge b, where the subnormal reciprocal only loses
+// precision.
 template <typename T>
 bool is_usable_reciprocal(c10::complex<T>) {
   return true;
