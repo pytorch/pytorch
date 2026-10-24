@@ -514,7 +514,9 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum,
-    const std::optional<at::Tensor>& alpha) {
+    const std::optional<at::Tensor>& alpha,
+    float gemm_alpha,
+    float beta) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
@@ -614,6 +616,12 @@ sycl::event scaled_matmul(
   }
   if (bias_as_post_op) {
     po.append_binary(dnnl::algorithm::binary_add, bias_md);
+  }
+  if (gemm_alpha != 1.0f) {
+    po.append_eltwise(dnnl::algorithm::eltwise_linear, gemm_alpha, 0.0f);
+  }
+  if (beta != 0.0f) {
+    po.append_sum(beta);
   }
   if (po.len() > 0) {
     op_attr.set_post_ops(po);

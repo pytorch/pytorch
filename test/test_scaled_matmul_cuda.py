@@ -765,18 +765,19 @@ class TestFP8Matmul(TestCase):
 
     def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
         """Check in-place scaled-addmm capture and replay."""
+        device_module = torch.get_device_module(input.device)
         for _ in range(3):
             scaled_addmm_(input.clone(), *args, **kwargs)
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         captured_input = input.clone()
         data_ptr = captured_input.data_ptr()
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
+        graph = torch.xpu.XPUGraph() if input.is_xpu else torch.cuda.CUDAGraph()
+        with device_module.graph(graph):
             captured_output = scaled_addmm_(captured_input, *args, **kwargs)
         captured_input.copy_(input)
         graph.replay()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         self.assertIs(captured_output, captured_input)
         self.assertEqual(captured_input.data_ptr(), data_ptr)
@@ -1508,7 +1509,7 @@ class TestFP8Matmul(TestCase):
         with self.assertRaisesRegex(ValueError, "canonical contiguous"):
             scaled_addmm_(invalid_ld, mat1[:1], *args[1:])
 
-        if not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
+        if self.device_type == "cuda" and not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
             row_scale_a = torch.ones(32, 1, device=device)
             row_scale_b = torch.ones(1, 32, device=device)
             with self.assertRaisesRegex(
@@ -1584,12 +1585,18 @@ class TestFP8Matmul(TestCase):
         mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
         mat1 = mat1_ref.to(e4m3_type)
         mat2 = mat2_ref.to(e4m3_type).t()
-        scale_a = to_blocked(
-            torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-        )
-        scale_b = to_blocked(
-            torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-        )
+        if self.device_type == "xpu":
+            scale_a = torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            scale_b = torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            swizzle = SwizzleType.NO_SWIZZLE
+        else:
+            scale_a = to_blocked(
+                torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            )
+            scale_b = to_blocked(
+                torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            )
+            swizzle = SwizzleType.SWIZZLE_32_4_4
 
         args = (
             mat1,
@@ -1600,8 +1607,8 @@ class TestFP8Matmul(TestCase):
             ScalingType.BlockWise1x32,
         )
         kwargs = {
-            "swizzle_a": SwizzleType.SWIZZLE_32_4_4,
-            "swizzle_b": SwizzleType.SWIZZLE_32_4_4,
+            "swizzle_a": swizzle,
+            "swizzle_b": swizzle,
         }
         actual = scaled_addmm(input, *args, **kwargs)
         reference = (
@@ -1625,13 +1632,18 @@ class TestFP8Matmul(TestCase):
         mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
         mat1 = _bfloat16_to_float4_e2m1fn_x2(mat1_ref)
         mat2 = _bfloat16_to_float4_e2m1fn_x2(mat2_ref).t()
-        scale_a = to_blocked(
-            torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
-        )
-        scale_b = to_blocked(
-            torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
-        )
-        swizzle = SwizzleType.SWIZZLE_32_4_4
+        if self.device_type == "xpu":
+            scale_a = torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            scale_b = torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            swizzle = SwizzleType.NO_SWIZZLE
+        else:
+            scale_a = to_blocked(
+                torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            )
+            scale_b = to_blocked(
+                torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            )
+            swizzle = SwizzleType.SWIZZLE_32_4_4
         gemm_scale = 1.0
         if two_level:
             global_scale_a = torch.full((1,), 0.5, device=device)
