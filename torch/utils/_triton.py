@@ -161,6 +161,10 @@ def has_triton_tma_device() -> bool:
             )
             or torch.xpu.is_available()
             or has_triton_cpu_backend()
+            or (
+                getattr(torch, "npu", None) is not None
+                and torch.npu.is_available()
+            )
         ):
             # old API
             try:
@@ -256,6 +260,10 @@ def has_triton_stable_tma_api() -> bool:
             )
             or torch.xpu.is_available()
             or has_triton_cpu_backend()
+            or (
+                getattr(torch, "npu", None) is not None
+                and torch.npu.is_available()
+            )
         ):
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
