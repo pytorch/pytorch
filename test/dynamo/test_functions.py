@@ -65,6 +65,10 @@ e = torch.nn.Linear(10, 10)
 flag = True
 
 
+def _singledispatch_annotation_impl(value: str):
+    return "registered"
+
+
 class CustomDictSubclass(collections.OrderedDict):
     pass
 
@@ -295,6 +299,111 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         res = opt(torch.ones(3))
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1:], res[1:])
+
+    def test_singledispatch_register_evaluated_union_annotations(self):
+        def fn(arg, tensor):
+            @functools.singledispatch
+            def dispatch(value):
+                return "default"
+
+            # Prime the string cache before registration to check that register
+            # invalidates dispatch_cache as it adds the union's classes.
+            before_registration = dispatch("cached")
+
+            @dispatch.register
+            def _(value: typing.Union[str, bytes]):  # noqa: UP007
+                return "typing.Union"
+
+            @dispatch.register
+            def _(value: int | float):
+                return "types.UnionType"
+
+            @dispatch.register
+            def _(value: str | int):
+                return "last registered"
+
+            dispatch.register(complex, lambda value: "explicit")
+            return before_registration, dispatch(arg), tensor + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=counter, fullgraph=True)
+        for arg, expected in (
+            ([], "default"),
+            (b"", "typing.Union"),
+            ("", "last registered"),
+            (1, "last registered"),
+            (1.0, "types.UnionType"),
+            (1j, "explicit"),
+        ):
+            before, actual, output = opt(arg, torch.ones(1))
+            self.assertEqual(before, "default")
+            self.assertEqual(actual, expected)
+            self.assertEqual(output, torch.full((1,), 2.0))
+        self.assertGreater(counter.frame_count, 0)
+
+    def test_singledispatch_annotation_guard(self):
+        def fn(value, tensor):
+            output = tensor + 1
+
+            @functools.singledispatch
+            def dispatch(arg):
+                return "default"
+
+            dispatch.register(_singledispatch_annotation_impl)
+            return dispatch(value), output
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=counter, fullgraph=True)
+        try:
+            self.assertEqual(
+                opt("value", torch.ones(1)),
+                ("registered", torch.full((1,), 2.0)),
+            )
+            compiled_before_annotation_change = counter.frame_count
+
+            _singledispatch_annotation_impl.__annotations__["value"] = bytes
+            self.assertEqual(
+                opt("value", torch.ones(1)),
+                ("default", torch.full((1,), 2.0)),
+            )
+            self.assertGreater(counter.frame_count, compiled_before_annotation_change)
+        finally:
+            _singledispatch_annotation_impl.__annotations__["value"] = str
+        self.assertGreater(counter.frame_count, 0)
+
+    def test_singledispatch_no_type_check_guard(self):
+        def fn(value, tensor):
+            @functools.singledispatch
+            def dispatch(arg):
+                return "default"
+
+            dispatch.register(_singledispatch_annotation_impl)
+            return dispatch(value), tensor + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=counter, fullgraph=False)
+        try:
+            result, output = opt("value", torch.ones(1))
+            self.assertEqual(result, "registered")
+            self.assertEqual(output, torch.full((1,), 2.0))
+            self.assertGreater(counter.frame_count, 0)
+
+            _singledispatch_annotation_impl.__no_type_check__ = True
+            with self.assertRaises(StopIteration):
+                opt("value", torch.ones(1))
+        finally:
+            _singledispatch_annotation_impl.__dict__.pop("__no_type_check__", None)
+
+    def test_builtin_type_mro_is_iterable(self):
+        def fn(tensor):
+            return set(list.__mro__), tensor + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=counter, fullgraph=True)
+        mro, output = opt(torch.ones(1))
+        self.assertEqual(mro, {list, object})
+        self.assertEqual(output, torch.full((1,), 2.0))
+        self.assertGreater(counter.frame_count, 0)
 
     def test_polyfill_constant_fold_raises_catchable(self):
         # Polyfilled constant-foldable functions (e.g. builtins.all) fold through
