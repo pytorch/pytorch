@@ -416,7 +416,7 @@ namespace {
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
 // NOTE: Because SVE uses ACL logic, the precision changes, hence the adjusted tolerance.
-#if defined(CPU_CAPABILITY_SVE256)
+#if defined(CPU_CAPABILITY_SVE128) || defined(CPU_CAPABILITY_SVE256)
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         test_unary<vec>(
