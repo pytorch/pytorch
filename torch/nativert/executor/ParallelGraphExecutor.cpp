@@ -2,16 +2,6 @@
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/ParallelGraphExecutor.h>
 
-namespace {
-
-#define WITH_LOCK(m, block)               \
-  {                                       \
-    std::unique_lock<decltype(m)> lk_(m); \
-    block                                 \
-  }
-
-} // namespace
-
 namespace torch::nativert {
 
 ThreadPoolExecutor::ThreadPoolExecutor()
