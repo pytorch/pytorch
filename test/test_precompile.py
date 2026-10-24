@@ -4946,6 +4946,8 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
             self._capture(single, options={"cudagraph_policy": None})
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph-policy": None})
         for key in ("size_asserts", "scalar_asserts"):
             with self.assertRaisesRegex(PrecompileError, "always compiles with"):
                 self._capture(single, tracer=make_fx, options={key: False})

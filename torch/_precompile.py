@@ -3449,10 +3449,15 @@ def capture(
     ``options``, and records them in the artifact's ``CUDAGRAPH_CONFIG``, so
     ``mode="reduce-overhead"`` (or ``"max-autotune"``) serves the loaded graphs
     as CUDA graphs, as the capture ran them. Whether a graph can run as a CUDA
-    graph at all (``triton.cudagraph_support_input_mutation``, ...) is decided
-    when it compiles, and that decision ships with it; ``cudagraph_policy``,
-    which wraps the graphs again at load and is a Python object, is refused in
-    ``options``. As under ``torch.compile``, a
+    graph at all (``triton.cudagraph_support_input_mutation``,
+    ``force_disable_cudagraph_TESTING_ONLY``) is decided when it compiles, and
+    that decision ships with it. The settings CUDA graph trees read while the
+    graphs run (``triton.cudagraph_capture_sizes``,
+    ``triton.cudagraph_dynamic_shape_rerecord_limit``,
+    ``triton.cudagraph_or_error``, ...) are the serving process's, as under
+    ``torch.compile``, whose options also cover only the compile.
+    ``cudagraph_policy``, which wraps the graphs again at load and is a Python
+    object, is refused in ``options``. As under ``torch.compile``, a
     graph's outputs are overwritten by its next replay, so clone what you keep
     across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated
@@ -3492,7 +3497,10 @@ def capture(
                 "Either mode or options can be specified, but both can't be "
                 "specified at the same time."
             )
-        if options is not None and "cudagraph_policy" in options:
+        # Keys normalized as the wrapper does; it cannot take this one at all
+        # (its type check fails on the string annotation).
+        keys = {k.replace("-", "_") for k in options or ()}
+        if "cudagraph_policy" in keys:
             raise PrecompileError(
                 "precompile cannot record options={'cudagraph_policy': ...}: the "
                 "policy wraps the graphs again at load, and an artifact holds no "
