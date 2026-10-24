@@ -196,6 +196,70 @@ def bench_grid_sampler_2d(
     return rc
 
 
+def bench_isin(
+    device: str = "mps", dtype: torch.dtype = torch.float32
+) -> list[Measurement]:
+    rc: list[Measurement] = []
+    sync_cmd = "torch.mps.synchronize()" if device == "mps" else ""
+    dtype_s = str(dtype)
+
+    def f(elements, test_elements):
+        return torch.isin(elements, test_elements)
+
+    f_c = torch.compile(f, dynamic=False, fullgraph=True)
+
+    x_4 = torch.testing.make_tensor(4, device=device, dtype=dtype)
+    x_32 = torch.testing.make_tensor(32, device=device, dtype=dtype)
+    x_256 = torch.testing.make_tensor(256, device=device, dtype=dtype)
+    x_1k = torch.testing.make_tensor(1024, device=device, dtype=dtype)
+    x_4k = torch.testing.make_tensor(4_096, device=device, dtype=dtype)
+    x_65k = torch.testing.make_tensor(65_536, device=device, dtype=dtype)
+    x_1m = torch.testing.make_tensor(1_000_000, device=device, dtype=dtype)
+    x_5m = torch.testing.make_tensor(5_000_000, device=device, dtype=dtype)
+    x_4d = torch.testing.make_tensor((16, 3, 224, 224), device=device, dtype=dtype)
+    x_2d = torch.testing.make_tensor((1024, 1024), device=device, dtype=dtype)
+
+    cases = [
+        ("1d-4x1000000", x_4, x_1m),
+        ("1d-4x5000000", x_4, x_5m),
+        ("1d-32x1000000", x_32, x_1m),
+        ("1d-256x1000000", x_256, x_1m),
+        ("1d-4096x1000000", x_4k, x_1m),
+        ("1d-4096x65536", x_4k, x_65k),
+        ("1d-1000000x4", x_1m, x_4),
+        ("1d-5000000x4", x_5m, x_4),
+        ("1d-1000000x32", x_1m, x_32),
+        ("1d-1000000x256", x_1m, x_256),
+        ("1d-1000000x4096", x_1m, x_4k),
+        ("1d-65536x4096", x_65k, x_4k),
+        ("1d-65536x65536", x_65k, x_65k),
+        ("4d-16x3x224x224", x_4d, x_256),
+        ("4d-permuted", x_4d.permute(0, 2, 3, 1), x_256),
+        ("2d-transposed", x_2d.T, x_1k),
+    ]
+
+    for case_label, elements, test_elements in cases:
+        r_e, r_c = f(elements, test_elements), f_c(elements, test_elements)
+        if not torch.equal(r_e, r_c):
+            warnings.warn(
+                f"Eager and compile isin do not match for {dtype} case={case_label}",
+                stacklevel=2,
+            )
+        sub_label = f"isin-{case_label} ({dtype_s})"
+        for label, fn in [("eager", f), ("compile", f_c)]:
+            t = Timer(
+                stmt=f"f(elements, test_elements);{sync_cmd}",
+                globals={"f": fn, "elements": elements, "test_elements": test_elements},
+                language="python",
+                timer=timeit.default_timer,
+                sub_label=sub_label,
+                description=label,
+                env=torch.__version__,
+            )
+            rc.append(t.blocked_autorange())
+    return rc
+
+
 def main() -> None:
     dtypes = [torch.float16, torch.float32, torch.bfloat16]
 
@@ -249,6 +313,12 @@ def main() -> None:
             rc.extend(bench_grid_sampler_2d(dtype=dtype))
         Compare(rc).print()
 
+    def bench_isin_ops():
+        rc = []
+        for dtype in dtypes:
+            rc.extend(bench_isin(dtype=dtype))
+        Compare(rc).print()
+
     benchmarks = {
         "index": bench_index_ops,
         "unary": bench_unary_ops,
@@ -257,6 +327,7 @@ def main() -> None:
         "scan_with_indices": bench_scan_with_indices_ops,
         "binary": bench_binary_ops,
         "grid_sampler_2d": bench_grid_sampler_2d_ops,
+        "isin": bench_isin_ops,
     }
 
     selected = sys.argv[1:]
