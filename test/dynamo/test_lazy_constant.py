@@ -874,6 +874,20 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, "a", "b"), (t, "c", "d")], expected_frames=1)
 
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_computed_str_repeat_raise_keeps_effect_order(self):
+        def fn(t, s, n):
+            r = s * n
+            t.add_(1)
+            return r
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.zeros(1), "ab", 2)
+        t = torch.zeros(1)
+        with self.assertRaises(OverflowError):
+            opt_fn(t, "ab", sys.maxsize)
+        self.assertEqual(t, torch.zeros(1))
+
 
 if __name__ == "__main__":
     run_tests()

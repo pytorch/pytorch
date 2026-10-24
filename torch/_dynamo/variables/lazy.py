@@ -600,6 +600,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         # realize/reconstruct recurse through args; unbounded chains overflow the stack
         if num_nodes > max_nodes:
             return None
+        # str * int can raise OverflowError when recomputed with runtime operands
+        if op is operator.mul and any(type(v) is str for v in values):
+            return None
         try:
             value = op(*values)
         except Exception:

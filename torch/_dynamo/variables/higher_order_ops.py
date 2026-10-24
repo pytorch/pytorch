@@ -3710,6 +3710,47 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.print"
 
+    @staticmethod
+    def _lazy_str_proxy(
+        tx: "InstructionTranslatorBase", vt: VariableTracker
+    ) -> torch.fx.Proxy | None:
+        """
+        Strings that print only passes through don't need to be specialized on.
+        If vt is an unrealized lazy str constant (or a str computed from them),
+        return an OpaqueStr graph input built from it before the graph runs,
+        guarded only on the type of the underlying strings.
+        """
+        from torch._library.opaque_object import OpaqueStr
+
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        # Subgraph HOPs (cond, invoke_subgraph, ...) specialize on the strings
+        # they capture, and Inductor can't lower opaque print args inside them.
+        if tx.output.export or tx.output.current_tracer.parent is not None:
+            return None
+        if (
+            not isinstance(vt, (LazyConstantVariable, ComputedLazyConstantVariable))
+            or vt.is_realized()
+            or type(vt.peek_value()) is not str
+        ):
+            return None
+        value = vt.peek_value()
+        is_lazy = isinstance(vt, LazyConstantVariable)
+        if is_lazy:
+            ctor_info = (OpaqueStr, (value,), (vt.source,))
+            for proxy in tx.output.root_tracer.input_name_to_proxy.values():
+                grapharg = proxy.node.meta.get("grapharg")
+                if grapharg is not None and (
+                    tx.output.synthetic_source_ctor_info.get(grapharg.source)
+                    == ctor_info
+                ):
+                    return proxy
+        # Installs TYPE_MATCH guards on the underlying strings without realizing.
+        vt.python_type()
+        return tx.output.synthetic_graph_input(
+            OpaqueStr, (value,), ctor_arg_sources=(vt.source if is_lazy else vt,)
+        ).as_proxy()
+
     def _call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -3718,10 +3759,12 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        def as_proxy(vt: VariableTracker) -> Any:
+            proxy = self._lazy_str_proxy(tx, vt)
+            return vt.realize().as_proxy() if proxy is None else proxy
 
-        args_proxy = [arg.as_proxy() for arg in args]
-        kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
+        args_proxy = [as_proxy(arg) for arg in args]
+        kwargs_proxy = {k: as_proxy(v) for k, v in kwargs.items()}
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
