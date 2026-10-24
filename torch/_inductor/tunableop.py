@@ -332,7 +332,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
 # benchmark loop. Cleared with the other inductor caches (fresh_cache).
 class _PretunedGemms:
     def __init__(self) -> None:
-        self.seen: set[Any] = set()
+        self.seen: OrderedSet[Any] = OrderedSet()
 
     def cache_clear(self) -> None:
         self.seen.clear()
@@ -353,17 +353,19 @@ except Exception:
 # since rebuilding its metas densely would tune a layout runtime never asks
 # for.
 _TUNABLEOP_GEMM_CHOICES = frozenset(
-    {
-        "mm",
-        "mm_dtype",
-        "addmm",
-        "addmm_dtype",
-        "bmm",
-        "bmm_dtype",
-        "baddbmm",
-        "_scaled_mm",
-        "_scaled_mm_v2",
-    }
+    OrderedSet(
+        [
+            "mm",
+            "mm_dtype",
+            "addmm",
+            "addmm_dtype",
+            "bmm",
+            "bmm_dtype",
+            "baddbmm",
+            "_scaled_mm",
+            "_scaled_mm_v2",
+        ]
+    )
 )
 
 # Smallest dim worth its own tuning job. Applied to the dim, not to the symbol:
@@ -577,8 +579,8 @@ def maybe_range_pretune(winner) -> None:
     # The traced hint is always a rung: it is the size actually served, so it
     # must be tuned even when it is not a power of two and neither endpoint.
     sym_vals = sorted(
-        {sym_start, sym_hint, sym_hi}
-        | {1 << k for k in range(1, 64) if sym_start < (1 << k) < sym_hi}
+        OrderedSet([sym_start, sym_hint, sym_hi])
+        | OrderedSet([1 << k for k in range(1, 64) if sym_start < (1 << k) < sym_hi])
     )
     # Ceiling in DIM space, since the symbol cap cannot see a multiplier: with
     # the symbol alone bounded at 16384, 96*s reached 1572864. Anchored to the
