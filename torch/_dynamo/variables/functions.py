@@ -5313,7 +5313,12 @@ class MemberDescriptorVariable(DescriptorVariable):
         attr_name = self.descriptor.__name__
         # Prefer the VT's declarative table when it models this attribute, so a
         # VT with no concrete Python object behind it still resolves.
-        entry = obj.lookup_tp_getset_member(attr_name)
+        entry = (
+            obj.raw_descriptor_entry(attr_name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(attr_name)
+        )
         if entry is not None and entry.getter is not None:
             result = entry.getter(obj, tx)
             if result is not None:
@@ -5348,7 +5353,12 @@ class MemberDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
-        entry = obj.lookup_tp_getset_member(name)
+        entry = (
+            obj.raw_descriptor_entry(name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(name)
+        )
         if entry is not None:
             # A READONLY PyMemberDef is modeled by readonly_setter, which raises
             # what PyMember_SetOne raises.
@@ -5424,7 +5434,12 @@ class GetSetDescriptorVariable(DescriptorVariable):
     ) -> VariableTracker:
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
-        entry = obj.lookup_tp_getset_member(name)
+        entry = (
+            obj.raw_descriptor_entry(name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(name)
+        )
         if entry is None:
             # No model for this getset. Dynamo cannot see whether the C setter
             # accepts the write, rejects it as read-only, or type-checks the
@@ -5461,7 +5476,12 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # proxy-based VTs like TensorVariable.
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
-        entry = obj.lookup_tp_getset_member(attr_name)
+        entry = (
+            obj.raw_descriptor_entry(attr_name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(attr_name)
+        )
         if entry is not None and entry.getter is not None:
             result = entry.getter(obj, tx)
             if result is not None:

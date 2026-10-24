@@ -4703,6 +4703,10 @@ def import_submodule(mod: types.ModuleType) -> None:
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
+def get_property_accessor(obj: property, name: str) -> Any:
+    return property.__dict__[name].__get__(obj)
+
+
 def get_property_name(obj: property) -> tuple[Any, ...]:
     # Distinguish a missing name from a name explicitly set to None.
     try:

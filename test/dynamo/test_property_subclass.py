@@ -651,9 +651,6 @@ class PropertySubclassTests(TestCase):
     @parametrize("shadow_name", (False, True))
     @parametrize("explicit", (False, True))
     def test_missing_accessor_message(self, action, shadow_name, explicit):
-        if explicit and sys.version_info < (3, 13):
-            self.skipTest("explicit descriptor names require Python 3.13+")
-
         class NamedProperty(property):
             __name__ = "shadowed name"
 
@@ -680,7 +677,14 @@ class PropertySubclassTests(TestCase):
                 return x + 1, str(exc)
 
         x = torch.ones(2)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+        if sys.version_info < (3, 13):
+            with self.assertRaisesRegex(Unsupported, "legacy property error message"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        else:
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+            )
 
     @parametrize("action", ("set", "delete"))
     @parametrize(
@@ -1032,6 +1036,529 @@ class PropertySubclassTests(TestCase):
 
         x = torch.ones(2)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize(
+        "attr", ("fget", "fset", "fdel", "__name__", "__isabstractmethod__", "__doc__")
+    )
+    @parametrize("new", (False, True))
+    def test_custom_metadata_getattribute(self, attr, new):
+        if new and sys.version_info < (3, 12):
+            self.skipTest("requires Python 3.12+ construction")
+
+        class InterceptedProperty(property):
+            def __getattribute__(self, name):
+                if name == attr:
+                    return "intercepted"
+                return super().__getattribute__(name)
+
+        def getter(obj):
+            return obj
+
+        existing = InterceptedProperty(getter)
+
+        def fn(x):
+            p = InterceptedProperty(getter) if new else existing
+            return x + 1, getattr(p, attr)
+
+        x = torch.ones(2)
+        if new:
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        else:
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+            )
+
+    @parametrize("new", (False, True))
+    @parametrize("explicit", (False, True))
+    def test_delegated_metadata_getattribute(self, new, explicit):
+        if new and sys.version_info < (3, 12):
+            self.skipTest("requires Python 3.12+ construction")
+
+        class DelegatedProperty(property):
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def getter(obj):
+            return obj
+
+        existing = DelegatedProperty(getter)
+        raw_fget = property.fget
+
+        def fn(x):
+            p = DelegatedProperty(getter) if new else existing
+            fget = raw_fget.__get__(p) if explicit else p.fget
+            return x + 1, fget is getter
+
+        x = torch.ones(2)
+        if new:
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        else:
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+            )
+
+    @parametrize("action", ("get", "set", "delete"))
+    @parametrize("override", ("getattribute", "class_attribute"))
+    def test_descriptor_uses_c_accessors(self, action, override):
+        def fake(obj, value=None):
+            obj.value = obj.value + 100
+            return obj.value
+
+        class OverriddenProperty(property):
+            if override == "getattribute":
+
+                def __getattribute__(self, name):
+                    if name in ("fget", "fset", "fdel"):
+                        return fake
+                    return super().__getattribute__(name)
+            else:
+                fget = fset = fdel = fake
+
+        def getter(obj):
+            return obj.value + 1
+
+        def setter(obj, value):
+            obj.value = value + 2
+
+        def deleter(obj):
+            obj.value = obj.value + 3
+
+        class Holder:
+            prop = OverriddenProperty(getter, setter, deleter)
+
+        def fn(x):
+            obj = Holder()
+            obj.value = x
+            if action == "get":
+                return obj.prop
+            if action == "set":
+                obj.prop = x
+            else:
+                del obj.prop
+            return obj.value
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("accessor", ("fget", "fset", "fdel"))
+    def test_abstractness_uses_c_accessors(self, accessor):
+        class ShadowedProperty(property):
+            fget = fset = fdel = None
+
+        def fn_accessor(*args):
+            return None
+
+        fn_accessor.__isabstractmethod__ = True
+        p = ShadowedProperty(**{accessor: fn_accessor})
+
+        def fn(x):
+            return x + 1, p.__isabstractmethod__
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("action", ("set", "delete"))
+    @parametrize("failure", (None, "attribute", "value", "non_string"))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_missing_accessor_traces_name_repr(self, action, failure):
+        events = []
+
+        class Name:
+            def __repr__(self):
+                events.append("repr")
+                if failure == "attribute":
+                    raise AttributeError("name repr failed")
+                if failure == "value":
+                    raise ValueError("name repr failed")
+                if failure == "non_string":
+                    return 123
+                return "custom property name"
+
+        class Holder:
+            pass
+
+        p = PropertyWithoutDoc()
+        p.__name__ = Name()
+
+        def fn(x):
+            try:
+                if action == "set":
+                    p.__set__(Holder(), x)
+                else:
+                    p.__delete__(Holder())
+            except (AttributeError, ValueError, TypeError) as exc:
+                return x + 1, type(exc), str(exc)
+
+        x = torch.ones(2)
+        expected = fn(x)
+        self.assertEqual(events, ["repr"])
+        events.clear()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(events, ["repr"])
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(events, ["repr", "repr"])
+
+    @parametrize("action", ("set", "delete"))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_missing_accessor_tensor_name_graph_break(self, action):
+        class Holder:
+            pass
+
+        def fn(x):
+            p = PropertyWithoutDoc()
+            p.__name__ = x
+            try:
+                if action == "set":
+                    p.__set__(Holder(), x)
+                else:
+                    p.__delete__(Holder())
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_existing_name_getter_graph_break(self):
+        events = []
+
+        class Getter:
+            def __call__(self, obj):
+                return obj
+
+            def __getattribute__(self, name):
+                if name == "__name__":
+                    events.append("name")
+                    return str(len(events))
+                return super().__getattribute__(name)
+
+        p = PropertyWithoutDoc(Getter())
+
+        def fn(x):
+            return x + 1, p.__name__
+
+        x = torch.ones(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(events, [])
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(compiled(x), (x + 1, "1"))
+        self.assertEqual(events, ["name"])
+        self.assertEqual(compiled(x), (x + 1, "2"))
+        self.assertEqual(events, ["name", "name"])
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_existing_name_getter_mutation_graph_break(self):
+        def getter(obj):
+            return obj
+
+        p = PropertyWithoutDoc(getter)
+
+        def fn(x):
+            getter.__name__ = "renamed getter"
+            return x + 1, p.__name__
+
+        x = torch.ones(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(getter.__name__, "getter")
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("dictionary_first", (False, True))
+    @parametrize("reinitialize", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_mixed_name_stores_graph_break(self, dictionary_first, reinitialize):
+        def getter(obj):
+            return obj
+
+        def fn(x):
+            p = PropertyWithoutDoc(getter)
+            if dictionary_first:
+                p.__dict__["__name__"] = "dict name"
+                p.__name__ = "slot name"
+            else:
+                p.__name__ = "slot name"
+                p.__dict__["__name__"] = "dict name"
+            if reinitialize:
+                p.__init__(getter)
+            return x + 1, p.__name__, p.__dict__["__name__"], p
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(Unsupported, "property.*name|Property.*name"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual[:3], expected[:3])
+        self.assertEqual(actual[3].__name__, expected[3].__name__)
+        self.assertEqual(actual[3].__dict__, expected[3].__dict__)
+
+    @parametrize("new", (False, True))
+    @parametrize("attr", ("fget", "fset", "fdel", "__isabstractmethod__", "__doc__"))
+    def test_raw_descriptor_ignores_shadow(self, new, attr):
+        if new and sys.version_info < (3, 12):
+            self.skipTest("requires Python 3.12+ construction")
+
+        class ShadowProperty(property):
+            fget = fset = fdel = "shadowed"
+            __isabstractmethod__ = "shadowed"
+
+        def getter(obj):
+            """Getter docstring."""
+            return obj
+
+        existing = ShadowProperty(getter)
+        descriptor = property.__dict__[attr]
+
+        def fn(x):
+            p = ShadowProperty(getter) if new else existing
+            return x + 1, descriptor.__get__(p)
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2)),
+            fn(torch.ones(2)),
+        )
+
+    @parametrize("shadow", (False, True))
+    @parametrize("delete", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_raw_name_setter_graph_break(self, shadow, delete):
+        events = []
+
+        class CustomProperty(property):
+            if shadow:
+                __name__ = "shadowed"
+            else:
+
+                def __setattr__(self, name, value):
+                    events.append(name)
+                    super().__setattr__(name, value)
+
+        descriptor = property.__dict__["__name__"]
+        p = CustomProperty(lambda obj: obj)
+        p.__name__ = "original"
+        events.clear()
+
+        def fn(x):
+            if delete:
+                descriptor.__delete__(p)
+            else:
+                descriptor.__set__(p, "changed")
+            return x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
+        self.assertEqual(events, [])
+        torch.compile(fn, backend="eager")(torch.ones(2))
+        self.assertEqual(events, [])
+        expected = "<lambda>" if delete else "changed"
+        self.assertEqual(descriptor.__get__(p), expected)
+
+    @parametrize("implicit", (False, True))
+    def test_missing_getter(self, implicit):
+        class Holder:
+            prop = PropertyWithoutDoc()
+
+        p = Holder.__dict__["prop"]
+
+        def fn(x):
+            try:
+                obj = Holder()
+                result = obj.prop if implicit else p.__get__(obj, Holder)
+                return x + result
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        if sys.version_info < (3, 13):
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        else:
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+            )
+
+    @parametrize("existing_owner", (False, True))
+    @parametrize("mutate_inside", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_missing_accessor_owner_name(self, mutate_inside, existing_owner):
+        class Holder:
+            pass
+
+        p = PropertyWithoutDoc(lambda obj: obj)
+        existing = Holder()
+
+        def fn(x):
+            if mutate_inside:
+                Holder.__qualname__ = "Changed"
+            try:
+                p.__set__(existing if existing_owner else Holder(), x)
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+        if not mutate_inside:
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(counter.frame_count, 1)
+            Holder.__qualname__ = "Changed"
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(counter.frame_count, 2)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_missing_accessor_owner_name_repr(self):
+        events = []
+
+        class Name(str):
+            __slots__ = ()
+
+            def __repr__(self):
+                events.append("repr")
+                return "custom owner"
+
+        class Holder:
+            pass
+
+        Holder.__qualname__ = Name("Holder")
+        p = PropertyWithoutDoc(lambda obj: obj)
+
+        def fn(x):
+            try:
+                p.__set__(Holder(), x)
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        expected = fn(x)
+        events.clear()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(events, ["repr"])
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(events, ["repr", "repr"])
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_missing_accessor_custom_metaclass_graph_break(self):
+        events = []
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__qualname__":
+                    events.append(name)
+                    return "fake owner"
+                return super().__getattribute__(name)
+
+        class Holder(metaclass=Meta):
+            pass
+
+        p = PropertyWithoutDoc(lambda obj: obj)
+
+        def fn(x):
+            try:
+                p.__set__(Holder(), x)
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        expected = fn(x)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(events, [])
+        self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+        self.assertEqual(events, [])
+
+    @parametrize("manual_name", (False, True))
+    def test_legacy_missing_accessor_name_graph_break(self, manual_name):
+        if sys.version_info >= (3, 13):
+            self.skipTest("legacy names are not exposed before Python 3.13")
+
+        class Holder:
+            prop = PropertyWithoutDoc()
+            alias = prop
+
+        if manual_name:
+            Holder.prop.__set_name__(Holder, "renamed")
+
+        def fn(x):
+            try:
+                Holder().prop = x
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(Unsupported, "legacy property error message"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("new", (False, True))
+    @parametrize("explicit", (False, True))
+    @parametrize("getter_name", (True, False))
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_deleted_name_uses_getter_name(self, new, explicit, getter_name):
+        def getter(obj):
+            return obj
+
+        getter = getter if getter_name else None
+        existing = PropertyWithoutDoc(getter)
+        descriptor = property.__dict__["__name__"]
+
+        def fn(x):
+            p = PropertyWithoutDoc(getter) if new else existing
+            p.__name__ = "custom"
+            if explicit:
+                descriptor.__delete__(p)
+            else:
+                del p.__name__
+            return x + 1, getattr(p, "__name__", "missing"), p
+
+        x = torch.ones(2)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (x, x + 1):
+            result = compiled(value)
+            self.assertEqual(result[0], value + 1)
+            self.assertEqual(result[1], expected[1])
+            self.assertEqual(getattr(result[2], "__name__", "missing"), expected[1])
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
+    def test_name_repr_string_subclass(self):
+        events = []
+
+        class Text(str):
+            __slots__ = ()
+
+            def __format__(self, spec):
+                events.append("format")
+                return "wrong"
+
+        class Name:
+            def __repr__(self):
+                return Text("custom name")
+
+        class Holder:
+            pass
+
+        p = PropertyWithoutDoc()
+        p.__name__ = Name()
+
+        def fn(x):
+            try:
+                p.__set__(Holder(), x)
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+        self.assertEqual(events, [])
 
 
 if __name__ == "__main__":

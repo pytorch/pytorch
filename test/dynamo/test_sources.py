@@ -3,6 +3,7 @@
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._dynamo.testing
 import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
@@ -49,6 +50,48 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         a = func(e)
         b = torch.compile(func, backend="eager", fullgraph=True)(e)
         self.assertEqual(a, b)
+
+    def test_property_accessor_guard_and_reconstruction(self):
+        accesses = []
+
+        class Property(property):
+            fget = None
+
+            def __getattribute__(self, name):
+                if name == "fget":
+                    accesses.append(name)
+                    return None
+                return super().__getattribute__(name)
+
+        class Getter:
+            def __init__(self, offset):
+                self.offset = offset
+
+            def __call__(self, value):
+                return value + self.offset, self
+
+        first = Getter(1)
+        second = Getter(2)
+        prop = Property(first)
+
+        def fn(x):
+            return prop.__get__(x)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            result, accessor = compiled(x)
+            self.assertEqual(result, x + 1)
+            self.assertIs(accessor, first)
+        self.assertEqual(counter.frame_count, 1)
+        property.__init__(prop, second)
+        for _ in range(2):
+            result, accessor = compiled(x)
+            self.assertEqual(result, x + 2)
+            self.assertIs(accessor, second)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(accesses, [])
 
     def test_supported_nodes(self):
         class Model(nn.Module):

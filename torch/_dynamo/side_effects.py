@@ -547,6 +547,15 @@ class SideEffects:
         mutated_source: Source | None = None,
     ) -> None:
         if not self.is_attribute_mutation(item):
+            if isinstance(item, variables.UserDefinedPropertyVariable):
+                unimplemented(
+                    gb_type="Untracked property subclass mutation",
+                    context=f"property subclass attribute mutation: {name}",
+                    explanation="Dynamo cannot replay attribute mutations on this property subclass because its side effects are not tracked.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"
             )
@@ -565,6 +574,24 @@ class SideEffects:
             deferred = self.snapshot_attr_mutation(item, name, value)
         if not deferred:
             self.check_allowed_side_effect(item)
+        if (
+            sys.version_info >= (3, 13)
+            and name == "__name__"
+            and isinstance(item, variables.UserDefinedPropertyVariable)
+            and item.lookup_class_mro_attr(name) is property.__dict__[name]
+            and name in self.store_attr_mutations.get(item, {})
+            and self.get_attr_mutation_kind(item, name) is not mutation_kind
+        ):
+            unimplemented(
+                gb_type="Mixed property name and instance dictionary mutations",
+                context="property.__name__ and instance __dict__ share a pending mutation key",
+                explanation="Dynamo cannot track both the property name field and an instance dictionary entry with the same name in one frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                # A partial graph can reconstruct a pending __dict__ on the
+                # stack as a copy, losing the dictionary store after resuming.
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -591,7 +618,11 @@ class SideEffects:
         # re-inserts at the end.
         if not isinstance(value, variables.DeletedVariable):
             existing = self.store_attr_mutations.get(item, {}).get(name)
-            if isinstance(existing, variables.DeletedVariable):
+            if isinstance(
+                existing, variables.DeletedVariable
+            ) and self.has_pending_mutation_of_attr(
+                item, name, AttrMutationKind.INSTANCE_DICT
+            ):
                 # store_attr always writes both maps together, so the
                 # attr_mutation_kinds entry is guaranteed present here; use del
                 # for both to surface any invariant violation.
