@@ -50,6 +50,7 @@ target_compile_options_if_supported(test_aoti_inference -Wno-unused-function)
 
 if(INSTALL_TEST)
   install(TARGETS test_aoti_inference DESTINATION bin)
+  install(TARGETS aoti_custom_class DESTINATION lib)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_aoti_inference> DESTINATION bin OPTIONAL)
