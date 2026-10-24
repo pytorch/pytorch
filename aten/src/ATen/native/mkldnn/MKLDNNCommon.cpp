@@ -128,7 +128,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
       "itensor_view_from_dense expects dense tensor input");
   if (tensor.scalar_type() == ScalarType::Float) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f32,
+            dnnl::memory::data_type::f32,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<float*>(tensor.template const_data_ptr<float>()) :
@@ -136,7 +136,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
   }
   else if (tensor.scalar_type() == ScalarType::BFloat16) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::bf16,
+            dnnl::memory::data_type::bf16,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<BFloat16*>(tensor.template const_data_ptr<BFloat16>()) :
@@ -144,7 +144,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
   }
   else if (tensor.scalar_type() == ScalarType::Half) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f16,
+            dnnl::memory::data_type::f16,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<Half*>(tensor.template const_data_ptr<Half>()) :
@@ -152,7 +152,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
   }
   else if (tensor.scalar_type() == ScalarType::Byte) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::u8,
+            dnnl::memory::data_type::u8,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<void*>(tensor.const_data_ptr()) :
@@ -160,7 +160,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
   }
   else if (tensor.scalar_type() == ScalarType::Char) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::s8,
+            dnnl::memory::data_type::s8,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<void*>(tensor.const_data_ptr()) :
@@ -168,7 +168,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
   }
   else if (tensor.scalar_type() == ScalarType::Float8_e4m3fn) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f8_e4m3,
+            dnnl::memory::data_type::f8_e4m3,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<void*>(tensor.const_data_ptr()) :
@@ -176,7 +176,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
   }
   else if (tensor.scalar_type() == ScalarType::Float8_e5m2) {
     return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f8_e5m2,
+            dnnl::memory::data_type::f8_e5m2,
             tensor.strides().vec()},
             from_const_data_ptr ?
               const_cast<void*>(tensor.const_data_ptr()) :
