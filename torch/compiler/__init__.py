@@ -782,11 +782,15 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> CacheInfo | None:
 
     torch.compiler.load_cache_artifacts(artifacts[0])
     """
+    from torch._dynamo.convert_frame import compile_lock
+
     from ._cache import CacheArtifactManager, CacheInfo
 
-    artifacts = CacheArtifactManager.deserialize(serialized_artifacts)
-    if artifacts is not None:
-        return CacheArtifactManager.populate_caches(artifacts)
+    # A cache load that starts first must populate before compilation can begin.
+    with compile_lock:
+        artifacts = CacheArtifactManager.deserialize(serialized_artifacts)
+        if artifacts is not None:
+            return CacheArtifactManager.populate_caches(artifacts)
     return None
 
 
