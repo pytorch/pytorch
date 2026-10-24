@@ -151,6 +151,12 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
 
     arange_check_bounds(start, end, step);
 
+    // arange_check_bounds validates only the double-converted step, which can
+    // be nonzero while xstep underflows to zero after dtype conversion (e.g.
+    // a fractional step with an integral dtype); a zero xstep would silently
+    // produce a nonsense tensor.
+    TORCH_CHECK(xstep != 0, "step must be nonzero and representable in the target dtype");
+
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
                 "invalid size, possible overflow?");
 

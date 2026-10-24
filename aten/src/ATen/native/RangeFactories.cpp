@@ -160,6 +160,11 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
 
     arange_check_bounds(start, end, step);
 
+    // arange_check_bounds validates only the double-converted step, which can
+    // be nonzero while xstep underflows to zero after dtype conversion (e.g.
+    // a fractional step with an integral dtype), causing a division by zero.
+    TORCH_CHECK(xstep != 0, "step must be nonzero and representable in the target dtype");
+
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
     if (result.numel() != size) {
       result.resize_({size});
