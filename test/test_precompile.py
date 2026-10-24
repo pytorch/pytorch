@@ -4964,7 +4964,7 @@ class TestPrecompileDynamoCapture(TestCase):
         tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
         with mock.patch.object(target, name, wraps=getattr(target, name)) as spy:
             with self._capture(fn, tracer=tracer_obj, options=options) as cap:
-                cap(self.model, self.x2)
+                y = cap(self.model, self.x2)
                 graphs = cap.summary().backend_graphs if tracer == "dynamo" else 1
         # compile_fx re-enters itself without config_patches once it has applied
         # them, so each graph is one call that carries them.
@@ -4973,6 +4973,11 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertGreaterEqual(len(seen), 2 if tracer == "dynamo" else 1)
         for patches in seen:
             self.assertEqual(patches["max_autotune_gemm_backends"], "ATEN")
+        # A graph-breaking capture mints resume names this process already holds.
+        if tracer == "dynamo":
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
+        else:
+            self.assertEqual(load(self.artifact, self.cache)(self.model, self.x2), y)
 
     # The crossref harness keeps a dispatch mode active while the capture runs,
     # and Dynamo guards on that state; a fresh process has no such mode, so
