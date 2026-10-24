@@ -171,16 +171,19 @@ def rebuild_cuda_tensor(
     ref_counter_offset,
     event_handle,
     event_sync_required,
+    device_type="cuda",
 ):
+    device = torch.device(device_type, storage_device)
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
-        storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
+        storage = storage_cls(0, dtype=dtype, device=device, _internal=True)
     else:
         cache_key = (storage_device, storage_handle, storage_offset_bytes)
         storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
-            torch.cuda._lazy_init()
-            storage = storage_cls._new_shared_cuda(
+            torch.get_device_module(device_type)._lazy_init()
+            new_shared = getattr(storage_cls, f"_new_shared_{device_type}")
+            storage = new_shared(
                 storage_device,
                 storage_handle,
                 storage_size_bytes,
@@ -194,7 +197,7 @@ def rebuild_cuda_tensor(
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(
-                ref_counter_handle, ref_counter_offset, device=storage_device
+                ref_counter_handle, ref_counter_offset, device=device
             )
 
     _storage = (
@@ -218,6 +221,10 @@ def rebuild_cuda_tensor(
         t.requires_grad = requires_grad
 
     return t
+
+
+def rebuild_xpu_tensor(*args):
+    return rebuild_cuda_tensor(*args, device_type="xpu")
 
 
 def reduce_tensor(tensor):
@@ -340,7 +347,12 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    if storage._untyped_storage.device.type == "cuda":
+    storage_device_type = storage._untyped_storage.device.type
+    if storage_device_type in ("cuda", "xpu"):
+        if storage_device_type == "cuda":
+            share, rebuild = storage._share_cuda_, rebuild_cuda_tensor
+        else:
+            share, rebuild = storage._share_xpu_, rebuild_xpu_tensor
         (
             device,
             handle,
@@ -350,13 +362,13 @@ def reduce_tensor(tensor):
             ref_counter_offset,
             event_handle,
             event_sync_required,
-        ) = storage._share_cuda_()
+        ) = share()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (
-            rebuild_cuda_tensor,
+            rebuild,
             (
                 type(tensor),
                 tensor.size(),
@@ -595,6 +607,10 @@ def reduce_storage(storage):
     if storage.is_cuda:
         raise RuntimeError(
             "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+        )
+    elif storage.device.type == "xpu":
+        raise RuntimeError(
+            "Cannot pickle XPU storage; try pickling an XPU tensor instead"
         )
     elif storage.device.type == "meta":
         raise RuntimeError(
