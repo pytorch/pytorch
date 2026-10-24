@@ -2682,6 +2682,33 @@ s50 > 3""",
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
 
+    @parametrize("custom_guard", [False, True])
+    def test_tensor_subclass_metadata_recompile_hint(self, custom_guard):
+        class CustomGuardTensor(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, original, current):
+                return original == current
+
+        tensor_type = CustomGuardTensor if custom_guard else CtxSubclassTensor
+        failures = []
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(lambda x: x * x)
+
+        compiled(tensor_type(torch.ones(2), 3))
+        compiled(tensor_type(torch.ones(2), 3))
+        self.assertEqual(failures, [])
+        compiled(tensor_type(torch.ones(2), 2))
+
+        expected = (
+            "CustomGuardTensor.__metadata_guard__() rejected"
+            if custom_guard
+            else "CtxSubclassTensor.__tensor_flatten__()"
+        )
+        self.assertIn(expected, "\n".join(failures))
+
     def test_tensor_subclass_ctx_recursive_guards(self):
         x0 = torch.ones(2, 2)
         x1 = CtxSubclassTensor(x0.clone(), 2)
