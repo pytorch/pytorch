@@ -1056,6 +1056,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.q_scale: lambda input: -1,
         torch.q_zero_point: lambda input: -1,
         torch.linalg.qr: lambda input, mode="reduced", out=None: -1,
+        torch.linalg.qr_piv: lambda input, mode="reduced", out=None: -1,
         torch.linalg.polar: lambda A, out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
         torch.nanquantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
