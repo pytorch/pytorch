@@ -18,9 +18,12 @@
 #endif
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
@@ -31,6 +34,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -878,13 +882,40 @@ void GraphTask::exec_post_processing() {
   }
 }
 
-void GraphTask::set_exception_without_signal(
-    const c10::intrusive_ptr<Node>& fn) {
-  if (!has_error_.exchange(true)) {
-    if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack(fn->name());
-    }
+namespace {
+
+// Attach the anomaly-mode forward traceback to the exception that will be
+// rethrown after backward. Error-reporting frameworks surface exception
+// messages, not the UserWarning that print_stack() used to emit (#101069).
+std::exception_ptr wrap_exception_with_anomaly_trace(
+    std::exception_ptr eptr,
+    const std::string& trace) {
+  if (!eptr || trace.empty()) {
+    return eptr;
   }
+  std::string original = "Unknown exception";
+  try {
+    std::rethrow_exception(eptr);
+  } catch (const c10::Error& e) {
+    original = e.what_without_backtrace();
+  } catch (const std::exception& e) {
+    original = e.what();
+  } catch (...) {
+    original = "Unknown exception";
+  }
+  try {
+    TORCH_CHECK(false, original, "\n", trace);
+  } catch (...) {
+    return std::current_exception();
+  }
+  return eptr;
+}
+
+} // namespace
+
+void GraphTask::set_exception_without_signal(
+    const c10::intrusive_ptr<Node>& /*fn*/) {
+  has_error_.exchange(true);
 }
 
 void GraphTask::set_exception(
@@ -892,6 +923,29 @@ void GraphTask::set_exception(
     const c10::intrusive_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
+    if (AnomalyMode::is_enabled() && fn) {
+      try {
+        // Python FakeTensorMode (AOT tracing) is a TorchDispatchMode. It does
+        // not include DispatchKey::Fake; that key is for unused C++ FakeTensor
+        // mode. AOT matches FakeTensor exception types (e.g.
+        // DataDependentOutputException / "aten._unique.default"), so keep the
+        // original exception and emit the traceback as a warning.
+        const bool in_fake_tensor_mode =
+            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake) ||
+            c10::impl::TorchDispatchModeTLS::get_mode(
+                c10::impl::TorchDispatchModeKey::FAKE)
+                .has_value();
+        if (in_fake_tensor_mode) {
+          fn->metadata()->print_stack(fn->name());
+        } else {
+          eptr = wrap_exception_with_anomaly_trace(
+              std::move(eptr), fn->metadata()->format_stack(fn->name()));
+        }
+      } catch (...) {
+        // Keep the original exception if formatting the forward traceback
+        // fails.
+      }
+    }
     future_result_->setError(std::move(eptr));
   }
 }
