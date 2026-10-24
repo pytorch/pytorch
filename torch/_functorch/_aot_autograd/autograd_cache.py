@@ -381,6 +381,12 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
+    # Cache hits skip compiled_graph_wrapper, so bypass while it is set. Install
+    # any env-requested wrapper first: that install otherwise runs only on a miss.
+    torch._utils_internal.maybe_init_compiled_graph_wrapper()
+    if config.compiled_graph_wrapper is not None:
+        raise BypassAOTAutogradCache("compiled_graph_wrapper is set")
+
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -1256,6 +1262,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             (entry, pickled_content) = result
             try:
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
+                if compiler_config_extra is not None:
+                    fx_config["graph_id"] = compiler_config_extra.graph_id
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content
