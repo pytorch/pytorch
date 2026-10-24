@@ -159,6 +159,7 @@ def set_flags(
     _allow_tf32=None,
     _fp32_precision="none",
     _depthwise_kernel=None,
+    _allow_reduced_precision_reduction=None,
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -168,6 +169,7 @@ def set_flags(
         torch._C._get_cudnn_allow_tf32(),
         torch._C._get_fp32_precision_getter("cuda", "all"),
         torch._C._get_cudnn_depthwise_kernel(),
+        torch._C._get_cudnn_allow_reduced_precision_reduction(),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -183,6 +185,10 @@ def set_flags(
         torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
     if _depthwise_kernel is not None:
         torch._C._set_cudnn_depthwise_kernel(_depthwise_kernel)
+    if _allow_reduced_precision_reduction is not None:
+        torch._C._set_cudnn_allow_reduced_precision_reduction(
+            _allow_reduced_precision_reduction
+        )
     return orig_flags
 
 
@@ -195,6 +201,7 @@ def flags(
     allow_tf32=True,
     fp32_precision="none",
     depthwise_kernel="auto",
+    allow_reduced_precision_reduction=True,
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
@@ -205,6 +212,7 @@ def flags(
             allow_tf32,
             fp32_precision,
             depthwise_kernel,
+            allow_reduced_precision_reduction,
         )
     try:
         yield
@@ -217,6 +225,17 @@ def flags(
 # The magic here is to allow us to intercept code like this:
 #
 #   torch.backends.<cudnn|mkldnn>.enabled = True
+
+
+def _set_cudnn_allow_reduced_precision_reduction(b):
+    if os.environ.get("TORCH_CUDNN_V8_API_DISABLED", "0") == "1":
+        warnings.warn(
+            "torch.backends.cudnn.allow_reduced_precision_reduction has no "
+            "effect when the cuDNN V8 API is disabled via the "
+            "TORCH_CUDNN_V8_API_DISABLED environment variable",
+            stacklevel=2,
+        )
+    torch._C._set_cudnn_allow_reduced_precision_reduction(b)
 
 
 class CudnnModule(PropModule):
@@ -235,6 +254,10 @@ class CudnnModule(PropModule):
         )
     allow_tf32 = ContextProp(
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
+    )
+    allow_reduced_precision_reduction = ContextProp(
+        torch._C._get_cudnn_allow_reduced_precision_reduction,
+        _set_cudnn_allow_reduced_precision_reduction,
     )
     conv = _FP32Precision("cuda", "conv")
     fp32_precision = ContextProp(
@@ -256,6 +279,7 @@ enabled: bool
 deterministic: bool
 benchmark: bool
 allow_tf32: bool
+allow_reduced_precision_reduction: bool
 fp32_precision: str
 benchmark_limit: int
 depthwise_kernel: str
