@@ -345,6 +345,7 @@ Global Hooks For Module
     nn.BCELoss
     nn.BCEWithLogitsLoss
     nn.MarginRankingLoss
+    nn.BPRLoss
     nn.HingeEmbeddingLoss
     nn.MultiLabelMarginLoss
     nn.HuberLoss
