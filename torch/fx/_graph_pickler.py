@@ -88,6 +88,16 @@ def _unpickle_as_dead_weakref() -> Callable[[], None]:
     return lambda: None
 
 
+def _unpickle_by_value(data: bytes) -> object:
+    return pickle.loads(data)
+
+
+def _rebuild_pinned_storage(rebuild: Callable[..., Any], args: tuple[Any, ...]) -> Any:
+    storage = rebuild(*args)
+    pinned_storage = storage._untyped_storage.pin_memory()
+    return storage._new_wrapped_storage(pinned_storage)
+
+
 @contextlib.contextmanager
 def patch_pytree_map_over_slice() -> Generator[None]:
     if slice in pytree.SUPPORTED_NODES:
@@ -157,6 +167,12 @@ class GraphPickler(pickle.Pickler):
 
         if is_fake_tensor(obj):
             return _TensorPickleData.reduce_helper(self, obj)
+        elif (
+            isinstance(obj, torch.storage.TypedStorage)
+            and obj._untyped_storage.is_pinned()
+        ):
+            rebuild, args = obj.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
+            return _rebuild_pinned_storage, (rebuild, args)
         elif isinstance(obj, torch.fx.GraphModule):
             return _GraphModulePickleData.reduce_helper(self, obj)
         elif isinstance(obj, (torch._ops.OperatorBase, torch._ops.OpOverloadPacket)):
@@ -186,6 +202,8 @@ class GraphPickler(pickle.Pickler):
             else:
                 return (_unpickle_as_dead_weakref, ())
         else:
+            if dill is not None and "<locals>" in type(obj).__qualname__:
+                return _unpickle_by_value, (dill.dumps(obj, byref=False),)
             # We should never get a raw Node!
             if isinstance(obj, torch.fx.Node):
                 if self.options.ignore_raw_node:
@@ -337,11 +355,11 @@ class GraphPickler(pickle.Pickler):
 
             # 3) GraphPickler reducer_override
             try:
+                red = NotImplemented
                 red = pickler.reducer_override(o)
                 log(f"{indent}reducer_override -> {type(red)}")
             except Exception as e2:
                 log(f"{indent}💥 reducer_override crashed: {e2}")
-                return path
 
             if red is not NotImplemented:
                 _, args = red
