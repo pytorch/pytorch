@@ -3559,10 +3559,12 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    A :class:`DynamoTracer` artifact's graphs run as CUDA graphs exactly when
-    its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading process's
-    ``torch._inductor.config.triton.cudagraphs`` and ``triton.cudagraph_trees``
-    say; the rest of the CUDA graph config is the loading process's.
+    The graphs a :class:`DynamoTracer` artifact ships run as CUDA graphs
+    exactly when its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading
+    process's ``torch._inductor.config.triton.cudagraphs`` and
+    ``triton.cudagraph_trees`` say; the rest of the CUDA graph config is the
+    loading process's, and so is all of it for a serve-time compile
+    (``allow_serve_time_compiles``), like the rest of the Inductor config.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve
