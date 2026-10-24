@@ -170,6 +170,14 @@ def _method_from_src(
 def _format_import_statement(name: str, obj: object, importer: Importer) -> str:
     if name in _custom_builtins:
         return _custom_builtins[name].import_str
+    for builtin in _custom_builtins.values():
+        if obj is builtin.obj:
+            # A custom builtin that codegen renamed (e.g. ``nan_1``) because a
+            # placeholder shadows its usual name: import it under that name.
+            import_str = builtin.import_str
+            if import_str.startswith(("import ", "from ")):
+                return f"{import_str.rsplit(' as ', 1)[0]} as {name}"
+            return f"{name} = {import_str.split('=', 1)[1].strip()}"
     if _is_from_torch(name):
         return "import torch"
     module_name, attr_name = importer.get_name(obj)
