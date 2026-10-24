@@ -9096,6 +9096,38 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    @config.patch({"numerics": "strict", "emulate_precision_casts": True})
+    def test_cat_masked_fp16_reshaped_producers(self):
+        if self.device != GPU_TYPE:
+            self.skipTest("requires a Triton GPU")
+
+        def fn(prefix, long, mid, short, long_bias, mid_bias, short_bias):
+            batch = prefix.shape[0]
+            long = (long + long_bias).reshape(7, batch, 8, 256)
+            long = long.permute(1, 0, 2, 3).reshape(batch, 56, 256)
+            mid = (mid + mid_bias).reshape(1, batch, 8, 256)
+            mid = mid.permute(1, 0, 2, 3).reshape(batch, 8, 256)
+            short = (short + short_bias).reshape(14, batch, 8, 256)
+            short = short.permute(1, 0, 2, 3).reshape(batch, 112, 256)
+            return torch.cat((prefix, long, mid, short), dim=1)
+
+        def rand(shape):
+            return torch.randn(shape, device=self.device, dtype=torch.float16)
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        for batch in (2, 35):
+            with self.subTest(batch=batch):
+                inputs = (
+                    rand((batch, 1216, 256))[:, :288],
+                    rand((7, batch, 2048)),
+                    rand((1, batch, 2048)),
+                    rand((14, batch, 2048)),
+                    rand((7, 1, 2048)),
+                    rand((1, 1, 2048)),
+                    rand((14, 1, 2048)),
+                )
+                self.assertEqual(compiled(*inputs), fn(*inputs), atol=0, rtol=0)
+
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
