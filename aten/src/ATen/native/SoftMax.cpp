@@ -565,7 +565,8 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
       }
   }
 
-  Tensor output = at::empty_like(input_, input_.options());
+  Tensor output = at::empty_like(
+      input_, input_.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto input = input_.contiguous();
   int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
   dim = maybe_wrap_dim(dim, input_.dim());
