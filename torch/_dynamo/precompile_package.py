@@ -1766,6 +1766,8 @@ class PrecompileSession(Generic[_P, _R]):
         # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
         # graphs is decided again when it is post-compiled at load. The artifact
         # records the capture's choice, and the capture's calls compile under it.
+        # graph_partition is in it because post-compile picks the wrapper for a
+        # partitioned graph by it, while the graph was partitioned at compile.
         self._cudagraph_config: dict[str, bool] = {}
         if backend == "inductor":
             from torch._inductor import config as inductor_config
@@ -1773,6 +1775,7 @@ class PrecompileSession(Generic[_P, _R]):
             self._cudagraph_config = {
                 "triton.cudagraphs": inductor_config.triton.cudagraphs,
                 "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
+                "graph_partition": inductor_config.graph_partition,
             }
             if inductor is not None:
                 config = self._cudagraph_config

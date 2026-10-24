@@ -3446,12 +3446,12 @@ def capture(
     ``mode="reduce-overhead"`` (or ``"max-autotune"``, or
     ``options={"triton.cudagraphs": True}``) makes a :class:`DynamoTracer`
     capture serve its loaded graphs as CUDA graphs, as the capture ran them:
-    the artifact records ``triton.cudagraphs`` and ``triton.cudagraph_trees``
+    the artifact records ``triton.cudagraphs``, ``triton.cudagraph_trees``
+    and ``graph_partition`` (which picks how a partitioned graph is wrapped)
     as the capture compiled under them (``mode`` and ``options`` over the
     process's ``torch._inductor.config`` when ``capture()`` is called) in its
     ``CUDAGRAPH_CONFIG``, and the loading process records its CUDA graphs
-    afresh on its first calls. Whether a graph can run as a CUDA
-    graph at all (``triton.cudagraph_support_input_mutation``,
+    afresh on its first calls. Whether a graph can run as a CUDA graph at all (``triton.cudagraph_support_input_mutation``,
     ``force_disable_cudagraph_TESTING_ONLY``) is decided when it compiles, and
     that decision ships with it. The settings CUDA graph trees read while the
     graphs run (``triton.cudagraph_capture_sizes``,
@@ -3648,8 +3648,8 @@ def load(
 
     The graphs a :class:`DynamoTracer` artifact ships run as CUDA graphs
     exactly when its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading
-    process's ``torch._inductor.config.triton.cudagraphs`` and
-    ``triton.cudagraph_trees`` say; the rest of the CUDA graph config is the
+    process's ``torch._inductor.config.triton.cudagraphs``,
+    ``triton.cudagraph_trees`` and ``graph_partition`` say; the rest of the CUDA graph config is the
     loading process's, and so is all of it for a serve-time compile
     (``allow_serve_time_compiles``), like the rest of the Inductor config.
 
