@@ -4,7 +4,12 @@ import unittest
 
 import torch
 import torch.nn as nn
-from torch.distributed._tools.mem_tracker import MemTracker
+from torch.distributed._tools.mem_tracker import (
+    _PYTORCH_MIN_ALLOCATE,
+    _MemRefType,
+    _WeakRefInfo,
+    MemTracker,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
@@ -155,6 +160,45 @@ class TestMemTracker(TestCase):
         acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
         accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
+
+    def test_mem_consumed_rounding(self):
+        """
+        Tests that ``_WeakRefInfo._calculate_mem_consumed`` applies the 512-byte
+        allocation rounding only for storages on the current accelerator, and
+        reports the exact byte count for all other devices.
+        """
+        # CPU storages must never be rounded, regardless of accelerator
+        # availability or allocator settings.
+        numels, element_size = 3, 4
+        winfo = _WeakRefInfo(numels, element_size, torch.device("cpu"), _MemRefType.ACT)
+        self.assertEqual(winfo.mem_consumed, numels * element_size)
+
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is None:
+            raise unittest.SkipTest("No accelerator available")
+        if _PYTORCH_MIN_ALLOCATE == 1:
+            raise unittest.SkipTest(
+                "Caching allocator disabled; allocation rounding is a no-op"
+            )
+
+        # Small accelerator storages are rounded up to the minimum allocation.
+        winfo = _WeakRefInfo(numels, element_size, accelerator, _MemRefType.PARAM)
+        self.assertEqual(winfo.mem_consumed, _PYTORCH_MIN_ALLOCATE)
+
+        # Accelerator storages already aligned to the minimum allocation size
+        # stay unchanged.
+        aligned_numels = _PYTORCH_MIN_ALLOCATE // element_size
+        winfo = _WeakRefInfo(
+            aligned_numels, element_size, accelerator, _MemRefType.PARAM
+        )
+        self.assertEqual(winfo.mem_consumed, aligned_numels * element_size)
+
+        # An accelerator storage one element above the aligned size is rounded
+        # up to the next multiple of _PYTORCH_MIN_ALLOCATE.
+        winfo = _WeakRefInfo(
+            aligned_numels + 1, element_size, accelerator, _MemRefType.PARAM
+        )
+        self.assertEqual(winfo.mem_consumed, 2 * _PYTORCH_MIN_ALLOCATE)
 
     def test_tracker_attribution(self):
         """
