@@ -13099,6 +13099,35 @@ class <lambda>(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_nested_input_mutation(self, device, dynamic):
+        # Regression for #201742: mutation inside a nested cond must propagate
+        # through the outer cond via auto_functionalization (not silently drop).
+        class M(torch.nn.Module):
+            def forward(self, p, q, y, x):
+                def inner_true(y, x):
+                    y.copy_(x * 2.0)
+                    return (x + 1.0,)
+
+                def inner_false(y, x):
+                    return (x - 1.0,)
+
+                def tb(q, y, x):
+                    return torch.cond(q, inner_true, inner_false, (y, x))
+
+                def fb(q, y, x):
+                    return (x * 0.5,)
+
+                return torch.cond(p, tb, fb, (q, y, x))
+
+        p = torch.tensor(True)
+        q = torch.tensor(True)
+        y = torch.full((4,), 7.0)
+        x = torch.arange(4, dtype=torch.float32)
+        self.check(M, (p, q, y, x), device, dynamic)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
         class M(torch.nn.Module):
             def __init__(self):
