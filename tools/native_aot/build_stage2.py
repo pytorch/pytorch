@@ -411,7 +411,7 @@ def should_run() -> bool:
             return False
 
     # Also "not applicable": the DSL wheels are cp-tagged and do not exist for
-    # every interpreter the release matrix builds. For the pinned 4.8.0 the
+    # every interpreter the release matrix builds. For the pinned 4.8.1 the
     # -libs-* packages publish cp310-cp314 plus cp314t on Linux, with no sdist,
     # while the matrix also builds 3.13t/3.15/3.15t. Those wheels keep the JIT
     # path; demanding an unresolvable tag would fail the build on nothing anyone

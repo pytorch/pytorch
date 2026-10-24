@@ -352,30 +352,36 @@ function install_flash_attn_cute() {
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
     flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK support the CuTeDSL version accepted by torch._native, but
+  # do not pin it, so install the pinned CuTeDSL in the same resolve.
   pip_install \
     "$flash_attn_package" \
+    "$(cutlass_dsl_package)" \
     quack-kernels==0.6.5 \
     apache-tvm-ffi==0.1.12
   echo "FlashAttention 4 installation complete."
 }
 
-function install_cutlass_dsl() {
-  local cutlass_dsl_package=nvidia-cutlass-dsl==4.8.0
+# Pin to a version accepted by torch._native's cutedsl version gate
+# (_CUTEDSL_REQUIRED_VERSIONS).
+function cutlass_dsl_package() {
   if [[
     "${DESIRED_CUDA:-}" == cu13* ||
     "${DESIRED_CUDA:-}" == 13.* ||
     "${CUDA_VERSION:-}" == 13.* ||
     "${BUILD_ENVIRONMENT:-}" == *cuda13*
   ]]; then
-    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.8.0"
+    echo "nvidia-cutlass-dsl[cu13]==4.8.1"
+  else
+    echo "nvidia-cutlass-dsl==4.8.1"
   fi
+}
 
+function install_cutlass_dsl() {
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
-  # Pin to a version accepted by torch._native's cutedsl version gate
-  # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
-  # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
+  # apache-tvm-ffi is a required runtime dep of the CuTeDSL op overrides but
+  # is not pulled in by nvidia-cutlass-dsl.
+  pip_install "$(cutlass_dsl_package)" apache-tvm-ffi==0.1.12
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
