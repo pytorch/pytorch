@@ -11884,17 +11884,13 @@ class TestLinalgCudaOnly(TestCase):
 
     @dtypes(torch.float16)
     def test_reuse_pass_kill_switch_tunableop(self, device, dtype):
-        # PYTORCH_TUNABLEOP_NEAREST_MATCH=0 and PYTORCH_TUNABLEOP_RECORD_BORROWED=0
-        # force borrowing off for the whole process, overriding the enable call.
-        # Both are read into a function-local static, so a fresh process is the
-        # only way to exercise them.
+        # Setting either var to 0 forces borrowing off for the process. Both are
+        # read into a function-local static, so a fresh process is the only way
+        # to exercise them.
         #
-        # Scope: this covers the query accessors only. LookupNearest and
-        # RecordBorrowed apply the same env check at their own call sites, and
-        # that is NOT covered here -- deleting either one would leave this test
-        # green. They share a helper with the accessors, but sharing a helper is
-        # not evidence the call site invokes it. Asserting the behaviour needs a
-        # C++ test in a subprocess with the env set.
+        # Covers the query accessors only: the matching checks inside
+        # LookupNearest and RecordBorrowed are untested, and deleting either
+        # would leave this green.
         import os
         import subprocess
         import sys
