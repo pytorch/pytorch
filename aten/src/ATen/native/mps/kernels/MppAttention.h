@@ -588,8 +588,7 @@ struct MPPTile {
 
 // Flash-attention prefill via matmul2d. Mirrors prefill_attention's contract
 // (PrefillAttnParams + 4D mask, last-dim contiguous, [B, H, L, D] layout,
-// upper-left causal, padded head dims). One threadgroup per (Q-block, head,
-// batch) tile.
+// upper-left causal). One threadgroup per (Q-block, head, batch, V/O slab).
 template <
     typename T,
     int BD,
@@ -597,31 +596,26 @@ template <
     bool DO_CAUSAL,
     bool IS_APPLE10,
     bool CHUNKED, // QK dim wider than BD, accumulated in BD-wide chunks
-    bool SPLIT, // split-K launch: O holds fp32 partial rows [row][split][BD]
     typename MaskType>
-[[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
+[[kernel,
+  max_total_threads_per_threadgroup(
+      kPrefillSimdgroups* c10::metal::simdgroup_size)]] void
 prefill_attention_mpp(
     const device T* Q [[buffer(0)]],
     const device T* K [[buffer(1)]],
     const device T* V [[buffer(2)]],
-    device SplitOutT<T, SPLIT>* O [[buffer(3)]],
+    device T* O [[buffer(3)]],
     const constant PrefillAttnParams* params [[buffer(4)]],
     const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
     const device MaskType* mask [[buffer(6)]],
-    device float* sums [[buffer(7)]],
-    device float* maxs [[buffer(8)]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint3 tid [[threadgroup_position_in_grid]]) {
   using AccumType = c10::metal::accum_t<T>;
   constexpr int BQ = kMppBQ;
   constexpr int BK = kMppBK;
 
-  const int n_splits = params->n_splits;
-  const int batch_splits = params->B * n_splits;
-  const int slab = tid.z / batch_splits;
-  const int batch_split = tid.z - slab * batch_splits;
-  const int batch_idx = batch_split / n_splits;
-  const int split = batch_split - batch_idx * n_splits;
+  const int slab = tid.z / params->B;
+  const int batch_idx = tid.z - slab * params->B;
   const int head_idx = tid.y;
   const int block_idx = tid.x;
 
@@ -650,6 +644,8 @@ prefill_attention_mpp(
   K += batch_idx * params->K_strides[0] + kv_head_idx * params->K_strides[1];
   V += batch_idx * params->V_strides[0] + kv_head_idx * params->V_strides[1] +
       slab * Dv;
+  O += batch_idx * params->O_strides[0] + head_idx * params->O_strides[1] +
+      (block_idx * BQ) * params->O_strides[2] + slab * Dv;
 
   if constexpr (HAS_MASK) {
     mask += batch_idx * mask_params->M_strides[0] +
@@ -661,7 +657,7 @@ prefill_attention_mpp(
   const int q_seq_stride = int(params->Q_strides[2]);
   const int k_seq_stride = int(params->K_strides[2]);
   const int v_seq_stride = int(params->V_strides[2]);
-  int o_seq_stride = int(params->O_strides[2]);
+  const int o_seq_stride = int(params->O_strides[2]);
 
   // Pre-multiply by 1/ln(2) so we can use exp2 in the inner softmax.
   const AccumType scale2 =
@@ -693,20 +689,6 @@ prefill_attention_mpp(
   const short tm = kU * TQ * simd_group_id;
   Q += tm * q_seq_stride;
 
-  // Split-K writes this split's unnormalized rows of O[row][split][slabs * Dv]
-  // plus the row max (log2 units) and sum for sdpa_merge_partials.
-  const int part0 =
-      ((batch_idx * params->H + head_idx) * qL + block_idx * BQ + tm) *
-          n_splits +
-      split;
-  if constexpr (SPLIT) {
-    O += (long(part0) * params->n_slabs + slab) * Dv;
-    o_seq_stride = n_splits * params->n_slabs * Dv;
-  } else {
-    O += batch_idx * params->O_strides[0] + head_idx * params->O_strides[1] +
-        (block_idx * BQ + tm) * params->O_strides[2] + slab * Dv;
-  }
-
   const short2 simd_coord = otile_t::MPPFrag_t::get_coord();
   const short sm = simd_coord.y;
   const short sn = simd_coord.x;
@@ -731,29 +713,18 @@ prefill_attention_mpp(
   }
 
   const bool is_last_q = (block_idx == NQ_aligned);
-  const short lim_rows_q = qL_rem - tm;
-  const short lim_rows_k = kL_rem;
+  const short q_rows = (!align_Q && is_last_q) ? short(qL_rem - tm) : BQ;
 
-  // Split-K: threadgroup `split` covers K blocks [kb0, kb1) of this Q block.
-  const int kb0 = split * kb_lim / n_splits;
-  const int kb1 = (split + 1) * kb_lim / n_splits;
-  K += long(kb0) * BK * k_seq_stride;
-  V += long(kb0) * BK * v_seq_stride;
-
-  for (int kb = kb0; kb < kb1; kb++) {
+  for (int kb = 0; kb < kb_lim; kb++) {
     const bool is_last_k = (kb == NK_aligned);
-    const short q_rows = (!align_Q && is_last_q) ? lim_rows_q : BQ;
-    const short k_rows = (!align_K && is_last_k) ? lim_rows_k : BK;
+    const short k_rows = (!align_K && is_last_k) ? short(kL_rem) : BK;
 
     using stile_t = MPPTile<AccumType, TQ, TK, QFrag_t>;
     stile_t Stile;
     Stile.clear();
 
-    // S = Q @ K^T, accumulated over BD-wide chunks of the QK dim when CHUNKED.
-    // K is loaded row-major and consumed transposed by mma.
-    const int d_end = CHUNKED ? D : BD;
-    for (int d0 = 0; d0 < d_end; d0 += BD) {
-      const bool d_full = d0 + BD <= D;
+    // S = Q @ K^T. K is loaded row-major and consumed transposed by mma.
+    for (int d0 = 0; d0 < (CHUNKED ? D : BD); d0 += BD) {
       MPP_PRAGMA_UNROLL
       for (short iq = 0; iq < TQ; iq++) {
         MPP_PRAGMA_UNROLL
@@ -767,14 +738,14 @@ prefill_attention_mpp(
             const int Q_load_off = iq * kU * q_seq_stride + dcol;
             const int K_load_off = ik * kU * k_seq_stride + dcol;
 
-            if (d_full && q_rows == BQ) {
+            if (d0 + BD <= D && q_rows == BQ) {
               Qtile.load(Q + Q_load_off, q_seq_stride);
             } else {
               Qtile.load_safe(
                   Q + Q_load_off, q_seq_stride, q_rows - iq * kU, D - dcol);
             }
 
-            if (d_full && k_rows == BK) {
+            if (d0 + BD <= D && k_rows == BK) {
               Ktile.load(K + K_load_off, k_seq_stride);
             } else {
               Ktile.load_safe(
@@ -800,7 +771,7 @@ prefill_attention_mpp(
       Stile.elems()[ii] *= scale2;
     }
 
-    // Mask out the partial K column when kL is not BK-aligned.
+    // Mask out the partial K column when kL is not a multiple of 32 (BK).
     if (!align_K && is_last_k) {
       MPP_PRAGMA_UNROLL
       for (short iq = 0; iq < TQ; iq++) {
@@ -894,7 +865,7 @@ prefill_attention_mpp(
             if constexpr (is_bool) {
               fg[jj] = mfrag[jj] ? fg[jj] : (AccumType)-INFINITY;
             } else {
-              fg[jj] += mask_log2e(mfrag[jj]);
+              fg[jj] += mask_log2e(static_cast<AccumType>(mfrag[jj]));
             }
           }
         }
@@ -931,7 +902,6 @@ prefill_attention_mpp(
     simdgroup_barrier(mem_flags::mem_none);
 
     // O += P @ V.
-    const bool v_full = k_rows == BK && Dv == BD;
     MPP_PRAGMA_UNROLL
     for (short iq = 0; iq < TQ; iq++) {
       MPP_PRAGMA_UNROLL
@@ -945,7 +915,7 @@ prefill_attention_mpp(
         for (short ik = 0; ik < TK; ik++) {
           MPPTile<T, 1, 2, QFrag_t> Vtile;
           const int V_load_off = ik * kU * v_seq_stride + id * kU;
-          if (v_full) {
+          if (k_rows == BK && Dv == BD) {
             Vtile.load(V + V_load_off, v_seq_stride);
           } else {
             Vtile.load_safe(
@@ -971,78 +941,59 @@ prefill_attention_mpp(
   // back below.
   threadgroup_barrier(mem_flags::mem_none);
 
-  const short o_rows = (!align_Q && is_last_q) ? lim_rows_q : BQ;
-  if constexpr (SPLIT) {
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
-      const int row = sm + i * otile_t::kFragRowsJump;
-      if (sn == 0 && row < o_rows) {
-        sums[part0 + row * n_splits] = sum_score[i];
-        maxs[part0 + row * n_splits] = max_score[i];
-      }
+  // Treat fully-masked rows as zero output.
+  MPP_PRAGMA_UNROLL
+  for (short i = 0; i < kRowsPT; ++i) {
+    if (max_score[i] == -INFINITY) {
+      sum_score[i] = (AccumType)1;
     }
-  } else {
-    // Treat fully-masked rows as zero output.
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
-      if (max_score[i] == -INFINITY) {
-        sum_score[i] = (AccumType)1;
-      }
-    }
-    metal::vec<AccumType, kRowsPT> rcp;
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
-      rcp[i] = 1.0f / sum_score[i];
-    }
-    Otile.template row_bin_op<MulOp>(rcp);
   }
+  metal::vec<AccumType, kRowsPT> rcp;
+  MPP_PRAGMA_UNROLL
+  for (short i = 0; i < kRowsPT; ++i) {
+    rcp[i] = 1.0f / sum_score[i];
+  }
+  Otile.template row_bin_op<MulOp>(rcp);
 
-  if (o_rows <= 0) {
+  O += tm * o_seq_stride;
+  if (q_rows <= 0) {
     return;
   }
-  if (o_rows >= otile_t::kRows && Dv >= otile_t::kCols) {
+  if (q_rows >= otile_t::kRows && Dv >= otile_t::kCols) {
     Otile.store(O, o_seq_stride);
   } else {
-    Otile.store_safe(O, o_seq_stride, o_rows, Dv);
+    Otile.store_safe(O, o_seq_stride, q_rows, Dv);
   }
 }
 
-#define instantiate_mpp_attn_arch(                                           \
-    arch, is_a10, dtype, bd, hm, dc, ck, sp, mtype)                          \
-  instantiate_kernel(                                                        \
-      "prefill_attention_mpp_" arch "_" #dtype "_bd" #bd "_hm" #hm "_dc" #dc \
-      "_ck" #ck "_split" #sp "_mask" #mtype,                                 \
-      prefill_attention_mpp,                                                 \
-      dtype,                                                                 \
-      bd,                                                                    \
-      hm,                                                                    \
-      dc,                                                                    \
-      is_a10,                                                                \
-      ck,                                                                    \
-      sp,                                                                    \
+#define instantiate_mpp_attn_arch(arch, is_a10, dtype, bd, hm, dc, ck, mtype) \
+  instantiate_kernel(                                                         \
+      "prefill_attention_mpp_" arch "_" #dtype "_bd" #bd "_hm" #hm "_dc" #dc  \
+      "_ck" #ck "_mask" #mtype,                                               \
+      prefill_attention_mpp,                                                  \
+      dtype,                                                                  \
+      bd,                                                                     \
+      hm,                                                                     \
+      dc,                                                                     \
+      is_a10,                                                                 \
+      ck,                                                                     \
       mtype)
 
-// Both GPU-generation layouts, each also as a split-K variant writing fp32
-// partials.
-#define instantiate_mpp_attn(dtype, bd, hm, dc, ck, mtype)                 \
-  instantiate_mpp_attn_arch("a10", true, dtype, bd, hm, dc, ck, 0, mtype); \
-  instantiate_mpp_attn_arch("a10", true, dtype, bd, hm, dc, ck, 1, mtype); \
-  instantiate_mpp_attn_arch("a9", false, dtype, bd, hm, dc, ck, 0, mtype); \
-  instantiate_mpp_attn_arch("a9", false, dtype, bd, hm, dc, ck, 1, mtype)
+#define instantiate_mpp_attn(dtype, bd, hm, dc, ck, mtype)              \
+  instantiate_mpp_attn_arch("a10", true, dtype, bd, hm, dc, ck, mtype); \
+  instantiate_mpp_attn_arch("pre_a10", false, dtype, bd, hm, dc, ck, mtype)
 
-// Head dims above the widest tile are chunked on the 128 tile, so only it
-// gets a chunked variant. Keep the tiles in sync with kMppTiles in
-// Attention.mm.
-#define instantiate_mpp_attn_tiles(dtype, hm, dc, mtype) \
-  instantiate_mpp_attn(dtype, 256, hm, dc, 0, mtype);    \
-  instantiate_mpp_attn(dtype, 128, hm, dc, 1, mtype);    \
-  instantiate_mpp_attn(dtype, 128, hm, dc, 0, mtype);    \
-  instantiate_mpp_attn(dtype, 96, hm, dc, 0, mtype);     \
+// Keep the tiles in sync with kMppTiles / kMppWideTile in Attention.h: the 256
+// tile only serves pre-Apple10, and only Apple10 chunks (on the 128 tile).
+#define instantiate_mpp_attn_tiles(dtype, hm, dc, mtype)                     \
+  instantiate_mpp_attn_arch("pre_a10", false, dtype, 256, hm, dc, 0, mtype); \
+  instantiate_mpp_attn_arch("a10", true, dtype, 128, hm, dc, 1, mtype);      \
+  instantiate_mpp_attn(dtype, 128, hm, dc, 0, mtype);                        \
+  instantiate_mpp_attn(dtype, 96, hm, dc, 0, mtype);                         \
   instantiate_mpp_attn(dtype, 64, hm, dc, 0, mtype)
 
 // Without a mask the mask name is the query dtype. A mask together with
-// is_causal is rejected on the host, so there are no hm1_dc1 variants; an
-// fp32 additive mask is taken as is and added in fp32, like the CPU math path.
+// is_causal is rejected on the host, so there are no hm1_dc1 variants.
 #define instantiate_mpp_attn_masks(dtype)         \
   instantiate_mpp_attn_tiles(dtype, 0, 0, dtype); \
   instantiate_mpp_attn_tiles(dtype, 0, 1, dtype); \

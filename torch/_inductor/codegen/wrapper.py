@@ -6585,6 +6585,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
+        self.multi_kernel_state = MultiKernelState(parent_wrapper.multi_kernel_state)
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of

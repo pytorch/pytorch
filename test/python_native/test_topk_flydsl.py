@@ -198,8 +198,6 @@ class TestFlyDSLTopK(TestCase):
         indices_base = torch.full((m, k), -1, dtype=torch.int64, device="cuda")
         values = values_base._lazy_clone()
         indices = indices_base._lazy_clone()
-        if not torch._C._is_cow_tensor(values):
-            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(torch._C._is_cow_tensor(values))
         self.assertTrue(torch._C._is_cow_tensor(indices))
 
@@ -241,8 +239,6 @@ class TestFlyDSLTopK(TestCase):
             ref_v, _ = torch.topk(x, k, dim=-1)
 
         x = x._lazy_clone()
-        if not torch._C._is_cow_tensor(x):
-            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(torch._C._is_cow_tensor(x))
         data_ptr = x.const_data_ptr()
 
