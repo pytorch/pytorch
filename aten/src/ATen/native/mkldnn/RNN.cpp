@@ -253,14 +253,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   // per layer input size
   int64_t input_size = input.size(2);
   ideep::tensor w1_, w2_;
-  auto x = itensor_view_from_dense(
+  auto x = itensor_view_from_const_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
-  auto hx = itensor_view_from_dense(
+  auto hx = itensor_view_from_const_dense(
       hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_)));
-  auto cx = itensor_view_from_dense(
+  auto cx = itensor_view_from_const_dense(
       cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_)));
-  auto b = itensor_view_from_dense(
+  auto b = itensor_view_from_const_dense(
       bias, rnn.bias_desc(get_mkldnn_dtype(bias)));
   auto y = itensor_view_from_dense(
       output, rnn.dst_layer_desc(get_mkldnn_dtype(output)));
@@ -268,8 +268,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_)));
   auto cy = itensor_view_from_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
-  w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
-  w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
+  w1_ = weight_ih.is_mkldnn() ? itensor_from_const_tensor(weight_ih) : itensor_view_from_const_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
+  w2_ = weight_hh.is_mkldnn() ? itensor_from_const_tensor(weight_hh) : itensor_view_from_const_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
@@ -277,7 +277,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
     ideep::tensor mkldnn_workspace;
     mkldnn_workspace.init(
-        pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
+      pd.workspace_desc(), workspace.template mutable_data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
         pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
     return std::make_tuple(
@@ -343,27 +343,26 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 
   // per layer input size
   int64_t input_size = input.size(2);
-  auto x = itensor_view_from_dense(
+    auto x = itensor_view_from_const_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input.scalar_type())));
-  auto hx = itensor_view_from_dense(
+    auto hx = itensor_view_from_const_dense(
       hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_.scalar_type())));
-  auto cx = itensor_view_from_dense(
+    auto cx = itensor_view_from_const_dense(
       cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_.scalar_type())));
-  auto w1 = itensor_view_from_dense(
+    auto w1 = itensor_view_from_const_dense(
       weight_ih,
-      rnn.weights_layer_desc(
-          input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
-  auto w2 = itensor_view_from_dense(
+      rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
+    auto w2 = itensor_view_from_const_dense(
       weight_hh,
       rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
-  auto b = itensor_view_from_dense(
+    auto b = itensor_view_from_const_dense(
       bias, rnn.bias_desc(get_mkldnn_dtype(bias.scalar_type())));
-  auto y = itensor_view_from_dense(
+    auto y = itensor_view_from_const_dense(
       output, rnn.dst_layer_desc(get_mkldnn_dtype(output.scalar_type())));
-  auto hy = itensor_view_from_dense(
+    auto hy = itensor_view_from_const_dense(
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_.scalar_type())));
-  auto cy = itensor_view_from_dense(
+    auto cy = itensor_view_from_const_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
 
   // Create diff_* ATen tensor and corresponding ideep tensor as fp32
@@ -409,25 +408,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
         grad_cy.sizes(), grad_cy.options().dtype(at::ScalarType::Float));
     grad_cy_.copy_(grad_cy);
 
-    diff_y = itensor_view_from_dense(
+    diff_y = itensor_view_from_const_dense(
         grad_y_, rnn.dst_layer_desc(get_mkldnn_dtype(grad_y_.scalar_type())));
-    diff_hy = itensor_view_from_dense(
+    diff_hy = itensor_view_from_const_dense(
         grad_hy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_hy_.scalar_type())));
-    diff_cy = itensor_view_from_dense(
+    diff_cy = itensor_view_from_const_dense(
         grad_cy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_cy_.scalar_type())));
   } else {
-    diff_y = itensor_view_from_dense(
+    diff_y = itensor_view_from_const_dense(
         grad_output, rnn.dst_layer_desc(ideep::tensor::data_type::f32));
-    diff_hy = itensor_view_from_dense(
+    diff_hy = itensor_view_from_const_dense(
         grad_hy, rnn.dst_iter_desc(ideep::tensor::data_type::f32));
-    diff_cy = itensor_view_from_dense(
+    diff_cy = itensor_view_from_const_dense(
         grad_cy, rnn.dst_iter_desc(ideep::tensor::data_type::f32));
   }
 
   auto forward_hint = ideep::lstm_forward_training::prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
   ideep::tensor mkldnn_workspace;
   mkldnn_workspace.init(
-      forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
+      forward_hint.workspace_desc(), workspace.template mutable_data_ptr<uint8_t>());
   ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
   auto diff_b2_ = at::clone(diff_b_);
   return std::make_tuple(std::move(diff_x_), std::move(diff_w1_), std::move(diff_w2_), std::move(diff_b_), std::move(diff_b2_), std::move(diff_hx_), std::move(diff_cx_));

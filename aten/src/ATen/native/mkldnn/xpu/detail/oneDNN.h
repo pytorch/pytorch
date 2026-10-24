@@ -145,14 +145,14 @@ at::Tensor quantized_convolution(
     std::optional<std::string_view> unary_algorithm);
 
 void quantized_matmul(
-    at::Tensor mat1, // act
+    const at::Tensor& mat1, // act
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor mat2, // weight
+    const at::Tensor& mat2, // weight
     at::Tensor& weight_scales,
     at::Tensor& weight_zero_points,
     at::Tensor& b_raw,
-    at::Tensor result, // output
+    const at::Tensor& result, // output
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
