@@ -8,7 +8,7 @@ from typing import cast
 
 import torch
 import torch.nn.functional as F
-from torch.distributed import init_device_mesh
+from torch.distributed import init_device_mesh, is_nccl_available
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
@@ -463,9 +463,15 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
     @with_comms
     @skip_unless_torch_gpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
+    @unittest.skipUnless(
+        PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    @unittest.skipUnless(
+        not is_nccl_available()
+        or SM90OrLater
+        or torch.cuda.nccl.version() >= (2, 28, 3),
+        "NCCL FP8 reduction support begins with sm90 capable devices",
     )
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
