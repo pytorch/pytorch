@@ -211,6 +211,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     collections.defaultdict.__getattribute__,
     collections.deque.__getattribute__,
     BaseException.__getattribute__,
+    property.__getattribute__,
 )
 if sys.version_info < (3, 13):
     # SimpleNamespace names tp_getattro in its static struct before 3.13, so
@@ -599,6 +600,11 @@ class SideEffects:
                 del self.attr_mutation_kinds[item][name]
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
 
+    def remove_attr_mutation(self, item: VariableTracker, name: str) -> None:
+        if name in self.store_attr_mutations.get(item, ()):
+            del self.store_attr_mutations[item][name]
+            del self.attr_mutation_kinds[item][name]
+
     def get_attr_mutation_kind(
         self, item: VariableTracker, name: str
     ) -> AttrMutationKind:
@@ -855,6 +861,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, collections.deque):
             variable_cls = variables.UserDefinedDequeVariable
+        elif issubclass(user_cls, property):
+            variable_cls = variables.UserDefinedPropertyVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -1166,6 +1174,7 @@ class SideEffects:
         # Since newly constructed objects don't have a source, we manually
         # codegen their construction and store them to a newly assigned local
         # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
+        properties = []
         for var in self._get_modified_vars():
             if not isinstance(var.mutation_type, AttributeMutationNew):
                 if var.source is None:
@@ -1305,6 +1314,9 @@ class SideEffects:
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
 
+                if isinstance(var, variables.UserDefinedPropertyVariable):
+                    properties.append(var)
+
                 # For frozen dataclasses, we must emit object.__setattr__
                 # immediately after __new__ — before any other code can
                 # access the object.  The suffix-based codegen in
@@ -1324,6 +1336,10 @@ class SideEffects:
                         cg.extend_output(
                             [*create_call_method(3), create_instruction("POP_TOP")]
                         )
+
+        # Initialize C fields after every new object has a reconstruction source.
+        for var in properties:
+            var.codegen_init(cg)
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)

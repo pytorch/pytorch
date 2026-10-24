@@ -90,6 +90,11 @@ class _FrameState:
     f_builtins: dict
 
 
+class SerializableProperty(property):
+    def __reduce__(self):
+        return type(self), (self.fget, self.fset, self.fdel), self.__dict__
+
+
 class GlobalModule(torch.nn.Module):
     def forward(self, x):
         return x + 1
@@ -5863,6 +5868,57 @@ class TestGuardSerialization(TestGuardSerializationBase):
             {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
             False,
         )
+
+    @parametrize(
+        "attr",
+        ("fget", "fset", "fdel", "__isabstractmethod__", "__name__", "construction"),
+    )
+    def test_property_subclass_metadata(self, attr):
+        if attr == "__name__" and sys.version_info < (3, 13):
+            self.skipTest("property names require Python 3.13+")
+        if attr == "construction" and sys.version_info < (3, 12):
+            self.skipTest("property subclass construction requires Python 3.12+")
+        unsupported = frozenset(
+            CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+        )
+
+        def guard_filter(guards):
+            keep = []
+            for guard in guards:
+                # Keep property descriptor ID guards so serialization catches them.
+                property_descriptor = (
+                    guard.has_value
+                    and isinstance(
+                        guard.value,
+                        (types.GetSetDescriptorType, types.MemberDescriptorType),
+                    )
+                    and guard.value.__objclass__ is property
+                )
+                keep.append(guard.guard_type not in unsupported or property_descriptor)
+            return keep
+
+        def fn(x, p, attr):
+            if attr == "construction":
+                p = SerializableProperty()
+                value = p.fget
+            else:
+                value = getattr(p, attr)
+            return x + 1, value is None
+
+        p = SerializableProperty(global_func)
+        x = torch.ones(2)
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize(
+            "eager", package=package, guard_filter_fn=guard_filter
+        )(fn)
+        self.assertEqual(compiled(x, p, attr), fn(x, p, attr))
+        entries = package._codes[fn.__code__].guarded_codes
+        self.assertEqual(len(entries), 1)
+        state = load_guards_state(entries[0].guards_state)
+        guards = torch._dynamo.package.load_guard_manager(
+            state, fn.__code__, fn.__globals__
+        )
+        self.assertTrue(guards.check({"x": x, "p": p, "attr": attr}))
 
     def test_source_serialization(self):
         # Test that "equal" sources with different hashes serialize to the same result
