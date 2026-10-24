@@ -19,6 +19,7 @@ import time
 from typing import Any, Literal, NamedTuple
 
 import sympy
+
 import torch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
@@ -627,9 +628,7 @@ def maybe_range_pretune(winner) -> None:
     # Copy the winner's serializable bmreq and rebuild its tensor metas per
     # bucket, reusing Inductor's meta machinery rather than rebuilding the GEMM.
     from torch._inductor.autotune_process import TensorMeta
-    from torch._inductor.select_algorithm import (
-        get_strides_with_layout_constraints,
-    )
+    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
 
     def _as_buffer(node: Any) -> Any:
         return (
