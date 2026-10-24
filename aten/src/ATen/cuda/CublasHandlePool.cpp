@@ -120,7 +120,14 @@ static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, v
 #endif
 
 void createCublasHandle(cublasHandle_t *handle) {
-  TORCH_CUDABLAS_CHECK(cublasCreate(handle));
+  auto status = cublasCreate(handle);
+  // flushing cached memory can synchronize, so avoid it during capture.
+  if (status == CUBLAS_STATUS_ALLOC_FAILED &&
+      c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None) {
+    c10::cuda::CUDACachingAllocator::emptyCache();
+    status = cublasCreate(handle);
+  }
+  TORCH_CUDABLAS_CHECK(status);
 }
 
 #ifdef USE_ROCM
