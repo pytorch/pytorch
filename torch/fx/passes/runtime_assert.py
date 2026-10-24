@@ -673,7 +673,15 @@ def insert_deferred_runtime_asserts(
                     # treat upper bound == sys.maxsize - 1 for int symbols as +oo
                     # to avoid redundant runtime assert
                     vr = ValueRanges(vr.lower, int_oo)
-                if not shape_env._default_unspecified_value_range().issubset(vr):
+                # An equal symbol's range checks suffice only when they were
+                # already emitted and cover at least this symbol's range.
+                rep = shape_env.replacements.get(i0)
+                checked_via_rep = rep in constrained_unbacked_symbols and (
+                    shape_env.var_to_range[rep].issubset(vr)
+                )
+                if not checked_via_rep and not (
+                    shape_env._default_unspecified_value_range().issubset(vr)
+                ):
                     # The runtime range is constrained, so add a runtime
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
