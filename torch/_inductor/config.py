@@ -73,6 +73,12 @@ def static_cuda_launcher_default() -> bool:
 
     if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
+    elif os.environ.get("TRITON_COMPILE_IQ_COLLECT") or os.environ.get(
+        "TRITON_COMPILE_IQ_APPLY"
+    ):
+        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
+        # launcher bypasses.
+        return False
     elif is_fbcode():
         version = torch._utils_internal.justknobs_getval_int(
             "pytorch/inductor:static_cuda_launcher_version"
