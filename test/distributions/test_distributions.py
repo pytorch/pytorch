@@ -3382,7 +3382,9 @@ class TestDistributions(DistributionsTestCase):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
         x = torch.randn(ndim)
-        P = torch.exp(-((x - x.unsqueeze(-1)) ** 2))  # RBF kernel
+        # RBF kernel plus diagonal jitter: nearby points can make the bare kernel
+        # numerically singular, so it would fail PositiveDefinite for some seeds.
+        P = torch.exp(-((x - x.unsqueeze(-1)) ** 2)) + 1e-3 * torch.eye(ndim)
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
