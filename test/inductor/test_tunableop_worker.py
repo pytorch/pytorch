@@ -1,0 +1,496 @@
+# Owner(s): ["module: inductor"]
+
+import os
+import unittest
+from unittest import mock
+
+import torch
+from torch._inductor import tunableop
+from torch._inductor.autotune_process import _TestBenchmarkRequest
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfWindows,
+    TestCase,
+    run_tests,
+)
+
+
+class _FakeProcess:
+    """Stands in for TuningProcess: records how it was constructed."""
+
+    def __init__(self, device=None):
+        self.device = device
+        self.sent = []
+        self.result = 1.0
+        self.raises = None
+        self.shutdown_calls = 0
+
+    def put(self, job):
+        self.sent.append(job)
+
+    def get(self, timeout=None):
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+    def shutdown(self, wait=True):
+        self.shutdown_calls += 1
+
+
+class TunableOpWorkerTest(TestCase):
+    """The worker is a subprocess holding process-global TunableOp state, so the
+    things worth pinning are which GPU it lands on and when it gets replaced.
+    Neither needs a GPU to check, and a GPU-only test would not run in CI."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        tunableop._worker = None
+        tunableop._worker_key = None
+        self.created = []
+
+        def factory(device=None):
+            proc = _FakeProcess(device=device)
+            self.created.append(proc)
+            return proc
+
+        patcher = mock.patch(
+            "torch._inductor.autotune_process.TuningProcess", side_effect=factory
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(setattr, tunableop, "_worker", None)
+        self.addCleanup(setattr, tunableop, "_worker_key", None)
+
+    def _submit(self, device=0, filename="t0.csv", job=None):
+        with (
+            mock.patch("torch.cuda.current_device", return_value=device),
+            mock.patch("torch.cuda.tunable.get_filename", return_value=filename),
+        ):
+            return tunableop.submit(job or tunableop.BenchmarkJob(None, tuning=False))
+
+    def test_worker_does_not_inherit_a_rewritten_visibility_mask(self):
+        # TuningProcess.start() REPLACES CUDA_VISIBLE_DEVICES with str(device),
+        # so passing a logical ordinal would point the worker at a different
+        # physical GPU: with CUDA_VISIBLE_DEVICES=4,7 and logical 1, the parent
+        # is on physical 7 and the worker would take physical 1.
+        self._submit(device=1)
+        self.assertEqual(len(self.created), 1)
+        self.assertIsNone(self.created[0].device)
+
+    def test_job_carries_the_submitting_logical_device(self):
+        # The mask is left alone, so the ordinal means the same GPU in the
+        # worker -- but only if the job actually carries it.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        self._submit(device=3, job=job)
+        self.assertEqual(job.device, 3)
+
+    def test_worker_restarts_when_the_device_changes(self):
+        self._submit(device=0)
+        first = self.created[0]
+        self._submit(device=1)
+        self.assertEqual(len(self.created), 2)
+        self.assertEqual(first.shutdown_calls, 1)
+
+    def test_worker_restarts_when_the_results_file_changes(self):
+        # The worker reads the results file once at startup, so a second compile
+        # pointing somewhere else must not keep appending to the first file.
+        self._submit(filename="a.csv")
+        first = self.created[0]
+        self._submit(filename="b.csv")
+        self.assertEqual(len(self.created), 2)
+        self.assertEqual(first.shutdown_calls, 1)
+
+    def test_worker_is_reused_when_device_and_file_are_unchanged(self):
+        self._submit(device=2, filename="a.csv")
+        self._submit(device=2, filename="a.csv")
+        self.assertEqual(len(self.created), 1)
+
+    def test_faults_are_reported_rather_than_raised(self):
+        # A compile must continue when a GEMM cannot be benchmarked.
+        for exc, status in (
+            (TimeoutError(), "timeout"),
+            (EOFError(), "crash"),
+            (RuntimeError("boom"), "error"),
+        ):
+            tunableop._worker = None
+            tunableop._worker_key = None
+            self.created.clear()
+            job = tunableop.BenchmarkJob(None, tuning=False)
+            with (
+                mock.patch("torch.cuda.current_device", return_value=0),
+                mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+            ):
+                tunableop.get_worker((0, "t.csv")).raises = exc
+                outcome = tunableop.submit(job)
+            self.assertEqual(outcome.status, status)
+            self.assertIsNone(outcome.time)
+
+    def test_a_failure_before_the_worker_is_also_reported(self):
+        # The caller is a compile, not a benchmark harness: anything submit()
+        # touches -- including resolving the current device -- has to come back
+        # as an outcome rather than unwind the compile.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with mock.patch(
+            "torch.cuda.current_device", side_effect=RuntimeError("no context")
+        ):
+            outcome = tunableop.submit(job)
+        self.assertEqual(outcome.status, "error")
+        self.assertIsNone(outcome.time)
+
+    def test_error_restarts_the_worker(self):
+        # A catchable exception can leave a sticky GPU fault behind; the worker
+        # must not survive it, or every later GEMM fails the same way.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+        ):
+            tunableop.get_worker((0, "t.csv")).raises = RuntimeError("boom")
+            outcome = tunableop.submit(job)
+            self.assertEqual(outcome.status, "error")
+            self.assertIsNone(tunableop._worker)
+
+    def test_setup_failure_does_not_restart_worker(self):
+        # A failure before the worker is involved (no device) must not kill a
+        # healthy worker another thread may be using.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+        ):
+            tunableop.get_worker((0, "t.csv"))
+            first = tunableop._worker
+        with mock.patch(
+            "torch.cuda.current_device", side_effect=RuntimeError("no context")
+        ):
+            outcome = tunableop.submit(job)
+            self.assertEqual(outcome.status, "error")
+            self.assertIs(tunableop._worker, first)
+
+    def test_submit_stamps_parent_settings(self):
+        tunable = mock.Mock()
+        tunable.get_filename.return_value = "s.csv"
+        tunable.get_max_tuning_duration.return_value = 11
+        tunable.get_max_tuning_iterations.return_value = 12
+        tunable.get_rotating_buffer_size.return_value = 13
+        tunable.get_cublaslt_requested_algo_count.return_value = 14
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+        ):
+            tunableop.submit(job)
+        self.assertEqual(
+            job.settings,
+            {
+                "set_max_tuning_duration": 11,
+                "set_max_tuning_iterations": 12,
+                "set_rotating_buffer_size": 13,
+                "set_cublaslt_requested_algo_count": 14,
+            },
+        )
+
+    def test_snapshot_skips_unreadable_knobs(self):
+        tunable = mock.Mock()
+        tunable.get_filename.return_value = "s.csv"
+        tunable.get_max_tuning_duration.side_effect = RuntimeError("gone")
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+        ):
+            tunableop.submit(job)
+        self.assertNotIn("set_max_tuning_duration", job.settings)
+        # The failure is contained: the submission still went through.
+        self.assertEqual(job.filename, "s.csv")
+
+    def test_submit_stamps_resolved_filename(self):
+        # get_filename() is "" until the manager initializes; submit() must
+        # resolve the C++ default rule instead of keying the worker on "".
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        env = {k: v for k, v in os.environ.items() if k != "PYTORCH_TUNABLEOP_FILENAME"}
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable.get_filename", return_value=""),
+            mock.patch.dict("os.environ", env, clear=True),
+        ):
+            # No PYTORCH_TUNABLEOP_FILENAME: default rule applies, ordinal included.
+            tunableop.submit(job)
+            self.assertEqual(job.filename, "tunableop_results0.csv")
+            self.assertEqual(tunableop._worker_key, (0, "tunableop_results0.csv"))
+
+    def test_submit_prefers_env_filename_when_unset(self):
+        # The C++ manager inserts the device ordinal into the env name; the
+        # worker must use the same file or the runtime never sees its results.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=1),
+            mock.patch("torch.cuda.tunable.get_filename", return_value=""),
+            mock.patch.dict(
+                "os.environ", {"PYTORCH_TUNABLEOP_FILENAME": "env.csv"}
+            ),
+        ):
+            tunableop.submit(job)
+            self.assertEqual(job.filename, "env1.csv")
+
+    def test_insert_device_ordinal_matches_cpp_rule(self):
+        self.assertEqual(tunableop._insert_device_ordinal("r%d.csv", 3), "r3.csv")
+        self.assertEqual(tunableop._insert_device_ordinal("a.b.csv", 2), "a.b2.csv")
+        self.assertEqual(tunableop._insert_device_ordinal("results", 0), "results0")
+
+    def test_submit_uses_parent_filename_when_set(self):
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch(
+                "torch.cuda.tunable.get_filename", return_value="parent.csv"
+            ),
+        ):
+            tunableop.submit(job)
+            self.assertEqual(job.filename, "parent.csv")
+
+
+class BenchmarkJobCallTest(TestCase):
+    """BenchmarkJob.__call__ runs in the worker: set device first, then flags."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_call_sets_device_flags_and_filename(self):
+        calls = []
+
+        class FakeTunable:
+            def set_filename(self, filename, insert_device_ordinal=False):
+                calls.append(("set_filename", filename, insert_device_ordinal))
+
+            def enable(self, val):
+                calls.append(("enable", val))
+
+            def tuning_enable(self, val):
+                calls.append(("tuning_enable", val))
+
+            def _nearest_match_enable(self, val):
+                calls.append(("_nearest_match_enable", val))
+
+        class FakeBmreq:
+            benchmark_with_cudagraphs = True
+
+            def benchmark(self):
+                calls.append(("benchmark",))
+                return 1.5
+
+        job = tunableop.BenchmarkJob(FakeBmreq(), tuning=True, nearest_match=True)
+        job.device = 3
+        job.filename = "w.csv"
+        with (
+            mock.patch(
+                "torch.cuda.set_device", side_effect=lambda d: calls.append(
+                    ("set_device", d)
+                ),
+            ),
+            mock.patch("torch.cuda.tunable", FakeTunable()),
+        ):
+            self.assertEqual(job(), 1.5)
+        # Device first, then filename, then flags; cudagraphs cleared.
+        kinds = [c[0] for c in calls]
+        self.assertEqual(
+            kinds,
+            [
+                "set_device",
+                "set_filename",
+                "enable",
+                "tuning_enable",
+                "_nearest_match_enable",
+                "benchmark",
+            ],
+        )
+        self.assertEqual(calls[0], ("set_device", 3))
+        self.assertEqual(calls[1], ("set_filename", "w.csv", False))
+        self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
+
+    def test_call_skips_set_filename_when_empty(self):
+        seen = []
+
+        class FakeTunable:
+            def set_filename(self, *a, **k):
+                seen.append((a, k))
+
+            def enable(self, val):
+                pass
+
+            def tuning_enable(self, val):
+                pass
+
+            def _nearest_match_enable(self, val):
+                pass
+
+        class FakeBmreq:
+            benchmark_with_cudagraphs = True
+
+            def benchmark(self):
+                return 1.0
+
+        job = tunableop.BenchmarkJob(FakeBmreq(), tuning=False)
+        job.filename = ""
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", FakeTunable()),
+        ):
+            job()
+        self.assertEqual(seen, [])
+
+
+class TunableopModeValidationTest(TestCase):
+    """Invalid TORCHINDUCTOR_ATEN_TUNABLEOP_MODE values warn instead of silently
+    disabling."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_invalid_mode_warns_and_disables(self):
+        tunableop._mode_warned = False
+        try:
+            with mock.patch.object(
+                tunableop.config, "aten_tunableop_mode", "Tune"
+            ):
+                with self.assertLogs(tunableop.log, level="WARNING") as logs:
+                    self.assertFalse(tunableop.is_tune_mode())
+                    self.assertFalse(tunableop.is_reuse_mode())
+                    self.assertFalse(tunableop.is_enabled())
+            self.assertTrue(
+                any("TORCHINDUCTOR_ATEN_TUNABLEOP_MODE" in m for m in logs.output)
+            )
+            # Warns only once: the second invalid value logs nothing.
+            with mock.patch.object(
+                tunableop.config, "aten_tunableop_mode", "bogus"
+            ):
+                with self.assertNoLogs(tunableop.log, level="WARNING"):
+                    tunableop.is_enabled()
+        finally:
+            tunableop._mode_warned = False
+
+    def test_valid_modes_do_not_warn(self):
+        tunableop._mode_warned = False
+        try:
+            for mode in ("off", "tune", "reuse"):
+                with mock.patch.object(
+                    tunableop.config, "aten_tunableop_mode", mode
+                ):
+                    with self.assertNoLogs(tunableop.log, level="WARNING"):
+                        tunableop.is_enabled()
+        finally:
+            tunableop._mode_warned = False
+
+
+class TunableOpRealWorkerTest(TestCase):
+    """Runs jobs in a real TuningProcess.
+
+    _FakeProcess above cannot model get() killing or closing the process, or
+    put() restarting it, so the central claim -- a hang or crash leaves the
+    worker restartable and the next submission succeeds -- has no coverage
+    without this. No GPU needed: the jobs never touch CUDA, and only
+    current_device/get_filename are patched in the parent.
+
+    Jobs are _TestBenchmarkRequest instances passed directly: the request is
+    callable (see its __call__ in autotune_process.py) and unpickles in the
+    child, which only has torch on its path, so test-file classes cannot be
+    used. submit() stamps job.device before sending.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        tunableop._worker = None
+        tunableop._worker_key = None
+        self.addCleanup(tunableop.shutdown_worker)
+        self.addCleanup(setattr, tunableop, "_worker", None)
+        self.addCleanup(setattr, tunableop, "_worker_key", None)
+
+    def _job(self, **kwargs):
+        return _TestBenchmarkRequest(1.0, **kwargs)
+
+    def _submit(self, job, timeout):
+        # current_device is None (not 0): submit() stamps job.device with it,
+        # and _TestBenchmarkRequest.benchmark only asserts the visibility mask
+        # when device is not None. The stamping path itself is covered by the
+        # fake tests; here the jobs must run assertion-free in the child.
+        with (
+            mock.patch("torch.cuda.current_device", return_value=None),
+            mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+        ):
+            return tunableop.submit(job, timeout=timeout)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_hang_then_next_submission_succeeds(self):
+        outcome = self._submit(self._job(sleep=600.0), timeout=5.0)
+        self.assertEqual(outcome.status, "timeout")
+        self.assertIsNone(outcome.time)
+        # get() kills the worker on timeout; put() must restart it.
+        outcome = self._submit(self._job(), timeout=120.0)
+        self.assertEqual(outcome.status, "ok")
+        self.assertEqual(outcome.time, 1.0)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_crash_then_next_submission_succeeds(self):
+        outcome = self._submit(self._job(crash=True), timeout=120.0)
+        self.assertEqual(outcome.status, "crash")
+        self.assertIsNone(outcome.time)
+        # get() closes the dead worker on EOF; put() must restart it.
+        outcome = self._submit(self._job(), timeout=120.0)
+        self.assertEqual(outcome.status, "ok")
+        self.assertEqual(outcome.time, 1.0)
+
+
+class TunableOpRocmWorkerTest(TestCase):
+    """Real BenchmarkJob through a real worker on ROCm hardware.
+
+    Covers what the fake and _TestBenchmarkRequest tests cannot: the job and
+    its bmreq surviving the pickle round trip, set_device/set_filename/flag
+    ordering against lazy results-manager init in the child, and the worker
+    appending to the file the parent's runtime reads. Needs ROCm CI (a GPU and
+    a subprocess torch import that works); skipped elsewhere. Only
+    current_device is patched -- the filename flows through the real
+    set_filename so resolve_filename takes the parent's file.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_real_job_tunes_and_appends_to_shared_file(self):
+        import tempfile
+
+        from torch._inductor.autotune_process import _TestTunableMatmulRequest
+
+        tunableop._worker = None
+        tunableop._worker_key = None
+        self.addCleanup(tunableop.shutdown_worker)
+        self.addCleanup(setattr, tunableop, "_worker", None)
+        self.addCleanup(setattr, tunableop, "_worker_key", None)
+
+        with tempfile.TemporaryDirectory(prefix="tunableop_worker_roc_") as d:
+            results_file = os.path.join(d, "results.csv")
+            torch.cuda.tunable.set_filename(results_file, False)
+            try:
+                torch.cuda.tunable.enable(False)
+                job = tunableop.BenchmarkJob(
+                    _TestTunableMatmulRequest(), tuning=True
+                )
+                with mock.patch(
+                    "torch.cuda.current_device",
+                    return_value=torch.cuda.current_device(),
+                ):
+                    outcome = tunableop.submit(job, timeout=600.0)
+            finally:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.set_filename("", False)
+            self.assertEqual(outcome.status, "ok")
+            self.assertGreater(outcome.time, 0)
+            with open(results_file) as f:
+                content = f.read()
+            self.assertIn("GemmTunableOp", content)
+
+
+if __name__ == "__main__":
+    run_tests()
