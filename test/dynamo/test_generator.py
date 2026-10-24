@@ -11,6 +11,7 @@ import torch._dynamo.testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2527,7 +2528,6 @@ class TestSubgeneratorDelegation(GeneratorTestsBase):
         self.assertEqual(log, ["iter close"])
 
     @make_dynamo_test
-    @unittest.expectedFailure
     def test_throw_into_iterator_without_throw(self):
         # A plain iterator (no throw method): the exception is raised in the
         # outer frame at the yield-from point (CPython's `goto throw_here`).
@@ -2539,6 +2539,155 @@ class TestSubgeneratorDelegation(GeneratorTestsBase):
         self.assertRaises(ValueError, g.throw, ValueError)
 
 
+class OptionalTensorDelegate:
+    def __init__(self, value, cleaned=None):
+        self.value = value
+        self.cleaned = cleaned
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.value
+
+
+class FailingTensorDelegate(OptionalTensorDelegate):
+    def close(self):
+        raise RuntimeError("delegate close")
+
+    def throw(self, error):
+        raise RuntimeError("delegate throw")
+
+
+def optional_delegate_close(self):
+    self.cleaned.append(self.value * 3)
+
+
+def optional_delegate_throw(self, error):
+    return self.value * 3
+
+
+class GeneratorDelegationCleanupTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(caching_precompile=True)
+    @parametrize("delegate", ["tuple", "list", "dict_values"])
+    @parametrize("operation", ["close", "throw", "generator_exit"])
+    def test_builtin_delegate_cleanup(self, device, delegate, operation):
+        def compute(value):
+            cleaned = []
+
+            def values():
+                try:
+                    if delegate == "tuple":
+                        yield from (value, value + 1)
+                    elif delegate == "list":
+                        yield from iter([value, value + 1])
+                    else:
+                        yield from {"first": value, "second": value + 1}.values()
+                finally:
+                    cleaned.append(value * 2)
+
+            iterator = values()
+            first = next(iterator)
+            if operation == "close":
+                iterator.close()
+                iterator.close()
+            elif operation == "throw":
+                try:
+                    iterator.throw(ValueError)
+                except ValueError:
+                    pass
+            else:
+                try:
+                    iterator.throw(GeneratorExit)
+                except GeneratorExit:
+                    pass
+            return first + cleaned[0]
+
+        value = torch.randn(3, device=device, requires_grad=True)
+        expected = compute(value)
+        actual = torch.compile(compute, backend="aot_eager", fullgraph=True)(value)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), value),
+            torch.autograd.grad(expected.sum(), value),
+        )
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=True)
+    @parametrize("operation", ["close", "throw", "generator_exit"])
+    def test_custom_delegate_errors(self, device, operation):
+        def compute(value):
+            cleaned = []
+
+            def values():
+                try:
+                    yield from FailingTensorDelegate(value)
+                finally:
+                    cleaned.append(value * 2)
+
+            iterator = values()
+            first = next(iterator)
+            try:
+                if operation == "close":
+                    iterator.close()
+                elif operation == "throw":
+                    iterator.throw(ValueError)
+                else:
+                    iterator.throw(GeneratorExit)
+            except RuntimeError:
+                first = first + value
+            return first + cleaned[0]
+
+        value = torch.randn(3, device=device)
+        self.assertEqual(
+            torch.compile(compute, backend="aot_eager", fullgraph=True)(value),
+            compute(value),
+        )
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=True)
+    @parametrize("operation", ["close", "throw"])
+    def test_optional_delegate_method_guard(self, device, operation):
+        Delegate = OptionalTensorDelegate
+
+        def compute(delegate):
+            def values():
+                try:
+                    yield from delegate
+                finally:
+                    delegate.cleaned.append(delegate.value * 2)
+
+            iterator = values()
+            first = next(iterator)
+            if operation == "close":
+                iterator.close()
+            else:
+                try:
+                    first = iterator.throw(ValueError)
+                except ValueError:
+                    first = first + delegate.value
+                iterator.close()
+            return first + delegate.cleaned[0]
+
+        value = torch.randn(3, device=device)
+        compiled = torch.compile(compute, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(Delegate(value, [])), compute(Delegate(value, [])))
+        graph_count = counters["stats"]["unique_graphs"]
+        setattr(
+            Delegate,
+            operation,
+            optional_delegate_close
+            if operation == "close"
+            else optional_delegate_throw,
+        )
+        try:
+            self.assertEqual(
+                compiled(Delegate(value, [])), compute(Delegate(value, []))
+            )
+            self.assertGreater(counters["stats"]["unique_graphs"], graph_count)
+        finally:
+            delattr(Delegate, operation)
+
+
+instantiate_device_type_tests(GeneratorDelegationCleanupTests, globals())
 instantiate_parametrized_tests(GeneratorTests)
 instantiate_parametrized_tests(TestGeneratorSend)
 instantiate_parametrized_tests(TestGeneratorClose)
