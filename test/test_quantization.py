@@ -73,6 +73,14 @@ except ImportError as e:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
     log.warning(e)
+try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxDeviceCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxDeviceXPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
 
 try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
