@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -1381,6 +1382,37 @@ class TestBinaryUfuncsDevice(TestCase):
         res = [num / d for d in denom]
         ref = [num * (1 / d) for d in denom]
         self.assertEqual(res, ref, atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @parametrize("divisor", ("tiny/8", "-tiny/5", "max/2", "-max"))
+    @parametrize("rounding_mode", (None, "floor"))
+    def test_division_by_scalar_without_finite_normal_reciprocal(
+        self, device, dtype, divisor, rounding_mode
+    ):
+        # 1/s overflows or is subnormal in opmath, so CUDA must divide by s
+        # instead of multiplying by 1/s; this matches CPU exactly.
+        opmath = torch.finfo(torch.double if dtype == torch.double else torch.float)
+        s = {
+            "tiny/8": opmath.tiny / 8,
+            "-tiny/5": -opmath.tiny / 5,
+            "max/2": opmath.max / 2,
+            "-max": -opmath.max,
+        }[divisor]
+        a = torch.tensor([0.0, 1.0, -2.5, 3.0, 30.0], dtype=torch.double) * opmath.tiny
+        a = torch.cat([a, torch.tensor([1.0, -7.5, 100.0], dtype=torch.double)])
+        a = a.to(dtype)
+        expect = torch.div(a, s, rounding_mode=rounding_mode)
+        actual = torch.div(a.to(device), s, rounding_mode=rounding_mode)
+        self.assertEqual(actual, expect, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_complex_division_by_huge_scalar(self, device):
+        # 1/s has subnormal parts, but dividing by s in complex64 overflows an
+        # intermediate and returns 0, so complex keeps the reciprocal.
+        a = torch.tensor([1e38 + 1e38j], dtype=torch.complex64, device=device)
+        actual = a / (2e38 + 2e38j)
+        self.assertEqual(actual.cpu(), torch.tensor([0.5 + 0j]), atol=1e-6, rtol=0)
 
     # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message
