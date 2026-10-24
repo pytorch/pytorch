@@ -3,11 +3,10 @@ import io
 import itertools
 from bisect import bisect_right, insort
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch._utils import _get_device_module
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.tensor import DTensor
@@ -499,13 +498,20 @@ def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
     """
 
+    def _get_meta_replacement_device() -> torch.device:
+        device_type = dist.distributed_c10d._get_pg_default_device().type
+        if device_type == "cpu":
+            return torch.device("cpu")
+        if torch.accelerator.is_available():
+            return torch.device(device_type, torch.accelerator.current_device_index())
+        mod = getattr(torch, device_type, None)
+        idx = mod.current_device() if mod and hasattr(mod, "current_device") else 0
+        return torch.device(device_type, idx)
+
     def dtensor_func(value: DTensor):
         device = getattr(value, "device", None)
         if device == torch.device("meta"):
-            device_type = dist.distributed_c10d._get_pg_default_device().type
-            device = cast(
-                torch.device, _get_device_module(device_type).current_device()
-            )
+            device = _get_meta_replacement_device()
             new_local_tensor = torch.empty_like(value.to_local(), device=device)
             # We need to pass shape and stride explicitly, since DTensor might be
             # sharded unevenly.
@@ -532,10 +538,7 @@ def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     def tensor_func(value: torch.Tensor):
         device = getattr(value, "device", None)
         if device == torch.device("meta"):
-            device_type = dist.distributed_c10d._get_pg_default_device().type
-            device = cast(
-                torch.device, _get_device_module(device_type).current_device()
-            )
+            device = _get_meta_replacement_device()
             tensor = torch.empty_like(value, device=device)
             if _is_checkpointable_tensor(value):
                 _copy_checkpointable_tensor_metadata(value, tensor)
