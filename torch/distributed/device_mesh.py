@@ -574,10 +574,7 @@ else:
                 None,
             ):
                 # Reuse default_group when ranks match standard [0..N-1] order, or
-                # when the caller hasn't opted in to honoring a permuted rank order
-                # (the fallthrough below preserves order unconditionally via
-                # split_group, so skipping the shortcut for an unsorted rank_map
-                # would silently change subgroup rank order for existing callers).
+                # when the caller hasn't opted in to honoring a permuted rank order.
                 ranks = list(range(get_world_size()))
                 ranks_match_default = ranks == pg_ranks_by_dim.flatten().tolist()
                 if not preserve_rank_order or ranks_match_default:
@@ -616,11 +613,14 @@ else:
                     == backend
                 )
             ):
+                split_ranks = pg_ranks_by_dim.tolist()
+                if not preserve_rank_order:
+                    split_ranks = [sorted(ranks) for ranks in split_ranks]
                 dim_group = split_group(
                     parent_pg=default_group,
                     timeout=timeout,
                     pg_options=pg_options,
-                    split_ranks=pg_ranks_by_dim.tolist(),
+                    split_ranks=split_ranks,
                     group_desc=group_desc,
                 )
                 if dim_group == GroupMember.NON_GROUP_MEMBER:
