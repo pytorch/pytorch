@@ -76,6 +76,20 @@ class TestMetrics(TestCase):
             "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
         )
 
+    def test_parse_gather_hint(self):
+        gather_kernel = """
+@triton_heuristics.gather(
+    size_hints={'x': 36096, 'y': 2048},
+    filename=__file__,
+    triton_meta={},
+    inductor_meta={}
+)
+@triton.jit
+def triton_gat_fused_add_index_select_0(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    pass
+"""
+        self.assertEqual("gather", get_kernel_category_by_source_code(gather_kernel))
+
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("partitioned_scatter_enabled", False)
     def test_atomic_add(self):
