@@ -130,11 +130,9 @@ def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
     if dims_arg is None:
         return None
     dims = cast(list[int], as_list(dims_arg))
-    dims = cast(list[int], normalize_dims(dims, ndim))
-    empty_dims = [[0], [-1], []]
-    if ndim == 0 and dims_arg in empty_dims:
+    if ndim == 0 and dims in [[0], [-1], []]:
         return None
-    return dims
+    return cast(list[int], normalize_dims(dims, ndim))
 
 
 def _infer_reduce_dims_map(
@@ -371,6 +369,7 @@ def _reduction_single_dim_strategy(
 LINEAR_REDUCTION_OP_MAP = {
     aten.all.default: "product",
     aten.all.dim: "product",
+    aten.all.dims: "product",
     aten.any.default: "sum",
     aten.any.dim: "sum",
     aten.any.dims: "sum",
@@ -402,11 +401,13 @@ FOREACH_LINEAR_REDUCTION_OP_MAP = {
 
 FOREACH_LINEAR_REDUCTION_OPS = list(FOREACH_LINEAR_REDUCTION_OP_MAP)
 
-# all/any are NOT linear reductions: validation showed S(reduction_dim)->P(...)
-# produces incorrect results. They only support sharding on non-reduction dims.
+# all/any cannot propagate a Partial input (e.g. any() of P(sum) holding 1 and -1
+# must see 0). Sharding a reduction dim is fine: it yields P(max) for any and
+# P(min) for all, which on the bool outputs are OR and AND.
 NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.all.default,
     aten.all.dim,
+    aten.all.dims,
     aten.any.default,
     aten.any.dim,
     aten.any.dims,
@@ -555,7 +556,7 @@ def bool_reduction_single_dim_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    """all/any: only shard on non-reduction dims (no partial propagation)."""
+    """all/any: shard on a reduction dim -> P(max)/P(min); no partial propagation."""
     input_meta = args_schema[0]
     if not isinstance(input_meta, TensorMeta):
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
@@ -566,12 +567,23 @@ def bool_reduction_single_dim_strategy(
         dims = _infer_reduction_dims(args_schema[1], ndim)
 
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    match op:
+        case aten.any.default | aten.any.dim | aten.any.dims | aten.any.out:
+            reduce_op = "max"
+        case aten.all.default | aten.all.dim | aten.all.dims:
+            reduce_op = "min"
+        case _:
+            raise AssertionError(f"Unexpected bool reduction op: {op}")
+    reduce_dims = range(ndim) if dims is None else dims
     return _reduction_single_dim_strategy(
         args_schema,
         reduction_dims=dims,
         keep_dim=keep_dim,
         reduction_linear=False,
         reduction_op="sum",
+        extra_partial_rules=[
+            [Partial(reduce_op), _ShardingPlaceholder(d)] for d in reduce_dims
+        ],
     )
 
 
