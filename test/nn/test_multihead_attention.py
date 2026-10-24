@@ -735,9 +735,299 @@ class TestMultiheadAttentionNN(NNTestCase):
         mha.out_proj.bias.requires_grad = False
         mha(nt, nt, nt)
 
+    def test_multihead_attention_rotary_callable_shapes(self):
+        embed_dim = 8
+        num_heads = 2
+        tgt_len = 4
+        src_len = 3
+        batch_size = 5
+
+        class RecordingRotary:
+            def __init__(self) -> None:
+                self.shapes = []
+
+            def __call__(self, x):
+                self.shapes.append(tuple(x.shape))
+                return x
+
+        rotary = RecordingRotary()
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, use_rotary=False)
+        mha.use_rotary = True
+        mha.rotary_pos_emb = rotary
+
+        query = torch.randn(tgt_len, batch_size, embed_dim)
+        key = torch.randn(src_len, batch_size, embed_dim)
+        value = torch.randn(src_len, batch_size, embed_dim)
+
+        mha(query, key, value, need_weights=False)
+
+        self.assertEqual(
+            rotary.shapes,
+            [
+                (batch_size, tgt_len, num_heads, embed_dim // num_heads),
+                (batch_size, src_len, num_heads, embed_dim // num_heads),
+            ],
+        )
+
+    def test_multihead_attention_use_rotary_changes_output(self):
+        torch.manual_seed(0)
+        embed_dim = 16
+        num_heads = 4
+        seq_len = 6
+        batch_size = 2
+
+        mha_no_rope = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=0.0, use_rotary=False
+        )
+        mha_rope = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=0.0, use_rotary=True
+        )
+        mha_rope.load_state_dict(mha_no_rope.state_dict(), strict=False)
+
+        query = torch.randn(seq_len, batch_size, embed_dim)
+        key = torch.randn(seq_len, batch_size, embed_dim)
+        value = torch.randn(seq_len, batch_size, embed_dim)
+
+        out_no_rope, _ = mha_no_rope(query, key, value, need_weights=False)
+        out_rope, _ = mha_rope(query, key, value, need_weights=False)
+
+        self.assertFalse(torch.allclose(out_no_rope, out_rope))
+
+    def test_multihead_attention_identity_rotary_matches(self):
+        embed_dim, num_heads, batch_size = 8, 2, 3
+        query = torch.randn(4, batch_size, embed_dim)
+        cases = [
+            (None, None, False, False),
+            (5, 6, False, False),
+            (None, None, True, False),
+            (None, None, False, True),
+        ]
+        for kdim, vdim, add_bias_kv, add_zero_attn in cases:
+            with self.subTest(
+                kdim=kdim,
+                vdim=vdim,
+                add_bias_kv=add_bias_kv,
+                add_zero_attn=add_zero_attn,
+            ):
+                key = torch.randn(5, batch_size, kdim or embed_dim)
+                value = torch.randn(5, batch_size, vdim or embed_dim)
+                plain = nn.MultiheadAttention(
+                    embed_dim,
+                    num_heads,
+                    kdim=kdim,
+                    vdim=vdim,
+                    add_bias_kv=add_bias_kv,
+                    add_zero_attn=add_zero_attn,
+                )
+                rotary = nn.MultiheadAttention(
+                    embed_dim,
+                    num_heads,
+                    kdim=kdim,
+                    vdim=vdim,
+                    add_bias_kv=add_bias_kv,
+                    add_zero_attn=add_zero_attn,
+                )
+                rotary.load_state_dict(plain.state_dict())
+                rotary.use_rotary = True
+                rotary.rotary_pos_emb = nn.Identity()
+                for need_weights in (True, False):
+                    plain_out, plain_weights = plain(
+                        query, key, value, need_weights=need_weights
+                    )
+                    rotary_out, rotary_weights = rotary(
+                        query, key, value, need_weights=need_weights
+                    )
+                    self.assertEqual(rotary_out, plain_out)
+                    self.assertEqual(rotary_weights, plain_weights)
+
+    def test_multihead_attention_rotary_fastpath_matches_slowpath(self):
+        mha = nn.MultiheadAttention(8, 2, batch_first=True, use_rotary=True).eval()
+        query = torch.randn(3, 4, 8)
+        with torch.inference_mode():
+            for need_weights in (True, False):
+                fast_out, fast_weights = mha(
+                    query, query, query, need_weights=need_weights
+                )
+                with mock.patch(
+                    "torch.backends.mha.get_fastpath_enabled", return_value=False
+                ):
+                    slow_out, slow_weights = mha(
+                        query, query, query, need_weights=need_weights
+                    )
+                self.assertEqual(fast_out, slow_out)
+                self.assertEqual(fast_weights, slow_weights)
+
+    def test_multihead_attention_default_rotary_torchscript(self):
+        mha = nn.MultiheadAttention(8, 2, batch_first=True)
+        query = torch.randn(2, 4, 8)
+        scripted = torch.jit.script(mha)
+        eager_out, eager_weights = mha(query, query, query)
+        scripted_out, scripted_weights = scripted(query, query, query)
+        self.assertEqual(scripted_out, eager_out)
+        self.assertEqual(scripted_weights, eager_weights)
+
+    def test_rotary_positional_embeddings_cache_growth_and_odd_dim(self):
+        short_cache = nn.modules.activation._RotaryPositionalEmbeddings(
+            4, max_seq_len=2
+        )
+        long_cache = nn.modules.activation._RotaryPositionalEmbeddings(
+            4, max_seq_len=3
+        )
+        x = torch.randn(2, 3, 2, 4)
+        self.assertEqual(short_cache(x), long_cache(x))
+        with self.assertRaisesRegex(ValueError, "even"):
+            nn.modules.activation._RotaryPositionalEmbeddings(3)
+
+    def test_multihead_attention_rotary_copy_and_old_state(self):
+        import copy
+
+        mha = nn.MultiheadAttention(8, 2, use_rotary=True)
+        cloned = copy.deepcopy(mha)
+        self.assertIsNotNone(cloned.rotary_pos_emb)
+        query = torch.randn(4, 3, 8)
+        self.assertEqual(mha(query, query, query), cloned(query, query, query))
+
+        legacy = nn.MultiheadAttention(8, 2)
+        state = legacy.__getstate__().copy()
+        del state["use_rotary"]
+        del state["rotary_pos_emb"]
+        legacy.__setstate__(state)
+        self.assertFalse(legacy.use_rotary)
+        self.assertIsNone(legacy.rotary_pos_emb)
+        legacy(query, query, query)
+
+    def test_rotary_encoder_constructor_and_inference(self):
+        from torch.nn.modules.transformer import (
+            TransformerEncoder,
+            _TransformerEncoderLayerRoPE,
+        )
+
+        layer = _TransformerEncoderLayerRoPE(
+            8,
+            2,
+            dim_feedforward=16,
+            dropout=0.0,
+            activation="gelu",
+            layer_norm_eps=1e-3,
+            batch_first=True,
+            dtype=torch.float64,
+        ).eval()
+        self.assertTrue(all(p.dtype == torch.float64 for p in layer.parameters()))
+        self.assertEqual(layer.norm1.eps, 1e-3)
+        self.assertIs(layer.activation, torch.nn.functional.gelu)
+        with self.assertWarnsRegex(UserWarning, "use_rotary"):
+            encoder = TransformerEncoder(layer, 2)
+        self.assertFalse(encoder.use_nested_tensor)
+        encoder.eval()
+        query = torch.randn(3, 4, 8, dtype=torch.float64)
+        with torch.inference_mode():
+            for model in (layer, encoder):
+                actual = model(query)
+                with mock.patch(
+                    "torch.backends.mha.get_fastpath_enabled", return_value=False
+                ):
+                    expected = model(query)
+                self.assertEqual(actual, expected)
+
+    def test_multihead_attention_rotary_compile(self):
+        for use_rotary in (False, True):
+            mha = nn.MultiheadAttention(8, 2, use_rotary=use_rotary)
+            query = torch.randn(4, 3, 8, requires_grad=True)
+            key = torch.randn(5, 3, 8)
+            value = torch.randn(5, 3, 8)
+            graphs = []
+
+            def backend(graph, example_inputs):
+                graphs.append(graph)
+                return graph.forward
+
+            expected = mha(query, key, value, need_weights=False)[0]
+            actual = torch.compile(mha, backend=backend, fullgraph=True)(
+                query, key, value, need_weights=False
+            )[0]
+            self.assertEqual(actual, expected)
+            self.assertEqual(len(graphs), 1)
+            opaque_attention = any(
+                node.op == "call_function"
+                and node.target is torch.nn.functional.multi_head_attention_forward
+                for node in graphs[0].graph.nodes
+            )
+            self.assertEqual(opaque_attention, not use_rotary)
+            inputs = (query, *mha.parameters())
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), inputs),
+                torch.autograd.grad(expected.sum(), inputs),
+            )
+
+    def test_multihead_attention_rotary_matches_reference(self):
+        torch.manual_seed(0)
+        embed_dim, num_heads, head_dim = 8, 2, 4
+        batch_size, tgt_len, src_len = 3, 4, 5
+        mha = nn.MultiheadAttention(embed_dim, num_heads, use_rotary=True)
+        query = torch.randn(tgt_len, batch_size, embed_dim)
+        key = torch.randn(src_len, batch_size, embed_dim)
+        value = torch.randn(src_len, batch_size, embed_dim)
+
+        q, k, v = (
+            torch.nn.functional.linear(x, weight, bias)
+            for x, weight, bias in zip(
+                (query, key, value),
+                mha.in_proj_weight.chunk(3),
+                mha.in_proj_bias.chunk(3),
+            )
+        )
+
+        def rotate(x):
+            x = x.view(x.size(0), x.size(1), num_heads, head_dim)
+            position = torch.arange(x.size(0), dtype=x.dtype, device=x.device)
+            freq = torch.tensor([1.0, 0.01], dtype=x.dtype, device=x.device)
+            angle = position[:, None] * freq
+            cos, sin = angle.cos()[None, :, None, :], angle.sin()[None, :, None, :]
+            pairs = x.permute(1, 0, 2, 3).reshape(
+                batch_size, x.size(0), num_heads, head_dim // 2, 2
+            )
+            real, imag = pairs[..., 0], pairs[..., 1]
+            return torch.stack(
+                (real * cos - imag * sin, imag * cos + real * sin), dim=-1
+            ).flatten(-2)
+
+        q = rotate(q).permute(0, 2, 1, 3)
+        k = rotate(k).permute(0, 2, 1, 3)
+        v = v.view(src_len, batch_size, num_heads, head_dim).permute(1, 2, 0, 3)
+        weights = torch.softmax(q @ k.transpose(-2, -1) / (head_dim**0.5), dim=-1)
+        context = (weights @ v).permute(2, 0, 1, 3).reshape(
+            tgt_len, batch_size, embed_dim
+        )
+        expected = torch.nn.functional.linear(
+            context, mha.out_proj.weight, mha.out_proj.bias
+        )
+        actual, actual_weights = mha(query, key, value, need_weights=True)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_weights, weights.mean(dim=1))
+
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_multihead_attention_rotary_respects_constructor_device(self, device):
+        embed_dim = 16
+        num_heads = 4
+        seq_len = 6
+        batch_size = 2
+
+        mha = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=0.0, use_rotary=True, device=device
+        )
+        self.assertIsNotNone(mha.rotary_pos_emb)
+
+        query = torch.randn(seq_len, batch_size, embed_dim, device=device)
+        key = torch.randn(seq_len, batch_size, embed_dim, device=device)
+        value = torch.randn(seq_len, batch_size, embed_dim, device=device)
+
+        out, _ = mha(query, key, value, need_weights=False)
+
+        self.assertEqual(out.device, query.device)
 
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
