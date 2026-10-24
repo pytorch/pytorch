@@ -4322,6 +4322,22 @@ def _classify_kernel_operation(
     return "other"
 
 
+def _maybe_pretune_tunableop(choice: ChoiceCaller) -> None:
+    """Widen TunableOp coverage when an extern (aten) kernel wins autotune.
+
+    Fires on every concrete extern-winner path (single-choice, deterministic,
+    empty-timings fallback, best-choice) so all of them are covered, not just
+    the deferred multi-template path handled by
+    Scheduler.finalize_multi_template_buffers. Function-local tunableop import:
+    select_algorithm is imported widely and must not gain a module-level edge.
+    """
+    if not isinstance(choice, ExternKernelCaller):
+        return
+    from . import tunableop
+
+    tunableop.maybe_range_pretune(choice)
+
+
 class AlgorithmSelectorCache(PersistentCache):
     """
     A persistent cache for algorithm selection results used in autotuning of GEMMs
@@ -4445,11 +4461,13 @@ class AlgorithmSelectorCache(PersistentCache):
             if not isinstance(choices[0], CUTLASSTemplateCaller):
                 # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
                 node = choices[0].output_node()
+                _maybe_pretune_tunableop(choices[0])
                 return node, choices[0]
 
         if config.deterministic:
             choice = self.pick_deterministic_choice(choices)
             node = choice.output_node()
+            _maybe_pretune_tunableop(choice)
             return node, choice
 
         inputs_key = create_inputs_key(input_nodes)
@@ -4630,6 +4648,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
                         node,
                     )
+                    _maybe_pretune_tunableop(choice)
                     return node, choice
             node = choices[0].output_node()
             choice = choices[0]
@@ -4637,6 +4656,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "Autotuning returned empty timings, falling back to first choice: %s",
                 node,
             )
+            _maybe_pretune_tunableop(choice)
             return node, choice
 
         # if we got any timings at all, pick the best of those
@@ -4698,6 +4718,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         choice = best_choice
         node = choice.output_node()
+        _maybe_pretune_tunableop(choice)
 
         log.debug("Autotuning selected choice: %s", node)
         return node, choice
