@@ -2812,9 +2812,16 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         def wrap_tensors(x):
             return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
-        return pytree.tree_map(
+        out = pytree.tree_map(
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
+
+        # foreach ops have the getitem operation,
+        # so replacing it to match the register_foreach_inplace lowering
+        # and returning aten inputs
+        if kernel in inplace_foreach_ops:
+            return list(args[0])
+        return out
 
     # This lets us detect that a lowering is a fallback handler.
     handler._is_fallback_handler = True  # type: ignore[attr-defined]

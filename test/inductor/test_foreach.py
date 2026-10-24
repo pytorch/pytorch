@@ -419,6 +419,58 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu
+    @inplace_bin_ops
+    def test_inplace_fallback(self, op):
+        def fn(a, b):
+            op(a, b)
+            return a
+
+        fn_opt = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        a = [torch.tensor([1 + 2j, 3 + 4j], device=GPU_TYPE, dtype=torch.complex64)]
+        a_expected = [t.clone() for t in a]
+        b = 1j
+
+        actual = fn_opt(a, b)
+        expected = fn(a_expected, b)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    def test_sgd_foreach_fallback(self):
+        def fn(params, grads):
+            with torch.no_grad():
+                torch.optim._functional.sgd(
+                    params,
+                    grads,
+                    [None] * len(params),
+                    foreach=True,
+                    fused=False,
+                    has_sparse_grad=False,
+                    weight_decay=0,
+                    momentum=0,
+                    lr=0.1,
+                    dampening=0,
+                    nesterov=False,
+                    maximize=False,
+                )
+            return params
+
+        p = torch.nn.Parameter(
+            torch.complex(
+                torch.randn(3, 2, device=GPU_TYPE), torch.randn(3, 2, device=GPU_TYPE)
+            )
+        )
+        grad = torch.ones_like(p)
+
+        expected = [p.detach().clone()]
+        actual = [p.detach().clone()]
+
+        expected = fn(expected, [grad])
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(actual, [grad])
+
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
     @scalar_bin_ops
     def test_kernel_split_arg_limit_list(self, op):
         # NB: foeach_copy won't pass this test because it will dce one set of buffers
