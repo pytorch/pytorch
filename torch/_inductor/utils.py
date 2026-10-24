@@ -1348,11 +1348,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1398,8 +1393,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -3618,19 +3612,34 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    from .codecache import PyCodeCache
+
     remove_quote = kwargs.pop("remove_quote", False)
-    # pyrefly: ignore [bad-argument-type]
-    result, source_codes = run_and_get_code(fn, *args, **kwargs)
-    kernels = []
+    # A module-level kernel's def is renamed and its benchmark harness cut, so take the
+    # source it is compiled from, which every load of a wrapper passes, cache hits too.
+    # Keyed by wrapper: one wrapper can be loaded more than once.
+    module_level: dict[str, list[str]] = {}
+    orig_load = PyCodeCache.load_by_key_path
+
+    def load(key: str, *load_args: Any, **load_kwargs: Any) -> Any:
+        if kernel_sources := load_kwargs.get("kernel_sources"):
+            module_level[key] = [src.strip() for _, src in kernel_sources.values()]
+        return orig_load(key, *load_args, **load_kwargs)
+
+    with mock.patch.object(PyCodeCache, "load_by_key_path", load):
+        # pyrefly: ignore [bad-argument-type]
+        result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels: list[str] = []
     for code in source_codes:
         if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
         else:
-            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
-        if remove_quote:
-            kernels = [kernel[3:-3] for kernel in kernels]
+            scraped = re.findall(r"'''.*?'''", code, re.DOTALL)
+            kernels.extend(k[3:-3] if remove_quote else k for k in scraped)
+    for sources in module_level.values():
+        kernels.extend(sources)
     return result, kernels
 
 
@@ -4184,6 +4193,44 @@ def is_output_of_multi_outputs_template(
     )
 
 
+def get_collective_config(node: torch.fx.Node) -> dict[str, Any] | None:
+    """A functional collective's per-collective configuration, if any."""
+    target = node.target
+    if (
+        not isinstance(target, torch._ops.OpOverload)
+        or target.namespace != "_c10d_functional"
+    ):
+        return None
+    for index, arg in enumerate(target._schema.arguments):
+        if arg.name == "config":
+            if index < len(node.args):
+                return node.args[index]  # type: ignore[return-value]
+            return node.kwargs.get("config")  # type: ignore[return-value]
+    return None
+
+
+def _config_value_key(value: Any) -> Any:
+    # Types are part of the key so 1, 1.0 and True stay distinct.
+    if isinstance(value, dict):
+        return (
+            dict,
+            tuple(sorted((k, _config_value_key(v)) for k, v in value.items())),
+        )
+    if isinstance(value, (list, tuple)):
+        return (type(value), tuple(_config_value_key(v) for v in value))
+    return (type(value), value)
+
+
+def collective_config_value_key(config: dict[str, Any] | None) -> Any:
+    """A hashable form of a collective configuration."""
+    return None if config is None else _config_value_key(config)
+
+
+def collective_config_key(node: torch.fx.Node) -> Any:
+    """A hashable form of the collective's configuration."""
+    return collective_config_value_key(get_collective_config(node))
+
+
 def is_collective(
     node: Node | Operation | None,
     op: torch._ops.OperatorBase | None = None,
@@ -4401,14 +4448,11 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         self: PythonWrapperCodegen,
         kernel_name: str,
         kernel_code: str,
-        metadata: str | None = None,
-        gpu: bool = True,
-        cpp_definition: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, *args, **kwargs)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -4788,6 +4832,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    if config.avoid_32bit_indexing_guards:
+        return False
 
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
@@ -5813,6 +5860,12 @@ def forwarded_cuda_compile_options() -> list[str]:
 
 def tlx_only_hip_options() -> list[str]:
     return _tlx_registry_options("tlx_only_hip_options")
+
+
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP compiler options forwarded to Triton."""
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
 
 
 def _round_up(x: int, y: int) -> int:

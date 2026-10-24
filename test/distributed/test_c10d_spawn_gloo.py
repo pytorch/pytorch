@@ -258,7 +258,8 @@ if not TEST_WITH_DEV_DBG_ASAN:
             x0.requires_grad = True
             x1.requires_grad = True
 
-            y = torch.distributed.nn.scatter([x0, x1], 1)
+            # Non-src ranks only need to pass a tensor for the output shape.
+            y = torch.distributed.nn.scatter([x0, x1] if self.rank == 1 else [x0], 1)
             if self.rank == 1:
                 self.assertEqual(y, 1 + torch.ones(5, 5, device=device))
             elif self.rank == 0:

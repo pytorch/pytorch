@@ -156,6 +156,8 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
 
         if self.rank == 1:
             self.assertEqual(y, 3 * torch.ones(5, 5, device=device))
+        else:
+            self.assertEqual(y, x)
 
         z = y.sin().sum()
         z.backward()
@@ -266,7 +268,9 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         expected = (
             1 + self.world_size
         ) * self.world_size / 2 + self.world_size * self.rank
-        y = torch.distributed.nn.reduce_scatter(y, [x0, x1])
+        y = torch.distributed.nn.reduce_scatter(
+            y, [x0, x1], op=c10d.ReduceOp(c10d.ReduceOp.SUM)
+        )
         self.assertEqual(y, torch.ones(5, 5, device=device) * expected)
         z = y.sin().sum()
         z.backward()

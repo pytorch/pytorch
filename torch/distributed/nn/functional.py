@@ -92,19 +92,9 @@ def gather(tensor, dst=0, group=group.WORLD):
     group = _resolve_group(group)
     if _rank_not_in_group(group):
         return ()
-    world_size = dist.get_world_size(group)
-    group_dst = dist.get_group_rank(group, dst)
-    is_dst = dist.get_rank(group) == group_dst
     out = funcol.wait_tensor(
-        funcol.all_to_all_single(
-            tensor.unsqueeze(0),
-            [int(is_dst)] * world_size,
-            [int(i == group_dst) for i in range(world_size)],
-            group,
-        )
+        funcol.gather(tensor.unsqueeze(0), dist.get_group_rank(group, dst), group)
     )
-    if not is_dst:
-        out = torch.cat([out, tensor.new_zeros(world_size, *tensor.shape)])
     return tuple(t.clone() for t in out.unbind(0))
 
 
@@ -117,7 +107,7 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter on the source rank.
-            Receivers must pass ``None``.
+            Other ranks only use ``tensors[0]`` for the output shape.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 
@@ -134,19 +124,9 @@ def scatter(tensors, src=0, group=group.WORLD):
     group = _resolve_group(group)
     if _rank_not_in_group(group):
         return torch.zeros_like(tensors[0])
-    world_size = dist.get_world_size(group)
-    group_src = dist.get_group_rank(group, src)
-    is_src = dist.get_rank(group) == group_src
-    input = torch.stack(tensors)
-    if not is_src:
-        # Send an empty slice that keeps the inputs in the graph.
-        input = input[:0]
-    out = funcol.all_to_all_single(
-        input,
-        [int(i == group_src) for i in range(world_size)],
-        [int(is_src)] * world_size,
-        group,
-    )
+    if dist.get_rank() != src:
+        tensors = tensors[:1] * dist.get_world_size(group)
+    out = funcol.scatter(torch.stack(tensors), dist.get_group_rank(group, src), group)
     return funcol.wait_tensor(out)[0]
 
 
@@ -155,6 +135,11 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
     Reduces the tensor data across all machines.
 
     Only the process with rank ``dst`` is going to receive the final result.
+
+    .. warning::
+        The backward broadcasts the gradient from ``dst`` and only supports
+        ``ReduceOp.SUM`` and ``ReduceOp.AVG``. Gradients of the outputs on
+        other ranks are ignored.
 
     Arguments:
         tensor (Tensor): Input of the collective.
@@ -176,18 +161,23 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
     group = _resolve_group(group)
     if _rank_not_in_group(group):
         return tensor.clone()
-    out = funcol.wait_tensor(funcol.all_reduce(tensor, op, group))
+    out = funcol.wait_tensor(
+        funcol.reduce(tensor, dist.get_group_rank(group, dst), op, group)
+    )
     if dist.get_rank() == dst:
         return out
-    # Non-dst ranks return their input. Keeping ``out`` in the graph with a zero
-    # gradient makes the backward all_reduce run on every rank.
-    false_mask = torch.zeros((), dtype=torch.bool, device=out.device)
-    return torch.where(false_mask, out, tensor.detach())
+    # Non-dst ranks return their input. ``out`` is zeros here and stays in the
+    # graph so the backward broadcast runs on every rank.
+    return out + tensor.detach()
 
 
 def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
+
+    .. warning::
+        The backward all-gathers the gradient and only supports
+        ``ReduceOp.SUM`` and ``ReduceOp.AVG``.
 
     Arguments:
         output (Tensor): Output tensor.
@@ -214,7 +204,10 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     if _rank_not_in_group(group):
         return output
     return funcol.reduce_scatter_inplace(
-        output, list(input_list), funcol.REDUCE_OP_TO_STR[op], group
+        output,
+        list(input_list),
+        funcol.REDUCE_OP_TO_STR[funcol._reduce_op_type(op)],
+        group,
     )
 
 
@@ -383,6 +376,9 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
 
     After the call the returned tensor is going to be bitwise
     identical in all processes.
+
+    .. warning::
+        The backward does not support bitwise ops.
 
     Arguments:
         tensor (Tensor): Input of the collective.
