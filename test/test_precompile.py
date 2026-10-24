@@ -32,7 +32,7 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
-from torch._precompile import _write_artifact, PrecompileError
+from torch._precompile import _parse_artifact_metadata, _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
     capture,
@@ -6197,6 +6197,7 @@ def calls_breaking_helper(model, x):
 """
 
 _CUDAGRAPH_LOADER = """
+import contextlib
 import sys
 import torch
 from torch._inductor import cudagraph_trees
@@ -6207,13 +6208,34 @@ mod = __import__(module)
 saved = torch.load(state)
 model = mod.Model().cuda()
 model.load_state_dict(saved["state_dict"])
+captured = 0
+capture_begin = torch.cuda.CUDAGraph.capture_begin
+
+
+def counting_capture_begin(self, *args, **kwargs):
+    global captured
+    captured += 1
+    return capture_begin(self, *args, **kwargs)
+
+
+torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 f = torch.compiler.precompile.load(artifact, cache)
-with torch.no_grad():
+training = saved["expected_grad"] is not None
+with contextlib.nullcontext() if training else torch.no_grad():
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
-        torch.testing.assert_close(f(model, saved["x"]), saved["expected"])
+        model.zero_grad(set_to_none=True)
+        y = f(model, saved["x"])
+        torch.testing.assert_close(y, saved["expected"])
+        if training:
+            y.sum().backward()
+            torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
 manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
-print("recorded", 0 if manager is None else sum(map(len, manager.roots.values())))
+nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
+for node in nodes:
+    nodes.extend(child for children in node.children.values() for child in children)
+recorded = len(nodes)
+print("recorded", recorded, "captured", captured)
 """
 
 
@@ -6240,22 +6262,21 @@ class TestPrecompileCudagraphs(TestCase):
         self.model = self.mod.Model().cuda()
         self.x = torch.randn(4, 8, device="cuda")
 
-    def _capture_step(self, fn, **kwargs):
-        with torch.no_grad():
+    def _capture_step(self, fn, grad=False, **kwargs):
+        with torch.set_grad_enabled(grad):
             with capture(
                 fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs
             ) as cap:
-                y = cap(self.model, self.x).clone()
+                y = cap(self.model, self.x).detach().clone()
         with open(self.artifact) as f:
-            return y, f.read()
+            return y, _parse_artifact_metadata(f.read())
 
-    def _recorded_in_fresh_process(self, expected, env=None):
-        # The number of CUDA graphs the loading process recorded serving it.
+    def _serve_in_fresh_process(self, expected, env=None, expected_grad=None):
+        # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
+        # by the loading process while serving the artifact.
         state = os.path.join(self.dir, "state.pt")
-        torch.save(
-            {"state_dict": self.model.state_dict(), "x": self.x, "expected": expected},
-            state,
-        )
+        saved = {"x": self.x, "expected": expected, "expected_grad": expected_grad}
+        torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
         out = subprocess.run(
             [sys.executable, "-c", _CUDAGRAPH_LOADER, *argv],
@@ -6265,7 +6286,8 @@ class TestPrecompileCudagraphs(TestCase):
             env={**os.environ, **(env or {})},
         )
         self.assertEqual(out.returncode, 0, out.stderr)
-        return int(out.stdout.split("recorded")[-1])
+        _, recorded, _, captured = out.stdout.split()[-4:]
+        return int(recorded), int(captured)
 
     @parametrize("serving", ["standalone", "installed"])
     @torch._dynamo.config.patch(nested_graph_breaks=False)
@@ -6273,17 +6295,39 @@ class TestPrecompileCudagraphs(TestCase):
         mod = self.mod
         fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
-            y, code = self._capture_step(fn)
-        self.assertIn(f'SERVING_MODE = "{serving}"', code)
-        self.assertIn("'triton.cudagraphs': True", code)
+            y, meta = self._capture_step(fn)
+        self.assertEqual(meta["SERVING_MODE"], serving)
+        cudagraphs = {"triton.cudagraphs": True, "triton.cudagraph_trees": True}
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], cudagraphs)
         # The loading process leaves triton.cudagraphs at its default (off).
-        self.assertGreater(self._recorded_in_fresh_process(y), 0)
+        recorded, _ = self._serve_in_fresh_process(y)
+        self.assertGreater(recorded, 0)
+
+    def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            y, _ = self._capture_step(self.mod.step, grad=True)
+        self.model.zero_grad(set_to_none=True)
+        self.mod.step(self.model, self.x).sum().backward()
+        grad = self.model.lin.weight.grad.clone()
+        recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
+        # One graph for the forward, one for the backward.
+        self.assertEqual(recorded, 2)
+
+    def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
+        config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
+        with torch._inductor.config.patch(config):
+            y, meta = self._capture_step(self.mod.step)
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], config)
+        # The loading process leaves triton.cudagraph_trees at its default (on).
+        recorded, captured = self._serve_in_fresh_process(y)
+        self.assertEqual(recorded, 0)
+        self.assertGreater(captured, 0)
 
     def test_an_artifact_captured_without_cudagraphs_serves_none(self):
-        y, code = self._capture_step(self.mod.step)
-        self.assertIn("'triton.cudagraphs': False", code)
+        y, meta = self._capture_step(self.mod.step)
+        self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
         env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
-        self.assertEqual(self._recorded_in_fresh_process(y, env), 0)
+        self.assertEqual(self._serve_in_fresh_process(y, env), (0, 0))
 
 
 def _exception_chain(exc: BaseException | None) -> str:
