@@ -5404,7 +5404,7 @@ Example::
 add_docstr(
     torch.histogramdd,
     r"""
-histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
+histogramdd(input, bins, *, range=None, weight=None, density=False) -> (Tensor, Tensor[])
 
 Computes a multi-dimensional histogram of the values in a tensor.
 
@@ -6858,6 +6858,42 @@ Example::
     >>> torch.dist(A @ x, b)
     tensor(1.00000e-07 *
            2.8312)
+""".format(**common_args),
+)
+
+add_docstr(
+    torch.masked_fill,
+    r"""
+masked_fill(input, mask, value) -> Tensor
+
+Returns a new tensor with the elements of :attr:`input` replaced by
+:attr:`value` where :attr:`mask` is ``True``. This is the out-of-place
+version of :meth:`torch.Tensor.masked_fill_`.
+
+:attr:`input` and :attr:`mask` are :ref:`broadcast <broadcasting-semantics>`
+together, so the returned tensor has their broadcast shape, which may be
+larger than the shape of :attr:`input`.
+
+Args:
+    {input}
+    mask (BoolTensor): the boolean mask
+    value (Number or Tensor): the value to fill in with. If a tensor, it
+      must be 0-dimensional.
+
+Example::
+
+    >>> x = torch.arange(6).reshape(2, 3)
+    >>> mask = x.ge(3)
+    >>> mask
+    tensor([[False, False, False],
+            [ True,  True,  True]])
+    >>> torch.masked_fill(x, mask, -1)
+    tensor([[ 0,  1,  2],
+            [-1, -1, -1]])
+    >>> # The mask can broadcast the result to a larger shape
+    >>> torch.masked_fill(torch.zeros(3), torch.tensor([[True], [False]]), 1.0)
+    tensor([[1., 1., 1.],
+            [0., 0., 0.]])
 """.format(**common_args),
 )
 
@@ -11170,7 +11206,7 @@ Example:
 add_docstr(
     torch.std_mean,
     r"""
-std_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
+std_mean(input, dim=None, *, correction=1, keepdim=False) -> (Tensor, Tensor)
 
 Calculates the standard deviation and mean over the dimensions specified by
 :attr:`dim`. :attr:`dim` can be a single dimension, list of dimensions, or
@@ -11202,7 +11238,6 @@ Keyword args:
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
     {opt_keepdim}
-    {out}
 
 Returns:
     A tuple (std, mean) containing the standard deviation and mean.
@@ -12563,7 +12598,7 @@ Example:
 add_docstr(
     torch.var_mean,
     r"""
-var_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
+var_mean(input, dim=None, *, correction=1, keepdim=False) -> (Tensor, Tensor)
 
 Calculates the variance and mean over the dimensions specified by :attr:`dim`.
 :attr:`dim` can be a single dimension, list of dimensions, or ``None`` to
@@ -12594,7 +12629,6 @@ Keyword args:
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
     {opt_keepdim}
-    {out}
 
 Returns:
     A tuple (var, mean) containing the variance and mean.
