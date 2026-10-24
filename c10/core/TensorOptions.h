@@ -641,6 +641,11 @@ inline DispatchKey computeDispatchKey(
   }
         C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
+        case c10::DeviceType::MTIA:
+          if (isQIntType(dtype_)) {
+            return DispatchKey::QuantizedMTIA;
+          }
+          return DispatchKey::MTIA;
         case c10::DeviceType::FPGA:
           return DispatchKey::FPGA;
         case c10::DeviceType::MAIA:
@@ -678,6 +683,8 @@ inline DispatchKey computeDispatchKey(
   }
         C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
+        case c10::DeviceType::MTIA:
+          return DispatchKey::SparseMTIA;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -705,6 +712,8 @@ inline DispatchKey computeDispatchKey(
   }
         C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
+        case c10::DeviceType::MTIA:
+          return DispatchKey::SparseCsrMTIA;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,

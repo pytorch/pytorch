@@ -31,8 +31,6 @@ const char* toString(BackendComponent t) {
       return "HPUBit";
     case BackendComponent::VEBit:
       return "VEBit";
-    case BackendComponent::MTIABit:
-      return "MTIA";
     case BackendComponent::MAIABit:
       return "MAIA";
     case BackendComponent::PrivateUse1Bit:
@@ -56,6 +54,8 @@ BackendComponent toBackendComponent(DeviceType device_type) {
   }
     C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
+    case DeviceType::MTIA:
+      return BackendComponent::PrivateUse1Bit;
     default:
       return BackendComponent::InvalidBit;
   }
@@ -83,8 +83,6 @@ const char* toString(DispatchKey t) {
       return "MPS";
     case DispatchKey::HPU:
       return "HPU";
-    case DispatchKey::MTIA:
-      return "MTIA";
 
     case DispatchKey::Quantized:
       return "Quantized";
@@ -140,8 +138,6 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
-    case DispatchKey::AutocastMTIA:
-      return "AutocastMTIA";
     case DispatchKey::AutocastMAIA:
       return "AutocastMAIA";
     case DispatchKey::AutocastXPU:
@@ -347,6 +343,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
       {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
       {"QuantizedPrivateUse1", c10::DispatchKey::QuantizedPrivateUse1},
+      {"QuantizedMTIA", c10::DispatchKey::QuantizedMTIA},
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
@@ -378,6 +375,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
       {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
       {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
+      {"AutogradMTIA", c10::DispatchKey::AutogradMTIA},
 
       {"Autograd", c10::DispatchKey::Autograd},
       {"CompositeImplicitAutograd",

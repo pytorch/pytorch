@@ -156,6 +156,9 @@ static SparseTensor new_sparse(
       break;
     C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
+    case DeviceType::MTIA:
+      dispatch_key = DispatchKey::SparseMTIA;
+      break;
     default:
       TORCH_CHECK(false, "device type not supported for sparse ", device_or_default(device))
   }

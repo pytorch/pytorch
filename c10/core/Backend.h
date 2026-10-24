@@ -139,8 +139,6 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedPrivateUse1;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
-  } else if (t == DispatchKey::MTIA || t == DispatchKey::AutogradMTIA) {
-    return Backend::MTIA;
   } else if (
       t == DispatchKey::PrivateUse1 || t == DispatchKey::AutogradPrivateUse1) {
     return Backend::PrivateUse1;

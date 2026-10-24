@@ -16,7 +16,8 @@ namespace c10 {
 
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
-// This is most backends except PrivateUse2 and PrivateUse3
+// This is most backends except PrivateUse2 and PrivateUse3, and MTIA (which
+// dispatches as PrivateUse1)
 #define C10_FORALL_BACKEND_DEVICE_TYPES(_, extra) \
   _(CPU, extra)                                   \
   _(CUDA, extra)                                  \
@@ -29,7 +30,6 @@ namespace c10 {
   _(VE, extra)                                    \
   _(Lazy, extra)                                  \
   _(Meta, extra)                                  \
-  _(MTIA, extra)                                  \
   _(PrivateUse1, extra)
 
 enum class DeviceType : int8_t {

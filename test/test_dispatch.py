@@ -991,6 +991,15 @@ CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
         ):
             C._dispatch_print_registrations_for_dispatch_key("invalid_key")
 
+    def test_mtia_aliases_privateuse1(self):
+        DK = C.DispatchKey
+        self.assertEqual(DK.MTIA, DK.PrivateUse1)
+        self.assertEqual(DK.AutogradMTIA, DK.AutogradPrivateUse1)
+        self.assertEqual(DK.AutocastMTIA, DK.AutocastPrivateUse1)
+        self.assertEqual(C._parse_dispatch_key("MTIA"), DK.PrivateUse1)
+        self.assertEqual(C._parse_dispatch_key("AutogradMTIA"), DK.AutogradPrivateUse1)
+        self.assertEqual(C._dispatch_key_for_device("mtia"), "PrivateUse1")
+
 
 class TestPythonDispatcher(TestCase):
     hw_classification = HardwareClassification.GENERIC
