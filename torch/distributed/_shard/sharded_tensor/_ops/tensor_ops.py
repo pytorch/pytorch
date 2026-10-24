@@ -51,7 +51,7 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     elif pg and pg._get_backend_name() == "gloo":
         dev = torch.device("cpu")
     else:
-        dev = torch.device(torch.cuda.current_device())
+        dev = self_st._get_preferred_device()
     return dev
 
 
