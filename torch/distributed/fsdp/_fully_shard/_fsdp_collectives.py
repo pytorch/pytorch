@@ -132,7 +132,16 @@ class SymmMemAllocMixin:
             return torch.empty(size, dtype=dtype, device=device)
 
 
-class DefaultAllGather(DefaultAllocMixin, AllGather):
+class _AlignedRankStrideMixin:
+    # NCCL collectives slow down when ranks' chunks start off a 16-byte boundary
+    # (#195450); padding each chunk costs at most 15 bytes
+    def rank_stride_alignment(
+        self, dtype: torch.dtype, group: dist.ProcessGroup
+    ) -> int:
+        return max(1, 16 // dtype.itemsize)
+
+
+class DefaultAllGather(_AlignedRankStrideMixin, DefaultAllocMixin, AllGather):
     def __call__(
         self,
         output_tensor: torch.Tensor,
@@ -148,7 +157,9 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
         )
 
 
-class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
+class ProcessGroupAllocAllGather(
+    _AlignedRankStrideMixin, ProcessGroupAllocMixin, AllGather
+):
     def __init__(self, group: dist.ProcessGroup) -> None:
         super().__init__(group)
 
@@ -196,7 +207,7 @@ class SymmMemAllGather(SymmMemAllocMixin, AllGather):
         )
 
 
-class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
+class DefaultReduceScatter(_AlignedRankStrideMixin, DefaultAllocMixin, ReduceScatter):
     def __call__(
         self,
         output_tensor: torch.Tensor,
@@ -214,7 +225,9 @@ class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
         )
 
 
-class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
+class ProcessGroupAllocReduceScatter(
+    _AlignedRankStrideMixin, ProcessGroupAllocMixin, ReduceScatter
+):
     def __init__(self, group: dist.ProcessGroup) -> None:
         super().__init__(group)
 
@@ -537,6 +550,17 @@ def _prepare_default_all_gather_outputs(
         # Skips outputs that view the group's buffers, which it re-allocated
         fsdp_param.alloc_all_gather_outputs()
         plan.outputs.append(fsdp_param.all_gather_outputs)
+    split_sizes = plan.split_sizes
+    padding = (all_gather_result.rank_stride or 0) - sum(split_sizes)
+    if padding > 0:
+        # A scratch output takes each rank's padding, so the copy-out reads the
+        # collective's rows whole
+        scratch = all_gather_result.all_gather_output.new_empty(world_size * padding)
+        plan = _DefaultAllGatherCopyPlan(
+            [*plan.outputs, [scratch]],
+            [*split_sizes, padding],
+            [*plan.outer_sizes, 1],
+        )
     return plan
 
 
@@ -687,12 +711,30 @@ def _default_reduce_scatter_input_fn(
     world_size: int,
 ) -> Callable[[torch.Tensor], None]:
     """Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
+    _reorder_reduce_scatter_grads(unsharded_grads, shard_dims, world_size)
+    return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
+
+
+def _reorder_reduce_scatter_grads(
+    unsharded_grads: list[torch.Tensor], shard_dims: list[int], world_size: int
+) -> None:
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
-    return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
+
+
+def _append_zero_tail(
+    unsharded_grads: list[torch.Tensor], out: torch.Tensor, padding: int
+) -> list[torch.Tensor]:
+    """Append a (1, padding) zeros tensor. chunk_cat gives its row to rank 0 and
+    zero-pads the other ranks' empty chunks, so each rank's row of ``out`` ends
+    with ``padding`` zeros."""
+    dtypes = {grad.dtype for grad in unsharded_grads}
+    # The gradients' own dtype keeps a uniform group on its single-dtype path
+    dtype = dtypes.pop() if len(dtypes) == 1 else out.dtype
+    return [*unsharded_grads, out.new_zeros((1, padding), dtype=dtype)]
 
 
 class _CallbackReduceScatterInputLayout(ReduceScatterInputLayout):
@@ -715,12 +757,27 @@ class _CallbackReduceScatterInputLayout(ReduceScatterInputLayout):
         return ReduceScatterInputPlan(row_numel=row_numel, copy_in=copy_in)
 
 
-class DefaultReduceScatterInputLayout(_CallbackReduceScatterInputLayout):
-    """FSDP's reduce-scatter copy-in, with rows exactly as wide as the padded
-    shards."""
+class DefaultReduceScatterInputLayout(ReduceScatterInputLayout):
+    """FSDP's reduce-scatter copy-in, which pads each rank's row with zeros up to
+    the comm's ``rank_stride_alignment``."""
 
-    def __init__(self) -> None:
-        super().__init__(_default_reduce_scatter_input_fn)
+    def prepare(
+        self,
+        unsharded_grads: list[torch.Tensor],
+        metadata: ReduceScatterInputMetadata,
+    ) -> ReduceScatterInputPlan:
+        world_size, alignment = metadata.world_size, metadata.rank_stride_alignment
+        _reorder_reduce_scatter_grads(unsharded_grads, metadata.shard_dims, world_size)
+        shards_numel = sum(metadata.padded_sharded_numels)
+        row_numel = (shards_numel + alignment - 1) // alignment * alignment
+        padding = row_numel - shards_numel
+
+        def copy_in(reduce_scatter_input: torch.Tensor) -> None:
+            foreach_reduce_scatter_copy_in(
+                unsharded_grads, reduce_scatter_input, world_size, padding
+            )
+
+        return ReduceScatterInputPlan(row_numel=row_numel, copy_in=copy_in)
 
 
 DEFAULT_REDUCE_SCATTER_INPUT_LAYOUT = DefaultReduceScatterInputLayout()
@@ -1049,8 +1106,13 @@ def foreach_reduce_scatter_copy_in(
     unsharded_grads: list[torch.Tensor],
     reduce_scatter_input: torch.Tensor,
     world_size: int,
+    padding: int = 0,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    if padding:
+        unsharded_grads = _append_zero_tail(
+            unsharded_grads, reduce_scatter_input, padding
+        )
     # With reduce_dtype set, gradients share it. Otherwise each follows its
     # parameter's grad_dtype policy (default: the parameter's dtype), so a group
     # can mix dtypes, e.g. bf16 weights with fp32 norms. Uniform groups run the

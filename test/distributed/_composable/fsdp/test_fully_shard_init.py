@@ -1492,6 +1492,9 @@ class TestFullyShardNonFloatParam(FSDPTest):
         expected_ag_dtype = (
             next(iter(ag_input_dtypes)) if len(ag_input_dtypes) == 1 else torch.uint8
         )
+        # FSDP pads each rank's chunk of its collectives to 16 bytes
+        rank_bytes = expected_ag_output_bytes // self.world_size
+        expected_ag_output_bytes = (rank_bytes + 15) // 16 * 16 * self.world_size
         orig_ag = dist.all_gather_single
 
         def assert_all_gather(*args, **kw):
@@ -1501,9 +1504,12 @@ class TestFullyShardNonFloatParam(FSDPTest):
             self.assertEqual(output.nbytes, expected_ag_output_bytes)
             return orig_ag(*args, **kw)
 
-        expected_rs_input_numel = sum(
-            p.numel() for p in model.parameters() if p.requires_grad
+        rank_numel = (
+            sum(p.numel() for p in model.parameters() if p.requires_grad)
+            // self.world_size
         )
+        # Reduce-scatters gradients in fp32, so 4 elements are 16 bytes
+        expected_rs_input_numel = (rank_numel + 3) // 4 * 4 * self.world_size
         orig_rs = dist.reduce_scatter_single
 
         def assert_reduce_scatter(*args, **kw):
