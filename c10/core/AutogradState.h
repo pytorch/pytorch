@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/SafePyObject.h>
 #include <c10/macros/Export.h>
 #include <optional>
 
@@ -12,7 +11,7 @@ struct C10_API AutogradState {
   static AutogradState& get_tls_state();
   static void set_tls_state(AutogradState state);
 
-  AutogradState(
+  constexpr AutogradState(
       bool grad_mode,
       bool inference_mode,
       bool fw_grad_mode,
@@ -46,10 +45,6 @@ struct C10_API AutogradState {
     grad_layout_enforcement_enabled_ = enabled;
   }
 
-  void set_graph_exec_group(const std::optional<SafePyObject>& group) {
-    graph_exec_group_ = group;
-  }
-
   bool get_grad_mode() const {
     return grad_mode_;
   }
@@ -74,12 +69,7 @@ struct C10_API AutogradState {
     return grad_layout_enforcement_enabled_;
   }
 
-  const std::optional<SafePyObject>& get_graph_exec_group() const {
-    return graph_exec_group_;
-  }
-
  private:
-  std::optional<SafePyObject> graph_exec_group_;
   bool grad_mode_ : 1 = true;
   bool inference_mode_ : 1 = false;
   bool fw_grad_mode_ : 1 = true;

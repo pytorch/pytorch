@@ -23,6 +23,7 @@
 #include <c10/core/InferenceMode.h>
 
 #include <iostream>
+#include <optional>
 #include <utility>
 
 // This file contains functorch's Python bindings.
