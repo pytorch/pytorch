@@ -1304,6 +1304,47 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out = f_compiled(x_cloned)
                 self.assertEqual(eager_out, compiled_out)
 
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cat_across_partitions(self):
+            # cat inputs are written in place into the cat buffer. When they are
+            # computed in different partitions, the cat buffer must be allocated
+            # once and passed across partitions.
+            @torch.library.custom_op(
+                "mylib::unsafe_clone",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def unsafe_clone(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @unsafe_clone.register_fake
+            def _(x: torch.Tensor) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            # The middle partition writes c but holds neither the first writer
+            # nor the ConcatKernel node.
+            def f(x, y):
+                a = (x.sin() * 2).sum(0, keepdim=True)
+                b = unsafe_clone(y * a)
+                c = (b.cos() * 3).sum(0, keepdim=True)
+                d = unsafe_clone(y * c)
+                e = (d.sin() * 4).sum(0, keepdim=True)
+                return torch.cat([a, c, e])
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+            x = torch.randn(64, 128, device="cuda")
+            y = torch.randn(64, 128, device="cuda")
+
+            _, code = run_and_get_code(f_compiled, x, y)
+            self.assertGreaterEqual(get_num_partitions(code), 3)
+            FileCheck().check_count("empty_strided_cuda((3, 128)", 1, exactly=True).run(
+                code[0]
+            )
+
+            for _ in range(3):
+                self.assertEqual(f_compiled(x, y), f(x, y), atol=1e-2, rtol=1e-2)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
