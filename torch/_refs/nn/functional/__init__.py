@@ -327,10 +327,11 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     cg = c // groups
     dhw = input.shape[2:]
 
-    if input.numel() == 0 or (
-        device_hint(input) == "cuda" and (groups == 1 or groups == c)
-    ):
+    if input.numel() == 0:
         return input.view(input.shape)
+
+    if device_hint(input) == "cuda" and (groups == 1 or groups == c):
+        return input.contiguous()
 
     return (
         input.reshape(n, groups, cg, *dhw)
