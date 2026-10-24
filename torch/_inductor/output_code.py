@@ -43,6 +43,7 @@ from torch._inductor.cudagraph_utils import (
     get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
+    is_graph_capture_runtime_ready,
     log_cudagraph_skip_and_bump_counter,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
@@ -227,6 +228,25 @@ def prepare_cudagraph_post_compile(
         boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
 
+def _skip_cudagraphs_without_capture_runtime(
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+    boxed_forward_device_index: BoxedDeviceIndex | None,
+) -> bool:
+    if is_graph_capture_runtime_ready(
+        compiled_graph.device_types, compiled_graph.device_idxs
+    ):
+        return False
+
+    BoxedBool.disable(cudagraphs)
+    maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+    log_cudagraph_skip_and_bump_counter(
+        "skipping cudagraphs due to no capture runtime for "
+        f"{set(compiled_graph.device_types)}"
+    )
+    return True
+
+
 def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
@@ -272,6 +292,11 @@ def cudagraph_post_compile(
         prepare_cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
         )
+
+        if _skip_cudagraphs_without_capture_runtime(
+            compiled_graph, cudagraphs, boxed_forward_device_index
+        ):
+            return
 
         current_callable = compiled_graph.current_callable
         if current_callable is None:
@@ -397,6 +422,11 @@ def cudagraph_partition_post_compile(
     prepare_cudagraph_post_compile(
         compiled_graph, example_inputs, boxed_forward_device_index
     )
+
+    if _skip_cudagraphs_without_capture_runtime(
+        compiled_graph, cudagraphs, boxed_forward_device_index
+    ):
+        return
 
     from .compile_fx import cudagraphify
 
