@@ -6,10 +6,31 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize as parametrize_test,
+    run_tests,
+    TestCase,
+)
 
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+
+
+def _binary_add_args(conv):
+    # trailing args of mkldnn._convolution_pointwise(_).binary after input/other
+    return (
+        conv.weight,
+        conv.bias,
+        conv.padding,
+        conv.stride,
+        conv.dilation,
+        conv.groups,
+        "add",
+        None,
+        None,
+        [],
+        None,
+    )
 
 
 class PointwisePostOp(NamedTuple):
@@ -280,6 +301,99 @@ class TestoneDNNFusion(TestCase):
                     self.assertEqual(ref, other)
                     self.assertEqual(ref, fused_inplace)
                 self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
+
+    @parametrize_test("inplace", [False, True])
+    @parametrize_test("x_channels_last", [False, True])
+    @parametrize_test(
+        "other_layout",
+        ["contiguous", "channels_last", "sliced", "channels_last_sliced", "offset"],
+    )
+    def test_conv_binary_other_layout(
+        self, device, inplace, x_channels_last, other_layout
+    ):
+        # `other` is read (and for the in-place op written) in its own layout,
+        # which may differ from the one the conv picked from src/weight and may
+        # not even be dense
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        if x_channels_last:
+            x = x.to(memory_format=torch.channels_last)
+        with torch.no_grad():
+            ref = conv(x)
+            sliced = other_layout.endswith("sliced")
+            other = torch.randn_like(ref).repeat(1, 1, 1, 2 if sliced else 1)
+            if other_layout.startswith("channels_last"):
+                other = other.to(memory_format=torch.channels_last)
+            if sliced:
+                other = other[..., ::2]
+            if other_layout == "offset":
+                # not 64-byte aligned
+                buf = torch.empty(other.numel() + 1, device=device)
+                other = buf[1:].view_as(other).copy_(other)
+            expected = ref + other
+            args = _binary_add_args(conv)
+            if inplace:
+                fused = torch.ops.mkldnn._convolution_pointwise_.binary(other, x, *args)
+                self.assertEqual(expected, other)
+            else:
+                fused = torch.ops.mkldnn._convolution_pointwise.binary(x, other, *args)
+        self.assertEqual(expected, fused)
+
+    @parametrize_test("x_channels_last", [False, True])
+    @parametrize_test("expanded", [False, True])
+    def test_conv_binary_broadcast_other(self, device, x_channels_last, expanded):
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        if x_channels_last:
+            x = x.to(memory_format=torch.channels_last)
+        args = _binary_add_args(conv)
+        with torch.no_grad():
+            ref = conv(x)
+            other = torch.randn(1, 6, 1, 1, device=device)
+            if expanded:
+                other = other.expand_as(ref)
+            fused = torch.ops.mkldnn._convolution_pointwise.binary(x, other, *args)
+        self.assertEqual(ref + other, fused)
+
+    def test_conv_binary_inplace_overlapping_other(self, device):
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        args = _binary_add_args(conv)
+        other = torch.zeros(1, 6, 1, 1, device=device).expand(2, 6, 6, 6)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(RuntimeError, "more than one element"),
+        ):
+            torch.ops.mkldnn._convolution_pointwise_.binary(other, x, *args)
+
+    @parametrize_test("aliased", ["input", "weight", "bias"])
+    def test_conv_binary_inplace_other_aliases_operand(self, device, aliased):
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        operand = {"input": x, "weight": conv.weight, "bias": conv.bias}[aliased]
+        buf = torch.zeros(2 * 6 * 6 * 6 + operand.numel(), device=device)
+        with torch.no_grad():
+            operand.set_(buf[: operand.numel()].view_as(operand).copy_(operand))
+        other = buf[: 2 * 6 * 6 * 6].view(2, 6, 6, 6)
+        args = _binary_add_args(conv)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(RuntimeError, "refer to a single memory location"),
+        ):
+            torch.ops.mkldnn._convolution_pointwise_.binary(other, x, *args)
+
+    def test_conv_binary_self_overlapping_other(self, device):
+        # overlapping nonzero strides can't be described to oneDNN, so other is
+        # read from a contiguous copy
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        other = torch.randn(2 * 6 * 6 * 6, device=device).as_strided(
+            (2, 6, 6, 6), (216, 6, 6, 1)
+        )
+        args = _binary_add_args(conv)
+        with torch.no_grad():
+            fused = torch.ops.mkldnn._convolution_pointwise.binary(x, other, *args)
+            self.assertEqual(conv(x) + other, fused)
 
 
 instantiate_device_type_tests(
