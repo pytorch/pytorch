@@ -5,13 +5,12 @@
  * cd ~/pytorch && python torchgen/operator_versions/gen_mobile_upgraders.py
  */
 
+#include <caffe2/serialize/versions.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
-
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // clang-format off
 
@@ -419,20 +418,39 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                                "full_names_0_4",
                                std::vector<Instruction>({
                                            Instruction{OpCode::STOREN, 1, 7},
+                                           Instruction{OpCode::DROPR, 3, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::LOADC, 0, 0},
+                                           Instruction{OpCode::__IS__, 0, 0},
+                                           Instruction{OpCode::JF, 5, 0},
+                                           Instruction{OpCode::LOAD, 2, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::JMP, 4, 0},
+                                           Instruction{OpCode::LOAD, 2, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::OP, 1, 0},
+                                           Instruction{OpCode::STOREN, 8, 2},
+                                           Instruction{OpCode::DROPR, 4, 0},
+                                           Instruction{OpCode::DROPR, 2, 0},
                                            Instruction{OpCode::MOVE, 1, 0},
-                                           Instruction{OpCode::MOVE, 2, 0},
-                                           Instruction{OpCode::MOVE, 4, 0},
+                                           Instruction{OpCode::MOVE, 8, 0},
+                                           Instruction{OpCode::MOVE, 9, 0},
                                            Instruction{OpCode::MOVE, 5, 0},
                                            Instruction{OpCode::MOVE, 6, 0},
                                            Instruction{OpCode::MOVE, 7, 0},
-                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::OP, 2, 0},
                                            Instruction{OpCode::RET, 0, 0},
                                    }), // instructions list,
-                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::IValue>({
+                                           c10::IValue(),
+                                   }), // constants list,
                                std::vector<c10::TypePtr>(), // types list,
-                               7
+                               9
                            ),
                            std::vector<OperatorString>({
+                                   OperatorString({"aten::Float", "Scalar", 1}),
+                                   OperatorString({"prim::unchecked_cast", "", 1}),
                                    OperatorString({"aten::full", "", 6}),
                            }), // operators list
                    }),
@@ -681,4 +699,5 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
 
 // clang-format on
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
