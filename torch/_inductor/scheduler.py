@@ -4822,6 +4822,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     has no data dependencies among them and can be executed in parallel.
     """
 
+    # Set when this node is derived from another foreach node; see __init__.
+    _strict_reduction: bool | None = None
+    _reduction: bool | None = None
+
     def get_consumer_subnode_for(
         self, producer: BaseSchedulerNode
     ) -> BaseSchedulerNode | None:
@@ -5053,6 +5057,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
             }
 
+            # Only one subnode changed, to prev_node_2, so these follow from the
+            # two nodes this one was built from. Recomputing them over every
+            # subnode after each of many fusions is quadratic.
+            self._strict_reduction = (
+                prev_node_1.has_strict_reduction() or prev_node_2.has_strict_reduction()
+            )
+            self._reduction = prev_node_1.is_reduction() or prev_node_2.is_reduction()
+
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
         if not device:
@@ -5061,6 +5073,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
         self.per_subkernel_blocks = per_subkernel_blocks
+
+    def has_strict_reduction(self) -> bool:
+        if self._strict_reduction is None:
+            self._strict_reduction = super().has_strict_reduction()
+        return self._strict_reduction
+
+    def is_reduction(self) -> bool:
+        if self._reduction is None:
+            self._reduction = super().is_reduction()
+        return self._reduction
 
     @classmethod
     def combinable_nodes(
@@ -12408,11 +12430,19 @@ class Scheduler:
                 and isinstance(snode._body, LoopBody)
             )
             remove_redundant_argreduce_indices(list(loop_bodies))
-            return (
-                self._codegen_partitions()
-                if torch._inductor.config.graph_partition
-                else self._codegen(self.nodes)
-            )
+            try:
+                return (
+                    self._codegen_partitions()
+                    if torch._inductor.config.graph_partition
+                    else self._codegen(self.nodes)
+                )
+            finally:
+                from .codegen.simd import SIMDScheduling
+
+                # candidate_tilings is a class-level cache keyed on scheduler
+                # nodes; once codegen is done, its entries would only keep this
+                # graph (IR, FX graph, and e.g. frozen constants) alive.
+                SIMDScheduling.candidate_tilings.cache_clear()
 
     def _codegen_partition_wrapper(
         self,
