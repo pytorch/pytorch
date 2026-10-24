@@ -4,7 +4,7 @@ import math
 import os
 import socket
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
@@ -62,6 +62,45 @@ _is_test_mode: bool = False
 _mocked_group_names: set[str] | None = None
 
 
+def _is_fake_process_group(group_name: c10d.GroupName) -> bool:
+    group = c10d._resolve_process_group(group_name)
+    return c10d.get_backend(group) == "fake"
+
+
+class _FakeSymmetricMemory:
+    """Model virtual peers as aliases of one local symmetric allocation."""
+
+    def __init__(self, payload: torch.Tensor, group: c10d.ProcessGroup) -> None:
+        self._payload = payload.view(torch.uint8).flatten()
+        self.group = group
+        self.rank = group.rank()
+        self.world_size = group.size()
+        self.buffer_size = self._payload.numel()
+        self.buffer_ptrs = [self._payload.data_ptr()] * self.world_size
+
+    def get_buffer(
+        self,
+        rank: int,
+        sizes: Sequence[int],
+        dtype: torch.dtype,
+        storage_offset: int = 0,
+    ) -> torch.Tensor:
+        if not 0 <= rank < self.world_size:
+            raise ValueError(
+                f"fake symmetric-memory rank {rank} is outside [0, {self.world_size})"
+            )
+        start = storage_offset * dtype.itemsize
+        end = start + math.prod(sizes) * dtype.itemsize
+        if end > self.buffer_size:
+            raise ValueError(
+                f"requested {end} payload bytes from a {self.buffer_size}-byte buffer"
+            )
+        return self._payload[start:end].view(dtype).view(tuple(sizes))
+
+    def barrier(self, channel: int = 0, timeout_ms: int = 0) -> None:
+        del channel, timeout_ms
+
+
 @contextmanager
 def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, None]:
     """
@@ -104,6 +143,8 @@ def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
+_group_name_to_fake_workspace_tensor: dict[str, torch.Tensor] = {}
+_group_name_to_fake_workspace: dict[str, _FakeSymmetricMemory] = {}
 
 
 def get_symm_mem_workspace(
@@ -150,6 +191,37 @@ def get_symm_mem_workspace(
     return _SymmetricMemory.rendezvous(tensor)
 
 
+def _get_pipelined_symm_mem_workspace(
+    group_name: c10d.GroupName, min_size: int
+) -> _SymmetricMemory | _FakeSymmetricMemory:
+    if not _is_fake_process_group(group_name):
+        return get_symm_mem_workspace(group_name, min_size)
+
+    group = c10d._resolve_process_group(group_name)
+    tensor = _group_name_to_fake_workspace_tensor.get(group_name)
+    size = tensor.numel() * tensor.element_size() if tensor is not None else 0
+    if tensor is None or size < min_size:
+        if torch.accelerator.current_stream().is_capturing():
+            raise RuntimeError(
+                "FakePG symmetric-memory workspace must be allocated before "
+                "CUDA graph capture"
+            )
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            (max(size, min_size),),
+            [1],
+            torch.uint8,
+            torch.device(torch.accelerator.current_device_index()),
+        )
+        _group_name_to_fake_workspace_tensor[group_name] = tensor
+        _group_name_to_fake_workspace[group_name] = _FakeSymmetricMemory(tensor, group)
+
+    workspace = _group_name_to_fake_workspace.get(group_name)
+    if workspace is None or workspace.group is not group:
+        workspace = _FakeSymmetricMemory(tensor, group)
+        _group_name_to_fake_workspace[group_name] = workspace
+    return workspace
+
+
 _backend_streams: dict[int, torch.Stream] = {}
 
 
@@ -186,7 +258,9 @@ def _pipelined_multi_all_gather_and_consume(
     p2p_workspace_size_req = 0
     for x in shard:
         p2p_workspace_size_req += x.numel() * x.element_size()
-    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    symm_mem = _get_pipelined_symm_mem_workspace(
+        group_name, min_size=p2p_workspace_size_req
+    )
     group_size = symm_mem.world_size
     rank = symm_mem.rank
 
@@ -358,9 +432,16 @@ def _pipelined_produce_and_all2all(
         c10d._get_group_size_by_name(group_name), dim=out_chunk_dim
     )
     p2p_workspace_size_req = out_chunks[0].numel() * out_chunks[0].element_size() * 2
-    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    symm_mem = _get_pipelined_symm_mem_workspace(
+        group_name, min_size=p2p_workspace_size_req
+    )
     group_size = symm_mem.world_size
     rank = symm_mem.rank
+    emulate_peer_buffers = isinstance(symm_mem, _FakeSymmetricMemory)
+    if emulate_peer_buffers:
+        # Virtual peers have no physical writers. Keep their receive chunks at
+        # zero so the downstream reduction contains only this rank's partial.
+        output.zero_()
 
     symm_mem.barrier(channel=0)
     backend_stream = _get_backend_stream()
@@ -442,7 +523,8 @@ def _pipelined_produce_and_all2all(
                 torch.cuda._sleep(100)
             chunk_producer((rank + step) % group_size, p2p_buf)
             symm_mem.barrier(channel=step % 2)
-            out_chunks[remote_rank].copy_(remote_p2p_buf)
+            if not emulate_peer_buffers:
+                out_chunks[remote_rank].copy_(remote_p2p_buf)
             # The local P2P buffer can only be overwritten by the next
             # chunk_producer after all peers have finished reading from it.
             symm_mem.barrier(channel=step % 2)
@@ -791,7 +873,9 @@ def _pipelined_all_gather_and_consume_last_dim(
 ) -> None:
     p2p_workspace_size_req = 0
     p2p_workspace_size_req = shard.numel() * shard.element_size()
-    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    symm_mem = _get_pipelined_symm_mem_workspace(
+        group_name, min_size=p2p_workspace_size_req
+    )
     group_size = symm_mem.world_size
     rank = symm_mem.rank
 
@@ -972,7 +1056,10 @@ def _fused_all_gather_matmul(
             A_shard, Bs, gather_dim, group_name, return_A=return_A
         )
 
-    if _should_use_fused_all_gather_matmul_native(A_shard, Bs, gather_dim, group_name):
+    emulate_peer_buffers = _is_fake_process_group(group_name)
+    if not emulate_peer_buffers and _should_use_fused_all_gather_matmul_native(
+        A_shard, Bs, gather_dim, group_name
+    ):
         group = c10d._resolve_process_group(group_name)
         leading_dims = list(A_shard.shape[:-1])
         leading_dims[0] *= group.size()
@@ -981,7 +1068,7 @@ def _fused_all_gather_matmul(
         )
         return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
 
-    if _should_use_multimem_all_gather_matmul(
+    if not emulate_peer_buffers and _should_use_multimem_all_gather_matmul(
         A_shard, gather_dim, group_name, return_A
     ):
         return None, _multimem_all_gather_matmul(A_shard, Bs, group_name)
@@ -1458,6 +1545,9 @@ def _fused_matmul_reduce_scatter_impl(
     if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
     group = c10d._resolve_process_group(group_name)
+    # FakePG has one physical contributor, so both reductions preserve its
+    # local partial after virtual peer destinations are zero-initialized.
+    effective_reduce_op = "sum" if _is_fake_process_group(group_name) else reduce_op
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
     output_dtype = out_dtype or A.dtype
@@ -1490,7 +1580,7 @@ def _fused_matmul_reduce_scatter_impl(
         return reduce_partials(
             stacked_partials_view,
             dim=-2,
-            reduce_op=reduce_op,
+            reduce_op=effective_reduce_op,
             output_dtype=output_dtype,
             group_size=group.size(),
         )
@@ -1521,7 +1611,7 @@ def _fused_matmul_reduce_scatter_impl(
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
         dim=scatter_dim,
-        reduce_op=reduce_op,
+        reduce_op=effective_reduce_op,
         output_dtype=output_dtype,
         group_size=group.size(),
     )
@@ -2224,7 +2314,6 @@ def _all_to_all_vdev_2d_offset_meta(
 # =============================================================================
 
 
-from collections.abc import Sequence
 from typing import overload, TYPE_CHECKING, Union
 
 
