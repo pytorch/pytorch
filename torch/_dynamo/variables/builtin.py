@@ -630,6 +630,28 @@ _VALUE_INDEPENDENT_INSTANCECHECKS = frozenset(
     if hook is not None
 )
 
+_PROTOCOL_META = getattr(typing, "_ProtocolMeta", None)
+
+
+def _runtime_protocol_members(classinfo: Any) -> frozenset[str] | None:
+    """The member names typing's instance check reads for a runtime_checkable
+    Protocol. None for any other classinfo, and when this Python does not
+    expose them (they are private to typing), so that the real isinstance()
+    answers as before."""
+    if not (
+        type(classinfo) is _PROTOCOL_META
+        and getattr(classinfo, "_is_protocol", False)
+        and getattr(classinfo, "_is_runtime_protocol", False)
+    ):
+        return None
+    members = getattr(classinfo, "__protocol_attrs__", None)  # 3.12+
+    if members is None:
+        get_members = getattr(typing, "_get_protocol_attrs", None)
+        if get_members is None:
+            return None
+        members = get_members(classinfo)
+    return frozenset(members)
+
 
 def _uses_custom_classinfo_check(
     type_info: Any,
@@ -2944,9 +2966,22 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if answered_by_type
                 else arg.get_real_python_backed_value()
             )
-            if value is not NO_SUCH_SUBOBJ:
+            protocol_members = (
+                _runtime_protocol_members(member)
+                if isinstance(arg, variables.UserDefinedObjectVariable)
+                else None
+            )
+            if protocol_members is not None or value is not NO_SUCH_SUBOBJ:
+                # Both run user code on the object (the Protocol path on
+                # 3.10/3.11 runs a member's getter), so a TypeError is observed
+                # for user code to catch, as in eager.
                 try:
-                    val = isinstance(value, member)
+                    if protocol_members is not None:
+                        val = arg.isinstance_runtime_protocol(
+                            tx, member, protocol_members
+                        )
+                    else:
+                        val = isinstance(value, member)
                 except TypeError as e:
                     raise_observed_exception(TypeError, tx, args=list(e.args))
             else:
