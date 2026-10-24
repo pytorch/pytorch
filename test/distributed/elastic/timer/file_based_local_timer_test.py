@@ -293,6 +293,31 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
             mock_os_kill.assert_called_once_with(test_pid, signal.SIGKILL)
             mock_debug_info.assert_called()
 
+        def test_expired_timer_does_not_kill_server_process(self):
+            """
+            tests that reaping a worker with an expired timer leaves the process
+            hosting the server (e.g. the elastic agent) alone
+            """
+            server_pid = os.getpid()
+            os_kill = os.kill
+
+            def kill(pid, sig):
+                if pid != server_pid:
+                    os_kill(pid, sig)
+
+            worker = mp.Process(target=time.sleep, args=(60,))
+            worker.start()
+            with mock.patch("os.kill", side_effect=kill) as mock_os_kill:
+                self.server.start()
+                client = timer.FileTimerClient(self.file_path)
+                client._send_request(self._expired_timer(pid=worker.pid, scope="test"))
+                self.server.run_once()
+            worker.join()
+            self.assertEqual(-signal.SIGKILL, worker.exitcode)
+            self.assertNotIn(
+                mock.call(server_pid, signal.SIGKILL), mock_os_kill.call_args_list
+            )
+
         @mock.patch("os.kill")
         def test_send_request_release(self, mock_os_kill):
             """
