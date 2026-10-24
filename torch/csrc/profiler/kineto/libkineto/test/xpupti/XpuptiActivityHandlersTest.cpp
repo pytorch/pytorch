@@ -8,6 +8,7 @@
 
 #include "include/MetadataFieldCatalog.h"
 #include "include/output_base.h"
+#include "include/time_since_epoch.h"
 #include "src/ActivityBuffers.h"
 #include "src/plugin/xpupti/XpuptiActivityApi.h"
 #include "src/plugin/xpupti/XpuptiActivityProfilerSession.h"
@@ -16,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 
@@ -46,6 +48,12 @@ static_assert(
 class MockXpuptiActivityApi : public KN::XpuptiActivityApi {
  public:
   std::vector<const pti_view_record_base*> records;
+  // Hand-crafted records carry small literal timestamps, not PTI-clock times.
+  bool monotonicRaw = false;
+
+  bool ptiClockIsMonotonicRaw() const override {
+    return monotonicRaw;
+  }
 
   std::unique_ptr<KN::XpuptiActivityBufferMap> activityBuffers() override {
     // Return a non-null map so processTrace enters the processing path.
@@ -305,6 +313,42 @@ TEST_F(XpuptiActivityHandlersTest, ZeroDurationMemoryCopyOmitsBandwidth) {
       activity.metadataJson().find(
           XpuMetadataFields::kMemoryBandwidthGbps.name),
       std::string::npos);
+}
+
+// With PTI reporting in CLOCK_MONOTONIC_RAW, the session maps records onto
+// system_clock with one conversion, so back-to-back kernels keep their order,
+// gap and durations (intel/torch-xpu-ops#5717).
+TEST_F(XpuptiActivityHandlersTest, MonotonicRawTimestampsMapToSystemClock) {
+  mockApi_.monotonicRaw = true;
+  const int64_t sysNow =
+      libkineto::timeSinceEpoch(std::chrono::system_clock::now());
+  const uint64_t raw = KN::XpuptiActivityApi::ptiClockNs();
+
+  KN::pti_view_record_kernel_t first{};
+  KN::pti_view_record_kernel_t second{};
+  for (auto* record : {&first, &second}) {
+    record->_view_kind._view_kind = PTI_VIEW_DEVICE_GPU_KERNEL;
+    record->_name = "test_kernel";
+    record->_sycl_queue_id = 64;
+  }
+  first._kernel_id = first._correlation_id = 1;
+  first._start_timestamp = raw;
+  first._end_timestamp = raw + 1000;
+  second._kernel_id = second._correlation_id = 2;
+  second._start_timestamp = raw + 1500;
+  second._end_timestamp = raw + 4000;
+  mockApi_.records.push_back(&first._view_kind);
+  mockApi_.records.push_back(&second._view_kind);
+
+  constexpr int64_t kSecond = 1'000'000'000;
+  auto traceBuffer = processAndGetTrace(sysNow - kSecond, sysNow + kSecond);
+  ASSERT_EQ(traceBuffer->activities.size(), 2);
+  const auto& a = *traceBuffer->activities[0];
+  const auto& b = *traceBuffer->activities[1];
+  EXPECT_NEAR(a.timestamp(), sysNow, 1'000'000);
+  EXPECT_NEAR(a.duration(), 1000, 2);
+  EXPECT_NEAR(b.timestamp() - (a.timestamp() + a.duration()), 500, 2);
+  EXPECT_NEAR(b.duration(), 2500, 2);
 }
 
 // --- Hardware engine metadata tests ---
