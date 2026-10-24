@@ -1094,13 +1094,14 @@ print("RECOVERED")
             stop = threading.Event()
 
             def heartbeat():
-                while not stop.wait(0.001):
+                while not stop.is_set():
                     beats.append(time.perf_counter())
+                    time.sleep(0.001)
 
             thread = threading.Thread(target=heartbeat)
             thread.start()
             try:
-                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(200 * get_cycles_per_ms()))
                 start = time.perf_counter()
                 copy_fn()
                 end = time.perf_counter()
