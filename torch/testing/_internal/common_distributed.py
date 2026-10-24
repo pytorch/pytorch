@@ -153,13 +153,6 @@ DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
 
 
-def _run_with_nested_graph_breaks(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> Any:
-    with torch._dynamo.config.patch(nested_graph_breaks=True):
-        return fn(*args, **kwargs)
-
-
 class TestSkip(NamedTuple):
     exit_code: int
     message: str
@@ -1006,11 +999,10 @@ class MultiProcessTestCase(TestCase):
 
     def _start_processes(self, proc) -> None:
         self.processes = []
-        worker_target = partial(_run_with_nested_graph_breaks, self.__class__._run)
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
             process = proc(
-                target=worker_target,
+                target=self.__class__._run,
                 name="process " + str(rank),
                 args=(
                     rank,
@@ -1306,7 +1298,6 @@ class MultiProcessTestCase(TestCase):
 # This abstracts the PG creation and deletion, the backends are selected based
 # on device type. The tests functions can be instantiated per device type using
 # common_device_type.instantiate_device_type_tests
-# other backends can add entry in backend() function
 class DistributedTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -1324,14 +1315,7 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        return c10d.get_default_backend_for_device(device)
 
     def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
@@ -1339,18 +1323,11 @@ class DistributedTestBase(MultiProcessTestCase):
         backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        if "nccl" in backend or "xccl" in backend:
+        if torch.accelerator.is_available() and backend != c10d.Backend.GLOO:
             accelerator = torch.accelerator.current_accelerator()
-            if accelerator:
-                device_type = accelerator.type
-                device = torch.device(f"{device_type}:{self.rank}")
-                torch.set_default_device(device)
-                torch.accelerator.set_device_index(device)
-            else:
-                raise RuntimeError(
-                    "Expected to find an accelerator when initializing process group"
-                    f" with {backend} backend, but got None"
-                )
+            device = torch.device(f"{accelerator.type}:{self.rank}")
+            torch.set_default_device(device)
+            torch.accelerator.set_device_index(device)
         torch.distributed.init_process_group(
             backend=backend,
             world_size=world_size,
@@ -1463,12 +1440,8 @@ def spawn_threads_and_init_comms(
                     c10d.destroy_process_group()
 
         threads = []
-        worker_target = partial(_run_with_nested_graph_breaks, worker)
         for rank in range(world_size):
-            t = threading.Thread(
-                target=worker_target,
-                args=(rank, world, global_store),
-            )
+            t = threading.Thread(target=worker, args=(rank, world, global_store))
             t.start()
             threads.append(t)
 
@@ -1580,11 +1553,9 @@ class MultiThreadedTestCase(TestCase):
         if not world_is_valid():
             raise RuntimeError("Invalid world")
 
-        worker_target = partial(_run_with_nested_graph_breaks, self.__class__._run)
         for rank in range(self.world_size):
             t = threading.Thread(
-                target=worker_target,
-                args=(test_name, rank, self.world_size),
+                target=self.__class__._run, args=(test_name, rank, self.world_size)
             )
             t.start()
             self.threads.append(t)
@@ -2064,12 +2035,11 @@ class MultiProcContinuousTest(TestCase):
             # The start method has already been set
             pass
 
-        worker_target = partial(_run_with_nested_graph_breaks, cls._worker_loop)
         for rank in range(int(world_size)):
             task_queue = torch.multiprocessing.Queue()
             completion_queue = torch.multiprocessing.Queue()
             process = torch.multiprocessing.Process(
-                target=worker_target,
+                target=cls._worker_loop,
                 name="process " + str(rank),
                 daemon=True,  # so that child processes will exit if parent decides to terminate
                 args=(rank, world_size, cls.rdvz_file, task_queue, completion_queue),
