@@ -3813,16 +3813,29 @@ class GuardBuilder(GuardBuilderBase):
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
-        if self.check_fn_manager.torch_function_mode_stack is None:
+        modes = self.check_fn_manager.torch_function_mode_stack
+        if modes is None:
             raise AssertionError("torch_function_mode_stack must not be None")
+        mode_names = [type(mode).__qualname__ for mode in modes]
+        expected = (
+            f"TorchFunctionMode classes {mode_names!r} in this order"
+            if mode_names
+            else "no active TorchFunctionMode"
+        )
+        reason = (
+            f"This compiled version expects {expected}; the current modes differ "
+            "in number, class, or order. TorchFunctionMode can override PyTorch "
+            "operations. Use the same mode classes in the same order to satisfy "
+            "this guard."
+        )
         self.check_fn_manager.torch_function_mode_stack_check_fn = (
-            make_torch_function_mode_stack_guard(
-                self.check_fn_manager.torch_function_mode_stack
-            )
+            make_torch_function_mode_stack_guard(modes)
         )
         self.guard_manager.root.add_torch_function_mode_stack_guard(
-            self.check_fn_manager.torch_function_mode_stack,
-            ["___check_torch_function_mode_stack()"],
+            modes,
+            get_verbose_code_parts(
+                "___check_torch_function_mode_stack()", guard, recompile_hint=reason
+            ),
             guard.user_stack,
         )
 

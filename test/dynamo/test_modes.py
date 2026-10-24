@@ -248,6 +248,37 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
 
+    def test_torch_function_mode_guard_recompile_hint(self):
+        class ModeA(BaseTorchFunctionMode):
+            pass
+
+        class ModeB(BaseTorchFunctionMode):
+            pass
+
+        failures = []
+        x = torch.ones(2)
+
+        def f(x):
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(f)
+        compiled(x)
+        with ModeA():
+            compiled(x)
+        self.assertIn("expects no active TorchFunctionMode", "\n".join(failures))
+
+        failures.clear()
+        with ModeA():
+            compiled(x)
+        self.assertEqual(failures, [])
+        with ModeB():
+            compiled(x)
+        self.assertIn("TorchFunctionMode classes", "\n".join(failures))
+        self.assertIn("ModeA", "\n".join(failures))
+
     def test_torch_function_mode_preserves_cuda_rng_state(self):
         class ConstantReturnMode(TorchFunctionMode):
             def __torch_function__(self, func, types, args=(), kwargs=None):
