@@ -3687,6 +3687,43 @@ class TestInvokeSubgraphCompileDevice(TestCase):
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphOutputViews(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("view", ("rows", "cols", "flat"))
+    @parametrize("training", (False, True))
+    def test_output_with_storage_offset(self, device, view, training):
+        # exp saves its result, so in training the partitioned forward also
+        # returns the buffer that the view points into.
+        @nested_compile_region
+        def region(a, b):
+            out = torch.exp(a + b)
+            if view == "rows":
+                return out[4:]
+            if view == "cols":
+                return out[:, 4:]
+            # A 4-byte offset, which is not GPU-aligned.
+            return out.flatten()[1:65]
+
+        def fn(x, y):
+            return region(x, y) * 2, region(y, x) * 3
+
+        x = torch.randn(8, 9, device=device, requires_grad=training)
+        y = torch.randn(8, 9, device=device, requires_grad=training)
+        x_ref = x.detach().clone().requires_grad_(training)
+        y_ref = y.detach().clone().requires_grad_(training)
+
+        actual = torch.compile(fn, fullgraph=True)(x, y)
+        expected = fn(x_ref, y_ref)
+        self.assertEqual(actual, expected)
+        if training:
+            sum(out.sum() for out in actual).backward()
+            sum(out.sum() for out in expected).backward()
+            self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(y.grad, y_ref.grad)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompileCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -6497,6 +6534,14 @@ instantiate_device_type_tests(
     TestInvokeSubgraphCompileDevice,
     globals(),
     only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
+
+
+instantiate_device_type_tests(
+    TestInvokeSubgraphOutputViews,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 

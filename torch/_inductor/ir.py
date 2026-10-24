@@ -11301,6 +11301,21 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
 
 
+def _mark_unaligned_subgraph_output(
+    multi_output: MultiOutput, subgraph_outputs: Sequence[tuple[Subgraph, IRNode]]
+) -> None:
+    # The MultiOutput's layout has offset 0 relative to the tensor the subgraph
+    # returns, so record when that tensor is unaligned, as fallback outputs do.
+    for subgraph, output in subgraph_outputs:
+        if subgraph.graph is None:
+            raise AssertionError("Expected a lowered subgraph")
+        with V.set_graph_handler(subgraph.graph):
+            unaligned = is_unaligned(output)
+        if unaligned:
+            V.graph.unaligned_buffers.add(multi_output.get_name())
+            return
+
+
 @ir_dataclass(frozen=False)
 class InvokeSubgraph(ExternKernel):
     """
@@ -11477,19 +11492,22 @@ class InvokeSubgraph(ExternKernel):
                 if device is None:
                     raise AssertionError("Expected device is not None")
 
-                return MultiOutput(
+                multi_output = MultiOutput(
                     FixedLayout(
                         device=device,
                         dtype=output.get_dtype(),
                         size=output.get_size(),
                         stride=output.get_stride(),
-                        offset=output.get_layout().offset,
+                        # The returned tensor already starts at the view's offset.
+                        offset=0,
                         is_pinned=output.get_layout().is_pinned,
                     ),
                     invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
                     skip_size_stride_alignment_checks=True,
                 )
+                _mark_unaligned_subgraph_output(multi_output, [(subgraph, output)])
+                return multi_output
 
         outs = [create_output(output, i) for i, output in enumerate(outputs)]
         invoke_subgraph.outputs = outs  # type: ignore[assignment]
@@ -11702,7 +11720,8 @@ class Switch(ExternKernel):
                     dtype=output.get_dtype(),
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],
-                    offset=output.get_layout().offset,
+                    # The returned tensor already starts at the view's offset.
+                    offset=0,
                     is_pinned=output.get_layout().is_pinned,
                 ),
                 switch,
@@ -11716,6 +11735,9 @@ class Switch(ExternKernel):
         ]
 
         switch.outputs = outputs  # type: ignore[assignment]
+        for i, multi_output in enumerate(outputs):
+            branch_outs = [(b, outs[i]) for b, outs in zip(branches, branch_outputs)]
+            _mark_unaligned_subgraph_output(multi_output, branch_outs)
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,
@@ -12079,11 +12101,13 @@ class WhileLoop(ExternKernel):
                             dtype=output.get_dtype(),
                             size=output.get_size(),
                             stride=output.get_stride(),
-                            offset=output.get_layout().offset,
+                            # The returned tensor already starts at the view's offset.
+                            offset=0,
                         ),
                         while_loop,
                         [(list, idx)],
                     )
+                    _mark_unaligned_subgraph_output(multi_out, [(body_fn, output)])
                     while_loop.outputs.append(multi_out)
                     all_outputs.append(multi_out)
 
