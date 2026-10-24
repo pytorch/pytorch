@@ -381,7 +381,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     prior_deterministic, warn_only=prior_warn_only
                 )
                 torch.random.set_rng_state(torch_rng_state)
-                torch.set_default_dtype(prior_dtype)
+                if torch.get_default_dtype() != prior_dtype:
+                    torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
                     torch._C._is_default_mobile_cpu_allocator_set()
                 )
