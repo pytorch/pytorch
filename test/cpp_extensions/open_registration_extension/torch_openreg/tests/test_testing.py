@@ -304,6 +304,15 @@ with _temp_test_configs(
     )
 
 
+# Capabilities declared for the gating/query tests below. attention.flash_attention is
+# deliberately undeclared: the gating tests rely on it missing from the map.
+OPENREG_CAPABILITIES = {
+    Capability.dtype.fp8: lambda: True,
+    Capability.dtype.bf16: lambda: False,
+    Capability.attention.mem_efficient_attention: lambda: True,
+}
+
+
 class TestCapabilityGating(TestCase):
     """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
@@ -315,10 +324,7 @@ class TestCapabilityGating(TestCase):
             PrivateUse1TestBase, "_capabilities"
         )
         PrivateUse1TestBase._capabilities = classmethod(
-            lambda cls: {
-                Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: False,
-            }
+            lambda cls: OPENREG_CAPABILITIES
         )
 
     @classmethod
@@ -378,6 +384,46 @@ class TestCapabilityGating(TestCase):
 
 
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
+
+
+class TestCapabilityQueries(TestCase):
+    """get_capabilities() must return exactly the requested category."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_capabilities = inspect.getattr_static(
+            PrivateUse1TestBase, "_capabilities"
+        )
+        PrivateUse1TestBase._capabilities = classmethod(
+            lambda cls: OPENREG_CAPABILITIES
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        PrivateUse1TestBase._capabilities = cls._saved_capabilities
+        super().tearDownClass()
+
+    def test_capability_category_filter(self, device):
+        """Each query returns its own category, with nothing leaked from the other."""
+
+        self.assertEqual(
+            type(self).get_capabilities(Capability.dtype),
+            {Capability.dtype.fp8: True, Capability.dtype.bf16: False},
+        )
+        self.assertEqual(
+            type(self).get_capabilities(Capability.attention),
+            {Capability.attention.mem_efficient_attention: True},
+        )
+
+    def test_capability_invalid_category(self, device):
+        """get_capabilities raises ValueError for a category that is not a
+        Capability inner class."""
+
+        with self.assertRaisesRegex(ValueError, "Unknown capability category"):
+            type(self).get_capabilities(Capability)
+
+
+instantiate_device_type_tests(TestCapabilityQueries, globals(), only_for="openreg")
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
