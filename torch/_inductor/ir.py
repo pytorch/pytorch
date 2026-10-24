@@ -47,6 +47,7 @@ import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
+import torch.fx.experimental._config as symbolic_shapes_config
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
@@ -4409,7 +4410,11 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+        if symbolic_shapes_config.backed_size_oblivious or any(
+            free_unbacked_symbols(x) for x in (start, end, dim_size)
+        ):
+            # Size-oblivious bounds must remain symbolic when clamping needs
+            # a comparison that cannot be proven without the captured hint.
             min_func = Min
             max_func = Max
         elif any(
