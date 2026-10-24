@@ -1504,6 +1504,23 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_ndtr_lower_tail(self, device, dtype):
+        # ndtr(x) for x < 0 must keep relative accuracy down to where the
+        # value underflows (x ~ -38 in float64, ~ -13 in float32). The former
+        # (1 + erf(x / sqrt(2))) / 2 returned 0 for every x <= -8.3 and was
+        # off by 2% at x = -8 and 2e-6 at x = -7, see gh-192295.
+        lo = -37.0 if dtype == torch.float64 else -12.0
+        x = torch.linspace(lo, -1.0, 2001, device=device, dtype=dtype)
+        expected = torch.from_numpy(scipy.special.ndtr(x.cpu().double().numpy())).to(dtype)
+        actual = torch.special.ndtr(x)
+        self.assertTrue((actual > 0).all())
+        rtol = 1e-12 if dtype == torch.float64 else 1e-4
+        self.assertEqual(actual, expected, atol=0, rtol=rtol)
+        # symmetry with the upper half, which is unchanged
+        self.assertEqual(torch.special.ndtr(-x), 1 - actual, atol=0, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @expectedFailureMPS  # log_ndtr is not implemented on MPS
     def test_special_log_ndtr_vs_scipy(self, device, dtype):
         def check_equal(t):
