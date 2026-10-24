@@ -1207,6 +1207,18 @@ def set_num_interop_threads(
 ) -> None: ...  # THPModule_setNumInteropThreads
 def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
+class _CuDNNFlags: ...
+def _get_cudnn_flags() -> _CuDNNFlags: ...
+def _set_cudnn_flags(
+    enabled: _bool | None,
+    benchmark: _bool | None,
+    benchmark_limit: _int | None,
+    deterministic: _bool | None,
+    allow_tf32: _bool | None,
+    fp32_precision: str | None,
+    depthwise_kernel: str | None,
+) -> None: ...
+def _restore_cudnn_flags(flags: _CuDNNFlags) -> None: ...
 def _get_flash_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFusedSDP
 def _set_sdp_use_flash(arg: _bool) -> None: ...  # THPModule_setSDPUseFlash
 def _get_fa3_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFA3SDP
