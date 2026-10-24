@@ -84,16 +84,16 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   }
 
   const bool maybe_support_half = (
-    // CUDA and XPU support half precision, but since meta tensors don't have a
-    // device we err on the side of accepting it
-    device.is_cuda() || device.is_meta() || device.is_xpu()
+    // CUDA, XPU and MTIA support half precision, but since meta tensors don't
+    // have a device we err on the side of accepting it
+    device.is_cuda() || device.is_meta() || device.is_xpu() || device.is_mtia()
   );
   if (maybe_support_half) {
-    // XPU has no native bfloat16 FFT kernel; promote to float32.
+    // XPU and MTIA have no native bfloat16 FFT kernel; promote to float32.
     // ROCm (hipFFT) has no native bfloat16 FFT kernel; promote to float32.
     // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
     // so we leave them unchanged here and let the cuFFT planner decide.
-    if (type == kBFloat16 && device.is_xpu()) {
+    if (type == kBFloat16 && (device.is_xpu() || device.is_mtia())) {
       type = kFloat;
     }
     // ROCm/hipFFT does not support bfloat16; promote to float32
