@@ -8290,6 +8290,17 @@ for shape in [(1,), ()]:
             ):
                 out.sum().backward()
 
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
+    def test_graph_exec_group_inference_mode(self):
+        group = torch.utils.checkpoint.GraphExecGroup()
+        with group:
+            self.assertIs(torch._C._get_graph_exec_group(), group)
+            for enabled in (True, False):
+                with torch.inference_mode(enabled):
+                    self.assertIs(torch._C._get_graph_exec_group(), group)
+                self.assertIs(torch._C._get_graph_exec_group(), group)
+        self.assertIsNone(torch._C._get_graph_exec_group())
+
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
             out = x.sin().exp()
