@@ -915,7 +915,8 @@ def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
 
 
 class _LineIfNamesUsed(DeferredLineBase):
-    """A preamble import or binding that is emitted only if the module uses its names.
+    """A line emitted only if the module uses one of ``names``: by default the names
+    the import or binding on it binds.
 
     Which bindings a graph needs is not known when write_header runs, before anything
     is lowered, and several are only ever emitted by interpolation
@@ -924,22 +925,29 @@ class _LineIfNamesUsed(DeferredLineBase):
     """
 
     def __init__(
-        self, line: str, names: tuple[str, ...], wrapper: PythonWrapperCodegen
+        self,
+        line: str,
+        names: tuple[str, ...],
+        wrapper: PythonWrapperCodegen,
+        binds: bool,
     ) -> None:
         super().__init__(line)
         self.names = names
         self.wrapper = wrapper
+        # Whether ``names`` are the ones the line binds, so only its right-hand side,
+        # not the whole line, is a use.
+        self.binds = binds
 
     def __call__(self) -> str | None:
         if self.wrapper.scanning_for_uses:
-            # Absent from the text being scanned, so that `aten = torch.ops.aten` is
-            # not a use of aten.
+            # Absent from the text being scanned, so that a line is not a use of its
+            # own names: `aten = torch.ops.aten` is not a use of aten.
             return None
         used = self.wrapper.used_names
         return self.line if used is None or not used.isdisjoint(self.names) else None
 
     def _new_line(self, line: str) -> _LineIfNamesUsed:
-        return _LineIfNamesUsed(line, self.names, self.wrapper)
+        return _LineIfNamesUsed(line, self.names, self.wrapper, self.binds)
 
 
 class _OmittedFromScan(DeferredLineBase):
@@ -2415,15 +2423,20 @@ class PythonWrapperCodegen(CodeGen):
             "async_compile = AsyncCompile()",
         )
 
-    def write_if_used(self, buf: IndentedBuffer, line: str) -> None:
-        """Write an import or binding that is kept only if the module uses a name it
-        binds."""
-        names = self._names_bound_by(line)
-        if "torch" in names:
-            # The rest of the preamble is written in terms of it.
-            buf.writeline(line)
-            return
-        self.conditional_lines.append(_LineIfNamesUsed(line, names, self))
+    def write_if_used(
+        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
+    ) -> None:
+        """Write a line that is kept only if the module uses a name in ``names``, by
+        default the names the import or binding on it binds. A kept line uses the names
+        it reads: a binding's right-hand side, or all of a line given ``names``."""
+        binds = names is None
+        if names is None:
+            names = self._names_bound_by(line)
+            if "torch" in names:
+                # The rest of the preamble is written in terms of it.
+                buf.writeline(line)
+                return
+        self.conditional_lines.append(_LineIfNamesUsed(line, names, self, binds))
         buf.writeline(self.conditional_lines[-1])
 
     @staticmethod
@@ -2443,7 +2456,7 @@ class PythonWrapperCodegen(CodeGen):
             if len(names) == m.group(2).count(",") + 1:
                 return tuple(names)
         raise AssertionError(
-            f"cannot tell what {line!r} binds; write it in a form _names_bound_by reads"
+            f"cannot tell what {line!r} binds; write it with an explicit `names`"
         )
 
     def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
@@ -2483,16 +2496,20 @@ class PythonWrapperCodegen(CodeGen):
     def scan_for_used_names(self, module: IndentedBuffer) -> None:
         """Record which names ``module``, the finished wrapper, uses."""
         used = self.names_used_in(module) | self.names_used_unscanned
-        # A kept binding uses the names its right-hand side starts from, which another
-        # line may bind: `async_compile = AsyncCompile()`.
-        rhs_words = [
-            (line.names, re.findall(r"(?<![.\w])\w+", line.line.partition(" = ")[2]))
-            for line in self.conditional_lines
-        ]
+        if self.kernel_sources:
+            # Run as a script, the module compiles its module-level kernels, which the
+            # scan leaves out, at async_compile.wait.
+            used.add("async_compile")
+        # A kept line uses the names it reads, which another line may bind:
+        # `async_compile = AsyncCompile()`.
+        reads = []
+        for line in self.conditional_lines:
+            text = line.line.partition(" = ")[2] if line.binds else line.line
+            reads.append((line.names, re.findall(r"(?<![.\w])\w+", text)))
         while (
             new := OrderedSet(
                 word
-                for names, words in rhs_words
+                for names, words in reads
                 if not used.isdisjoint(names)
                 for word in words
             )
@@ -2721,13 +2738,10 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        # None of these lines is a use of async_compile: a module that compiles nothing
+        # has no need of them.
+        for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
+            self.write_if_used(self.prefix, line, ("async_compile",))
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
