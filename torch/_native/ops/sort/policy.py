@@ -26,8 +26,9 @@ REGISTER_MAX_NSORT = 2048
 # 64, and 16 rows spill 64-bit keys at rung 2048.
 REGISTER_ROWS_PER_CTA = 2
 # Longest bool row the partition kernel sorts: its flat extents are Int32, with
-# room for rounding a row out to whole vectors.
-PARTITION_MAX_NSORT = (1 << 31) - 64
+# room for one tile past the row end (cutedsl_partition.policy keeps a tile
+# within 2^12 chunks of at most 16 bytes).
+PARTITION_MAX_NSORT = (1 << 31) - (1 << 17)
 INDEX_MAX = {
     "uint8": (1 << 8) - 1,
     "int8": (1 << 7) - 1,

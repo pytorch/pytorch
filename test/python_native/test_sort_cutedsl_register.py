@@ -18,6 +18,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
+    slowTest,
+    subtest,
     TestCase,
 )
 
@@ -48,10 +50,21 @@ _NSORTS = (
     *(511, 512, 513, 1000, 1023, 1024, 1025, 2047, 2048),
 )
 _ROWS = (1, 7, 1000)
+_BOUNDARY_NSORTS = (1, 32, 33, 128, 129, 2047, 2048)
 # One key per code path for the length sweep (each spec is a JIT compile): two
 # 1-byte keys per register, a 16-bit key and a 32-bit key packed with the
 # index, and 64-bit keys beside it. Every dtype runs in test_index_dtypes.
 _NSORT_KEY_DTYPES = (torch.uint8, torch.bfloat16, torch.float32, torch.int64)
+
+
+def _slow_unless(fast, *axes):
+    """Every combination of ``axes``; those ``fast`` rejects are @slowTest (each
+    spec is a JIT compile, and the fast set is all CI runs)."""
+    cases = [c[0] if len(axes) == 1 else c for c in itertools.product(*axes)]
+    fast_ = fast if len(axes) == 1 else lambda c: fast(*c)
+    return [c if fast_(c) else subtest(c, decorators=[slowTest]) for c in cases]
+
+
 # (exponent, mantissa) bits.
 _FLOAT_LAYOUT = {
     torch.float16: (5, 10),
@@ -131,15 +144,33 @@ class TestCuTeDSLRegisterSort(TestCase):
     @parametrize("key_dtype", _NSORT_KEY_DTYPES)
     @parametrize("descending", (False, True))
     def test_nsorts(self, key_dtype, descending):
+        # Each spec is a JIT compile: every length for ascending float32, the
+        # leaf boundaries otherwise (test_nsorts_every_length has the rest).
+        full = key_dtype == torch.float32 and not descending
+        self._sweep(key_dtype, descending, _NSORTS if full else _BOUNDARY_NSORTS)
+
+    @slowTest
+    @parametrize("key_dtype", _NSORT_KEY_DTYPES)
+    @parametrize("descending", (False, True))
+    def test_nsorts_every_length(self, key_dtype, descending):
+        self._sweep(key_dtype, descending, _NSORTS)
+
+    def _sweep(self, key_dtype, descending, nsorts):
         torch.manual_seed(0)
-        # Each spec is a JIT compile: descending runs the leaf boundaries only.
-        for nsort in _NSORTS if not descending else (1, 32, 33, 128, 129, 2047, 2048):
+        for nsort in nsorts:
             for rows in _ROWS:
                 x = _make_keys(key_dtype, (rows, nsort))
                 self._check(x, torch.int16, descending)
 
-    @parametrize("index_dtype", _INDEX_DTYPES)
-    @parametrize("key_dtype", _KEY_DTYPES)
+    # Every index dtype with float32, every key with int16 indices.
+    @parametrize(
+        "index_dtype,key_dtype",
+        _slow_unless(
+            lambda i, k: k == torch.float32 or i == torch.int16,
+            _INDEX_DTYPES,
+            _KEY_DTYPES,
+        ),
+    )
     def test_index_dtypes(self, index_dtype, key_dtype):
         torch.manual_seed(1)
         # The full index range for 8-bit indices; rung 2048 is in test_nsorts.
@@ -148,7 +179,13 @@ class TestCuTeDSLRegisterSort(TestCase):
             x = _make_keys(key_dtype, (37, nsort))
             self._check(x, index_dtype, descending)
 
-    @parametrize("key_dtype", (torch.uint8, torch.float16, torch.float32, torch.int64))
+    @parametrize(
+        "key_dtype",
+        _slow_unless(
+            lambda k: k in (torch.uint8, torch.float32),
+            (torch.uint8, torch.float16, torch.float32, torch.int64),
+        ),
+    )
     def test_misaligned(self, key_dtype):
         from torch._native.ops.sort.policy import register_store
 

@@ -526,7 +526,11 @@ class Policy(NamedTuple):
 @functools.cache
 def policy(device: torch.device) -> Policy:
     stage_bytes = caps(device).smem_per_sm // 3
-    return Policy(256, 4, stage_bytes, 1024, 512, (2, 4), 256, 2)
+    p = Policy(256, 4, stage_bytes, 1024, 512, (2, 4), 256, 2)
+    tiles = (p.rows_threads * p.rows_items, p.row_threads * max(p.row_items), p.split_threads * p.split_items)
+    if max(tiles) > 1 << 12:
+        raise AssertionError(f"tiles of {tiles} chunks overrun PARTITION_MAX_NSORT's margin")
+    return p
 
 
 def spec_name(spec: dict) -> str:

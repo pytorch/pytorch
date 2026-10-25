@@ -1,13 +1,15 @@
 """Native-AOT declaration for aten::sort @ CUDA (the out-variant with narrow indices).
 
 Embeds, for float32 and bfloat16 keys (as topk does), the single-launch kernels
-the JIT route picks (cutedsl_impl._launcher): the register kernel for rows of
-up to REGISTER_MAX_NSORT at full vector width or width 1, and the in-place leaf
-for unstable rows of up to BITONIC_MAX_NSORT. Everything else keeps the JIT
-route: other key dtypes, bool keys (partition), longer rows (their kernels run
-long enough that host overhead does not matter), and register calls at an
-intermediate vector width (rows whose length is not a multiple of the full
-width, or partly aligned operands).
+the JIT route picks (cutedsl_impl._launcher), with uint8 (rows of up to 256),
+uint16 or int32 indices: the register kernel for rows of
+up to REGISTER_MAX_NSORT at full vector width, or at width 1 up to
+_WIDTH1_MAX_RUNG, and the in-place leaf for unstable rows of up to
+BITONIC_MAX_NSORT. Everything else keeps the JIT route: other key dtypes, bool
+keys (partition), longer rows and width-1 rows past _WIDTH1_MAX_RUNG (their
+kernels run long enough that host overhead does not matter), and register
+calls at an intermediate width (rows or operands aligned to 2-16 elements but
+not to the full width).
 
 As in topk, eligibility is stated three times on purpose: covered_axes()
 subtracts from JIT coverage, cpp_covers() is its C++ fast path, and
@@ -43,6 +45,9 @@ _REGISTER_RUNGS = tuple(
     1 << b
     for b in range(_MIN_RUNG.bit_length() - 1, _policy.REGISTER_MAX_NSORT.bit_length())
 )
+# Width-1 rows (odd or misaligned) past this rung run as long as the JIT host
+# time (2047 floats: 25 us either way on sm_120), so they stay JIT.
+_WIDTH1_MAX_RUNG = _policy.REGISTER_MAX_NSORT // 2
 
 
 def kernel_precompile_grid():
@@ -59,7 +64,9 @@ def kernel_precompile_grid():
         for rung in _REGISTER_RUNGS
         for index in _INDICES
         if rung - 1 <= _policy.INDEX_MAX[index]
-        for store in sorted({rung // _MIN_RUNG, 1})
+        for store in sorted(
+            {rung // _MIN_RUNG} | ({1} if rung <= _WIDTH1_MAX_RUNG else set())
+        )
     ]
     # The in-place radix leaf (rows past REGISTER_MAX_NSORT) runs 20 us or more,
     # so embedding it saves nothing over JIT; only the bitonic leaf is short.
@@ -75,16 +82,12 @@ def kernel_precompile_grid():
 def _final_address(out, like):
     """Where ``out``'s data will be once meta has resized it to ``like``'s shape.
 
-    resize_ keeps the storage offset and reuses a storage that is big enough;
-    otherwise the caching allocator's new block is at least 512-byte aligned, so
-    only the offset matters modulo the 16-byte vectors."""
+    resize_ keeps the storage offset. A storage it has to grow is resizable,
+    so caching-allocator memory: its old and new bases are both 512-byte
+    aligned and the old base predicts the address modulo the 16-byte vectors."""
     if out.shape == like.shape:
         return out.const_data_ptr()
-    offset = out.storage_offset() * out.element_size()
-    storage = out.untyped_storage()
-    if storage.nbytes() >= offset + like.numel() * out.element_size():
-        return storage.data_ptr() + offset
-    return offset
+    return out.untyped_storage().data_ptr() + out.storage_offset() * out.element_size()
 
 
 def covered_axes(
@@ -93,7 +96,7 @@ def covered_axes(
     import torch
 
     is_alias_of = torch._C._is_alias_of  # pyrefly: ignore[missing-attribute]
-    # Functional sort and int64 out= are never covered.
+    # Early-outs for the common calls; the grid's axes reject these too.
     if values is None or indices is None or indices.dtype == torch.int64:
         return {"kernel": None, "eligible": False}
     ndim = self.dim()
@@ -101,7 +104,6 @@ def covered_axes(
     nrows = self.numel() // nsort if nsort else 0
     eligible = (
         self.is_cuda
-        and ndim >= 1
         and -ndim <= dim < ndim
         and dim % ndim == ndim - 1
         and self.is_contiguous()
@@ -111,8 +113,8 @@ def covered_axes(
         and not is_alias_of(values, self)
         and not is_alias_of(indices, self)
         and not is_alias_of(values, indices)
-        and 0 < nsort <= _policy.REGISTER_MAX_NSORT
         and 0 < nrows <= _policy.MAX_ROWS
+        and nsort <= _policy.REGISTER_MAX_NSORT  # early-out, as above
     )
     axes = {
         "key": str(self.dtype).removeprefix("torch."),
@@ -140,9 +142,10 @@ def covered_axes(
     return axes | {"kernel": kernel, "sort_size": sort_size}
 
 
-# The JIT route's kernel choice and policy.register_store's vector width. The
-# row count is bounded by hand: codegen's int32 gate only sees the named
-# tensors' own dims, and the JIT cond leaves empty sorts to stock.
+# The JIT route's kernel choice and policy.register_store's vector width, given
+# _naot_final_address. The row count is bounded by hand: codegen's int32 gate
+# only sees the named tensors' own dims, and the JIT cond leaves empty sorts to
+# stock.
 _ROUTE_CPP = f"""
       const int64_t N = self.size(-1);
       if (N == 0 || N > {_policy.REGISTER_MAX_NSORT}) return false;
@@ -151,17 +154,6 @@ _ROUTE_CPP = f"""
       const bool use_register = stable.value_or(false) || N > {_policy.BITONIC_MAX_NSORT};
       const int64_t rung = N <= {_MIN_RUNG} ? {_MIN_RUNG} : int64_t{{1}} << (64 - __builtin_clzll(static_cast<uint64_t>(N - 1)));
       int64_t store = rung / {_MIN_RUNG};
-      // aot._final_address: an out meta still has to resize gets self's sizes,
-      // keeping its storage offset; a too-small storage is reallocated
-      // 512-byte aligned.
-      auto _naot_final_address = [&](const at::Tensor& t) -> uintptr_t {{
-        if (t.sizes().equals(self.sizes())) return reinterpret_cast<uintptr_t>(t.const_data_ptr());
-        const auto offset = static_cast<uintptr_t>(t.storage_offset() * t.element_size());
-        if (t.storage().nbytes() >= offset + static_cast<uintptr_t>(self.numel() * t.element_size())) {{
-          return reinterpret_cast<uintptr_t>(t.storage().data()) + offset;
-        }}
-        return offset;
-      }};
       auto _naot_misaligned = [&](const at::Tensor& t) {{
         const auto bytes = static_cast<uintptr_t>(std::min<int64_t>(16, store * t.element_size()));
         return _naot_final_address(t) % bytes != 0;
@@ -186,20 +178,26 @@ def cpp_covers():
       if (!({idx})) return false;
       const auto st = self.scalar_type();
       if (!({keys})) return false;
-      if (self.dim() < 1) return false;
+      // A 0-d self wraps dim to 0, never self.dim() - 1.
       if (c10::maybe_wrap_dim(dim, self.dim()) != self.dim() - 1) return false;
       if (!self.is_contiguous()) return false;
       // Outs meta resizes come out dense like self, so contiguous.
       if (values->sizes().equals(self.sizes()) && !values->is_contiguous()) return false;
       if (indices->sizes().equals(self.sizes()) && !indices->is_contiguous()) return false;
       if (indices->is_alias_of(self) || values->is_alias_of(self) || values->is_alias_of(*indices)) return false;
+      // aot._final_address: an out meta still has to resize keeps its storage
+      // offset, and a storage it grows was 512-byte aligned like the new one.
+      auto _naot_final_address = [&](const at::Tensor& t) -> uintptr_t {{
+        if (t.sizes().equals(self.sizes())) return reinterpret_cast<uintptr_t>(t.const_data_ptr());
+        return reinterpret_cast<uintptr_t>(t.storage().data()) + static_cast<uintptr_t>(t.storage_offset() * t.element_size());
+      }};
 {_ROUTE_CPP}
       if (use_register) {{
 {_store_cpp("*values", "*indices")}
         if (it == at::kByte && rung > {_policy.INDEX_MAX["uint8"] + 1}) return false;
-        return store == 1 || store == rung / {_MIN_RUNG};
+        return store == rung / {_MIN_RUNG} || (store == 1 && rung <= {_WIDTH1_MAX_RUNG});
       }}
-      return N <= {_policy.BITONIC_MAX_NSORT};
+      return true;  // the bitonic leaf
     """
 
 
@@ -207,16 +205,16 @@ def cpp_dispatch_prelude():
     return f"""
       // Functional sort.stable and int64 out= keep the stock leaves.
       if (indices.scalar_type() == at::kLong) return false;
-      if (self.dim() < 1) return false;
       if (c10::maybe_wrap_dim(dim, self.dim()) != self.dim() - 1) return false;
       if (!self.is_contiguous() || !values.is_contiguous() || !indices.is_contiguous()) return false;
       // Aliased outs go to stock, which copies first or raises.
       if (values.is_alias_of(self) || indices.is_alias_of(self) || values.is_alias_of(indices)) return false;
+      // Meta has resized the outs by now.
+      auto _naot_final_address = [](const at::Tensor& t) {{ return reinterpret_cast<uintptr_t>(t.const_data_ptr()); }};
 {_ROUTE_CPP}
       if (use_register) {{
 {_store_cpp("values", "indices")}
       }}
-      const int64_t sort_size = N <= {_policy.BITONIC_MAX_NSORT} ? {_policy.BITONIC_MAX_NSORT} : 0;
     """
 
 
@@ -228,7 +226,7 @@ def cpp_dispatch(spec):
     )
     if spec["kernel"] == "register":
         return f"{common} && use_register && rung == {spec['rung']} && store == {spec['store']}"
-    return f"{common} && !use_register && sort_size == {spec['sort_size']}"
+    return f"{common} && !use_register"
 
 
 def cpp_launch(spec, launch_fn):

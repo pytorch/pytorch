@@ -5,7 +5,7 @@ uint16, int16, uint32 or int32 (``torch.sort(x, out=(values, indices))`` and
 ``torch.argsort(x, out=indices)``, which reaches it through ``argsort_out``).
 Functional sort and int64 out= keep the stock path. Every stock CUDA sort leaf
 (see ``policy.py``) has a kernel that mirrors it and is bit-exact with it;
-bool keys and rows of up to 2048 take faster kernels (see ``_launcher``).
+bool keys and rows of up to 2048 take faster kernels (see ``policy.route``).
 """
 
 import functools

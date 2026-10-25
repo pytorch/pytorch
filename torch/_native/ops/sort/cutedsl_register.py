@@ -87,6 +87,10 @@ class RegisterSort:
         self.rows = rows
         self.store = store
 
+    def __repr__(self):
+        # CuTeDSL names the kernel after this, so profiles show rung and width.
+        return f"<{type(self).__module__}.RegisterSort rung{32 * self.vec} store{self.store}>"
+
     @cute.jit
     def __call__(
         self,

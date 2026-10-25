@@ -150,8 +150,9 @@ class TestCuTeDSLPartitionSort(TestCase):
     def test_rows_int32_limit(self):
         # Row counts near the Int32 limit: one launch, then two row batches.
         from torch._native.ops.sort import cutedsl_partition
+        from torch._native.ops.sort.policy import PARTITION_MAX_NSORT
 
-        for rows in ((1 << 31) - 64, (1 << 31) - 1):
+        for rows in (PARTITION_MAX_NSORT, (1 << 31) - 1):
             x = torch.zeros(rows, 1, dtype=torch.bool, device="cuda")
             x[::3] = True
             values = torch.empty_like(x)
@@ -159,6 +160,31 @@ class TestCuTeDSLPartitionSort(TestCase):
             cutedsl_partition.partition_sort(x, values, indices, False, _arch())
             self.assertTrue(torch.equal(values, x))
             self.assertFalse(indices.any())
+            del x, values, indices
+
+    @largeTensorTest("13GB", device="cuda")
+    def test_longest_row(self):
+        # Tile extents past the row end stay in Int32; offset 1 forces 1-byte
+        # chunks. Checked in slices: a stock reference would not fit.
+        from torch._native.ops.sort import cutedsl_partition
+        from torch._native.ops.sort.policy import PARTITION_MAX_NSORT
+
+        n, step = PARTITION_MAX_NSORT, 1 << 26
+        for offset in (0, 1):
+            x = (torch.rand(n + offset, device="cuda", dtype=torch.half) < 0.5)[offset:]
+            values = torch.empty_like(x)
+            indices = torch.full((n,), -1, dtype=torch.int32, device="cuda")
+            cutedsl_partition.partition_sort(
+                x[None], values[None], indices[None], False, _arch()
+            )
+            falses = n - sum(int(x[s : s + step].sum()) for s in range(0, n, step))
+            for s in range(0, n, step):
+                idx = indices[s : s + step + 1].long()
+                pos = torch.arange(s, s + idx.numel(), device="cuda")
+                self.assertTrue(torch.equal(values[s : s + step], pos[:step] >= falses))
+                self.assertTrue(torch.equal(x[idx], pos >= falses))
+                rising = (idx[1:] > idx[:-1]) | (pos[1:] == falses)
+                self.assertTrue(bool(rising.all()) and bool((idx >= 0).all()))
             del x, values, indices
 
     @parametrize("descending", (False, True))

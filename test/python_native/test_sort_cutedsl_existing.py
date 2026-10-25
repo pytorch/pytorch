@@ -5,9 +5,10 @@ The override serves only narrow out= indices, which those tests never pass. A
 TorchFunctionMode rewrites every functional CUDA sort/argsort (including the ones
 topk/unique tests use as references) into the out-variant with the narrowest index
 dtype that holds the row, and widens the indices back to int64 for the test's own
-assertions. Calls the override's cond accepts must launch the kernel its router
-picks; the rest (0-dim, empty, unsupported key dtypes) check the narrow out=
-fallback.
+assertions. The cond's short-call gate is off, so bool keys and short single rows
+still reach their kernels; calls the cond accepts with the gate off must launch
+the kernel its router picks, and the rest (0-dim, empty, unsupported key dtypes)
+check the narrow out= fallback.
 """
 
 import functools
@@ -73,14 +74,18 @@ class _NarrowOutMode(TorchFunctionMode):
         stable = call.get("stable")
         descending = bool(call.get("descending", False))
         expected = None
-        if cutedsl_impl._out_cond(
-            x,
-            stable=stable,
-            dim=dim,
-            descending=descending,
-            values=values,
-            indices=indices,
-        ):
+        # Judged with the gate off, so dropping setUp's patch fails the calls
+        # the gate would send to stock.
+        with mock.patch.object(cutedsl_impl, "jit_pays_off", lambda *a: True):
+            accepted = cutedsl_impl._out_cond(
+                x,
+                stable=stable,
+                dim=dim,
+                descending=descending,
+                values=values,
+                indices=indices,
+            )
+        if accepted:
             launcher = cutedsl_impl._launcher(x, nsort, bool(stable), descending)
             expected = launcher.func.__name__
         self.rewritten += 1
@@ -120,9 +125,13 @@ def _narrow_out(cls):
                 return wrapper
 
             # AOT kernels would serve covered calls invisibly to these counters.
-            aot_enabled = torch._native.aot_enabled()
+            aot_enabled = torch._C._get_native_aot_enabled()
             torch._native.set_aot_enabled(False)
             self.addCleanup(torch._native.set_aot_enabled, aot_enabled)
+            # The tests' tensors are small; the gate would send most to stock.
+            patcher = mock.patch.object(cutedsl_impl, "jit_pays_off", lambda *a: True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
             for module, name in _KERNELS:
                 patcher = mock.patch.object(
                     module, name, counting(getattr(module, name))
