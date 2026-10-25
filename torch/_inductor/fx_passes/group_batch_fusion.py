@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import inspect
 import logging
 import operator
 from collections import OrderedDict
@@ -10,7 +11,7 @@ import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -522,36 +523,56 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int | None, Any] | None:
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._layout_sensitive_users: dict[torch.fx.Node, bool] = {}
+
+    def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+            weight_val = weight.meta["example_value"]
+            # An empty projection adds no GEMM columns or fusion benefit, but
+            # grouping it with non-empty projections can change its eager stride.
+            if not statically_known_true(weight_val.shape[0] > 0):
+                return None
             # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
             # fuse() calls torch.cat on the weight example_values, which fails for
             # subclasses lacking aten.cat dispatch.  Probe it here so subclasses that
             # do implement aten.cat (e.g. future torchao versions) still get fused.
-            weight_val = weight.meta.get("example_value", weight.meta.get("val"))
-            if weight_val is not None and type(weight_val) not in (
-                torch.Tensor,
-                FakeTensor,
-            ):
+            if type(weight_val) not in (torch.Tensor, FakeTensor):
                 try:
                     _ = torch.cat([weight_val[:1], weight_val[:1]], dim=0)
                 except (RuntimeError, TypeError):
                     return None
             bias_tensor = None
             if bias is not None:
-                bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
-            bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
-            group_key = ("batch_linear_lhs", bias_dim, input)
+                bias_tensor = bias.meta.get("example_value")
+                if (
+                    bias_tensor is None
+                    or bias_tensor.ndim != 1
+                    or not statically_known_true(
+                        bias_tensor.shape[0] == weight_val.shape[0]
+                    )
+                ):
+                    return None
+            if node in self._layout_sensitive_users:
+                layout_sensitive = self._layout_sensitive_users[node]
+            else:
+                layout_sensitive = _has_layout_sensitive_user(node)
+                self._layout_sensitive_users[node] = layout_sensitive
+            if layout_sensitive:
+                return None
+            group_key = ("batch_linear_lhs", bias is not None, input)
         else:
             group_key = None
         return group_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
+        self._layout_sensitive_users.clear()
         batch_nodes = []
         batch_input = None
         batch_weights, batch_weights_meta = [], []
@@ -625,8 +646,529 @@ class BatchLinearLHSFusion(BatchFusion):
         counters["inductor"]["batch_linear_lhs"] += 1
 
 
-# Poor person's check for if a node in the graph mutates its input.
-# (the graph is torch IR, so we will see torch fns and python operators)
+_OPERATOR_TO_ATEN = {
+    operator.add: torch.ops.aten.add,
+    operator.sub: torch.ops.aten.sub,
+    operator.mul: torch.ops.aten.mul,
+    operator.truediv: torch.ops.aten.div,
+    operator.neg: torch.ops.aten.neg,
+    operator.pow: torch.ops.aten.pow,
+    operator.matmul: torch.ops.aten.matmul,
+    operator.gt: torch.ops.aten.gt,
+    operator.ge: torch.ops.aten.ge,
+    operator.lt: torch.ops.aten.lt,
+    operator.le: torch.ops.aten.le,
+    operator.eq: torch.ops.aten.eq,
+    operator.ne: torch.ops.aten.ne,
+    operator.floordiv: torch.ops.aten.floor_divide,
+    operator.mod: torch.ops.aten.remainder,
+    operator.and_: torch.ops.aten.bitwise_and,
+    operator.or_: torch.ops.aten.bitwise_or,
+    operator.xor: torch.ops.aten.bitwise_xor,
+    operator.invert: torch.ops.aten.bitwise_not,
+}
+
+# Aliases that never merge source dimensions are traversable: their users are
+# still inspected. getitem covers tensor indexing (select/slice) for the same
+# reason. Merging views are not in this set.
+_NON_MERGING_ALIAS_OPS = OrderedSet(
+    [
+        "alias",
+        "chunk",
+        "detach",
+        "narrow",
+        "permute",
+        "select",
+        "slice",
+        "split",
+        "squeeze",
+        "t",
+        "transpose",
+        "unsqueeze",
+        "unbind",
+        "unflatten",
+        "expand",
+        "movedim",
+        "swapaxes",
+        "swapdims",
+        "split_with_sizes",
+        "tensor_split",
+    ]
+)
+
+# Views that are legal only when they split, not merge, source dimensions.
+_SPLIT_VIEW_OPS = OrderedSet(["view", "reshape", "_unsafe_view"])
+
+_LAYOUT_SENSITIVE_OPS = OrderedSet(
+    [
+        "view",
+        "_unsafe_view",
+        "view_as",
+        "view_as_complex",
+        "as_strided",
+        "as_strided_copy",
+        "_reshape_alias",
+        "unsafe_chunk",
+        "unsafe_split",
+        "unsafe_split_with_sizes",
+        "stride",
+        "sym_stride",
+        "storage_offset",
+        "sym_storage_offset",
+        "is_contiguous",
+        "sym_is_contiguous",
+        "_has_same_storage_numel",
+        "is_set_to",
+    ]
+)
+
+_CONVERSION_METHODS = OrderedSet(
+    [
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "long",
+        "int",
+        "short",
+        "char",
+        "byte",
+        "bool",
+        "type",
+        "type_as",
+        "to",
+        "cpu",
+        "cuda",
+        "xpu",
+    ]
+)
+
+_LAYOUT_INDEPENDENT_OPS = OrderedSet(
+    [
+        "cat",
+        "stack",
+        "mm",
+        "bmm",
+        "matmul",
+        "linear",
+        "sum",
+        "mean",
+        "softmax",
+        "_softmax",
+        "layer_norm",
+        "native_layer_norm",
+        "rms_norm",
+        "scaled_dot_product_attention",
+        "scaled_dot_product_flash_attention",
+        "scaled_dot_product_efficient_attention",
+        "scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_attention_math",
+        "log_softmax",
+        "amax",
+        "amin",
+        "norm",
+        "linalg_vector_norm",
+        "var",
+        "std",
+        "cumsum",
+        "addmm",
+        "baddbmm",
+        "einsum",
+        "pad",
+        "constant_pad_nd",
+        "size",
+        "sym_size",
+        "dim",
+        "numel",
+    ]
+)
+
+
+def _node_value(value):
+    if isinstance(value, torch.fx.Node):
+        return value.meta.get("example_value", value.meta.get("val"))
+    return value
+
+
+def _unwrap_functional(target, args, kwargs):
+    if getattr(target, "__module__", None) != "torch.nn.functional":
+        return None
+    name = getattr(target, "__name__", None)
+    packet = getattr(torch.ops.aten, name, None) if name else None
+    if not isinstance(packet, torch._ops.OpOverloadPacket):
+        return None
+    try:
+        params = list(inspect.signature(target).parameters)
+    except (TypeError, ValueError):
+        params = []
+    if "inplace" in params:
+        index = params.index("inplace")
+        value = args[index] if len(args) > index else kwargs.get("inplace")
+        if value not in (None, False):
+            return "inplace"
+        if len(args) > index:
+            args = args[:index] + args[index + 1 :]
+        kwargs.pop("inplace", None)
+    return packet, args, kwargs
+
+
+def _layout_user_overloads(user: torch.fx.Node):
+    target = user.target
+    args = tuple(user.args)
+    kwargs = dict(user.kwargs)
+    if target is torch.nn.functional.softmax:
+        if get_arg_value(user, 1, "dim") is None:
+            return None
+        args = (*args[:2], *args[3:])
+        kwargs.pop("_stacklevel", None)
+        target = torch.ops.aten.softmax
+    elif target is torch.nn.functional.layer_norm:
+        target = torch.ops.aten.layer_norm
+    else:
+        unwrapped = _unwrap_functional(target, args, kwargs)
+        if unwrapped == "inplace":
+            return None
+        if isinstance(unwrapped, tuple):
+            target, args, kwargs = unwrapped
+        elif target in _OPERATOR_TO_ATEN:
+            target = _OPERATOR_TO_ATEN[target]
+        elif isinstance(target, str):
+            if not hasattr(torch.Tensor, target):
+                return None
+            target = getattr(torch.ops.aten, target, None)
+            if target is None:
+                return None
+    if not args and "input" in kwargs:
+        args = (kwargs.pop("input"),)
+    if isinstance(target, torch._ops.OpOverload):
+        return target if target.namespace == "aten" else None
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        qualname = target._qualified_op_name
+        packet = target
+    else:
+        qualname = torch.jit._builtins._find_builtin(target)
+        if qualname is None:
+            return None
+        namespace, _, op_name = qualname.partition("::")
+        packet = getattr(getattr(torch.ops, namespace, None), op_name, None)
+        if not isinstance(packet, torch._ops.OpOverloadPacket):
+            return None
+    args, kwargs = torch.fx.node.map_arg((args, kwargs), _node_value)
+    try:
+        overload_name = torch._C._jit_resolve_packet(qualname, *args, **kwargs)
+    except RuntimeError:
+        return None
+    overload = getattr(packet, overload_name, None)
+    return overload if overload is not None and overload.namespace == "aten" else None
+
+
+def _shape_value(value):
+    if isinstance(value, torch.Tensor) and value.dim() > 0:
+        return tuple(value.shape)
+    return None
+
+
+def _view_target_shape(user: torch.fx.Node):
+    if len(user.args) > 2:
+        size = user.args[1:]
+    else:
+        size = get_arg_value(user, 1, "size")
+        if size is None:
+            size = get_arg_value(user, 1, "shape")
+    if not isinstance(size, (tuple, list)):
+        return None
+    dims = tuple(_node_value(dim) for dim in size)
+    if any(not isinstance(dim, (int, torch.SymInt)) for dim in dims):
+        return None
+    return dims
+
+
+def _is_one(dim) -> bool:
+    if isinstance(dim, int):
+        return dim == 1
+    return statically_known_true(dim == 1)
+
+
+def _is_split_only_view(user: torch.fx.Node) -> bool:
+    source_node = get_arg_value(user, 0, "input")
+    if not isinstance(source_node, torch.fx.Node):
+        return False
+    source = _shape_value(_node_value(source_node))
+    target = _view_target_shape(user)
+    if source is None or target is None:
+        return False
+    if any(isinstance(dim, int) and dim == -1 for dim in target):
+        if sum(1 for dim in target if isinstance(dim, int) and dim == -1) > 1:
+            return False
+        total = 1
+        for dim in source:
+            total *= dim
+        known = 1
+        for dim in target:
+            if not (isinstance(dim, int) and dim == -1):
+                known *= dim
+        if not statically_known_true(known != 0):
+            return False
+        inferred = total // known
+        if not statically_known_true(inferred * known == total):
+            return False
+        target = tuple(
+            inferred if isinstance(dim, int) and dim == -1 else dim for dim in target
+        )
+    src = [dim for dim in source if not _is_one(dim)]
+    tgt = [dim for dim in target if not _is_one(dim)]
+    index = 0
+    for dim in src:
+        if index >= len(tgt):
+            return False
+        product = tgt[index]
+        index += 1
+        while not statically_known_true(product == dim):
+            if statically_known_true(product > dim) or index >= len(tgt):
+                return False
+            product = product * tgt[index]
+            index += 1
+    return index == len(tgt)
+
+
+def _memory_format(user: torch.fx.Node):
+    if len(user.args) > 1:
+        return user.args[1]
+    return user.kwargs.get("memory_format")
+
+
+def _is_conversion_user(user: torch.fx.Node, op) -> bool:
+    if user.op == "call_method":
+        return user.target in _CONVERSION_METHODS
+    return op is not None and op.overloadpacket.__name__ in OrderedSet(
+        ["_to_copy", "to", "type_as"]
+    )
+
+
+def _is_contiguous_user(user: torch.fx.Node, op) -> bool:
+    if user.op == "call_method":
+        return user.target == "contiguous"
+    return op is not None and op.overloadpacket.__name__ == "contiguous"
+
+
+def _contiguous_aliases(user: torch.fx.Node) -> bool:
+    # Eager linears are contiguous, so default contiguous() returns self.
+    # On a fused slice it returns a copy, which hides mutations from the
+    # original consumers.
+    return _memory_format(user) in (None, torch.contiguous_format)
+
+
+def _direct_is_mutable(user: torch.fx.Node, op) -> bool:
+    if user.op not in ("call_method", "call_function"):
+        return False
+    if user.op == "call_function" and user.target is operator.getitem:
+        return False
+    if op is not None:
+        if op._schema.is_mutable:
+            return True
+        return _is_mutable_node(user.target)
+    if user.op == "call_function":
+        # No resolvable schema: operator.setitem, HigherOrderOperator, or
+        # another opaque callable. Assume it may mutate rather than miss a
+        # write.
+        return True
+    return _is_mutable_node(user.target)
+
+
+def _allowed_alias(user: torch.fx.Node, op) -> bool:
+    # Traversable alias: safe only when it cannot merge dimensions.
+    if user.op == "call_function" and user.target is operator.getitem:
+        return True
+    if user.op == "call_method":
+        if user.target in _NON_MERGING_ALIAS_OPS:
+            return True
+        if user.target in _SPLIT_VIEW_OPS:
+            return _is_split_only_view(user)
+        return False
+    if user.op != "call_function" or op is None:
+        return False
+    name = op.overloadpacket.__name__
+    if name in _NON_MERGING_ALIAS_OPS:
+        return True
+    if name in _SPLIT_VIEW_OPS:
+        return _is_split_only_view(user)
+    return False
+
+
+def _is_alias_of(source: torch.Tensor, result: torch.Tensor) -> bool:
+    return bool(torch._C._is_alias_of(source, result))  # type: ignore[attr-defined]
+
+
+def _tensor_values(value):
+    if isinstance(value, torch.Tensor):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if isinstance(item, torch.Tensor)]
+    return []
+
+
+def _may_alias_without_meta(user: torch.fx.Node) -> bool:
+    if user.op == "call_method":
+        return user.target in _CONVERSION_METHODS or user.target == "contiguous"
+    return user.target is torch.nn.functional.dropout
+
+
+def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
+    # Node-level: if any result aliases any input, every user is traversed.
+    # Multi-result ops may over-reject sibling results, but never miss a
+    # mutation.
+    if user.op not in ("call_method", "call_function"):
+        return False
+    value = _node_value(user)
+    if value is None:
+        # Missing metadata: assume an alias for known identity-like ops so an
+        # unchecked mutation cannot slip through.
+        return assume_alias and _may_alias_without_meta(user)
+    results = _tensor_values(value)
+    if not results:
+        # Known non-tensor results cannot alias a tensor input.
+        return False
+    sources = []
+    for arg in user.args:
+        sources.extend(_tensor_values(torch.fx.node.map_arg(arg, _node_value)))
+    for arg in user.kwargs.values():
+        sources.extend(_tensor_values(torch.fx.node.map_arg(arg, _node_value)))
+    if not sources:
+        return assume_alias
+    return any(_is_alias_of(source, result) for source in sources for result in results)
+
+
+_STORAGE_SENSITIVE_OPS = OrderedSet(
+    [
+        # A row view such as b[1].contiguous() can read neighboring storage
+        # through as_strided, and its storage offset differs from the copy.
+        "as_strided",
+        "storage_offset",
+        "is_set_to",
+        "_has_same_storage_numel",
+    ]
+)
+
+
+def _has_storage_sensitive_user(node: torch.fx.Node) -> bool:
+    pending = list(node.users)
+    visited = OrderedSet()
+    while pending:
+        user = pending.pop()
+        if user in visited:
+            continue
+        visited.add(user)
+        if user.op not in ("call_method", "call_function"):
+            continue
+        op = _layout_user_overloads(user)
+        if op is not None and op.overloadpacket.__name__ in _STORAGE_SENSITIVE_OPS:
+            return True
+        if _is_aliasing_user(user, assume_alias=True):
+            pending.extend(user.users)
+    return False
+
+
+def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
+    pending = list(node.users)
+    visited = OrderedSet()
+    while pending:
+        user = pending.pop()
+        if user in visited:
+            continue
+        visited.add(user)
+        op = (
+            _layout_user_overloads(user)
+            if user.op in ("call_method", "call_function")
+            else None
+        )
+        if _direct_is_mutable(user, op):
+            return True
+        if _is_aliasing_user(user, assume_alias=True):
+            pending.extend(user.users)
+    return False
+
+
+def _direct_layout_user_is_sensitive(user: torch.fx.Node, op) -> bool:
+    """Return True if fusing the producer would change this user's semantics.
+
+    Fusion replaces a contiguous ``[M, N_i]`` linear output with
+    ``getitem(split(mm(...), dim=1))``, which has row stride ``sum(N)``. A
+    user is sensitive when it can observe that layout or alias it: graph
+    outputs, mutations and ``out=`` calls, stride/storage/contiguity queries,
+    merging views, and unknown ops. Copying conversions are layout-safe;
+    no-op conversions alias the input and are traversed by the caller.
+    Pointwise and known layout-independent ops stay eligible; unknown is
+    sensitive so new op forms are rejected rather than miscompiled.
+    """
+    if user.op == "output":
+        return True
+    if user.op not in ("call_method", "call_function"):
+        return True
+    if user.target is torch.nn.functional.dropout:
+        return get_arg_value(user, 3, "inplace") not in (None, False)
+    if op is not None and op.overloadpacket.__name__ == "clone":
+        return False
+    if _is_conversion_user(user, op):
+        return False
+    if op is None or op._schema.is_mutable:
+        return True
+    if op.namespace != "aten":
+        return True
+    name = op.overloadpacket.__name__
+    if (
+        name in _LAYOUT_SENSITIVE_OPS
+        or op.is_view
+        or (torch.Tag.maybe_aliasing_or_mutating in op.tags)
+    ):
+        return True
+    return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
+
+
+def _layout_sensitive_after_alias(user: torch.fx.Node, op) -> bool:
+    # cat/stack and TensorIterator pointwise ops derive the output layout from
+    # operand stride order, which split-only views and transpose preserve.
+    # memory_format copies instead consult size-1 strides, which can differ.
+    if op is None:
+        return False
+    return op.overloadpacket.__name__ in ("_to_copy", "to", "type_as") and bool(
+        user.kwargs.get("memory_format")
+    )
+
+
+def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+    """True if any consumer, including one behind an alias, is unsafe."""
+    pending = [(user, False) for user in node.users]
+    visited = OrderedSet()
+    while pending:
+        user, behind_alias = pending.pop()
+        key = (user, behind_alias)
+        if key in visited:
+            continue
+        visited.add(key)
+        op = (
+            _layout_user_overloads(user)
+            if user.op in ("call_method", "call_function")
+            else None
+        )
+        if behind_alias and _layout_sensitive_after_alias(user, op):
+            return True
+        if _is_contiguous_user(user, op):
+            if not _contiguous_aliases(user):
+                return True
+            if _is_aliasing_user(user, assume_alias=True):
+                if _has_mutable_alias_user(user) or _has_storage_sensitive_user(user):
+                    return True
+                pending.extend((next_user, True) for next_user in user.users)
+            continue
+        if _allowed_alias(user, op):
+            pending.extend((next_user, True) for next_user in user.users)
+        elif _direct_layout_user_is_sensitive(user, op):
+            return True
+        elif _is_aliasing_user(user, assume_alias=True):
+            pending.extend((next_user, True) for next_user in user.users)
+    return False
+
+
 def _is_mutable_node(tgt):
     if str(tgt).endswith("_"):
         # e.g. torch.mul_, torch.Tensor.mul_
