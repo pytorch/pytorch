@@ -10,6 +10,7 @@ radix order above. Values are decoded from the ordinal, and keys it cannot
 invert (zeros, NaN under the comparison order) are re-read from ``x``.
 """
 
+import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64
@@ -88,7 +89,11 @@ class RegisterSort:
 
     @cute.jit
     def __call__(
-        self, mX: cute.Tensor, mValues: cute.Tensor, mIndices: cute.Tensor, stream
+        self,
+        mX: cute.Tensor,
+        mValues: cute.Tensor,
+        mIndices: cute.Tensor,
+        stream: cuda.CUstream,
     ):
         rows = const_expr(self.rows)
         self.kernel(mX, mValues, mIndices).launch(
@@ -348,7 +353,7 @@ def spec_name(spec: dict) -> str:
     return (
         f"sort_register{spec['rung']}_{spec['key']}_{spec['index']}"
         f"_{'desc' if spec['descending'] else 'asc'}_r{spec['rows']}"
-        f"_v{spec['store']}_sm{spec['arch']}"
+        f"_v{spec['store']}" + (f"_sm{spec['arch']}" if "arch" in spec else "")
     )
 
 

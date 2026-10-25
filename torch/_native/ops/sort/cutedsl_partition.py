@@ -16,6 +16,8 @@ are outside torch's bool contract.
 import functools
 from typing import NamedTuple
 
+import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
+
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64, Uint8
@@ -68,7 +70,7 @@ class PartitionSort:
         rows: Int32,
         n: Int32,
         rows_per_cta: Int32,
-        stream,
+        stream: cuda.CUstream,
     ):
         block = [self.threads, 1, 1]
         if const_expr(self.mode == "rows"):
