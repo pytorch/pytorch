@@ -18,6 +18,7 @@ TRITON_MAX_BLOCK = {
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
+    "R2_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_MIX_ORDER_XBLOCK = 16
 TRITON_MAX_RSPLIT = 64
@@ -332,6 +333,7 @@ class InductorMeta(typing.TypedDict, total=False):
     force_disable_caches: bool
     dynamic_scale_rblock: bool
     incremental_autotune: bool
+    incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
     min_split_scan_rblock: int

@@ -26,9 +26,13 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
       switch (minor) {
         case 0:
           return is_macos_at_least(MacOSVersion::MACOS_26_0);
+        case 2:
+          return is_macos_at_least(MacOSVersion::MACOS_26_2);
+        case 4:
+          return is_macos_at_least(MacOSVersion::MACOS_26_4);
         default:
-          TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.0+");
-          return is_macos_at_least(MacOSVersion::MACOS_26_0);
+          TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.4+");
+          return is_macos_at_least(MacOSVersion::MACOS_26_4);
       }
     case 15:
       switch (minor) {
@@ -41,15 +45,6 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
           return is_macos_at_least(MacOSVersion::MACOS_15_1);
       }
     case 14:
-      switch (minor) {
-        case 0:
-          return true;
-        case 4:
-          return is_macos_at_least(MacOSVersion::MACOS_14_4);
-        default:
-          TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.4+");
-          return is_macos_at_least(MacOSVersion::MACOS_14_4);
-      }
     case 13:
       return true;
     default:
@@ -142,16 +137,16 @@ void MPSHooks::releaseEvent(uint32_t event_id) const {
   at::mps::getMPSEventPool()->releaseEvent(event_id);
 }
 
-void MPSHooks::recordEvent(uint32_t event_id) const {
-  at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true);
+void MPSHooks::recordEvent(uint32_t event_id, int64_t stream_id) const {
+  at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true, at::mps::getStreamByID(stream_id));
 }
 
 Device MPSHooks::getDeviceFromPtr(void* data) const {
   return at::mps::getDeviceFromPtr(data);
 }
 
-void MPSHooks::waitForEvent(uint32_t event_id) const {
-  at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true);
+void MPSHooks::waitForEvent(uint32_t event_id, int64_t stream_id) const {
+  at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true, at::mps::getStreamByID(stream_id));
 }
 
 void MPSHooks::synchronizeEvent(uint32_t event_id) const {
