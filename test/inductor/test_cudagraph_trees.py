@@ -6957,7 +6957,10 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(len(paths), 1 if autotune_at_compile_time else 0, paths)
             for path in paths:
                 with open(path) as f:
-                    self.assertIn("triton_poi_fused_add_", f.read())
+                    src = f.read()
+                # The block reuses the kernel too, and tunes no CPU kernel.
+                self.assertEqual(src.count("def triton_poi_fused_add_"), 1)
+                self.assertNotIn("cpp_fused__to_copy_add_1", src)
 
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
