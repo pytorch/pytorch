@@ -352,7 +352,8 @@ function install_flash_attn_cute() {
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
     flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK do not pin CuTeDSL, so install the pinned version first.
+  install_cutlass_dsl
   pip_install \
     "$flash_attn_package" \
     quack-kernels==0.6.5 \
