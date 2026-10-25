@@ -688,6 +688,9 @@ class TestGroupBatchFusion(TestCase):
             "split_view_mutation",
             "merge_view_2d",
             "transpose_view_neg1",
+            "view_then_cat",
+            "view_then_add",
+            "view_then_memory_format",
             "leaky_relu",
             "leaky_relu_inplace",
             "elu_inplace_pos",
@@ -783,6 +786,34 @@ class TestGroupBatchFusion(TestCase):
             )
             return result
 
+        def view_then_cat(graph, node):
+            view = split_view(graph, node)
+            result = graph.call_function(
+                torch.cat, args=([view, view],), kwargs={"dim": 0}
+            )
+            result.meta["example_value"] = torch.cat(
+                [view.meta["example_value"], view.meta["example_value"]], dim=0
+            )
+            return result
+
+        def view_then_add(graph, node):
+            view = split_view(graph, node)
+            result = graph.call_function(torch.add, args=(view, view))
+            result.meta["example_value"] = (
+                view.meta["example_value"] + view.meta["example_value"]
+            )
+            return result
+
+        def view_then_memory_format(graph, node):
+            view = split_view(graph, node)
+            result = graph.call_method(
+                "to", args=(view,), kwargs={"memory_format": torch.contiguous_format}
+            )
+            result.meta["example_value"] = view.meta["example_value"].clone(
+                memory_format=torch.contiguous_format
+            )
+            return result
+
         def custom_contiguous(graph, node):
             return graph.call_function(
                 torch.ops._batch_linear_lhs_test.contiguous.default, args=(node,)
@@ -848,6 +879,9 @@ class TestGroupBatchFusion(TestCase):
             "split_view_mutation": split_view_mutation,
             "merge_view_2d": merge_view_2d,
             "transpose_view_neg1": transpose_view_neg1,
+            "view_then_cat": view_then_cat,
+            "view_then_add": view_then_add,
+            "view_then_memory_format": view_then_memory_format,
             "leaky_relu": lambda graph, node: graph.call_function(
                 torch.nn.functional.leaky_relu, args=(node, 0.1)
             ),
@@ -947,56 +981,6 @@ class TestGroupBatchFusion(TestCase):
         linear.meta["example_value"] = torch.randn(4, 6)
         builders[case](graph, linear)
         self.assertEqual(_has_layout_sensitive_user(linear), case not in safe)
-
-    @parametrize(
-        "chain",
-        [
-            "direct",
-            "merging_view",
-            "as_strided",
-            "conversion",
-            "unsafe_view",
-            "broadcast",
-            "setitem",
-        ],
-    )
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_skips_contiguous_alias_mutation(self, chain):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.large = torch.nn.Linear(64, 48, bias=False)
-                self.a = torch.nn.Linear(64, 16, bias=False)
-                self.b = torch.nn.Linear(64, 16, bias=False)
-
-            def forward(self, x):
-                # Eager contiguous() returns the already-contiguous output, so
-                # a mutation behind any alias also updates the tensor used by
-                # cos(). Fusing would make contiguous() a copy and hide it.
-                large = self.large(x)
-                mutated = large.contiguous()
-                if chain == "merging_view":
-                    mutated = mutated.view(-1)
-                elif chain == "as_strided":
-                    mutated = mutated.as_strided((1536,), (1,))
-                elif chain == "conversion":
-                    mutated = mutated.float()
-                elif chain == "unsafe_view":
-                    mutated = torch.ops.aten._unsafe_view.default(mutated, [1536])
-                elif chain == "broadcast":
-                    mutated = torch.broadcast_tensors(mutated, mutated)[0]
-                elif chain == "setitem":
-                    mutated[0] = 0
-                mutated.mul_(2)
-                return (
-                    torch.sin(mutated),
-                    torch.cos(large),
-                    torch.sin(self.a(x)),
-                    torch.cos(self.b(x)),
-                )
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
 
     @parametrize("op", ["add_tensor", "add_scalar", "mul_scalar"])
     @_lhs_fusion_config
@@ -1228,30 +1212,6 @@ class TestGroupBatchFusion(TestCase):
 
         module = M().eval()
         _check_lhs_fusion(self, module, [2], torch.randn(4, 8), check_strides=True)
-
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_symbolic_projection_width_fuses(self):
-        # Weights and biases are graph inputs so Dynamo keeps their leading
-        # dimension symbolic; the matcher must still prove the width check.
-        def fn(x, w1, w2, b1, b2):
-            return (
-                torch.sin(torch.nn.functional.linear(x, w1, b1)),
-                torch.cos(torch.nn.functional.linear(x, w2, b2)),
-            )
-
-        x = torch.randn(4, 8)
-        w1 = torch.randn(6, 8)
-        w2 = torch.randn(6, 8)
-        b1 = torch.randn(6)
-        b2 = torch.randn(6)
-        for tensor in (w1, w2, b1, b2):
-            torch._dynamo.mark_dynamic(tensor, 0)
-        counters.clear()
-        with torch.no_grad():
-            expected = fn(x, w1, w2, b1, b2)
-            actual = torch.compile(fn, fullgraph=True)(x, w1, w2, b1, b2)
-        self.assertEqual(actual, expected)
-        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):

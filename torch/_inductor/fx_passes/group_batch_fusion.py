@@ -654,6 +654,18 @@ _OPERATOR_TO_ATEN = {
     operator.neg: torch.ops.aten.neg,
     operator.pow: torch.ops.aten.pow,
     operator.matmul: torch.ops.aten.matmul,
+    operator.gt: torch.ops.aten.gt,
+    operator.ge: torch.ops.aten.ge,
+    operator.lt: torch.ops.aten.lt,
+    operator.le: torch.ops.aten.le,
+    operator.eq: torch.ops.aten.eq,
+    operator.ne: torch.ops.aten.ne,
+    operator.floordiv: torch.ops.aten.floor_divide,
+    operator.mod: torch.ops.aten.remainder,
+    operator.and_: torch.ops.aten.bitwise_and,
+    operator.or_: torch.ops.aten.bitwise_or,
+    operator.xor: torch.ops.aten.bitwise_xor,
+    operator.invert: torch.ops.aten.bitwise_not,
 }
 
 # Aliases that never merge source dimensions are traversable: their users are
@@ -751,6 +763,19 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "scaled_dot_product_efficient_attention",
         "scaled_dot_product_cudnn_attention",
         "_scaled_dot_product_attention_math",
+        "log_softmax",
+        "amax",
+        "amin",
+        "norm",
+        "linalg_vector_norm",
+        "var",
+        "std",
+        "cumsum",
+        "addmm",
+        "baddbmm",
+        "einsum",
+        "pad",
+        "constant_pad_nd",
         "size",
         "sym_size",
         "dim",
@@ -1099,10 +1124,30 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op) -> bool:
     return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
 
 
+def _tensor_arg_count(user: torch.fx.Node) -> int:
+    count = 0
+    for value in (*user.args, *user.kwargs.values()):
+        mapped = torch.fx.node.map_arg(value, _node_value)
+        count += len(_tensor_values(mapped))
+    return count
+
+
+def _layout_sensitive_after_alias(user: torch.fx.Node, op) -> bool:
+    if op is None:
+        return False
+    name = op.overloadpacket.__name__
+    if name in ("cat", "stack"):
+        return True
+    if name in ("_to_copy", "to", "type_as") and user.kwargs.get("memory_format"):
+        return True
+    return torch.Tag.pointwise in op.tags and _tensor_arg_count(user) > 1
+
+
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     """True if any consumer, including one behind an alias, is unsafe."""
     pending = list(node.users)
     visited = OrderedSet()
+    alias_traversed = False
     while pending:
         user = pending.pop()
         if user in visited:
@@ -1113,18 +1158,23 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             if user.op in ("call_method", "call_function")
             else None
         )
+        if alias_traversed and _layout_sensitive_after_alias(user, op):
+            return True
         if _is_contiguous_user(user, op):
             if not _contiguous_aliases(user):
                 return True
             if _is_aliasing_user(user, assume_alias=True):
                 if _has_mutable_alias_user(user) or _has_storage_sensitive_user(user):
                     return True
+                alias_traversed = True
             continue
         if _allowed_alias(user, op):
+            alias_traversed = True
             pending.extend(user.users)
         elif _direct_layout_user_is_sensitive(user, op):
             return True
         elif _is_aliasing_user(user, assume_alias=True):
+            alias_traversed = True
             pending.extend(user.users)
     return False
 
