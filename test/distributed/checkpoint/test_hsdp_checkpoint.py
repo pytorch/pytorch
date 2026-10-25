@@ -17,9 +17,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     StateDictType,
 )
 from torch.distributed.tensor import Replicate
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -30,9 +31,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class SimpleModel(torch.nn.Module):
@@ -49,8 +47,8 @@ class SimpleModel(torch.nn.Module):
         x = F.relu(self.net3(x))
         return x
 
-    def get_input(self):
-        return torch.rand(4, 5, device=device_type)
+    def get_input(self, device):
+        return torch.rand(4, 5, device=device)
 
 
 class SimpleModelUneven(torch.nn.Module):
@@ -69,11 +67,13 @@ class SimpleModelUneven(torch.nn.Module):
         x = F.relu(self.net4(x))
         return x
 
-    def get_input(self):
-        return torch.rand(4, 5, device=device_type)
+    def get_input(self, device):
+        return torch.rand(4, 5, device=device)
 
 
 class TestHSDPCheckpoint(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = NUM_DEVICES
 
     @classmethod
@@ -88,7 +88,7 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    def test_hsdp_checkpoint(self, is_even_sharded_model) -> None:
+    def test_hsdp_checkpoint(self, device, is_even_sharded_model) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -114,7 +114,7 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
         )
 
         # Update the parameters so current model state_dict now be different from state_dict_to_save.
-        model(model.get_input()).sum().backward()
+        model(model.get_input(self.device_type)).sum().backward()
         optim.step()
 
         # At this point, the current state dict is different from state_dict_to_save.
@@ -146,7 +146,9 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    def test_hsdp_fsdp_checkpoint_conversion(self, is_even_sharded_model) -> None:
+    def test_hsdp_fsdp_checkpoint_conversion(
+        self, device, is_even_sharded_model
+    ) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -216,6 +218,13 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
             self.assertEqual(v1_all_gather.to_local(), v2_all_gather.to_local())
 
 
-instantiate_parametrized_tests(TestHSDPCheckpoint)
+instantiate_device_type_tests(
+    TestHSDPCheckpoint,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+
 if __name__ == "__main__":
     run_tests()
