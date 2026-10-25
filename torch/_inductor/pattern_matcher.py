@@ -2216,12 +2216,11 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                replace_trace_fn = trace_fn
-                if trace_fn is fwd_only and _is_rank_agnostic(match.graph):
-                    replace_trace_fn = functools.partial(fwd_only, is_replacement=True)
-                match.replacement_graph = replace_trace_fn(
+                match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
+                if _is_rank_agnostic(match.graph):
+                    _use_current_device_node(match.replacement_graph)
                 match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
@@ -3169,6 +3168,32 @@ def _is_rank_agnostic(graph: torch.fx.Graph) -> bool:
             op="call_function", target=torch.ops.coor.current_device.default
         )
     )
+
+
+def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
+    # trace_fns trace with CooR off, so a replacement bakes this rank's device.
+    # Under CooR the inputs are on the current accelerator by invariant, so swap
+    # that device for the current_device() node a CooR trace would have emitted.
+    graph = gm.graph
+    current_device = None
+
+    def swap(a: Any) -> Any:
+        nonlocal current_device
+        if not (isinstance(a, torch.device) and _coor_device_index_is_current(a)):
+            return a
+        if current_device is None:
+            first = next(n for n in graph.nodes if n.op != "placeholder")
+            with graph.inserting_before(first):
+                current_device = graph.call_function(
+                    torch.ops.coor.current_device.default
+                )
+            current_device.meta["val"] = a
+        return current_device
+
+    for n in list(graph.nodes):
+        n.args = torch.fx.node.map_aggregate(n.args, swap)
+        n.kwargs = torch.fx.node.map_aggregate(n.kwargs, swap)
+    gm.recompile()
 
 
 @torch.no_grad()
