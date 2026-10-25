@@ -11,6 +11,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -29,7 +30,27 @@ _INDEX_DTYPES = (
     torch.uint32,
     torch.int32,
 )
-_NSORTS = (1, 2, 31, 32, 33, 127, 128, 129, 4096, 4097, 10677, 65536, 200000)
+# Row lengths; 256 and 32768 are the longest that uint8 and int16 indices address.
+# 17, 4097 and 65537 end the input inside a 16-byte chunk.
+_NS = (
+    1,
+    2,
+    17,
+    31,
+    32,
+    33,
+    127,
+    128,
+    129,
+    256,
+    4096,
+    4097,
+    10677,
+    32768,
+    65536,
+    65537,
+    200000,
+)
 _ROWS = (1, 3, 127, 128, 1000)
 
 
@@ -51,28 +72,44 @@ class TestCuTeDSLPartitionSort(TestCase):
         descending: bool,
         values: torch.Tensor | None = None,
         indices: torch.Tensor | None = None,
-    ) -> None:
-        from torch._native.ops.sort.cutedsl_partition import partition_sort
+    ) -> set[str]:
+        """Sorts ``x`` and returns the launch modes taken."""
+        from torch._native.ops.sort import cutedsl_partition
 
         if values is None:
             values = torch.empty_like(x)
         if indices is None:
             indices = torch.empty(x.shape, dtype=index_dtype, device=x.device)
-        partition_sort(x, values, indices, descending, _arch())
+        with mock.patch.object(
+            cutedsl_partition, "make_spec", wraps=cutedsl_partition.make_spec
+        ) as make_spec:
+            cutedsl_partition.partition_sort(x, values, indices, descending, _arch())
         ref_values, ref_indices = torch.sort(
             x, dim=-1, stable=True, descending=descending
         )
         self.assertEqual(values, ref_values)
         self.assertEqual(indices.long(), ref_indices)
+        return {call.args[3] for call in make_spec.call_args_list}
+
+    def _row_mode_rows(self) -> int:
+        """Fewest rows that take a CTA per row on this GPU."""
+        from torch._native.cutedsl.hw_caps import caps
+        from torch._native.ops.sort.cutedsl_partition import policy
+
+        threads = policy(torch.device("cuda")).row_threads
+        return caps(torch.device("cuda")).fill_blocks(threads, waves=2.0)
 
     @parametrize("index_dtype", _INDEX_DTYPES)
     @parametrize("descending", (False, True))
     def test_shapes(self, index_dtype, descending):
+        torch.manual_seed(0)
         limit = torch.iinfo(index_dtype).max + 1
-        for nsort in _NSORTS:
+        for nsort in _NS:
             if nsort > limit:
                 continue
             for rows in _ROWS:
+                if rows * nsort > 100_000_000:
+                    continue  # test_large
                 x = torch.rand(rows, nsort, device="cuda") < 0.5
                 # All-false and all-true rows.
                 x[0] = False
@@ -80,29 +117,85 @@ class TestCuTeDSLPartitionSort(TestCase):
                 self._check(x, index_dtype, descending)
                 del x
 
+    @parametrize("index_dtype", (torch.uint16, torch.int32))
+    @parametrize("descending", (False, True))
+    def test_modes(self, index_dtype, descending):
+        torch.manual_seed(0)
+        fill = self._row_mode_rows()
+        # Rows past one ``rows`` tile (1024 16-byte chunks) take ``row`` with
+        # enough rows to fill the GPU, else ``split``.
+        cases = [
+            ("rows", 1000, 129),
+            ("rows", 3, 10677),
+            ("row", fill, 20000),
+            ("row", fill + 3, 30000),
+            ("split", fill - 1, 20000),
+            ("split", 3, 65535),
+        ]
+        for mode, rows, nsort in cases:
+            x = torch.rand(rows, nsort, device="cuda") < 0.5
+            x[0] = False
+            x[-1] = True
+            self.assertEqual(self._check(x, index_dtype, descending), {mode})
+
+    @largeTensorTest("6GB", device="cuda")
+    def test_large(self):
+        torch.manual_seed(0)
+        x = torch.rand(1000, 200000, device="cuda") < 0.5
+        for index_dtype in (torch.uint32, torch.int32):
+            self._check(x, index_dtype, True)
+
+    @largeTensorTest("8GB", device="cuda")
+    def test_rows_int32_limit(self):
+        # Row counts near the Int32 limit: one launch, then two row batches.
+        from torch._native.ops.sort import cutedsl_partition
+
+        for rows in ((1 << 31) - 64, (1 << 31) - 1):
+            x = torch.zeros(rows, 1, dtype=torch.bool, device="cuda")
+            x[::3] = True
+            values = torch.empty_like(x)
+            indices = torch.full(x.shape, 1, dtype=torch.uint8, device="cuda")
+            cutedsl_partition.partition_sort(x, values, indices, False, _arch())
+            self.assertTrue(torch.equal(values, x))
+            self.assertFalse(indices.any())
+            del x, values, indices
+
     @parametrize("descending", (False, True))
     def test_skewed(self, descending):
+        torch.manual_seed(0)
         for p in (0.001, 0.999):
             for rows, nsort in ((4099, 100), (37, 4097), (600, 65536), (2, 200000)):
                 x = torch.rand(rows, nsort, device="cuda") < p
                 self._check(x, torch.int32, descending)
 
-    def test_unaligned(self):
-        # Offsets that defeat the 16-byte chunks of keys, values and indices.
-        for rows, nsort in ((33, 31), (5, 4097), (3, 70000)):
+    @parametrize("index_dtype", (torch.uint8, torch.uint16, torch.int32))
+    @parametrize("descending", (False, True))
+    def test_unaligned(self, index_dtype, descending):
+        # Element offsets of keys, values and indices that defeat their 16-byte
+        # chunks one at a time and together; uint8 and uint16 indices at offset
+        # 0 store 16 and 8 per vector.
+        torch.manual_seed(0)
+        limit = torch.iinfo(index_dtype).max + 1
+        offsets = ((1, 0, 0), (0, 3, 0), (0, 0, 1), (0, 0, 3), (8, 1, 2), (3, 3, 3))
+        for rows, nsort in ((33, 31), (7, 256), (5, 4097), (3, 65536), (3, 70000)):
+            if nsort > limit:
+                continue
             size = rows * nsort
-            for offset in (1, 3, 8):
-                x = (torch.rand(size + offset, device="cuda") < 0.5)[offset:]
-                x = x.view(rows, nsort)
-                values = torch.empty(size + offset, dtype=torch.bool, device="cuda")
-                indices = torch.empty(size + offset, dtype=torch.int32, device="cuda")
-                values = values[offset:].view(rows, nsort)
-                indices = indices[offset:].view(rows, nsort)
-                self._check(x, torch.int32, True, values, indices)
+            for ox, ov, oi in offsets:
+                x = torch.rand(size + ox, device="cuda") < 0.5
+                values = torch.empty(size + ov, dtype=torch.bool, device="cuda")
+                indices = torch.empty(size + oi, dtype=index_dtype, device="cuda")
+                x = x[ox:].view(rows, nsort)
+                values = values[ov:].view(rows, nsort)
+                indices = indices[oi:].view(rows, nsort)
+                self._check(x, index_dtype, descending, values, indices)
 
     def test_row_batches(self):
         # Inputs past the Int32 flat extent are sorted in row batches.
-        with mock.patch("torch._native.ops.sort.cutedsl_partition._FLAT_LIMIT", 1000):
+        torch.manual_seed(0)
+        from torch._native.ops.sort import cutedsl_partition
+
+        with mock.patch.object(cutedsl_partition, "PARTITION_MAX_NSORT", 1000):
             for nsort in (100, 999, 4097):
                 x = torch.rand(37, nsort, device="cuda") < 0.5
                 self._check(x, torch.int16, True)
@@ -110,7 +203,7 @@ class TestCuTeDSLPartitionSort(TestCase):
     def test_empty(self):
         for shape in ((0, 64), (5, 0)):
             x = torch.empty(shape, dtype=torch.bool, device="cuda")
-            self._check(x, torch.int16, False)
+            self.assertEqual(self._check(x, torch.int16, False), set())
 
 
 instantiate_parametrized_tests(TestCuTeDSLPartitionSort)

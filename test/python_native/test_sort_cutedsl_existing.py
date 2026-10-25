@@ -23,7 +23,13 @@ from torch.testing._internal.common_utils import run_tests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import test_sort_and_select
 
-from torch._native.ops.sort import cutedsl_global, cutedsl_impl, cutedsl_inplace
+from torch._native.ops.sort import (
+    cutedsl_global,
+    cutedsl_impl,
+    cutedsl_inplace,
+    cutedsl_partition,
+    cutedsl_register,
+)
 
 
 _NARROW = (
@@ -91,7 +97,12 @@ class _NarrowOutMode(TorchFunctionMode):
         return result
 
 
-_KERNELS = ((cutedsl_inplace, "inplace_sort"), (cutedsl_global, "global_sort"))
+_KERNELS = (
+    (cutedsl_inplace, "inplace_sort"),
+    (cutedsl_global, "global_sort"),
+    (cutedsl_register, "register_sort"),
+    (cutedsl_partition, "partition_sort"),
+)
 
 
 def _narrow_out(cls):
@@ -109,7 +120,7 @@ def _narrow_out(cls):
                 return wrapper
 
             # AOT kernels would serve covered calls invisibly to these counters.
-            aot_enabled = torch._C._get_native_aot_enabled()
+            aot_enabled = torch._native.aot_enabled()
             torch._native.set_aot_enabled(False)
             self.addCleanup(torch._native.set_aot_enabled, aot_enabled)
             for module, name in _KERNELS:

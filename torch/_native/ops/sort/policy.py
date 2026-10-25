@@ -1,22 +1,33 @@
-"""Leaf choice for the narrow out= sort kernels, shared by the JIT condition and
-the AOT declaration. Torch-free: torchgen imports the AOT declaration before
-torch is built.
+"""Kernel choice for the narrow out= sort, shared by the JIT router and the AOT
+declaration (which loads this file by path). Torch-free: torchgen loads the
+AOT declaration before torch is built.
 
-The thresholds are those of the stock ``sort_cuda_kernel`` so that every DSL
-kernel replaces exactly one stock leaf:
+The mirror kernels replace stock ``sort_cuda_kernel`` leaves at its thresholds:
 
-  nsort <= 4096                         in-place leaves (Sort.cu)
+  nsort <= 4096                         in-place leaves (Sort.cu); unstable
+                                        rows of at most 32 take the bitonic one
   nsegments == 1 or nsort >= 1_000_000  one device radix sort per row
   nsegments < 128                       full sort with a segment payload
   otherwise                             segmented radix sort, one CTA per row
 """
 
 INPLACE_MAX_NSORT = 4096
+BITONIC_MAX_NSORT = 32
+WARP_MERGE_MAX_NSORT = 128
 PER_ROW_MIN_NSORT = 1_000_000
 SEGMENTED_MIN_ROWS = 128
 # The DSL kernels take the row count and the row length as Int32.
 MAX_ROWS = (1 << 31) - 1
 MAX_NSORT = (1 << 31) - 1
+# Longest row the register kernel sorts; not a stock threshold.
+REGISTER_MAX_NSORT = 2048
+# Rows (warps) per CTA of the register kernel. On sm_120 two rows are best or
+# within noise of best for every rung; one row loses up to 1.5x at rungs 32 and
+# 64, and 16 rows spill 64-bit keys at rung 2048.
+REGISTER_ROWS_PER_CTA = 2
+# Longest bool row the partition kernel sorts: its flat extents are Int32, with
+# room for rounding a row out to whole vectors.
+PARTITION_MAX_NSORT = (1 << 31) - 64
 INDEX_MAX = {
     "uint8": (1 << 8) - 1,
     "int8": (1 << 7) - 1,
@@ -25,6 +36,29 @@ INDEX_MAX = {
     "uint32": (1 << 32) - 1,
     "int32": (1 << 31) - 1,
 }
+
+
+def register_rung(nsort: int) -> int:
+    """Padded row length of the register kernel for rows of ``nsort``."""
+    return max(32, 1 << (nsort - 1).bit_length())
+
+
+def vector_alignment(store: int, itemsize: int) -> int:
+    """Byte alignment of vectors of ``store`` elements of ``itemsize`` bytes."""
+    return min(16, store * itemsize)
+
+
+def register_store(nsort: int, operands: list[tuple[int, int]]) -> int:
+    """Vector width of the register kernel: the widest power of two up to
+    rung / 32 that divides the row and to which every ``(address, itemsize)``
+    operand is aligned."""
+    store = register_rung(nsort) // 32
+    while store > 1 and (
+        nsort % store
+        or any(address % vector_alignment(store, size) for address, size in operands)
+    ):
+        store //= 2
+    return store
 
 
 def stock_leaf(nsort: int, nsegments: int) -> str:
@@ -36,6 +70,16 @@ def stock_leaf(nsort: int, nsegments: int) -> str:
     if nsegments < SEGMENTED_MIN_ROWS:
         return "full_sort"
     return "segmented"
+
+
+def route(nsort: int, nsegments: int, stable: bool, is_bool: bool) -> str:
+    """Kernel for ``nsegments`` rows of ``nsort``: "partition", "register",
+    "inplace" or "global". The JIT router and the AOT declaration both ask."""
+    if is_bool and nsort <= PARTITION_MAX_NSORT:
+        return "partition"
+    if nsort <= REGISTER_MAX_NSORT and (stable or nsort > BITONIC_MAX_NSORT):
+        return "register"
+    return "inplace" if stock_leaf(nsort, nsegments) == "inplace" else "global"
 
 
 # cub's tuning (cccl/cub/device/dispatch/tuning/tuning_radix_sort.cuh), resolved per

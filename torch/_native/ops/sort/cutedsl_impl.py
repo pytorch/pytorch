@@ -4,7 +4,8 @@ Fires only for the out-variant with an indices tensor of dtype uint8, int8,
 uint16, int16, uint32 or int32 (``torch.sort(x, out=(values, indices))`` and
 ``torch.argsort(x, out=indices)``, which reaches it through ``argsort_out``).
 Functional sort and int64 out= keep the stock path. Every stock CUDA sort leaf
-(see ``policy.py``) has a kernel that mirrors it and is bit-exact with it.
+(see ``policy.py``) has a kernel that mirrors it and is bit-exact with it;
+bool keys and rows of up to 2048 take faster kernels (see ``_launcher``).
 """
 
 import functools
@@ -14,7 +15,7 @@ import torch
 from torch._prims_common.wrappers import _maybe_resize_out
 
 from ... import cutedsl_utils as cu
-from .policy import INDEX_MAX, MAX_NSORT, MAX_ROWS, stock_leaf
+from .policy import INDEX_MAX, MAX_NSORT, MAX_ROWS, route
 
 
 _KEY_DTYPES = frozenset(
@@ -50,10 +51,20 @@ def _arch(device: int) -> int:
 def _launcher(
     self: torch.Tensor, nsort: int, stable: bool, descending: bool
 ) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]:
-    """Kernel for the stock leaf this call takes. Rows longer than 4096 go to
-    global_sort, which batches rows and picks the leaf per batch like stock."""
+    """Launcher for policy.route's kernel. The register kernel's unstable order
+    is its stable one, not stock's; global_sort batches rows and picks the stock
+    leaf per batch."""
     arch = _arch(self.device.index or 0)
-    if stock_leaf(nsort, self.numel() // nsort) == "inplace":
+    kernel = route(nsort, self.numel() // nsort, stable, self.dtype == torch.bool)
+    if kernel == "partition":
+        from .cutedsl_partition import partition_sort
+
+        return functools.partial(partition_sort, descending=descending, arch=arch)
+    if kernel == "register":
+        from .cutedsl_register import register_sort
+
+        return functools.partial(register_sort, descending=descending, arch=arch)
+    if kernel == "inplace":
         from .cutedsl_inplace import inplace_sort
 
         return functools.partial(

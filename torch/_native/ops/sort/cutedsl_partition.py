@@ -7,19 +7,26 @@ a two-way stream compaction; no key is compared and no iota is read.
 
 Rows are read through ``vec``-byte chunks aligned in the flat buffer, so one
 chunk can hold the end of a row and the start of the next; bytes outside the
-row are masked. A tile's thread-contiguous chunks give every element its
+row are masked and the buffer's partial last chunk is read bytewise. A tile's thread-contiguous chunks give every element its
 exclusive first-class count from one block scan. Indices are staged in shared
 memory in output order, each run at its gmem alignment, and leave as
 ``ivec``-wide stores; values are written from registers. Three modes:
 
-- ``rows``: a CTA owns ``group`` complete rows in one tile. Per-row counts come
-  from the in-tile prefix at each row start, so short rows need no extra pass.
+- ``rows``: a CTA owns ``rows_per_cta`` complete rows in one tile. Per-row
+  counts come from the in-tile prefix at each row start, so short rows need no
+  extra pass.
 - ``row``: a CTA owns a whole long row: it counts the row, then re-reads it
   (from L2) to scatter, tile by tile.
-- ``split``: rows are cut into segments of ``group`` chunks over several CTAs; a
-  count kernel writes per-segment counts and the scatter kernel prefixes them.
+- ``split``: rows are cut into segments of ``seg_chunks`` chunks (one tile) over
+  several CTAs; a count kernel writes per-segment counts and the scatter kernel
+  prefixes them.
+
+Any non-zero key byte is true and ``values`` are written as 0/1. Bool storage
+other than 0/1 is outside torch's bool contract (stock sort orders such bytes
+by value); this kernel normalizes it.
 """
 
+import functools
 from typing import NamedTuple
 
 import cutlass
@@ -39,6 +46,7 @@ from torch._native.cutedsl.scan import block_exclusive_prefix, warp_inclusive_pr
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from .cutedsl_common import INDEX_DTYPES, index_name
+from .policy import PARTITION_MAX_NSORT
 
 
 class PartitionSort:
@@ -72,24 +80,28 @@ class PartitionSort:
         mCounts: cute.Tensor,
         rows: Int32,
         n: Int32,
-        group: Int32,
+        rows_per_cta: Int32,
         stream,
     ):
         block = [self.threads, 1, 1]
         if const_expr(self.mode == "rows"):
-            self.rows_kernel(mX, mValues, mIndices, rows, n, group).launch(
-                grid=[(rows + group - Int32(1)) // group, 1, 1],
+            self.rows_kernel(mX, mValues, mIndices, rows, n, rows_per_cta).launch(
+                grid=[(rows - Int32(1)) // rows_per_cta + Int32(1), 1, 1],
                 block=block,
                 stream=stream,
             )
         else:
-            segs = (n + Int32(2 * self.vec - 2)) // Int32(self.vec)
-            segs = (segs + group - Int32(1)) // group
+            # Most chunks a row spans; a ``row`` CTA owns all of them.
+            seg_chunks = (n + Int32(2 * self.vec - 2)) // Int32(self.vec)
+            segs = Int32(1)
             if const_expr(self.mode == "split"):
-                self.count_kernel(mX, mCounts, n, group, segs).launch(
+                tile_chunks = Int32(self.threads * self.items)
+                segs = (seg_chunks - Int32(1)) // tile_chunks + Int32(1)
+                seg_chunks = tile_chunks
+                self.count_kernel(mX, mCounts, n, seg_chunks, segs).launch(
                     grid=[rows * segs, 1, 1], block=block, stream=stream
                 )
-            self.row_kernel(mX, mValues, mIndices, mCounts, n, group, segs).launch(
+            self.row_kernel(mX, mValues, mIndices, mCounts, n, seg_chunks, segs).launch(
                 grid=[rows * segs, 1, 1], block=block, stream=stream
             )
 
@@ -104,7 +116,7 @@ class PartitionSort:
     @cute.jit
     def load(
         self,
-        gX: cute.Tensor,
+        mX: cute.Tensor,
         c0: Int64,
         q0: Int32,
         q1: Int32,
@@ -117,12 +129,30 @@ class PartitionSort:
         ``masks[v]`` to the first-class bits of bytes ``0 <= ol < hi``, where
         ``ol = vec * q + k - shift``; returns their count."""
         VEC = const_expr(self.vec)
+        ITEMS = const_expr(self.items)
+        gX = self.chunked(mX, VEC)
+        # Only the last chunk of ``mX`` can be partial; it is read bytewise.
+        full = Int64(mX.shape[0] // Int32(VEC))
+        if q0 + Int32(ITEMS) <= q1 and c0 + Int64(q0 + Int32(ITEMS)) <= full:
+            for v in cutlass.range_constexpr(ITEMS):
+                cute.autovec_copy(gX[None, c0 + Int64(q0 + Int32(v))], chunks[None, v])
+        else:
+            for v in cutlass.range_constexpr(ITEMS):
+                q = q0 + Int32(v)
+                if q < q1:
+                    c = c0 + Int64(q)
+                    if c < full:
+                        cute.autovec_copy(gX[None, c], chunks[None, v])
+                    else:
+                        for k in cutlass.range_constexpr(VEC):
+                            chunks[k, v] = Uint8(0)
+                            if c * Int64(VEC) + Int64(k) < mX.shape[0]:
+                                chunks[k, v] = mX[c * Int64(VEC) + Int64(k)]
         f = Int32(0)
-        for v in cutlass.range_constexpr(self.items):
+        for v in cutlass.range_constexpr(ITEMS):
             masks[v] = Int32(0)
             q = q0 + Int32(v)
             if q < q1:
-                cute.autovec_copy(gX[None, c0 + Int64(q)], chunks[None, v])
                 base = q * Int32(VEC) - shift
                 m = Int32(0)
                 for k in cutlass.range_constexpr(VEC):
@@ -203,7 +233,7 @@ class PartitionSort:
         mIndices: cute.Tensor,
         rows: Int32,
         n: Int32,
-        group: Int32,
+        rows_per_cta: Int32,
     ):
         VEC = const_expr(self.vec)
         E = const_expr(self.ivec)
@@ -213,7 +243,6 @@ class PartitionSort:
         bid, _, _ = cute.arch.block_idx()
         lane = tidx % Int32(32)
         warp = tidx // Int32(32)
-        gX = self.chunked(mX, VEC)
         gV = self.chunked(mValues, VEC)
 
         smem = cutlass.utils.SmemAllocator()
@@ -227,8 +256,8 @@ class PartitionSort:
             Int32, cute.make_layout((NUM_WARPS + 1,)), byte_alignment=16
         )
 
-        r0 = bid * group
-        nr = cutlass.min(group, rows - r0)
+        r0 = bid * rows_per_cta
+        nr = cutlass.min(rows_per_cta, rows - r0)
         length = nr * n
         lo = Int64(r0) * Int64(n)
         c0 = lo // Int64(VEC)
@@ -237,7 +266,7 @@ class PartitionSort:
         q1 = (shift + length + Int32(VEC - 1)) // Int32(VEC)
         chunks = cute.make_rmem_tensor(cute.make_layout((VEC, ITEMS)), Uint8)
         masks = cute.make_rmem_tensor(ITEMS, Int32)
-        f = self.load(gX, c0, q0, q1, length, shift, chunks, masks)
+        f = self.load(mX, c0, q0, q1, length, shift, chunks, masks)
         excl, total = block_exclusive_prefix(f, s_scan, lane, warp, NUM_WARPS)
 
         # Prefix at each row start of the tile.
@@ -294,7 +323,7 @@ class PartitionSort:
         self.write_runs(mIndices, s_idx, p, lo, length, p, lo, Int32(0))
 
     @cute.jit
-    def row_bounds(self, n: Int32, group: Int32, segs: Int32, bid: Int32):
+    def row_bounds(self, n: Int32, seg_chunks: Int32, segs: Int32, bid: Int32):
         VEC = const_expr(self.vec)
         row = bid // segs
         s = bid - row * segs
@@ -302,14 +331,14 @@ class PartitionSort:
         c0 = rs // Int64(VEC)
         shift = Int32(rs - c0 * Int64(VEC))
         row_chunks = (shift + n + Int32(VEC - 1)) // Int32(VEC)
-        cs = s * group
-        ce = cutlass.min(cs + group, row_chunks)
+        cs = s * seg_chunks
+        ce = cutlass.min(cs + seg_chunks, row_chunks)
         return row, s, rs, c0, shift, cs, ce
 
     @cute.jit
     def count(
         self,
-        gX: cute.Tensor,
+        mX: cute.Tensor,
         c0: Int64,
         cs: Int32,
         ce: Int32,
@@ -325,7 +354,7 @@ class PartitionSort:
         f = Int32(0)
         for tile in cutlass.range(cs, ce, self.threads * ITEMS):
             q0 = tile + tidx * Int32(ITEMS)
-            f = f + self.load(gX, c0, q0, ce, n, shift, chunks, masks)
+            f = f + self.load(mX, c0, q0, ce, n, shift, chunks, masks)
         _, total = block_exclusive_prefix(
             f, s_scan, tidx % Int32(32), tidx // Int32(32), self.threads // 32
         )
@@ -333,7 +362,12 @@ class PartitionSort:
 
     @cute.kernel
     def count_kernel(
-        self, mX: cute.Tensor, mCounts: cute.Tensor, n: Int32, group: Int32, segs: Int32
+        self,
+        mX: cute.Tensor,
+        mCounts: cute.Tensor,
+        n: Int32,
+        seg_chunks: Int32,
+        segs: Int32,
     ):
         tidx, _, _ = cute.arch.thread_idx()
         bid, _, _ = cute.arch.block_idx()
@@ -345,8 +379,8 @@ class PartitionSort:
         # Last segments first: the scatter kernel then starts on the segments
         # still in L2.
         seg = nblocks - Int32(1) - bid
-        row, _, _, c0, shift, cs, ce = self.row_bounds(n, group, segs, seg)
-        total = self.count(self.chunked(mX, self.vec), c0, cs, ce, n, shift, s_scan)
+        row, _, _, c0, shift, cs, ce = self.row_bounds(n, seg_chunks, segs, seg)
+        total = self.count(mX, c0, cs, ce, n, shift, s_scan)
         if tidx == Int32(0):
             cute.arch.atomic_add(mCounts.iterator + Int32(2) * nblocks + row, total)
             mCounts[seg] = total
@@ -410,7 +444,7 @@ class PartitionSort:
         mIndices: cute.Tensor,
         mCounts: cute.Tensor,
         n: Int32,
-        group: Int32,
+        seg_chunks: Int32,
         segs: Int32,
     ):
         VEC = const_expr(self.vec)
@@ -422,18 +456,18 @@ class PartitionSort:
         bid, _, _ = cute.arch.block_idx()
         lane = tidx % Int32(32)
         warp = tidx // Int32(32)
-        gX = self.chunked(mX, VEC)
         gV = self.chunked(mValues, VEC)
 
         smem = cutlass.utils.SmemAllocator()
+        # p1 < E and p2 <= tile_f + 3 * E - 3, so slots stay below tile + 3 * E - 3.
         s_idx = smem.allocate_tensor(
-            self.index_dtype, cute.make_layout((self.tile + 2 * E,)), byte_alignment=16
+            self.index_dtype, cute.make_layout((self.tile + 3 * E,)), byte_alignment=16
         )
         s_scan = smem.allocate_tensor(
             Int32, cute.make_layout((NUM_WARPS + 1,)), byte_alignment=16
         )
 
-        row, s, rs, c0, shift, cs, ce = self.row_bounds(n, group, segs, bid)
+        row, s, rs, c0, shift, cs, ce = self.row_bounds(n, seg_chunks, segs, bid)
         row_f = Int32(0)
         first_run = Int32(0)
         if const_expr(self.mode == "split"):
@@ -441,14 +475,14 @@ class PartitionSort:
             row_f = mCounts[Int32(2) * nblocks + row]
             first_run = self.lookback(mCounts, bid, s, s_scan)
         else:
-            row_f = self.count(gX, c0, cs, ce, n, shift, s_scan)
+            row_f = self.count(mX, c0, cs, ce, n, shift, s_scan)
 
         chunks = cute.make_rmem_tensor(cute.make_layout((VEC, ITEMS)), Uint8)
         out = cute.make_rmem_tensor(VEC, Uint8)
         masks = cute.make_rmem_tensor(ITEMS, Int32)
         for tile in cutlass.range(cs, ce, NUM_THREADS * ITEMS):
             q0 = tile + tidx * Int32(ITEMS)
-            f = self.load(gX, c0, q0, ce, n, shift, chunks, masks)
+            f = self.load(mX, c0, q0, ce, n, shift, chunks, masks)
             excl, tile_f = block_exclusive_prefix(f, s_scan, lane, warp, NUM_WARPS)
             tile_lo = cutlass.max(tile * Int32(VEC) - shift, Int32(0))
             tile_hi = cutlass.min(
@@ -490,22 +524,20 @@ class Policy(NamedTuple):
     rows_threads: int
     rows_items: int  # most items per thread of a ``rows`` tile
     stage_bytes: int  # staged indices of a ``rows`` tile, at least one row
-    max_rows: int  # rows per ``rows`` tile
+    max_rows: int  # most rows per ``rows`` tile
     row_threads: int
     row_items: tuple[int, ...]  # ``row`` tiles, smallest whose rows fit L2
     split_threads: int
     split_items: int  # a ``split`` segment is one tile
 
 
-# sm_120 is measured (see the PR notes); other arches scale the staging budget
-# with shared memory per SM.
-_POLICY = {120: Policy(256, 4, 32768, 1024, 512, (2, 4), 256, 2)}
-
-
-def policy(arch: int, device: torch.device | None = None) -> Policy:
-    if arch in _POLICY:
-        return _POLICY[arch]
-    return _POLICY[120]._replace(stage_bytes=caps(device).smem_per_sm // 3)
+# Measured on sm_120; other arches reuse it with their own shared memory and L2
+# limits. A ``rows`` tile stages its indices in a third of shared memory per SM,
+# so three ``rows`` CTAs stay resident.
+@functools.cache
+def policy(device: torch.device) -> Policy:
+    stage_bytes = caps(device).smem_per_sm // 3
+    return Policy(256, 4, stage_bytes, 1024, 512, (2, 4), 256, 2)
 
 
 def spec_name(spec: dict) -> str:
@@ -575,7 +607,15 @@ def _compile(spec: tuple):
     return compile_kernel(kernel, *fake)
 
 
-_FLAT_LIMIT = 2**31 - 64
+def _smem_bytes(*buffers: int) -> int:
+    """Shared memory of ``SmemAllocator`` buffers of these sizes, 16-byte aligned."""
+    return sum(-(-size // 16) * 16 for size in buffers)
+
+
+@functools.cache
+def _no_counts(device: torch.device) -> torch.Tensor:
+    """Placeholder ``counts`` of the modes that keep no per-segment counts."""
+    return torch.empty(0, dtype=torch.int32, device=device)
 
 
 def partition_sort(
@@ -588,20 +628,20 @@ def partition_sort(
     """Stable sort of each row of 2D row-major bool ``x`` into ``values`` and
     ``indices``; also a valid unstable sort.
 
-    The caller checks eligibility: contiguous outputs and rows that
-    ``indices`` can address.
+    The caller checks eligibility: contiguous outputs, rows that ``indices``
+    can address and ``n <= PARTITION_MAX_NSORT``.
     """
     rows, n = x.shape
     if rows == 0 or n == 0:
         return
     # Flat extents are Int32.
-    batch = max(1, _FLAT_LIMIT // n)
+    batch = max(1, PARTITION_MAX_NSORT // n)
     if rows > batch:
         for start in range(0, rows, batch):
             rows_ = slice(start, start + batch)
             partition_sort(x[rows_], values[rows_], indices[rows_], descending, arch)
         return
-    p = policy(arch, x.device)
+    p = policy(x.device)
     hw = caps(x.device)
     x_flat = x.view(torch.uint8).view(-1)
     values_flat = values.view(torch.uint8).view(-1)
@@ -609,40 +649,38 @@ def partition_sort(
     ib = indices.element_size()
     ivec = supported_alignment(indices, 16) // ib
     chunks = -(-(n + vec - 1) // vec)
-    counts = torch.empty(0, dtype=torch.int32, device=x.device)
-    max_rows = 0
+    counts = _no_counts(x.device)
+    mode, threads, items, rows_per_cta = "split", p.split_threads, p.split_items, 0
     if chunks <= p.rows_threads * p.rows_items:
-        threads = p.rows_threads
-        staged = p.stage_bytes // (threads * vec * ib)
-        items = min(p.rows_items, max(-(-chunks // threads), staged))
-        group = min(p.max_rows, (threads * items * vec - vec + 1) // n)
-        mode, max_rows = "rows", p.max_rows
-    else:
-        mode, threads, items = "split", p.split_threads, p.split_items
-        group = threads * items
-        if rows >= hw.fill_blocks(p.row_threads, waves=2.0):
-            # A CTA per row re-reads its row from L2 while the resident rows fit.
-            for row_items in p.row_items:
-                smem = p.row_threads * row_items * vec * ib
-                per_sm = min(hw.blocks_per_sm(p.row_threads), hw.smem_per_sm // smem)
-                if smem > hw.smem_per_block_optin:
-                    break
-                if hw.sm_count * per_sm * n <= hw.l2_bytes // 2:
-                    mode, threads, items, group = (
-                        "row",
-                        p.row_threads,
-                        row_items,
-                        chunks,
-                    )
-                    break
-        if mode == "split":
-            segs = -(-chunks // group)
-            counts = torch.zeros(
-                rows * (2 * segs + 1), dtype=torch.int32, device=x.device
-            )
+        staged = p.stage_bytes // (p.rows_threads * vec * ib)
+        rows_items = min(p.rows_items, max(-(-chunks // p.rows_threads), staged))
+        tile = p.rows_threads * rows_items * vec
+        warps = p.rows_threads // 32
+        smem = _smem_bytes((tile + ivec) * ib, 4 * (p.max_rows + 1), 4 * (warps + 1))
+        if smem <= hw.smem_per_block_optin:
+            mode, threads, items = "rows", p.rows_threads, rows_items
+            rows_per_cta = min(p.max_rows, (tile - vec + 1) // n)
+    # A CTA per row needs two waves of rows to fill the GPU (measured on sm_120).
+    if mode == "split" and rows >= hw.fill_blocks(p.row_threads, waves=2.0):
+        # It re-reads its row from L2 while the resident rows fit; half of L2
+        # leaves room for the values and indices streaming out.
+        for row_items in p.row_items:
+            tile = p.row_threads * row_items * vec
+            warps = p.row_threads // 32
+            smem = _smem_bytes((tile + 3 * ivec) * ib, 4 * (warps + 1))
+            if smem > hw.smem_per_block_optin:
+                break
+            per_sm = min(hw.blocks_per_sm(p.row_threads), hw.smem_per_sm // smem)
+            if hw.sm_count * per_sm * n <= hw.l2_bytes // 2:
+                mode, threads, items = "row", p.row_threads, row_items
+                break
+    if mode == "split":
+        segs = -(-chunks // (threads * items))
+        counts = torch.zeros(rows * (2 * segs + 1), dtype=torch.int32, device=x.device)
+    max_rows = p.max_rows if mode == "rows" else 0
     spec = make_spec(
         arch, indices.dtype, descending, mode, threads, items, vec, ivec, max_rows
     )
     _compile(tuple(sorted(spec.items())))(
-        read_only(x_flat), values_flat, indices.view(-1), counts, rows, n, group
+        read_only(x_flat), values_flat, indices.view(-1), counts, rows, n, rows_per_cta
     )

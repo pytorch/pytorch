@@ -4,9 +4,11 @@
 # replaces the stock in-place leaves and must match them bit-exactly, including
 # their order of special values: rows of at most 128 (comparison leaves) tie
 # all NaNs above +inf, longer rows (radix leaf) put negative NaN first; both
-# tie -0.0 with +0.0. The kernel always yields the stable order, which stock
-# stable=False results must agree with up to ties.
+# tie -0.0 with +0.0. The kernel always yields the stable order, so every case
+# checks against the stable sort. Production sends bool keys to the partition
+# kernel, so they get a single smoke case.
 
+import itertools
 import unittest
 
 import torch
@@ -22,7 +24,6 @@ from torch.testing._internal.common_utils import (
 
 
 _KEY_DTYPES = (
-    torch.bool,
     torch.uint8,
     torch.int8,
     torch.int16,
@@ -41,15 +42,25 @@ _INDEX_DTYPES = (
     torch.uint32,
     torch.int32,
 )
-# Each side of every rung and leaf boundary (32, 128), plus a ragged row.
-_NSORTS = (1, 2, 31, 32, 33, 64, 127, 128, 129, 256, 1000, 2048)
+# Each side of every rung (32 .. 2048) and leaf boundary (32, 128), plus a
+# ragged row.
+_NSORTS = (
+    *(1, 2, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257),
+    *(511, 512, 513, 1000, 1023, 1024, 1025, 2047, 2048),
+)
 _ROWS = (1, 7, 1000)
-_NEG_NAN = {
-    torch.float16: 0xFE00,
-    torch.bfloat16: 0xFFC0,
-    torch.float32: 0xFFC00000,
-    torch.float64: 0xFFF8000000000000,
+# One key per code path for the length sweep (each spec is a JIT compile): two
+# 1-byte keys per register, a 16-bit key and a 32-bit key packed with the
+# index, and 64-bit keys beside it. Every dtype runs in test_index_dtypes.
+_NSORT_KEY_DTYPES = (torch.uint8, torch.bfloat16, torch.float32, torch.int64)
+# (exponent, mantissa) bits.
+_FLOAT_LAYOUT = {
+    torch.float16: (5, 10),
+    torch.bfloat16: (8, 7),
+    torch.float32: (8, 23),
+    torch.float64: (11, 52),
 }
+_INT_VIEW = {2: torch.int16, 4: torch.int32, 8: torch.int64}
 
 
 def _arch() -> int:
@@ -57,25 +68,38 @@ def _arch() -> int:
     return 10 * major + minor
 
 
-def _make_keys(dtype: torch.dtype, shape: tuple[int, int]) -> torch.Tensor:
+def _float_specials(dtype: torch.dtype) -> list[int]:
+    """Bit patterns of zeros, infinities, NaN payloads (quiet, signalling,
+    all-ones mantissa, both signs) and subnormals."""
+    exponent, mantissa = _FLOAT_LAYOUT[dtype]
+    inf = ((1 << exponent) - 1) << mantissa
+    ones = (1 << mantissa) - 1
+    positive = [0, inf, inf | 1 << (mantissa - 1), inf | 1, inf | ones, 1, ones]
+    sign = 1 << (exponent + mantissa)
+    return positive + [sign | bits for bits in positive]
+
+
+def _make_keys(dtype: torch.dtype, shape: tuple[int, ...]) -> torch.Tensor:
     if dtype == torch.bool:
         return torch.randint(0, 2, shape, device="cuda").bool()
     # Few distinct values give many ties; a third of the keys are specials.
     if dtype.is_floating_point:
         x = torch.randint(-8, 8, shape, device="cuda").to(dtype) / 4
-        int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
-        neg_nan = _NEG_NAN[dtype] - (1 << (8 * dtype.itemsize))
-        specials = torch.tensor([0.0, -0.0, float("inf"), -float("inf"), float("nan")])
-        neg_nan = torch.tensor([neg_nan], dtype=int_dtype).view(dtype)
-        pool = torch.cat([specials.to(dtype), neg_nan]).to("cuda")
+        bits = 8 * dtype.itemsize
+        specials = [b - (b >> (bits - 1) << bits) for b in _float_specials(dtype)]
+        view_dtype = _INT_VIEW[dtype.itemsize]
+        pool = torch.tensor(specials, dtype=view_dtype, device="cuda")
     else:
         info = torch.iinfo(dtype)
         lo, hi = max(info.min, -100), min(info.max, 100)
         x = torch.randint(lo, hi + 1, shape, device="cuda", dtype=dtype)
+        view_dtype = dtype
         extremes = (info.min, info.min + 1, info.max - 1, info.max)
         pool = torch.tensor(extremes, dtype=dtype, device="cuda")
+    # Write the specials through an integer view so NaN payloads survive.
     mask = torch.rand(shape, device="cuda") < 0.3
-    x[mask] = pool[torch.randint(0, len(pool), (int(mask.sum()),), device="cuda")]
+    picks = torch.randint(0, len(pool), (int(mask.sum()),), device="cuda")
+    x.view(view_dtype)[mask] = pool[picks]
     return x
 
 
@@ -90,7 +114,6 @@ class TestCuTeDSLRegisterSort(TestCase):
         x: torch.Tensor,
         index_dtype: torch.dtype,
         descending: bool,
-        stable: bool,
         values: torch.Tensor | None = None,
         indices: torch.Tensor | None = None,
     ) -> None:
@@ -100,56 +123,59 @@ class TestCuTeDSLRegisterSort(TestCase):
             values = torch.empty_like(x)
         if indices is None:
             indices = torch.empty(x.shape, dtype=index_dtype, device=x.device)
-        register_sort(x, values, indices, descending, stable, _arch())
+        register_sort(x, values, indices, descending, _arch())
         ref_values, ref_indices = torch.sort(
             x, dim=-1, stable=True, descending=descending
         )
         self.assertEqual(values.view(torch.uint8), ref_values.view(torch.uint8))
         self.assertEqual(indices.long(), ref_indices)
-        if not stable:
-            # Stock's unstable tie order may differ only among equal keys.
-            unstable_values, _ = torch.sort(x, dim=-1, descending=descending)
-            self.assertEqual(values, unstable_values)
 
-    @parametrize("key_dtype", _KEY_DTYPES)
+    @parametrize("key_dtype", _NSORT_KEY_DTYPES)
     @parametrize("descending", (False, True))
     def test_nsorts(self, key_dtype, descending):
+        torch.manual_seed(0)
         for nsort in _NSORTS:
             for rows in _ROWS:
                 x = _make_keys(key_dtype, (rows, nsort))
-                for stable in (False, True):
-                    self._check(x, torch.int16, descending, stable)
+                self._check(x, torch.int16, descending)
 
     @parametrize("index_dtype", _INDEX_DTYPES)
     @parametrize("key_dtype", _KEY_DTYPES)
     def test_index_dtypes(self, index_dtype, key_dtype):
+        torch.manual_seed(1)
         # The full index range for 8-bit indices; rung 2048 is in test_nsorts.
         limit = min(256, torch.iinfo(index_dtype).max + 1)
         for nsort, descending in ((100, True), (limit, False)):
             x = _make_keys(key_dtype, (37, nsort))
-            self._check(x, index_dtype, descending, True)
+            self._check(x, index_dtype, descending)
 
-    @parametrize("key_dtype", (torch.uint8, torch.float16, torch.float32))
-    def test_unaligned(self, key_dtype):
-        # Offset storage turns off the vector loads and stores.
-        rows, nsort = 33, 256
-        x = _make_keys(key_dtype, (rows * nsort + 1,))[1:].view(rows, nsort)
-        values = torch.empty(rows * nsort + 1, dtype=key_dtype, device="cuda")
-        indices = torch.empty(rows * nsort + 1, dtype=torch.int16, device="cuda")
-        for descending in (False, True):
-            self._check(
-                x,
-                torch.int16,
-                descending,
-                True,
-                values[1:].view(rows, nsort),
-                indices[1:].view(rows, nsort),
-            )
+    @parametrize("key_dtype", (torch.uint8, torch.float16, torch.float32, torch.int64))
+    def test_misaligned(self, key_dtype):
+        from torch._native.ops.sort.policy import register_store
+
+        torch.manual_seed(2)
+        # Element offsets of x, values and indices; each narrows the vector
+        # width to what every pointer is aligned to.
+        rows, nsort, pad = 33, 256, 4
+        size = rows * nsort + pad
+        base_x = _make_keys(key_dtype, (size,))
+        base_values = torch.empty(size, dtype=key_dtype, device="cuda")
+        base_indices = torch.empty(size, dtype=torch.int16, device="cuda")
+        stores = set()
+        for ox, ov, oi in itertools.product((0, 1, 2, 4), repeat=3):
+            x = base_x[ox : ox + rows * nsort].view(rows, nsort)
+            values = base_values[ov : ov + rows * nsort].view(rows, nsort)
+            indices = base_indices[oi : oi + rows * nsort].view(rows, nsort)
+            operands = [(t.data_ptr(), t.element_size()) for t in (x, values, indices)]
+            stores.add(register_store(nsort, operands))
+            for descending in (False, True):
+                self._check(x, torch.int16, descending, values, indices)
+        self.assertTrue({1, 2, 4} <= stores, stores)
 
     def test_empty(self):
         for shape in ((0, 64), (5, 0)):
             x = torch.empty(shape, device="cuda")
-            self._check(x, torch.int16, False, True)
+            self._check(x, torch.int16, False)
 
 
 instantiate_parametrized_tests(TestCuTeDSLRegisterSort)

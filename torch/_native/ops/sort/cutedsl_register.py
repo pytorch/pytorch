@@ -38,27 +38,21 @@ from .cutedsl_common import (
     raw_view,
 )
 from .cutedsl_inplace import _cmp_ordinal
+from .policy import (
+    REGISTER_ROWS_PER_CTA,
+    register_rung,
+    register_store,
+    vector_alignment,
+    WARP_MERGE_MAX_NSORT,
+)
 
 
-MAX_NSORT = 2048
 # Rows of at most this length replace the comparison leaves.
-_CMP_MAX_NSORT = 128
-# Rows (warps) per CTA by arch. On sm_120 two rows are best or within noise
-# of best for every rung; one row loses up to 1.5x at rungs 32 and 64, and 16
-# rows spill 64-bit keys at rung 2048.
-_ROWS_PER_CTA = {120: 2}
 
 
-def rung(nsort: int) -> int:
-    """Padded row length of the kernel that sorts rows of ``nsort``."""
-    return max(32, 1 << (nsort - 1).bit_length())
-
-
-def _align(store: int, itemsize: int) -> int:
-    """Byte alignment required by vectors of ``store`` elements."""
-    return min(16, store * itemsize)
-
-
+# Inline PTX: cute.arch has no min/max.u16x2 (sm_90+, as the router requires),
+# and cute.arch.prmt marks its asm side-effecting and takes the selector in a
+# register.
 @dsl_user_op
 def _ptx(asm: str, *operands, loc=None, ip=None) -> Int32:
     constraint = ",".join(["=r"] + ["r"] * len(operands))
@@ -78,6 +72,10 @@ def _prmt(a, b, selector: int):
     return _ptx(f"prmt.b32 $0, $1, $2, {selector};", a, b)
 
 
+def _at(regs: cute.Tensor | None, i: int):
+    return None if regs is None else regs[i]
+
+
 class RegisterSort:
     def __init__(
         self,
@@ -95,7 +93,7 @@ class RegisterSort:
         self.descending = descending
         self.vec = rung // 32
         self.idx_bits = (rung - 1).bit_length()
-        self.cmp = rung <= _CMP_MAX_NSORT
+        self.cmp = rung <= WARP_MERGE_MAX_NSORT
         self.rows = rows
         self.store = store
 
@@ -105,7 +103,8 @@ class RegisterSort:
     ):
         rows = const_expr(self.rows)
         self.kernel(mX, mValues, mIndices).launch(
-            grid=[(mX.shape[0] + rows - 1) // rows, 1, 1],
+            # Overflow-free round-up: rows reach policy.MAX_ROWS.
+            grid=[(mX.shape[0] - 1) // rows + 1, 1, 1],
             block=[32 * rows, 1, 1],
             stream=stream,
         )
@@ -119,16 +118,18 @@ class RegisterSort:
         return radix_ordinal(bits, self.kind, self.key_bits, self.descending)
 
     @cute.jit
-    def less(self, ka, ia: Int32, kb, ib: Int32):
-        if const_expr(self.key_bits == 64):
-            return ka < kb or (ka == kb and ia < ib)
-        return ka < kb
+    def less(self, ka, ia, kb, ib):
+        """Word order; 64-bit keys break ties by their separate index."""
+        if const_expr(ia is None):
+            return ka < kb
+        return ka < kb or (ka == kb and ia < ib)
 
     @cute.jit
-    def network(self, keys: cute.Tensor, index: cute.Tensor, lane: Int32):
+    def network(self, keys: cute.Tensor, index: cute.Tensor | None, lane: Int32):
         """Ascending bitonic sort without direction flags: the first step of
         merge ``size`` pairs e with e ^ (size - 1), later steps e with
-        e ^ stride; the lower element of each pair keeps the minimum."""
+        e ^ stride; the lower element of each pair keeps the minimum. ``index``
+        holds the tie-breaking indices of 64-bit keys and is None otherwise."""
         VEC = const_expr(self.vec)
         LOG_VEC = const_expr(VEC.bit_length() - 1)
         wide = const_expr(self.key_bits == 64)
@@ -141,7 +142,9 @@ class RegisterSort:
                     for i in cutlass.range_constexpr(VEC):
                         p = i ^ mask
                         if const_expr(p > i):
-                            if self.less(keys[p], index[p], keys[i], index[i]):
+                            if self.less(
+                                keys[p], _at(index, p), keys[i], _at(index, i)
+                            ):
                                 keys[i], keys[p] = keys[p], keys[i]
                                 if const_expr(wide):
                                     index[i], index[p] = index[p], index[i]
@@ -154,7 +157,7 @@ class RegisterSort:
                         if const_expr(p >= i):
                             ka = cute.arch.shuffle_sync_bfly(keys[p], offset=lane_mask)
                             kb = cute.arch.shuffle_sync_bfly(keys[i], offset=lane_mask)
-                            ia, ib = index[i], index[p]
+                            ia = ib = None
                             if const_expr(wide):
                                 ia = cute.arch.shuffle_sync_bfly(
                                     index[p], offset=lane_mask
@@ -162,12 +165,12 @@ class RegisterSort:
                                 ib = cute.arch.shuffle_sync_bfly(
                                     index[i], offset=lane_mask
                                 )
-                            if self.less(ka, ia, keys[i], index[i]) == lower:
+                            if self.less(ka, ia, keys[i], _at(index, i)) == lower:
                                 keys[i] = ka
                                 if const_expr(wide):
                                     index[i] = ia
                             if const_expr(p > i):
-                                if self.less(kb, ib, keys[p], index[p]) == lower:
+                                if self.less(kb, ib, keys[p], _at(index, p)) == lower:
                                     keys[p] = kb
                                     if const_expr(wide):
                                         index[p] = ib
@@ -239,11 +242,13 @@ class RegisterSort:
         n = mX.shape[1]
         row_valid = row < mX.shape[0]
 
-        # Rows whose length is a multiple of STORE (see ``register_sort``)
-        # move VEC * l .. VEC * l + VEC - 1 through lane l in vectors of STORE
-        # elements, where the network leaves positions. Other rows load
-        # element 32 * i + l into register i (coalesced). Padding words get the
-        # maximal ordinal and their index, so they sort last.
+        # STORE (``policy.register_store``) divides the row and all three
+        # pointers are aligned to it. With STORE > 1 lane l moves VEC * l ..
+        # VEC * l + VEC - 1 in vectors of STORE elements, where the network
+        # leaves positions; with STORE == 1 (rung 32, odd rows or misaligned
+        # pointers) it loads element 32 * i + l into register i (coalesced).
+        # Padding words get the maximal ordinal and their index, so they sort
+        # last.
         STORE = const_expr(self.store)
         keys = cute.make_rmem_tensor(VEC, word_t)
         index = cute.make_rmem_tensor(VEC, Int32)
@@ -278,7 +283,7 @@ class RegisterSort:
         if const_expr(self.key_bits + IDX_BITS <= 16 and VEC >= 2):
             self.packed_network(keys, lane)
         else:
-            self.network(keys, index, lane)
+            self.network(keys, index if const_expr(wide) else None, lane)
 
         # Scalar stores: swap the low M register bits with the low M lane
         # bits, so that each store writes runs of 2^M consecutive positions.
@@ -371,8 +376,8 @@ def make_spec(
         "key": index_name(key_dtype),
         "index": index_name(index_dtype),
         "descending": descending,
-        "rung": rung(nsort),
-        "rows": _ROWS_PER_CTA.get(arch, 2),
+        "rung": register_rung(nsort),
+        "rows": REGISTER_ROWS_PER_CTA,
         "store": store,
         "arch": arch,
     }
@@ -388,7 +393,10 @@ def compile_args(spec: dict) -> tuple[RegisterSort, list]:
     )
     fake = [
         fake_compact(
-            t, (sym(), sym()), stride_order=(1, 0), align=_align(store, t.width // 8)
+            t,
+            (sym(), sym()),
+            stride_order=(1, 0),
+            align=vector_alignment(store, t.width // 8),
         )
         for t in (raw, raw, index)
     ] + [
@@ -408,27 +416,22 @@ def register_sort(
     values: torch.Tensor,
     indices: torch.Tensor,
     descending: bool,
-    stable: bool,
     arch: int,
 ) -> None:
-    """Sort each row of 2D row-major ``x`` into ``values`` and ``indices``.
+    """Stable sort of each row of 2D row-major ``x`` into ``values`` and
+    ``indices``; also a valid unstable sort.
 
-    Always yields the stable order, so ``stable`` does not select a kernel.
     The caller checks eligibility: key and index dtypes supported, row length
-    at most ``MAX_NSORT`` and addressable by the index dtype, contiguous
-    outputs.
+    at most ``policy.REGISTER_MAX_NSORT`` and addressable by the index dtype,
+    contiguous outputs.
     """
     if x.numel() == 0:
         return
     nsort = x.shape[1]
-    store = rung(nsort) // 32
-    while store > 1 and (
-        nsort % store
-        or const_data_ptr(x) % _align(store, x.element_size())
-        or values.data_ptr() % _align(store, values.element_size())
-        or indices.data_ptr() % _align(store, indices.element_size())
-    ):
-        store //= 2
+    operands = [(const_data_ptr(x), x.element_size())] + [
+        (t.data_ptr(), t.element_size()) for t in (values, indices)
+    ]
+    store = register_store(nsort, operands)
     spec = make_spec(arch, x.dtype, indices.dtype, descending, nsort, store)
     _compile(tuple(sorted(spec.items())))(
         read_only(raw_view(x)), raw_view(values), indices

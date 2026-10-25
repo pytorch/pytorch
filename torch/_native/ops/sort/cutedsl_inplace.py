@@ -42,6 +42,7 @@ from .cutedsl_common import (
     RAW_CUTE,
     raw_view,
 )
+from .policy import BITONIC_MAX_NSORT, WARP_MERGE_MAX_NSORT
 
 
 # Bits of +inf; larger magnitudes are NaN.
@@ -63,10 +64,10 @@ _REGISTERS_PER_SM = 65536
 
 def sort_size(nsort: int, stable: bool) -> int:
     """Stock leaf for a row of ``nsort <= 4096``, as its padded sort size."""
-    if not stable and nsort <= 32:
-        return 32
-    if nsort <= 128:
-        return 128
+    if not stable and nsort <= BITONIC_MAX_NSORT:
+        return BITONIC_MAX_NSORT
+    if nsort <= WARP_MERGE_MAX_NSORT:
+        return WARP_MERGE_MAX_NSORT
     return max(1024, 1 << (nsort - 1).bit_length())
 
 

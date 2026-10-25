@@ -2,8 +2,11 @@
 #
 # Routing tests for the CuTeDSL override of aten::sort.values_stable: it fires
 # for every out= call with narrow indices, on every stock leaf, never for
-# functional sort or int64 out=, and the result always matches the stock sort.
+# functional sort or int64 out=, picks the kernel _launcher documents, and the
+# result always matches the stock sort.
 
+import collections
+import contextlib
 import unittest
 from unittest import mock
 
@@ -25,19 +28,43 @@ from torch.testing._internal.common_utils import (
 class TestCuTeDSLSortOverride(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def _launches(self, fn) -> int:
-        from torch._native.ops.sort import cutedsl_global, cutedsl_inplace
+    def setUp(self):
+        super().setUp()
+        # These test the JIT route; in a build with embedded kernels, covered
+        # calls would never reach it (test_sort_native_aot covers those).
+        aot_enabled = torch._native.aot_enabled()
+        torch._native.set_aot_enabled(False)
+        self.addCleanup(torch._native.set_aot_enabled, aot_enabled)
 
-        with (
-            mock.patch.object(
-                cutedsl_inplace, "inplace_sort", wraps=cutedsl_inplace.inplace_sort
-            ) as inplace,
-            mock.patch.object(
-                cutedsl_global, "global_sort", wraps=cutedsl_global.global_sort
-            ) as global_,
-        ):
+    def _kernels(self, fn) -> collections.Counter:
+        """Calls of each top-level kernel entry point while running fn."""
+        from torch._native.ops.sort import (
+            cutedsl_global,
+            cutedsl_inplace,
+            cutedsl_partition,
+            cutedsl_register,
+        )
+
+        entries = (
+            (cutedsl_inplace, "inplace_sort"),
+            (cutedsl_global, "global_sort"),
+            (cutedsl_register, "register_sort"),
+            (cutedsl_partition, "partition_sort"),
+        )
+        with contextlib.ExitStack() as stack:
+            mocks = {
+                name: stack.enter_context(
+                    mock.patch.object(module, name, wraps=getattr(module, name))
+                )
+                for module, name in entries
+            }
             fn()
-        return inplace.call_count + global_.call_count
+        return collections.Counter(
+            {name: m.call_count for name, m in mocks.items() if m.call_count}
+        )
+
+    def _launches(self, fn) -> int:
+        return sum(self._kernels(fn).values())
 
     @parametrize("dim", (0, 1, -1))
     @parametrize("descending", (False, True))
@@ -57,23 +84,107 @@ class TestCuTeDSLSortOverride(TestCase):
         self.assertEqual(values, ref_values)
         self.assertEqual(indices.long(), ref_indices)
 
-    @parametrize("nsort", (16, 100, 3000))
-    @parametrize("stable", (False, True))
-    def test_inplace_leaves_fire(self, nsort, stable):
+    # Expected entry point per (row length, stable); written out rather than
+    # derived, so a wrong rule in _launcher cannot also be the expectation.
+    _SHORT_ROWS = {
+        (16, False): "inplace_sort",  # bitonic leaf beats register here
+        (16, True): "register_sort",
+        (32, False): "inplace_sort",
+        (32, True): "register_sort",
+        (33, False): "register_sort",
+        (33, True): "register_sort",
+        (100, False): "register_sort",
+        (2048, False): "register_sort",
+        (2048, True): "register_sort",
+        (2049, False): "inplace_sort",
+        (2049, True): "inplace_sort",
+        (3000, True): "inplace_sort",
+    }
+
+    @parametrize(
+        "case",
+        list(_SHORT_ROWS),
+        name_fn=lambda c: f"n{c[0]}_{'stable' if c[1] else 'unstable'}",
+    )
+    @parametrize("descending", (False, True))
+    def test_short_rows_pick_kernel(self, case, descending):
+        nsort, stable = case
+        torch.manual_seed(nsort)
         x = torch.randn(1000, nsort, device="cuda")
         indices = torch.empty(0, dtype=torch.int16, device="cuda")
         out = (torch.empty_like(x), indices)
-        launches = self._launches(lambda: torch.sort(x, stable=stable, out=out))
-        self.assertEqual(launches, 1)
-        ref_values, ref_indices = torch.sort(x, stable=stable)
+        kernels = self._kernels(
+            lambda: torch.sort(x, stable=stable, descending=descending, out=out)
+        )
+        self.assertEqual(kernels, {self._SHORT_ROWS[case]: 1})
+        ref_values, ref_indices = torch.sort(x, stable=True, descending=descending)
         self.assertEqual(out[0], ref_values)
         self.assertEqual(indices.long(), ref_indices)
+
+    @parametrize("dim", (0, -1))
+    def test_register_paths(self, dim):
+        # argsort and a non-last dim both reach the register kernel.
+        torch.manual_seed(0)
+        x = torch.randn(1000, 100, device="cuda")
+        x = x.T.contiguous() if dim == 0 else x
+        indices = torch.empty(0, dtype=torch.uint8, device="cuda")
+        kernels = self._kernels(
+            lambda: torch.argsort(x, dim=dim, stable=True, out=indices)
+        )
+        self.assertEqual(kernels, {"register_sort": 1})
+        self.assertEqual(indices.long(), torch.argsort(x, dim=dim, stable=True))
+
+    @parametrize(
+        "shape, dim, index_dtype",
+        [
+            ((1000, 16), -1, torch.uint8),
+            ((300, 100), -1, torch.uint8),
+            ((8000, 5), 0, torch.uint16),
+            ((64, 70000), -1, torch.int32),
+        ],
+        name_fn=lambda shape,
+        dim,
+        index_dtype: f"{shape[0]}x{shape[1]}_dim{dim}_{str(index_dtype)[6:]}",
+    )
+    @parametrize("stable", (False, True))
+    @parametrize("descending", (False, True))
+    def test_bool_routes_to_partition(
+        self, shape, dim, index_dtype, stable, descending
+    ):
+        torch.manual_seed(shape[1])
+        x = torch.randint(0, 2, shape, device="cuda").bool()
+        values = torch.empty(0, dtype=torch.bool, device="cuda")
+        indices = torch.empty(0, dtype=index_dtype, device="cuda")
+        call = dict(
+            dim=dim, stable=stable, descending=descending, out=(values, indices)
+        )
+        kernels = self._kernels(lambda: torch.sort(x, **call))
+        self.assertEqual(kernels, {"partition_sort": 1})
+        ref_values, ref_indices = torch.sort(
+            x, dim=dim, stable=True, descending=descending
+        )
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices.long(), ref_indices)
+
+    def test_long_bool_rows_go_global(self):
+        # Partition extents are Int32; longer bool rows take the mirror kernels.
+        from torch._native.ops.sort import cutedsl_global, cutedsl_impl
+        from torch._native.ops.sort.policy import PARTITION_MAX_NSORT
+
+        for nsort, expected in (
+            (PARTITION_MAX_NSORT, "partition_sort"),
+            (PARTITION_MAX_NSORT + 1, "global_sort"),
+        ):
+            x = torch.zeros(1, 1, dtype=torch.bool, device="cuda").expand(1, nsort)
+            launch = cutedsl_impl._launcher(x, nsort, stable=True, descending=False)
+            self.assertEqual(launch.func.__name__, expected)
+        self.assertIs(launch.func, cutedsl_global.global_sort)
 
     def test_argsort_out_fires(self):
         x = torch.randint(0, 2, (256, 8000), device="cuda").bool()
         indices = torch.empty(0, dtype=torch.uint16, device="cuda")
-        launches = self._launches(lambda: torch.argsort(x, stable=True, out=indices))
-        self.assertEqual(launches, 1)
+        kernels = self._kernels(lambda: torch.argsort(x, stable=True, out=indices))
+        self.assertEqual(kernels, {"partition_sort": 1})
         self.assertEqual(indices.long(), torch.argsort(x, stable=True))
 
     def test_stock_paths_do_not_fire(self):
@@ -202,7 +313,8 @@ class TestCuTeDSLSortOverride(TestCase):
         x = torch.randn(*shape, device="cuda")
         indices = torch.empty(0, dtype=torch.int32, device="cuda")
         out = (torch.empty_like(x), indices)
-        self.assertEqual(self._launches(lambda: torch.sort(x, stable=True, out=out)), 1)
+        kernels = self._kernels(lambda: torch.sort(x, stable=True, out=out))
+        self.assertEqual(kernels, {"global_sort": 1})
         self.assertEqual(indices.long(), torch.sort(x, stable=True).indices)
 
 
