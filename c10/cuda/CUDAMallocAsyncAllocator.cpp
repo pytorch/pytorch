@@ -1049,12 +1049,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
            "udaMallocAsync";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(cudaMemcpyAsync(
-        dest,
-        src,
-        count,
-        cudaMemcpyDeviceToDevice,
-        cuda::getCurrentCUDAStream()));
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
   }
 };
 
