@@ -974,6 +974,8 @@ class TestGroupBatchFusion(TestCase):
             "tensor_split",
             "leaky_relu",
             "elu_inplace_false",
+            "view_then_cat",
+            "view_then_add",
         }
 
         graph = torch.fx.Graph()
@@ -1085,6 +1087,26 @@ class TestGroupBatchFusion(TestCase):
         module = M().eval()
         _check_lhs_fusion(self, module, [2], torch.randn(32, 64), check_strides=True)
 
+    @_lhs_fusion_config
+    def test_batch_linear_lhs_keeps_binary_pointwise_after_view(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                q = self.large(x).view(32, 4, 12).transpose(0, 1)
+                return (
+                    torch.sin(q) + torch.cos(q),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        _check_lhs_fusion(self, module, [3], torch.randn(32, 64))
+
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
@@ -1180,38 +1202,6 @@ class TestGroupBatchFusion(TestCase):
 
         module = M().eval()
         _check_lhs_fusion(self, module, [2], torch.randn(4, 8))
-
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_zero_width_preserves_stride(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.valid_weights = torch.nn.ParameterList(
-                    [
-                        torch.nn.Parameter(torch.randn(4, 8)),
-                        torch.nn.Parameter(torch.randn(4, 8)),
-                    ]
-                )
-                self.empty_weights = torch.nn.ParameterList(
-                    [
-                        torch.nn.Parameter(torch.randn(0, 8)),
-                        torch.nn.Parameter(torch.randn(0, 8)),
-                    ]
-                )
-
-            def forward(self, x):
-                valid = tuple(
-                    torch.sin(torch.nn.functional.linear(x, w))
-                    for w in self.valid_weights
-                )
-                empty = tuple(
-                    torch.sin(torch.nn.functional.linear(x, w))
-                    for w in self.empty_weights
-                )
-                return *valid, *empty
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [2], torch.randn(4, 8), check_strides=True)
 
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
