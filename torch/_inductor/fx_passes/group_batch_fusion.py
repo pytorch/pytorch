@@ -767,6 +767,18 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
 )
 
 
+_INPLACE_ARG_INDEX = {
+    torch.nn.functional.elu: 2,
+    torch.nn.functional.leaky_relu: 2,
+    torch.nn.functional.hardtanh: 3,
+    torch.nn.functional.relu6: 1,
+    torch.nn.functional.selu: 1,
+    torch.nn.functional.celu: 1,
+    torch.nn.functional.hardswish: 1,
+    torch.nn.functional.hardsigmoid: 1,
+}
+
+
 def _node_value(value):
     if isinstance(value, torch.fx.Node):
         return value.meta.get("example_value", value.meta.get("val"))
@@ -803,6 +815,13 @@ def _layout_user_overloads(user: torch.fx.Node):
             if target is torch.nn.functional.sigmoid
             else torch.ops.aten.tanh
         )
+    elif target in _INPLACE_ARG_INDEX:
+        index = _INPLACE_ARG_INDEX[target]
+        if get_arg_value(user, index, "inplace") not in (None, False):
+            return []
+        args = args[:index] + args[index + 1 :]
+        kwargs.pop("inplace", None)
+        target = _OPERATOR_TO_ATEN[target]
     elif target in _OPERATOR_TO_ATEN:
         target = _OPERATOR_TO_ATEN[target]
     elif isinstance(target, str):
@@ -996,24 +1015,32 @@ def _tensor_values(value):
     return []
 
 
+def _may_alias_without_meta(user: torch.fx.Node) -> bool:
+    if user.op == "call_method":
+        return user.target in _CONVERSION_METHODS or user.target == "contiguous"
+    return user.target is torch.nn.functional.dropout
+
+
 def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
     # Node-level: if any result aliases any input, every user is traversed.
     # Multi-result ops may over-reject sibling results, but never miss a
     # mutation.
     if user.op not in ("call_method", "call_function"):
         return False
-    results = _tensor_values(_node_value(user))
+    value = _node_value(user)
+    if value is None:
+        # Missing metadata: assume an alias for known identity-like ops so an
+        # unchecked mutation cannot slip through.
+        return assume_alias and _may_alias_without_meta(user)
+    results = _tensor_values(value)
     if not results:
-        # Missing metadata: the mutation scan assumes an alias, while the
-        # layout walk treats it as a terminal safe op.
-        return assume_alias
+        # Known non-tensor results cannot alias a tensor input.
+        return False
     sources = []
     for arg in user.args:
-        if isinstance(arg, torch.fx.Node):
-            sources.extend(_tensor_values(_node_value(arg)))
+        sources.extend(_tensor_values(torch.fx.node.map_arg(arg, _node_value)))
     for arg in user.kwargs.values():
-        if isinstance(arg, torch.fx.Node):
-            sources.extend(_tensor_values(_node_value(arg)))
+        sources.extend(_tensor_values(torch.fx.node.map_arg(arg, _node_value)))
     if not sources:
         return assume_alias
     return any(_is_alias_of(source, result) for source in sources for result in results)
@@ -1148,9 +1175,10 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             pending.extend(user.users)
         elif _direct_layout_user_is_sensitive(user, ops):
             return True
-        elif _is_aliasing_user(user):
+        elif _is_aliasing_user(user, assume_alias=True):
             # Safe ops that return the input itself (eval or p=0 dropout) must
-            # still have their users checked.
+            # still have their users checked. Missing metadata is treated as an
+            # alias so an unchecked mutation cannot slip through.
             pending.extend(user.users)
     return False
 
