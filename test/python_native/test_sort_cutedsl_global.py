@@ -1,0 +1,159 @@
+# Owner(s): ["module: dsl-native-ops"]
+#
+# Correctness tests for the CuTeDSL device-wide sort leaves (per-row onesweep,
+# full sort, segmented radix sort) that write narrow out= indices. Each must
+# match the stock CUDA sort bit-exactly on values and indices.
+
+import unittest
+from unittest import mock
+
+import torch
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfNoCuteDSL,
+    TestCase,
+)
+
+
+_KEY_DTYPES = (
+    torch.bool,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.float16,
+    torch.bfloat16,
+    torch.int32,
+    torch.float32,
+    torch.int64,
+    torch.float64,
+)
+_NEG_NAN = {2: 0xFE00, 4: 0xFFC00000, 8: 0xFFF8000000000000}
+_INT_VIEW = {2: torch.int16, 4: torch.int32, 8: torch.int64}
+
+
+def _arch() -> int:
+    major, minor = torch.cuda.get_device_capability()
+    return 10 * major + minor
+
+
+def _make_keys(dtype: torch.dtype, shape: tuple[int, int]) -> torch.Tensor:
+    if dtype == torch.bool:
+        return torch.randint(0, 2, shape, device="cuda").bool()
+    if dtype.is_floating_point:
+        # Few distinct values give many ties; specials exercise the ordinal map.
+        x = torch.randint(-8, 8, shape, device="cuda").to(dtype) / 4
+        specials = torch.tensor(
+            [0.0, -0.0, float("inf"), -float("inf"), float("nan")], dtype=dtype
+        )
+        x[:, :5] = specials.to("cuda")
+        bits = _NEG_NAN[dtype.itemsize]
+        bits = (
+            bits - (1 << (8 * dtype.itemsize))
+            if bits >> (8 * dtype.itemsize - 1)
+            else bits
+        )
+        neg_nan = torch.tensor([bits], dtype=_INT_VIEW[dtype.itemsize])
+        x[:, 5] = neg_nan.view(dtype).to("cuda")
+        return x
+    info = torch.iinfo(dtype)
+    x = torch.randint(
+        max(info.min, -100), min(info.max, 100) + 1, shape, device="cuda", dtype=dtype
+    )
+    extremes = torch.tensor(
+        [info.min, info.min + 1, info.max - 1, info.max, 0], dtype=dtype
+    )
+    x[:, :5] = extremes.to("cuda")
+    return x
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "SM90+ required")
+@skipIfNoCuteDSL
+class TestCuTeDSLGlobalSort(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def _check(
+        self, x: torch.Tensor, index_dtype: torch.dtype, descending: bool
+    ) -> None:
+        from torch._native.ops.sort.cutedsl_global import global_sort
+
+        values = torch.empty_like(x)
+        indices = torch.empty(x.shape, dtype=index_dtype, device=x.device)
+        global_sort(x, values, indices, descending, _arch())
+        ref_values, ref_indices = torch.sort(
+            x, dim=-1, stable=True, descending=descending
+        )
+        self.assertEqual(values.view(torch.uint8), ref_values.view(torch.uint8))
+        self.assertEqual(indices.long(), ref_indices)
+
+    # One shape per leaf: one row, fewer than 128 rows, segmented rows.
+    @parametrize("key_dtype", _KEY_DTYPES)
+    @parametrize("descending", (False, True))
+    @parametrize("rows", (1, 3, 130))
+    def test_key_dtypes(self, key_dtype, descending, rows):
+        self._check(_make_keys(key_dtype, (rows, 6000)), torch.int32, descending)
+
+    @parametrize("key_dtype", (torch.bool, torch.float16, torch.float32, torch.int64))
+    @parametrize("index_dtype", (torch.uint16, torch.int16, torch.uint32))
+    @parametrize("rows", (1, 3, 128))
+    def test_index_dtypes(self, key_dtype, index_dtype, rows):
+        self._check(_make_keys(key_dtype, (rows, 4097)), index_dtype, False)
+
+    @parametrize("rows", (1, 3, 127, 128, 300))
+    @parametrize("nsort", (4097, 6000, 70000, 200000))
+    def test_shapes(self, rows, nsort):
+        for key_dtype in (torch.float16, torch.int32):
+            self._check(_make_keys(key_dtype, (rows, nsort)), torch.int32, False)
+
+    @parametrize("rows", (1, 2))
+    def test_large_segments(self, rows):
+        for key_dtype in (torch.bool, torch.float32):
+            x = _make_keys(key_dtype, (rows, 1_000_001))
+            self._check(x, torch.int32, True)
+
+    def test_portions(self):
+        # cub carries each portion's bins into the next; shrink the portion
+        # to a few tiles to cover that path.
+        from torch._native.cutedsl.launch import compile_kernel
+        from torch._native.ops.sort import cutedsl_global as g
+
+        x = _make_keys(torch.float32, (1, 100_000))
+        spec = g.onesweep_spec(_arch(), "float", 32, "int32", False)
+        tile = g._sorter(spec).tile
+        with mock.patch.object(g, "_PORTION_LIMIT", 3 * tile + 1):
+            sorter, fake = g.compile_args(spec)
+            self.assertGreater(-(-x.numel() // sorter.portion), 1)
+            run = compile_kernel(sorter, *fake)
+        values = torch.empty_like(x)
+        indices = torch.empty(x.shape, dtype=torch.int32, device="cuda")
+        state = torch.empty(
+            sorter.state_words(x.numel()), dtype=torch.int32, device="cuda"
+        )
+        keys_tmp = torch.empty(x.numel(), dtype=torch.uint32, device="cuda")
+        idx_tmp = torch.empty(x.numel(), dtype=torch.int32, device="cuda")
+        blocks = g._hist_blocks(x.device, _arch())
+        run(
+            x.view(torch.uint32)[0],
+            keys_tmp,
+            values.view(torch.uint32)[0],
+            idx_tmp,
+            indices[0],
+            state,
+            blocks,
+            x.shape[1],
+            0,
+        )
+        ref_values, ref_indices = torch.sort(x, dim=-1, stable=True)
+        self.assertEqual(values.view(torch.uint8), ref_values.view(torch.uint8))
+        self.assertEqual(indices.long(), ref_indices)
+
+
+instantiate_parametrized_tests(TestCuTeDSLGlobalSort)
+
+
+if __name__ == "__main__":
+    run_tests()
