@@ -29,7 +29,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
-#include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh_native.h>
 #include <ATen/ops/sqrt_native.h>
@@ -90,21 +89,6 @@ static void unary_op(const Tensor& self,
 }
 
 } // namespace mps
-
-TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "signbit_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    MPSGraphTensor* output;
-    // signbit is not implemented for int64 type.
-    // workaround for `Function signbitOp_i64 was not found in the library`
-    if ([inputTensor dataType] == MPSDataTypeInt64) {
-      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-      output = [mpsGraph lessThanWithPrimaryTensor:inputTensor secondaryTensor:zeroTensor name:nil];
-    } else {
-      output = [mpsGraph signbitWithTensor:inputTensor name:nil];
-    }
-    return mps::castMPSTensor(mpsGraph, output, ScalarType::Bool);
-  });
-}
 
 static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string& op_name) {
   std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
