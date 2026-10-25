@@ -11968,6 +11968,34 @@ instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', 
 instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)
 
+class TestPythonKernelDefaultTrim(TestCase):
+    def test_python_kernel_default_trim_keeps_signed_zero(self):
+        lib = torch.library.Library("default_trim_repro", "FRAGMENT")
+        lib.define("f(Tensor x, float v=0.) -> Tensor")
+        received = []
+
+        @torch.library.impl(lib, "f", "CPU")
+        def _f(x, v=0):
+            received.append(v)
+            return x.clone()
+
+        x = torch.zeros(3)
+
+        torch.ops.default_trim_repro.f(x, -0.0)
+        self.assertIsInstance(received[-1], float)
+        self.assertEqual(math.copysign(1.0, received[-1]), -1.0)
+
+        torch.ops.default_trim_repro.f(x, v=-0.0)
+        self.assertIsInstance(received[-1], float)
+        self.assertEqual(math.copysign(1.0, received[-1]), -1.0)
+
+        torch.ops.default_trim_repro.f(x, 0.0)
+        self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
+
+        torch.ops.default_trim_repro.f(x)
+        self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
+
+
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
     run_tests()
