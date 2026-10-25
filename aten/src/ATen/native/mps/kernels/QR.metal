@@ -1,4 +1,9 @@
-#pragma once
+#include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/metal/reduction_utils.h>
+#include <c10/metal/utils.h>
+#include <metal_stdlib>
+
+using namespace metal;
 
 template <typename T>
 static T bool_to_float(bool b) {

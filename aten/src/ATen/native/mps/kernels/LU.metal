@@ -1,8 +1,14 @@
-#pragma once
+#include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/metal/utils.h>
+#include <metal_array>
+#include <metal_simdgroup>
+#include <metal_stdlib>
+
+using namespace metal;
 
 // LU factorization with partial pivoting (mirrors LAPACK sgetrf), in place on a
 // row-major fp32 (B, M, N) buffer. The host (lu_factor_panel_encode in
-// LinearAlgebra.mm) drives a blocked right-looking schedule built from:
+// LU.mm) drives a blocked right-looking schedule built from:
 //   factorPanelLU / luStream* -> sgetf2 (unblocked panel, isamax pivoting)
 //   laswpGatherLU             -> slaswp (apply a block's row interchanges)
 //   trsmPanelLU               -> strsm  (unit-lower triangular solve)

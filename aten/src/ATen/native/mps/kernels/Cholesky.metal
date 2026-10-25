@@ -1,4 +1,10 @@
-#pragma once
+#include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/metal/utils.h>
+#include <metal_array>
+#include <metal_simdgroup>
+#include <metal_stdlib>
+
+using namespace metal;
 
 template <bool col_major, typename T>
 inline device T& get_ref(device T* A, uint row, uint col, uint N) {

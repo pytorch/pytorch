@@ -1,6 +1,9 @@
-#pragma once
-
+#include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <ATen/native/mps/kernels/SVD.h>
+#include <c10/metal/reduction_utils.h>
+#include <metal_stdlib>
+
+using namespace metal;
 
 template <typename T>
 kernel void eigh_jacobi(

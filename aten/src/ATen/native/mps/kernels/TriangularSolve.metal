@@ -1,4 +1,11 @@
-#pragma once
+#include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/metal/reduction_utils.h>
+#include <c10/metal/utils.h>
+#include <metal_array>
+#include <metal_simdgroup>
+#include <metal_stdlib>
+
+using namespace metal;
 
 // op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
 template <typename T>
