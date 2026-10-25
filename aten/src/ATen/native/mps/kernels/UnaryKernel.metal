@@ -112,7 +112,7 @@ struct logit_functor {
       z = z < lo ? lo : (z > hi ? hi : z);
     }
     if IF_CONSTEXPR (::metal::is_same_v<E, float>) {
-      return ::precise::log(z / (1.0f - z));
+      return static_cast<E>(::precise::log(z / (1.0f - z)));
     } else {
       // fast:: error is far below half/bfloat rounding
       return static_cast<E>(
