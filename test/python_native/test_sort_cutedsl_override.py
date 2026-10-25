@@ -197,8 +197,9 @@ class TestCuTeDSLSortOverride(TestCase):
 
     @parametrize("shape", ((50, 8000), (1, 70000), (300, 5000)))
     def test_wide_leaves_fire(self, shape):
-        # Full-sort (< 128 rows), per-row (one row) and segmented leaves.
-        x = torch.randn(*shape, device="cuda").double()
+        # Full-sort (< 128 rows), per-row (one row) and segmented leaves; float32
+        # with int32 indices reuses the kernels test_sort_cutedsl_global compiles.
+        x = torch.randn(*shape, device="cuda")
         indices = torch.empty(0, dtype=torch.int32, device="cuda")
         out = (torch.empty_like(x), indices)
         self.assertEqual(self._launches(lambda: torch.sort(x, stable=True, out=out)), 1)

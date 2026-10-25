@@ -5,10 +5,12 @@ The override serves only narrow out= indices, which those tests never pass. A
 TorchFunctionMode rewrites every functional CUDA sort/argsort (including the ones
 topk/unique tests use as references) into the out-variant with the narrowest index
 dtype that holds the row, and widens the indices back to int64 for the test's own
-assertions. Calls the override's cond accepts must launch a DSL kernel; the rest
-(0-dim, empty, unsupported key dtypes) check the narrow out= fallback.
+assertions. Calls the override's cond accepts must launch the kernel its router
+picks; the rest (0-dim, empty, unsupported key dtypes) check the narrow out=
+fallback.
 """
 
+import functools
 import os
 import sys
 from unittest import mock
@@ -37,7 +39,7 @@ _ARGSORTS = {torch.argsort, torch.Tensor.argsort}
 class _NarrowOutMode(TorchFunctionMode):
     def __init__(self):
         super().__init__()
-        self.launches = 0
+        self.launched = []
         self.rewritten = 0
         self.missed = []
 
@@ -64,16 +66,19 @@ class _NarrowOutMode(TorchFunctionMode):
         indices = torch.empty_like(x, dtype=index_dtype)
         stable = call.get("stable")
         descending = bool(call.get("descending", False))
-        expect_dsl = cutedsl_impl._out_cond(
+        expected = None
+        if cutedsl_impl._out_cond(
             x,
             stable=stable,
             dim=dim,
             descending=descending,
             values=values,
             indices=indices,
-        )
+        ):
+            launcher = cutedsl_impl._launcher(x, nsort, bool(stable), descending)
+            expected = launcher.func.__name__
         self.rewritten += 1
-        launches = self.launches
+        start = len(self.launched)
         if func in _ARGSORTS:
             # Only the stable= overload of argsort has an out variant.
             torch.argsort(x, **(call | {"stable": bool(stable)}), out=indices)
@@ -81,9 +86,12 @@ class _NarrowOutMode(TorchFunctionMode):
         else:
             torch.sort(x, **call, out=(values, indices))
             result = torch.return_types.sort((values, indices.long()))
-        if expect_dsl and self.launches == launches:
-            self.missed.append((tuple(x.shape), x.dtype, call))
+        if expected is not None and expected not in self.launched[start:]:
+            self.missed.append((tuple(x.shape), x.dtype, call, expected))
         return result
+
+
+_KERNELS = ((cutedsl_inplace, "inplace_sort"), (cutedsl_global, "global_sort"))
 
 
 def _narrow_out(cls):
@@ -93,8 +101,9 @@ def _narrow_out(cls):
             self.mode = _NarrowOutMode()
 
             def counting(fn):
+                @functools.wraps(fn)
                 def wrapper(*args, **kwargs):
-                    self.mode.launches += 1
+                    self.mode.launched.append(fn.__name__)
                     return fn(*args, **kwargs)
 
                 return wrapper
@@ -103,10 +112,7 @@ def _narrow_out(cls):
             aot_enabled = torch._C._get_native_aot_enabled()
             torch._native.set_aot_enabled(False)
             self.addCleanup(torch._native.set_aot_enabled, aot_enabled)
-            for module, name in (
-                (cutedsl_inplace, "inplace_sort"),
-                (cutedsl_global, "global_sort"),
-            ):
+            for module, name in _KERNELS:
                 patcher = mock.patch.object(
                     module, name, counting(getattr(module, name))
                 )
@@ -119,7 +125,7 @@ def _narrow_out(cls):
             self.mode.__exit__(None, None, None)
             super().tearDown()
             self.assertEqual(
-                self.mode.missed, [], "rewritten calls that launched no DSL kernel"
+                self.mode.missed, [], "rewritten calls that missed the routed kernel"
             )
 
     NarrowOut.__name__ = NarrowOut.__qualname__ = f"{cls.__name__}NarrowOut"

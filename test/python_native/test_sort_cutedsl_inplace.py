@@ -9,6 +9,8 @@
 
 import unittest
 
+import itertools
+
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -18,6 +20,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
+    slowTest,
+    subtest,
     TestCase,
 )
 
@@ -51,6 +55,19 @@ _NEG_NAN = {
     torch.float64: 0xFFF8000000000000,
 }
 _ROWS = 37
+
+
+# Each JIT compile costs seconds, so the rest of each cross is @slowTest. The
+# fast set is all CI runs: every key kind (unsigned, signed, float) on each side
+# of the 32-bit sign wrap of the padding key, in both directions.
+_FAST_KEYS = (torch.uint8, torch.int8, torch.bfloat16, torch.float32, torch.int64)
+
+
+def _slow_unless(fast, *axes):
+    """Every combination of ``axes``; those ``fast`` rejects are @slowTest."""
+    cases = [c[0] if len(axes) == 1 else c for c in itertools.product(*axes)]
+    fast_ = fast if len(axes) == 1 else lambda c: fast(*c)
+    return [c if fast_(c) else subtest(c, decorators=[slowTest]) for c in cases]
 
 
 def _arch() -> int:
@@ -105,7 +122,7 @@ class TestCuTeDSLInplaceSort(TestCase):
         # The bitonic leaf is unstable but deterministic: its network is mirrored.
         self.assertEqual(indices.long(), ref_indices)
 
-    @parametrize("key_dtype", _KEY_DTYPES)
+    @parametrize("key_dtype", _slow_unless(lambda k: k in _FAST_KEYS, _KEY_DTYPES))
     @parametrize("descending", (False, True))
     @parametrize("stable", (False, True))
     def test_leaf_boundaries(self, key_dtype, descending, stable):
@@ -113,8 +130,15 @@ class TestCuTeDSLInplaceSort(TestCase):
             x = _make_keys(key_dtype, (_ROWS, nsort))
             self._check(x, torch.int16, descending, stable)
 
-    @parametrize("index_dtype", _INDEX_DTYPES)
-    @parametrize("key_dtype", (torch.bool, torch.bfloat16, torch.int32, torch.float64))
+    # Every index dtype with int32 keys, every key with int16 indices.
+    @parametrize(
+        "index_dtype,key_dtype",
+        _slow_unless(
+            lambda i, k: k == torch.int32 or i == torch.int16,
+            _INDEX_DTYPES,
+            (torch.bool, torch.bfloat16, torch.int32, torch.float64),
+        ),
+    )
     def test_index_dtypes(self, index_dtype, key_dtype):
         limit = min(4096, torch.iinfo(index_dtype).max + 1)
         for nsort, stable in ((32, False), (min(128, limit), True), (limit, True)):

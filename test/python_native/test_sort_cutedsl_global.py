@@ -4,6 +4,7 @@
 # full sort, segmented radix sort) that write narrow out= indices. Each must
 # match the stock CUDA sort bit-exactly on values and indices.
 
+import itertools
 import unittest
 from unittest import mock
 
@@ -16,6 +17,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
+    slowTest,
+    subtest,
     TestCase,
 )
 
@@ -32,8 +35,26 @@ _KEY_DTYPES = (
     torch.int64,
     torch.float64,
 )
-_NEG_NAN = {2: 0xFE00, 4: 0xFFC00000, 8: 0xFFF8000000000000}
+_NEG_NAN = {
+    torch.float16: 0xFE00,
+    torch.bfloat16: 0xFFC0,
+    torch.float32: 0xFFC00000,
+    torch.float64: 0xFFF8000000000000,
+}
 _INT_VIEW = {2: torch.int16, 4: torch.int32, 8: torch.int64}
+
+
+# Each JIT compile costs seconds, so the rest of each cross is @slowTest. The
+# fast set is all CI runs: every key kind (unsigned, signed, float) on each side
+# of the 32-bit sign wrap of the padding key, in both directions.
+_FAST_KEYS = (torch.uint8, torch.int8, torch.bfloat16, torch.float32, torch.int64)
+
+
+def _slow_unless(fast, *axes):
+    """Every combination of ``axes``; those ``fast`` rejects are @slowTest."""
+    cases = [c[0] if len(axes) == 1 else c for c in itertools.product(*axes)]
+    fast_ = fast if len(axes) == 1 else lambda c: fast(*c)
+    return [c if fast_(c) else subtest(c, decorators=[slowTest]) for c in cases]
 
 
 def _arch() -> int:
@@ -51,7 +72,7 @@ def _make_keys(dtype: torch.dtype, shape: tuple[int, int]) -> torch.Tensor:
             [0.0, -0.0, float("inf"), -float("inf"), float("nan")], dtype=dtype
         )
         x[:, :5] = specials.to("cuda")
-        bits = _NEG_NAN[dtype.itemsize]
+        bits = _NEG_NAN[dtype]
         bits = (
             bits - (1 << (8 * dtype.itemsize))
             if bits >> (8 * dtype.itemsize - 1)
@@ -92,15 +113,24 @@ class TestCuTeDSLGlobalSort(TestCase):
         self.assertEqual(indices.long(), ref_indices)
 
     # One shape per leaf: one row, fewer than 128 rows, segmented rows.
-    @parametrize("key_dtype", _KEY_DTYPES)
+    @parametrize("key_dtype", _slow_unless(lambda k: k in _FAST_KEYS, _KEY_DTYPES))
     @parametrize("descending", (False, True))
     @parametrize("rows", (1, 3, 130))
     def test_key_dtypes(self, key_dtype, descending, rows):
         self._check(_make_keys(key_dtype, (rows, 6000)), torch.int32, descending)
 
-    @parametrize("key_dtype", (torch.bool, torch.float16, torch.float32, torch.int64))
-    @parametrize("index_dtype", (torch.uint16, torch.int16, torch.uint32))
-    @parametrize("rows", (1, 3, 128))
+    # Every index dtype with float32, every key with uint16; the segmented leaf
+    # (128 rows) compiles slowest, so one pair there.
+    @parametrize(
+        "key_dtype,index_dtype,rows",
+        _slow_unless(
+            lambda k, i, r: (k == torch.float32 or i == torch.uint16)
+            and (r < 128 or (k, i) == (torch.float32, torch.int16)),
+            (torch.bool, torch.float16, torch.float32, torch.int64),
+            (torch.uint16, torch.int16, torch.uint32),
+            (1, 3, 128),
+        ),
+    )
     def test_index_dtypes(self, key_dtype, index_dtype, rows):
         self._check(_make_keys(key_dtype, (rows, 4097)), index_dtype, False)
 
@@ -108,7 +138,11 @@ class TestCuTeDSLGlobalSort(TestCase):
     @parametrize("nsort", (4097, 6000, 70000, 200000))
     def test_shapes(self, rows, nsort):
         for key_dtype in (torch.float16, torch.int32):
-            self._check(_make_keys(key_dtype, (rows, nsort)), torch.int32, False)
+            x = _make_keys(key_dtype, (rows, nsort))
+            # Small non-negative keys in row 0: one digit in a pass takes the
+            # segmented leaf's copy branch (cub's AgentRadixSortDownsweep::Copy).
+            x[0] = torch.randint(0, 100, (nsort,), device="cuda").to(key_dtype)
+            self._check(x, torch.int32, False)
 
     @parametrize("rows", (1, 2))
     def test_large_segments(self, rows):
