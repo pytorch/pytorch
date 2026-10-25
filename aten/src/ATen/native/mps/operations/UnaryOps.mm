@@ -21,7 +21,6 @@
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
-#include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_native.h>
@@ -104,19 +103,6 @@ TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
       output = [mpsGraph signbitWithTensor:inputTensor name:nil];
     }
     return mps::castMPSTensor(mpsGraph, output, ScalarType::Bool);
-  });
-}
-
-TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
-  TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
-  mps::unary_op(self, output, "frac_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    auto zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-    auto predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor secondaryTensor:zeroTensor name:nil];
-    auto truncTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                       truePredicateTensor:[mpsGraph ceilWithTensor:inputTensor name:nil]
-                                      falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
-                                                      name:nil];
-    return [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:truncTensor name:nil];
   });
 }
 
