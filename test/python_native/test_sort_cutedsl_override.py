@@ -137,8 +137,8 @@ class TestCuTeDSLSortOverride(TestCase):
     @parametrize(
         "shape, dim, index_dtype",
         [
-            ((1000, 16), -1, torch.uint8),
-            ((300, 100), -1, torch.uint8),
+            ((5000, 16), -1, torch.uint8),
+            ((1000, 100), -1, torch.uint8),
             ((8000, 5), 0, torch.uint16),
             ((64, 70000), -1, torch.int32),
         ],
@@ -165,6 +165,23 @@ class TestCuTeDSLSortOverride(TestCase):
         )
         self.assertEqual(values, ref_values)
         self.assertEqual(indices.long(), ref_indices)
+
+    @parametrize(
+        "shape, key",
+        [((64, 1024), torch.bool), ((1, 8192), torch.float16)],
+        name_fn=lambda shape, key: f"{shape[0]}x{shape[1]}_{str(key)[6:]}",
+    )
+    def test_short_calls_stay_on_stock(self, shape, key):
+        # policy.jit_pays_off: one stock kernel beats the JIT route's host cost.
+        for rows, launches in ((shape[0], 0), (shape[0] * 2, 1)):
+            x = torch.randn(rows, shape[1], device="cuda").to(key)
+            out = (
+                torch.empty_like(x),
+                torch.empty(x.shape, dtype=torch.uint16, device="cuda"),
+            )
+            self.assertEqual(
+                self._launches(lambda: torch.sort(x, stable=True, out=out)), launches
+            )
 
     def test_long_bool_rows_go_global(self):
         # Partition extents are Int32; longer bool rows take the mirror kernels.

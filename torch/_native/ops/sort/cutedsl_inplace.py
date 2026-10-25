@@ -42,7 +42,7 @@ from .cutedsl_common import (
     RAW_CUTE,
     raw_view,
 )
-from .policy import BITONIC_MAX_NSORT, WARP_MERGE_MAX_NSORT
+from .policy import inplace_sort_size
 
 
 # Bits of +inf; larger magnitudes are NaN.
@@ -60,15 +60,6 @@ _ROWS_PER_CTA = 16
 # and 32-thread CTAs get no budget, as stock's run near 255 there.
 _STOCK_RADIX_REGISTERS = 168
 _REGISTERS_PER_SM = 65536
-
-
-def sort_size(nsort: int, stable: bool) -> int:
-    """Stock leaf for a row of ``nsort <= 4096``, as its padded sort size."""
-    if not stable and nsort <= BITONIC_MAX_NSORT:
-        return BITONIC_MAX_NSORT
-    if nsort <= WARP_MERGE_MAX_NSORT:
-        return WARP_MERGE_MAX_NSORT
-    return max(1024, 1 << (nsort - 1).bit_length())
 
 
 @cute.jit
@@ -484,7 +475,7 @@ def inplace_sort(
     if x.numel() == 0:
         return
     spec = make_spec(
-        arch, x.dtype, indices.dtype, descending, sort_size(x.shape[1], stable)
+        arch, x.dtype, indices.dtype, descending, inplace_sort_size(x.shape[1], stable)
     )
     _compile(tuple(sorted(spec.items())))(
         read_only(raw_view(x)), raw_view(values), indices

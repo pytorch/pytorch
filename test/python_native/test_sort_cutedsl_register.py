@@ -5,8 +5,7 @@
 # their order of special values: rows of at most 128 (comparison leaves) tie
 # all NaNs above +inf, longer rows (radix leaf) put negative NaN first; both
 # tie -0.0 with +0.0. The kernel always yields the stable order, so every case
-# checks against the stable sort. Production sends bool keys to the partition
-# kernel, so they get a single smoke case.
+# checks against the stable sort.
 
 import itertools
 import unittest
@@ -64,8 +63,9 @@ _INT_VIEW = {2: torch.int16, 4: torch.int32, 8: torch.int64}
 
 
 def _arch() -> int:
-    major, minor = torch.cuda.get_device_capability()
-    return 10 * major + minor
+    from torch._native.ops.sort.cutedsl_impl import _arch
+
+    return _arch(torch.cuda.current_device())
 
 
 def _float_specials(dtype: torch.dtype) -> list[int]:
@@ -80,8 +80,6 @@ def _float_specials(dtype: torch.dtype) -> list[int]:
 
 
 def _make_keys(dtype: torch.dtype, shape: tuple[int, ...]) -> torch.Tensor:
-    if dtype == torch.bool:
-        return torch.randint(0, 2, shape, device="cuda").bool()
     # Few distinct values give many ties; a third of the keys are specials.
     if dtype.is_floating_point:
         x = torch.randint(-8, 8, shape, device="cuda").to(dtype) / 4
@@ -134,7 +132,8 @@ class TestCuTeDSLRegisterSort(TestCase):
     @parametrize("descending", (False, True))
     def test_nsorts(self, key_dtype, descending):
         torch.manual_seed(0)
-        for nsort in _NSORTS:
+        # Each spec is a JIT compile: descending runs the leaf boundaries only.
+        for nsort in _NSORTS if not descending else (1, 32, 33, 128, 129, 2047, 2048):
             for rows in _ROWS:
                 x = _make_keys(key_dtype, (rows, nsort))
                 self._check(x, torch.int16, descending)

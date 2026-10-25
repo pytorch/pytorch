@@ -55,8 +55,9 @@ _ROWS = (1, 3, 127, 128, 1000)
 
 
 def _arch() -> int:
-    major, minor = torch.cuda.get_device_capability()
-    return 10 * major + minor
+    from torch._native.ops.sort.cutedsl_impl import _arch
+
+    return _arch(torch.cuda.current_device())
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")

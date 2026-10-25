@@ -15,7 +15,7 @@ import torch
 from torch._prims_common.wrappers import _maybe_resize_out
 
 from ... import cutedsl_utils as cu
-from .policy import INDEX_MAX, MAX_NSORT, MAX_ROWS, route
+from .policy import INDEX_MAX, jit_pays_off, MAX_NSORT, MAX_ROWS, route
 
 
 _KEY_DTYPES = frozenset(
@@ -105,7 +105,10 @@ def _out_cond(
         return False  # meta raises the user-facing error
     if nsort > MAX_NSORT:
         return False
-    return self.numel() // nsort <= MAX_ROWS
+    nrows = self.numel() // nsort
+    if nrows > MAX_ROWS:
+        return False
+    return jit_pays_off(self.numel(), nsort, nrows, self.dtype == torch.bool)
 
 
 def _out_impl(

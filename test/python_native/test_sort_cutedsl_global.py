@@ -58,8 +58,9 @@ def _slow_unless(fast, *axes):
 
 
 def _arch() -> int:
-    major, minor = torch.cuda.get_device_capability()
-    return 10 * major + minor
+    from torch._native.ops.sort.cutedsl_impl import _arch
+
+    return _arch(torch.cuda.current_device())
 
 
 def _make_keys(dtype: torch.dtype, shape: tuple[int, int]) -> torch.Tensor:

@@ -1,29 +1,16 @@
-"""Partition leaf: the stable sort of bool keys as a counting partition.
+"""Stable sort of bool keys as a counting partition.
 
-The stable order of a bool row is unique: the keys that sort first (false
-ascending, true descending) in input order, then the others in input order.
-So ``values`` only needs each row's first-class count ``F`` and ``indices`` is
-a two-way stream compaction; no key is compared and no iota is read.
+The stable order of a bool row is its first-class keys (false ascending, true
+descending) in input order, then the rest: ``values`` needs only each row's
+first-class count and ``indices`` is a two-way stream compaction. Rows are read
+in aligned ``vec``-byte chunks (masked at row ends, bytewise for the buffer's
+partial last chunk) and indices leave through shared memory as ``ivec``-wide
+stores. Modes: ``rows`` (several whole rows per CTA), ``row`` (one long row per
+CTA, re-read from L2 to scatter) and ``split`` (a row over several CTAs, with a
+count kernel first).
 
-Rows are read through ``vec``-byte chunks aligned in the flat buffer, so one
-chunk can hold the end of a row and the start of the next; bytes outside the
-row are masked and the buffer's partial last chunk is read bytewise. A tile's thread-contiguous chunks give every element its
-exclusive first-class count from one block scan. Indices are staged in shared
-memory in output order, each run at its gmem alignment, and leave as
-``ivec``-wide stores; values are written from registers. Three modes:
-
-- ``rows``: a CTA owns ``rows_per_cta`` complete rows in one tile. Per-row
-  counts come from the in-tile prefix at each row start, so short rows need no
-  extra pass.
-- ``row``: a CTA owns a whole long row: it counts the row, then re-reads it
-  (from L2) to scatter, tile by tile.
-- ``split``: rows are cut into segments of ``seg_chunks`` chunks (one tile) over
-  several CTAs; a count kernel writes per-segment counts and the scatter kernel
-  prefixes them.
-
-Any non-zero key byte is true and ``values`` are written as 0/1. Bool storage
-other than 0/1 is outside torch's bool contract (stock sort orders such bytes
-by value); this kernel normalizes it.
+Non-zero bool bytes are true and values are written as 0/1; other byte values
+are outside torch's bool contract.
 """
 
 import functools

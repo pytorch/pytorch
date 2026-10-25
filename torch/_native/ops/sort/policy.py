@@ -38,6 +38,15 @@ INDEX_MAX = {
 }
 
 
+def inplace_sort_size(nsort: int, stable: bool) -> int:
+    """Padded sort size of the stock in-place leaf for a row of ``nsort``."""
+    if not stable and nsort <= BITONIC_MAX_NSORT:
+        return BITONIC_MAX_NSORT
+    if nsort <= WARP_MERGE_MAX_NSORT:
+        return WARP_MERGE_MAX_NSORT
+    return max(1024, 1 << (nsort - 1).bit_length())
+
+
 def register_rung(nsort: int) -> int:
     """Padded row length of the register kernel for rows of ``nsort``."""
     return max(32, 1 << (nsort - 1).bit_length())
@@ -70,6 +79,23 @@ def stock_leaf(nsort: int, nsegments: int) -> str:
     if nsegments < SEGMENTED_MIN_ROWS:
         return "full_sort"
     return "segmented"
+
+
+# Small calls whose JIT route launches several kernels from Python against one
+# stock kernel lose to stock: the route's host cost (about 18 us per call on
+# sm_120) exceeds the whole stock sort. Measured up to 2^16 elements for bool
+# keys on the in-place leaf (partition: 1.16-1.22x stock) and single long rows
+# (onesweep passes: up to 1.23x); every other measured short call is within 8%
+# of stock or faster.
+JIT_MIN_NUMEL = 1 << 16
+
+
+def jit_pays_off(numel: int, nsort: int, nsegments: int, is_bool: bool) -> bool:
+    """Whether the JIT route is worth its host cost for this call."""
+    if numel > JIT_MIN_NUMEL:
+        return True
+    leaf = stock_leaf(nsort, nsegments)
+    return not (leaf == "per_row" or (is_bool and leaf == "inplace"))
 
 
 def route(nsort: int, nsegments: int, stable: bool, is_bool: bool) -> str:

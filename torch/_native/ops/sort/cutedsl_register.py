@@ -1,21 +1,13 @@
-"""Register-resident sort of short rows (at most 2048) for narrow out= indices.
+"""Register-resident sort of rows of at most 2048 elements.
 
-One warp sorts one row, several rows per CTA. Lane ``l`` owns the ``VEC``
-consecutive elements ``VEC * l ..`` of a row padded to the rung ``32 * VEC``
-and the whole bitonic network runs in registers: in-thread compare-exchanges
-for strides below ``VEC``, shuffle butterflies above. No shared memory; the
-keys are read once and values and indices written once.
-
-Every element is a unique word ``ordinal << IDX_BITS | index`` with
-``IDX_BITS = log2(rung)`` (an Int32 for keys of up to 16 bits, an Int64 for
-32-bit keys; 64-bit keys keep the ordinal and the index in separate
-registers), so the network yields the stable order, which is also a valid
-order for ``stable=False``. Words of at most 16 bits (1-byte keys, rungs 64 to
-256) are sorted two per register with ``min/max.u16x2``. The ordinal is the one of the
-stock leaf the kernel replaces: ``_cmp_ordinal`` for rows of at most 128 (the
-comparison leaves), ``radix_ordinal`` above (the radix leaf). Values are
-decoded from the ordinal; keys whose ordinal is not invertible (zeros, and NaN
-under the comparison order) are re-read from ``x``.
+One warp per row: lane ``l`` holds ``VEC`` consecutive elements of the row
+padded to the rung ``32 * VEC``, and a bitonic network runs in registers and
+shuffles, with no shared memory. Each element is the unique word
+``ordinal << IDX_BITS | index`` (64-bit keys keep the index beside it), so the
+result is the stable order; 1-byte keys at rungs 64 to 256 sort two words per
+register. The ordinal is the replaced stock leaf's: comparison order up to 128,
+radix order above. Values are decoded from the ordinal, and keys it cannot
+invert (zeros, NaN under the comparison order) are re-read from ``x``.
 """
 
 import cutlass
@@ -45,9 +37,6 @@ from .policy import (
     vector_alignment,
     WARP_MERGE_MAX_NSORT,
 )
-
-
-# Rows of at most this length replace the comparison leaves.
 
 
 # Inline PTX: cute.arch has no min/max.u16x2 (sm_90+, as the router requires),
