@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import unittest
 import weakref
+from functools import partial
 from types import SimpleNamespace
 from unittest import mock
 
@@ -26,6 +27,7 @@ from torch._inductor.runtime.static_triton_launcher import (
 from torch._inductor.runtime.triton_compat import (
     CompiledKernel,
     JITFunction,
+    OutOfResources,
     tl,
     triton,
 )
@@ -58,7 +60,9 @@ def _patched_getitem(self, grid):
 
 class TestStaticTritonLauncherUnit(TestCase):
     @staticmethod
-    def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
+    def _global_scratch_kernel(
+        kernel_cls=StaticallyLaunchedCudaKernel, **metadata_overrides
+    ):
         fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
         src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
         metadata = SimpleNamespace(
@@ -68,6 +72,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             global_scratch_size=32,
             global_scratch_align=16,
         )
+        metadata.__dict__.update(metadata_overrides)
 
         class FakeCompiledKernel(SimpleNamespace):
             launch_enter_hook = None
@@ -83,6 +88,33 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel = kernel_cls(compiled_kernel)
         kernel.function = 1
         return kernel
+
+    def test_tensor_memory_limit(self):
+        make_kernel = partial(self._global_scratch_kernel, global_scratch_size=0)
+        for version in [(3, 5), (3, 8), (3, 9)]:
+            with mock.patch(
+                "torch._inductor.runtime.static_triton_launcher.get_triton_version",
+                return_value=version,
+            ):
+                for arch in [75, 80, 86, 89, 90, 100, 101, 103, 107, 110, 120, 121]:
+                    limit = 576 if arch == 107 and version >= (3, 8) else 512
+                    target = SimpleNamespace(arch=arch)
+                    with self.subTest(arch=arch, version=version):
+                        make_kernel(tmem_size=limit, target=target)
+                        with self.assertRaises(OutOfResources) as error:
+                            make_kernel(tmem_size=limit + 1, target=target)
+                        self.assertEqual(
+                            error.exception.args, (limit + 1, limit, "tensor memory")
+                        )
+        for metadata in [{}, {"target": None}, {"target": SimpleNamespace()}]:
+            with self.subTest(metadata=metadata):
+                make_kernel(tmem_size=512, **metadata)
+                with self.assertRaises(OutOfResources) as error:
+                    make_kernel(tmem_size=513, **metadata)
+                self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
+        for size in [None, 0]:
+            make_kernel(tmem_size=size)
+        make_kernel()
 
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
