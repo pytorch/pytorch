@@ -7788,14 +7788,7 @@ _SORT_INDEX_MAX = {
 }
 
 
-@register_meta(
-    [
-        aten.sort.default,
-        aten.sort.stable,
-        aten.sort.values,
-        aten.sort.values_stable,
-    ]
-)
+@register_meta([aten.sort.stable, aten.sort.values_stable])
 def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
     indices_dtype = indices.dtype if indices is not None else torch.int64
     # Same checks as the C++ meta (Sorting.cpp), so compiled code rejects what
@@ -7830,6 +7823,12 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
         return values, indices
     return v, i
+
+
+@register_meta([aten.sort.default, aten.sort.values])
+def meta_sort_dim(self, dim=-1, descending=False, values=None, indices=None):
+    # These overloads take dim first; forward so dim is not bound to stable.
+    return meta_sort(self, None, dim, descending, values, indices)
 
 
 def rnn_cell_checkSizes(

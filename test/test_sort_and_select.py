@@ -63,6 +63,22 @@ class TestSortAndSelect(TestCase):
         torch.compile(f, backend="aot_eager", fullgraph=True)(x, v, i)
         self.assertEqual(i.long(), torch.sort(x, stable=True).indices)
 
+        # The dim-first overloads (sort.default, sort.values) check the same dim.
+        def g(x, v, i):
+            return torch.sort(x, 0, out=(v, i))
+
+        for shape, ok in (((300, 2), False), ((2, 300), True)):
+            torch._dynamo.reset()
+            x = torch.randn(shape, device=device)
+            v = torch.empty_like(x)
+            i = torch.empty(shape, dtype=torch.uint8, device=device)
+            if ok:
+                torch.compile(g, backend="aot_eager", fullgraph=True)(x, v, i)
+                self.assertEqual(i.long(), torch.sort(x, 0).indices)
+            else:
+                with self.assertRaisesRegex(Exception, "too small"):
+                    torch.compile(g, backend="aot_eager", fullgraph=True)(x, v, i)
+
     def test_topk_quantized_scalar_input(self):
         # Calling topk on a quantized scalar input used to segfault,
         # see https://github.com/pytorch/pytorch/issues/116324
