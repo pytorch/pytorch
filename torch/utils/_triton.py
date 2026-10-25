@@ -230,7 +230,7 @@ def has_triton_cuda_tma_device() -> bool:
 
 @functools.cache
 def has_datacenter_blackwell_tma_device() -> bool:
-    """Inductor's is_datacenter_blackwell_arch() for the current device, plus TMA."""
+    """Same SM 10.x and 11.x range as Inductor's is_datacenter_blackwell_arch()."""
     import torch
 
     if (
