@@ -197,7 +197,8 @@ def validate_blockscaled_sf(
         assert SFA.shape[1] >= min_rm, (
             f"SFA padded rm {SFA.shape[1]} < ceil(total_m/128) + (L-1) = {min_rm}"
         )
-        shapes = [("SFB", SFB, (num_batches, (B.shape[-2] + 127) // 128, rk, 32, 4, 4))]
+        n = B.shape[-1] if b_kn else B.shape[-2]
+        shapes = [("SFB", SFB, (num_batches, (n + 127) // 128, rk, 32, 4, 4))]
     else:
         # Dense: 2D operands may carry unbatched 5-D SFs (the kernel prepends
         # the trivial batch mode at trace time) or single-batch 6-D ones.
