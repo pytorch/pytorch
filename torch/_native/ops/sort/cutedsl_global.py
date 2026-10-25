@@ -33,6 +33,7 @@ from .cutedsl_common import (
     INDEX_DTYPES,
     index_name,
     KEY_KINDS,
+    match_any,
     RADIX_BINS,
     RADIX_BITS,
     radix_ordinal,
@@ -393,7 +394,7 @@ class OnesweepSort:
             lanes_le = Int32(cute.arch.lanemask_le())
             for u in cutlass.range_constexpr(ITEMS):
                 digit = self.digit(keys[u], current_bit, nsort, segment_bits)
-                peers = Int32(cute.arch.match_sync(0xFFFFFFFF, digit))
+                peers = match_any(digit, RADIX_BITS)
                 leader = Int32(31) - Int32(cute.arch.clz(peers))
                 below = cute.arch.popc(peers & lanes_le)
                 offset = Int32(0)

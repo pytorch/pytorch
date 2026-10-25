@@ -114,3 +114,18 @@ def radix_ordinal_inverse(
         else:
             bits = ~ord_ & mask
     return bits
+
+
+@cute.jit
+def match_any(label: Int32, label_bits: cutlass.Constexpr) -> Int32:
+    """Lanes of a full warp whose low ``label_bits`` of ``label`` equal this
+    lane's: cub ``MatchAny``, one ballot per bit, since ``match.any.sync`` is
+    slower when matching a few bits."""
+    peers = Int32(-1)
+    for b in cutlass.range_constexpr(label_bits):
+        bit = (label >> Int32(b)) & Int32(1)
+        # Lanes that share this bit: the ballot if it is set, its complement if not.
+        peers = peers & (
+            Int32(cute.arch.vote_ballot_sync(bit != Int32(0))) ^ (bit - Int32(1))
+        )
+    return peers
