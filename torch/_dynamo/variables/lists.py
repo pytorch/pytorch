@@ -80,6 +80,8 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    python_constant_repr_impl,
+    repr_guard,
     type_implements_nb_index,
     vt_is_iterable,
 )
@@ -182,9 +184,6 @@ class BaseListVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        return VariableTracker.build(tx, self.debug_repr())
 
     def as_proxy(self) -> Any:
         if self.python_type() is SizeVariable:
@@ -1187,7 +1186,11 @@ class ListVariable(BaseListVariable):
         return self.debug_repr_helper("[", "]")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L452-L503
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "[...]")
+            items = ", ".join(tracked_repr(tx, item) for item in self.items)
         return VariableTracker.build(tx, f"[{items}]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1683,7 +1686,11 @@ class DequeVariable(BaseListVariable):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
+        # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1471-L1500
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "[...]")
+            items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
             return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
@@ -2030,7 +2037,11 @@ class TupleVariable(BaseListVariable):
         return self.debug_repr_helper("(", ")")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L226-L282
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "(...)")
+            items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if len(self.items) == 1:
             items += ","
         return VariableTracker.build(tx, f"({items})")
@@ -2267,6 +2278,10 @@ class ByteArrayVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, repr(self.data))
 
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # bytearray_str warns under -b (BytesWarning), then returns the repr.
+        return python_constant_repr_impl(self, tx, str)
+
     def nb_remainder_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2348,6 +2363,30 @@ class ByteArrayVariable(VariableTracker):
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 {**kwargs, "not_found_msg": not_found_msg},
+            )
+
+    def bytearray_rindex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        check_positional(tx, "rindex", len(args), 1, 3)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+
+        try:
+            return VariableTracker.build(
+                tx, self.data.rindex(*const_args, **const_kwargs)
+            )
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(
+                type(e),
+                tx,
+                args=list(e.args),
             )
 
     def bytearray_count(
@@ -2486,6 +2525,7 @@ class ByteArrayVariable(VariableTracker):
 
     tp_methods = {
         "index": Method(bytearray_index),
+        "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
@@ -2808,6 +2848,11 @@ class SliceVariable(VariableTracker):
 
     def debug_repr(self) -> str:
         return "slice(" + ", ".join(i.debug_repr() for i in self.items) + ")"
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # slice_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/sliceobject.c#L344-L348
+        start, stop, step = (tracked_repr(tx, item) for item in self.items)
+        return VariableTracker.build(tx, f"slice({start}, {stop}, {step})")
 
     def as_proxy(self) -> slice:
         return slice(*[x.as_proxy() for x in self.items])
