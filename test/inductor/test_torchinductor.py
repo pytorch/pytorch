@@ -9496,15 +9496,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
-    @parametrize("start, is_noop", [(-4, True), (-5, True), (-3, False)])
-    def test_remove_noop_slice_negative_start(self, start, is_noop):
+    def test_remove_noop_slice_negative_start(self):
         def f(x):
-            return torch.ops.aten.slice.Tensor(x, 0, start, 4) + 1
+            n = x.shape[0]
+            a = torch.ops.aten.slice.Tensor(x, 0, -n, n)
+            b = torch.ops.aten.slice.Tensor(x, 0, -n - 1, n)
+            c = torch.ops.aten.slice.Tensor(x, 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
 
         x = torch.randn(4, 8, device=self.device)
-        post_grad_graph = get_post_grad_graph(torch.compile(f), (x,))
-        self.assertEqual("= torch.ops.aten.slice" not in post_grad_graph, is_noop)
-        self.assertEqual(torch.compile(f)(x), f(x))
+        compiled = torch.compile(f)
+
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
