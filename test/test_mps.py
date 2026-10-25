@@ -2398,6 +2398,10 @@ class TestMPS(TestCaseMPS):
             if bias:
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad)
 
+            # backward(create_graph=True) leaves reference cycles through .grad that gc.collect() can't free
+            mps_linear.zero_grad()
+            linear_mps_input.grad = None
+
     def test_linear1D(self):
         self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
 

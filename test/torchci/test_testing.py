@@ -104,7 +104,7 @@ def _assert_run_line(
 ) -> None:
     test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
     test.assertEqual(
-        (run["type"], run["schema_version"], run["properties"]), ("run", "0.2", {})
+        (run["type"], run["schema_version"], run["properties"]), ("run", "1.0", {})
     )
     test.assertEqual(str(uuid.UUID(run["id"])), run["id"])
     test.assertIn(run["language"], ("python", "cpp"))
@@ -249,7 +249,7 @@ test_no_rerun_needed      | 0            | passed  |""",
             ],
         )
         self.assertEqual(report["type"], "report")
-        self.assertEqual(report["schema_version"], "0.2")
+        self.assertEqual(report["schema_version"], "1.0")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
