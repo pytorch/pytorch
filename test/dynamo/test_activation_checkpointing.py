@@ -3084,9 +3084,7 @@ class EagerSACCompiledRegionTests(torch._dynamo.test_case.TestCase):
             [torch.ops.aten.view_as_complex.default],
         )
         out = checkpoint(compiled, *args, use_reentrant=False, context_fn=context_fn)
-        self.assertEqual(
-            torch.autograd.grad(out, args), expected, atol=1e-4, rtol=1e-4
-        )
+        self.assertEqual(torch.autograd.grad(out, args), expected, atol=1e-4, rtol=1e-4)
 
     def test_mutable_op_fresh_output(self):
         # The op mutates count but returns a fresh tensor, and s.cos() is
