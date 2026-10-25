@@ -457,7 +457,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        NVSHMEM_SIGNAL_SET = 0 if TEST_WITH_ROCM else 9  # value defined by NVSHMEM for atomic set
+        NVSHMEM_SIGNAL_SET = (
+            0 if TEST_WITH_ROCM else 9
+        )  # value defined by NVSHMEM for atomic set
         SIGNAL_VAL = 1 + NVSHMEM_SIGNAL_SET  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
 
