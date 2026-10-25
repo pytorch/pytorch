@@ -14,6 +14,7 @@ reading reverse_indices; values and narrow indices are written straight to the
 outputs; the alternate buffers cover a chunk of rows, not the tensor.
 """
 
+import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64
@@ -480,7 +481,7 @@ class SegmentedRadixSort:
         mValues: cute.Tensor,
         mIndices: cute.Tensor,
         row_base: Int32,
-        stream,
+        stream: cuda.CUstream,
     ):
         rows = mX.shape[0]
         PASSES = const_expr(len(self.schedule))

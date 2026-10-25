@@ -22,6 +22,7 @@ NaN above +inf and ``-0.0 == +0.0``. The radix leaf orders keys like
 ``radix_ordinal``.
 """
 
+import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64, Uint16, Uint8
@@ -116,7 +117,11 @@ class InplaceSort:
 
     @cute.jit
     def __call__(
-        self, mX: cute.Tensor, mValues: cute.Tensor, mIndices: cute.Tensor, stream
+        self,
+        mX: cute.Tensor,
+        mValues: cute.Tensor,
+        mIndices: cute.Tensor,
+        stream: cuda.CUstream,
     ):
         rows_per_cta = const_expr(self.block[1])
         self.kernel(mX, mValues, mIndices).launch(
@@ -420,7 +425,8 @@ class InplaceSort:
 def spec_name(spec: dict) -> str:
     return (
         f"sort_inplace{spec['sort_size']}_{spec['key']}_{spec['index']}"
-        f"_{'desc' if spec['descending'] else 'asc'}_sm{spec['arch']}"
+        f"_{'desc' if spec['descending'] else 'asc'}"
+        + (f"_sm{spec['arch']}" if "arch" in spec else "")
     )
 
 

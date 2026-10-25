@@ -19,6 +19,7 @@ position (int32) instead of an int2 (segment, index) pair; values and narrow
 indices are written straight to the outputs.
 """
 
+import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64
@@ -121,7 +122,7 @@ class OnesweepSort:
         hist_blocks: Int32,
         nsort: Int32,
         segment_bits: Int32,
-        stream,
+        stream: cuda.CUstream,
     ):
         num_items = mKeys.shape[0]
         PASSES = const_expr(self.passes)
@@ -498,7 +499,7 @@ class FullSortPostprocess:
         mIndices: cute.Tensor,
         mPositions: cute.Tensor,
         nsort: Int32,
-        stream,
+        stream: cuda.CUstream,
     ):
         n = mX.shape[0]
         self.kernel(mX, mValues, mIndices, mPositions, nsort).launch(
