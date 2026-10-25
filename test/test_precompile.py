@@ -9119,5 +9119,80 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertIn(f"runtime cache phase ok: {phase}", out.stdout)
 
 
+_CUSTOM_OP_MODULE = """
+import torch
+
+
+@torch.library.custom_op("precompile_op_module_test::triple", mutates_args=())
+def triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+@triple.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+def fn(x):
+    return torch.ops.precompile_op_module_test.triple.default(x.sin()) + 1
+"""
+
+
+_CUSTOM_OP_DRIVER = """
+import os
+import sys
+
+import torch
+
+phase, directory, module = sys.argv[1:4]
+sys.path.insert(0, directory)
+pc = torch.compiler.precompile
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
+expected_path = os.path.join(directory, "expected.pt")
+x = torch.arange(6, dtype=torch.float32)
+if phase == "capture":
+    fn = __import__(module).fn
+    with pc.capture(
+        fn,
+        artifact_path=artifact,
+        cache_path=cache,
+        tracer=pc.MakeFxTracer(),
+        backend="eager",
+    ) as cap:
+        torch.save(cap(x), expected_path)
+else:
+    assert module not in sys.modules, module
+    loaded = pc.load(artifact, cache)
+    torch.testing.assert_close(loaded(x), torch.load(expected_path))
+    assert module in sys.modules, "the artifact did not import its custom op module"
+print("custom op phase ok:", phase)
+"""
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestPrecompileCustomOpModules(TestCase):
+    @skipIfCrossRef
+    def test_load_imports_the_modules_that_register_custom_ops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"precompile_op_module_{uuid.uuid4().hex}"
+            with open(os.path.join(directory, module + ".py"), "w") as f:
+                f.write(_CUSTOM_OP_MODULE)
+            for phase in ("capture", "replay"):
+                out = subprocess.run(
+                    [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory, module],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"custom op phase ok: {phase}", out.stdout)
+            with open(os.path.join(directory, "artifact.py")) as f:
+                (line,) = [
+                    line for line in f if line.startswith("CUSTOM_OP_MODULES = ")
+                ]
+            self.assertIn(repr(module), line)
+
+
 if __name__ == "__main__":
     run_tests()
