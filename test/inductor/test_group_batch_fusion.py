@@ -102,15 +102,15 @@ class MyModule(torch.nn.Module):
         self.z = z
         self.device = device
         self.seq_len = 10
-        self.seq1 = [
-            torch.nn.Linear(z, z, has_bias).to(self.device) for _ in range(self.seq_len)
-        ]
-        self.seq2 = [
-            torch.nn.Linear(z, z, has_bias).to(self.device) for _ in range(self.seq_len)
-        ]
-        self.seq3 = [
-            torch.nn.Linear(z, z, has_bias).to(self.device) for _ in range(self.seq_len)
-        ]
+        self.seq1 = torch.nn.ModuleList(
+            [torch.nn.Linear(z, z, has_bias) for _ in range(self.seq_len)]
+        ).to(self.device)
+        self.seq2 = torch.nn.ModuleList(
+            [torch.nn.Linear(z, z, has_bias) for _ in range(self.seq_len)]
+        ).to(self.device)
+        self.seq3 = torch.nn.ModuleList(
+            [torch.nn.Linear(z, z, has_bias) for _ in range(self.seq_len)]
+        ).to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x1 = [x + 0.1 * i for i in range(self.seq_len)]
@@ -262,11 +262,13 @@ class MyModule5(torch.nn.Module):
         self.device = device
 
         self.weights = torch.nn.ParameterList(
-            [torch.nn.Parameter(torch.randn(50, 100)).to(self.device) for _ in range(5)]
+            [torch.nn.Parameter(torch.randn(50, 100, device=device)) for _ in range(5)]
         )
 
         self.biases = (
-            ([torch.nn.Parameter(torch.randn(50)).to(self.device) for _ in range(5)])
+            torch.nn.ParameterList(
+                [torch.nn.Parameter(torch.randn(50, device=device)) for _ in range(5)]
+            )
             if has_bias
             else [None for _ in range(5)]
         )
@@ -296,8 +298,8 @@ class _TestPointwiseOps(torch.nn.Module):
         relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
         add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
         mul = [torch.mul(add[i], add[i]) for i in range(len(add))]
-        sub = [torch.sub(mul[i], mul[i]) for i in range(len(mul))]
-        div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
+        sub = [torch.sub(mul[i], add[i]) for i in range(len(mul))]
+        div = [torch.div(sub[i], add[i]) for i in range(len(sub))]
         return torch.cat(div, dim=1)
 
 
@@ -450,19 +452,20 @@ class TestGroupBatchFusion(TestCase):
         for has_bias in [True, False]:
             counters.clear()
             module = MyModule(z, has_bias).to(GPU_TYPE)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(z, z, device=GPU_TYPE)]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
+            self.compare_pred(ref_module, traced, input)
             self.assertEqual(
                 counters["inductor"]["group_linear"],
                 2,
             )
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced)
-            self.compare_gradients(module, traced)
+            self.compare_parameters(ref_module, traced)
+            self.compare_gradients(ref_module, traced)
             self.assertEqual(
                 counters["inductor"]["group_linear"],
                 4,
@@ -501,11 +504,12 @@ class TestGroupBatchFusion(TestCase):
     def test_group_linear_fusion_different_shapes(self):
         counters.clear()
         module = MyModule2().eval().to(GPU_TYPE)
+        ref_module = copy.deepcopy(module)
         input = [torch.rand(4, 24, device=GPU_TYPE)]
         traced = torch.compile(module)
-        ref = module(*input)
+        ref = ref_module(*input)
         res = traced(*input)
-        self.compare_pred(module, traced, input)
+        self.compare_pred(ref_module, traced, input)
         self.assertEqual(
             counters["inductor"]["group_linear"],
             1,
@@ -516,8 +520,8 @@ class TestGroupBatchFusion(TestCase):
         )
         ref.sum().backward()
         res.sum().backward()
-        self.compare_parameters(module, traced)
-        self.compare_gradients(module, traced)
+        self.compare_parameters(ref_module, traced)
+        self.compare_gradients(ref_module, traced)
         self.assertEqual(
             counters["inductor"]["group_linear"],
             2,
@@ -535,16 +539,18 @@ class TestGroupBatchFusion(TestCase):
             for has_bias in [True, False]:
                 counters.clear()
                 module = MyModule3(GPU_TYPE, has_weight, has_bias).to(GPU_TYPE)
+                ref_module = copy.deepcopy(module)
                 input = [torch.randn(2, 5, 50, device=GPU_TYPE)]
                 traced = torch.compile(module)
-                ref = module(*input)
+                ref = ref_module(*input)
                 res = traced(*input)
-                self.compare_pred(module, traced, input)
+                self.compare_pred(ref_module, traced, input)
                 self.assertEqual(counters["inductor"]["batch_layernorm"], 2)
                 ref.sum().backward()
                 res.sum().backward()
-                self.compare_parameters(module, traced)
-                self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+                self.compare_parameters(ref_module, traced)
+                # Fused FP32 reductions differ by up to 5.4e-7 locally.
+                self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
                 counters.clear()
 
     @requires_gpu()
@@ -567,6 +573,7 @@ class TestGroupBatchFusion(TestCase):
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(ref_module, traced)
+            # Fused FP32 gradients differ by up to 4.8e-6 locally.
             self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             counters.clear()
 
@@ -638,6 +645,136 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
+    @parametrize("bias_shape", [(1, 6), (1,), (6,)])
+    def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        graph = torch.fx.Graph()
+        input = graph.placeholder("input")
+        weight = graph.placeholder("weight")
+        bias = graph.placeholder("bias")
+        input.meta["example_value"] = torch.randn(4, 8)
+        weight.meta["example_value"] = torch.randn(6, 8)
+        bias.meta["example_value"] = torch.randn(bias_shape)
+        linear = graph.call_function(torch._C._nn.linear, args=(input, weight, bias))
+        linear.meta["example_value"] = torch.randn(4, 6)
+        graph.output(graph.call_function(torch.sin, args=(linear,)))
+        rule = BatchLinearLHSFusion()
+        if bias_shape == (6,):
+            self.assertIsNotNone(rule.match(linear))
+        else:
+            self.assertIsNone(rule.match(linear))
+
+    def test_batch_linear_lhs_rejects_bias_without_example_value(self):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        graph = torch.fx.Graph()
+        input = graph.placeholder("input")
+        weight = graph.placeholder("weight")
+        bias = graph.placeholder("bias")
+        input.meta["example_value"] = torch.randn(4, 8)
+        weight.meta["example_value"] = torch.randn(6, 8)
+        bias.meta["val"] = torch.randn(6)
+        linear = graph.call_function(torch._C._nn.linear, args=(input, weight, bias))
+        linear.meta["example_value"] = torch.randn(4, 6)
+        graph.output(linear)
+        self.assertIsNone(BatchLinearLHSFusion().match(linear))
+
+    @parametrize("invalid_projection", ["bias_width", "bias_rank"])
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_invalid_projection_keeps_valid_subset(
+        self, invalid_projection
+    ):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(8, 4, bias=False)
+                self.b = torch.nn.Linear(8, 4, bias=False)
+                self.bad_weights = torch.nn.ParameterList(
+                    [
+                        torch.nn.Parameter(torch.randn(6, 8)),
+                        torch.nn.Parameter(torch.randn(6, 8)),
+                    ]
+                )
+                if invalid_projection == "bias_width":
+                    shape = (1,)
+                else:
+                    shape = (1, 6)
+                self.bad_biases = torch.nn.ParameterList(
+                    [
+                        torch.nn.Parameter(torch.randn(shape)),
+                        torch.nn.Parameter(torch.randn(shape)),
+                    ]
+                )
+
+            def forward(self, x):
+                bad = tuple(
+                    torch.nn.functional.linear(x, weight, bias)
+                    for weight, bias in zip(self.bad_weights, self.bad_biases)
+                )
+                return torch.sin(self.a(x)), torch.cos(self.b(x)), *bad
+
+        module = M().eval()
+        x = torch.randn(4, 8)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_zero_width_preserves_stride(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.valid_weights = torch.nn.ParameterList(
+                    [
+                        torch.nn.Parameter(torch.randn(4, 8)),
+                        torch.nn.Parameter(torch.randn(4, 8)),
+                    ]
+                )
+                self.empty_weights = torch.nn.ParameterList(
+                    [
+                        torch.nn.Parameter(torch.randn(0, 8)),
+                        torch.nn.Parameter(torch.randn(0, 8)),
+                    ]
+                )
+
+            def forward(self, x):
+                valid = tuple(
+                    torch.sin(torch.nn.functional.linear(x, w))
+                    for w in self.valid_weights
+                )
+                empty = tuple(
+                    torch.nn.functional.linear(x, w) for w in self.empty_weights
+                )
+                return *valid, *empty
+
+        module = M().eval()
+        x = torch.randn(4, 8)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
@@ -665,6 +802,35 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         self.assertEqual(subsets, [2])
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_symbolic_projection_width_fuses(self):
+        # Weights and biases are graph inputs so Dynamo keeps their leading
+        # dimension symbolic; the matcher must still prove the width check.
+        def fn(x, w1, w2, b1, b2):
+            return (
+                torch.sin(torch.nn.functional.linear(x, w1, b1)),
+                torch.cos(torch.nn.functional.linear(x, w2, b2)),
+            )
+
+        x = torch.randn(4, 8)
+        w1 = torch.randn(6, 8)
+        w2 = torch.randn(6, 8)
+        b1 = torch.randn(6)
+        b2 = torch.randn(6)
+        for tensor in (w1, w2, b1, b2):
+            torch._dynamo.mark_dynamic(tensor, 0)
+        counters.clear()
+        with torch.no_grad():
+            expected = fn(x, w1, w2, b1, b2)
+            actual = torch.compile(fn, fullgraph=True)(x, w1, w2, b1, b2)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -838,6 +1004,7 @@ class TestGroupBatchFusion(TestCase):
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(ref_module, traced)
+            # Fused FP32 gradients differ by up to 4.8e-7 locally.
             self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             counters.clear()
 
@@ -850,16 +1017,20 @@ class TestGroupBatchFusion(TestCase):
         for has_bias in [True, False]:
             counters.clear()
             module = MyModule5(GPU_TYPE, has_bias)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(50, 500, device=GPU_TYPE)]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
+            self.compare_pred(ref_module, traced, input)
             self.assertEqual(counters["inductor"]["batch_linear"], 1)
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_parameters(ref_module, traced)
+            # Independent fused/eager FP32 GEMM reductions differ by up to
+            # 5e-5 on ROCm and 5.7e-6 on CPU; gradients reach ~2e1, and a
+            # dropped projection would differ by O(1).
+            self.compare_gradients(ref_module, traced, rtol=1e-4, atol=1e-4)
             counters.clear()
 
     @requires_gpu()
@@ -878,11 +1049,12 @@ class TestGroupBatchFusion(TestCase):
     def test_pointwise_op_fusion(self):
         counters.clear()
         module = _TestPointwiseOps(GPU_TYPE)
-        input = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
+        ref_input = torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)
+        res_input = ref_input.detach().clone().requires_grad_(True)
         traced = torch.compile(module)
-        ref = module(*input)
-        res = traced(*input)
-        self.compare_pred(module, traced, input)
+        ref = module(ref_input)
+        res = traced(res_input)
+        self.assertEqual(ref, res)
         self.assertEqual(counters["inductor"]["batch_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_sigmoid"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
@@ -891,8 +1063,8 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_div"], 1)
         ref.sum().backward()
         res.sum().backward()
-        self.compare_parameters(module, traced)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        # Fused FP32 pointwise gradients differ by up to 1.2e-7 locally.
+        self.assertEqual(ref_input.grad, res_input.grad, rtol=1e-5, atol=1e-5)
         counters.clear()
 
     @requires_gpu()
@@ -1003,19 +1175,20 @@ class TestGroupBatchFusion(TestCase):
     def test_pointwise_op_fusion_post_grad(self):
         counters.clear()
         module = _TestPointwiseOpsPostGrad(GPU_TYPE)
-        input = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
+        ref_input = torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)
+        res_input = ref_input.detach().clone().requires_grad_(True)
         traced = torch.compile(module)
-        ref = module(*input)
-        res = traced(*input)
-        self.compare_pred(module, traced, input)
+        ref = module(ref_input)
+        res = traced(res_input)
+        self.assertEqual(ref, res)
         self.assertEqual(counters["inductor"]["batch_aten_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
         self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 2)
         ref.sum().backward()
         res.sum().backward()
-        self.compare_parameters(module, traced)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        # Fused FP32 pointwise gradients differ by up to 6.0e-8 locally.
+        self.assertEqual(ref_input.grad, res_input.grad, rtol=1e-5, atol=1e-5)
         counters.clear()
 
     @requires_gpu()
@@ -1038,6 +1211,7 @@ class TestGroupBatchFusion(TestCase):
         counters.clear()
         size = 20
         module = _TestHighwaySelfGating(d_model=10, size=size, device=GPU_TYPE)
+        ref_module = copy.deepcopy(module)
         input = [
             [
                 torch.randn(10, 10, requires_grad=True, device=GPU_TYPE)
@@ -1045,9 +1219,9 @@ class TestGroupBatchFusion(TestCase):
             ]
         ]
         traced = torch.compile(module)
-        ref = module(*input)
+        ref = ref_module(*input)
         res = traced(*input)
-        self.compare_pred(module, traced, input)
+        self.compare_pred(ref_module, traced, input)
         self.assertEqual(counters["inductor"]["batch_linear_post_grad"], 2)
         self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
@@ -1056,8 +1230,9 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 5)
         ref.sum().backward()
         res.sum().backward()
-        self.compare_parameters(module, traced)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(ref_module, traced)
+        # Fused FP32 reductions differ by up to 2.9e-6 locally.
+        self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
         counters.clear()
 
     @requires_gpu()
