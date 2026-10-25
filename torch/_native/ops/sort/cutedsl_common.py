@@ -64,11 +64,13 @@ def radix_ordinal(
     kind: cutlass.Constexpr,
     key_bits: cutlass.Constexpr,
     descending: cutlass.Constexpr,
+    keep_negative_zero: cutlass.Constexpr = False,
 ) -> Int32:
     """Map raw key bits to an unsigned ordinal in the low ``key_bits`` bits.
 
     ``bits`` and the result are Int32 for keys of up to 32 bits and Int64 for
-    64-bit keys."""
+    64-bit keys. ``keep_negative_zero`` gives cub's invertible ``to_bit_ordered``,
+    whose digit extractor ties -0.0 with +0.0 instead."""
     word = Int64 if const_expr(key_bits == 64) else Int32
     full = const_expr(key_bits in (32, 64))
     mask = word(-1) if full else word((1 << key_bits) - 1)
@@ -77,8 +79,9 @@ def radix_ordinal(
     if const_expr(kind == "signed"):
         ord_ = bits ^ sign
     elif const_expr(kind == "float"):
-        if (bits & (mask ^ sign)) == word(0):
-            bits = word(0)  # -0.0 ties with +0.0, as in the stock leaf
+        if const_expr(not keep_negative_zero):
+            if (bits & (mask ^ sign)) == word(0):
+                bits = word(0)  # -0.0 ties with +0.0, as in the stock leaf
         if (bits & sign) != word(0):
             ord_ = ~bits & mask
         else:
@@ -86,3 +89,28 @@ def radix_ordinal(
     if const_expr(descending):
         ord_ = ~ord_ & mask
     return ord_
+
+
+@cute.jit
+def radix_ordinal_inverse(
+    ord_: Int32,
+    kind: cutlass.Constexpr,
+    key_bits: cutlass.Constexpr,
+    descending: cutlass.Constexpr,
+) -> Int32:
+    """Raw key bits of a ``radix_ordinal(..., keep_negative_zero=True)``."""
+    word = Int64 if const_expr(key_bits == 64) else Int32
+    full = const_expr(key_bits in (32, 64))
+    mask = word(-1) if full else word((1 << key_bits) - 1)
+    sign = word(-(1 << (key_bits - 1))) if full else word(1 << (key_bits - 1))
+    if const_expr(descending):
+        ord_ = ~ord_ & mask
+    bits = ord_
+    if const_expr(kind == "signed"):
+        bits = ord_ ^ sign
+    elif const_expr(kind == "float"):
+        if (ord_ & sign) != word(0):
+            bits = ord_ ^ sign
+        else:
+            bits = ~ord_ & mask
+    return bits

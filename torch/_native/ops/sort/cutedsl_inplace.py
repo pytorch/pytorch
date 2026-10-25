@@ -12,8 +12,8 @@ length (``sort_size``):
   CTA. Its result is the unique stable order, computed by the same network on
   keys made unique by their index.
 - 1024 / 2048 / 4096: ``radixSortKVInPlace``, ``sort_size / 32`` threads x 32
-  items, one row per CTA; a stable LSD radix sort over 8-bit digits with the
-  row held in registers and exchanged through shared memory each pass.
+  items, one row per CTA: cub ``BlockRadixSort`` with its defaults (4-bit digits,
+  packed-counter ranking, padded exchanges, transpose load and store).
 
 Stock uses these shapes for every key width, 8-byte keys included.
 
@@ -24,7 +24,7 @@ NaN above +inf and ``-0.0 == +0.0``. The radix leaf orders keys like
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Int32, Int64
+from cutlass import const_expr, Int32, Int64, Uint16, Uint8
 
 import torch
 from torch._native.cutedsl.launch import compile_kernel, read_only
@@ -36,9 +36,8 @@ from .cutedsl_common import (
     INDEX_DTYPES,
     index_name,
     KEY_KINDS,
-    RADIX_BINS,
-    RADIX_BITS,
     radix_ordinal,
+    radix_ordinal_inverse,
     RAW_CUTE,
     raw_view,
 )
@@ -53,6 +52,12 @@ _INF_BITS = {
 }
 # max_block_y of the bitonic and warp merge leaves.
 _ROWS_PER_CTA = 16
+# Registers per thread that ptxas gives stock's radixSortKVInPlace for keys and
+# narrow values of at most 4 bytes with 64 and 128 threads (cuobjdump
+# -res-usage); the radix leaf asks for the residency that implies. 8-byte keys
+# and 32-thread CTAs get no budget, as stock's run near 255 there.
+_STOCK_RADIX_REGISTERS = 168
+_REGISTERS_PER_SM = 65536
 
 
 def sort_size(nsort: int, stable: bool) -> int:
@@ -102,6 +107,12 @@ class InplaceSort:
             self.block = (32, _ROWS_PER_CTA)
         else:
             self.block = (sort_size // 32, 1)
+        threads = self.block[0] * self.block[1]
+        self.min_blocks = (
+            _REGISTERS_PER_SM // (_STOCK_RADIX_REGISTERS * threads)
+            if sort_size > 128 and threads >= 64 and self.key_bits <= 32
+            else 0
+        )
 
     @cute.jit
     def __call__(
@@ -112,6 +123,10 @@ class InplaceSort:
             grid=[(mX.shape[0] + rows_per_cta - 1) // rows_per_cta, 1, 1],
             block=[self.block[0], self.block[1], 1],
             stream=stream,
+            min_blocks_per_mp=self.min_blocks,
+            # Without a preference the driver sizes the carveout for min_blocks
+            # only, which starves the 1-warp CTAs of the 1024 leaf.
+            preferred_smem_carveout=100,
         )
 
     @cute.kernel
@@ -219,128 +234,185 @@ class InplaceSort:
         return ka < kb or (ka == kb and wa < wb)
 
     @cute.jit
-    def radix(self, mX: cute.Tensor, mValues: cute.Tensor, mIndices: cute.Tensor):
-        """cub BlockRadixSort shape; warp w, item k, lane l owns element
-        32 * (ITEMS * w + k) + l, so ranking in (w, k, l) order is stable."""
-        ITEMS = const_expr(32)
-        NUM_THREADS = const_expr(self.block[0])
-        NUM_WARPS = const_expr(NUM_THREADS // 32)
-        PASSES = const_expr(self.key_bits // RADIX_BITS)
-        DIGITS_PER_THREAD = const_expr(RADIX_BINS // NUM_THREADS)
-        DIGIT_MASK = const_expr(RADIX_BINS - 1)
-        desc = const_expr(self.descending)
-        # Keys up to 16 bits travel with their index in one 32-bit word.
-        packed = const_expr(self.key_bits <= 16)
-        key_mask = Int32((1 << self.key_bits) - 1) if const_expr(packed) else Int32(-1)
+    def _digit(self, ord_, neg_zero, pos_zero, shift, bits: cutlass.Constexpr) -> Int32:
+        """BFEDigitExtractor over a bit-ordered key (ProcessFloatMinusZero first)."""
+        if const_expr(self.kind == "float"):
+            if ord_ == neg_zero:
+                ord_ = pos_zero
         word_t = Int64 if const_expr(self.key_bits == 64) else Int32
+        return Int32((ord_ >> shift) & word_t((1 << bits) - 1))
+
+    @cute.jit
+    def radix(self, mX: cute.Tensor, mValues: cute.Tensor, mIndices: cute.Tensor):
+        """radixSortKVInPlace: cub BlockLoad / BlockRadixSort / BlockStore with
+        their defaults (4-bit digits, BlockRadixRank's packed 16-bit counters and
+        raking scan, padded BlockExchange). Thread t holds the blocked items
+        t * ITEMS .. t * ITEMS + ITEMS - 1. Like stock, the row is padded with
+        keys that sort last (all-ones bit-ordered); the index is the position, so
+        no iota."""
+        ITEMS = const_expr(32)
+        THREADS = const_expr(self.block[0])
+        WARPS = const_expr(THREADS // 32)
+        BITS = const_expr(4)
+        PASSES = const_expr(self.key_bits // BITS)
+        COUNTER_LANES = const_expr(8)  # (1 << BITS) digits / 2 counters per word
+        RAKING_SEGMENT = const_expr(COUNTER_LANES + 1)  # + 1 lane of bank padding
+        desc = const_expr(self.descending)
+        word_t = Int64 if const_expr(self.key_bits == 64) else Int32
+        key_mask = (
+            word_t(-1)
+            if const_expr(self.key_bits >= 32)
+            else word_t((1 << self.key_bits) - 1)
+        )
+        index_bits = const_expr(self.index_dtype.width)
+        index_mask = (
+            Int32(-1) if const_expr(index_bits == 32) else Int32((1 << index_bits) - 1)
+        )
         tidx, _, _ = cute.arch.thread_idx()
         row, _, _ = cute.arch.block_idx()
         n = mX.shape[1]
         lane = tidx % Int32(32)
         warp = tidx // Int32(32)
 
+        # cub's TempStorage is a union of the ranking counters and the key and
+        # value exchanges (and stock unions BlockLoad / BlockStore over it), so
+        # shared memory per CTA, and with it residency, matches stock.
+        padded = const_expr(
+            self.sort_size + self.sort_size // 32
+        )  # BlockExchange padding
+        key_bytes = const_expr(self.key_bits // 8)
+        index_bytes = const_expr(index_bits // 8)
+        ranking_bytes = const_expr(4 * (RAKING_SEGMENT * THREADS + WARPS + 1))
+        union_bytes = const_expr(
+            max(ranking_bytes, padded * max(key_bytes, index_bytes))
+        )
         smem = cutlass.utils.SmemAllocator()
-        s_count = smem.allocate_tensor(
-            Int32, cute.make_layout((NUM_WARPS * RADIX_BINS,)), byte_alignment=16
-        )
-        s_scan = smem.allocate_tensor(
-            Int32, cute.make_layout((NUM_WARPS + 1,)), byte_alignment=16
-        )
-        s_buf = smem.allocate_tensor(
-            word_t, cute.make_layout((self.sort_size,)), byte_alignment=16
+        storage = smem.allocate_tensor(
+            Uint8, cute.make_layout((union_bytes,)), byte_alignment=16
         )
 
-        warp_base = warp * Int32(32 * ITEMS)
+        def view(dtype, size, offset=0):
+            ptr = cute.recast_ptr(storage.iterator + offset, dtype=dtype)
+            return cute.make_tensor(ptr, cute.make_layout((size,)))
+
+        s_counters = view(Int32, RAKING_SEGMENT * THREADS)  # packed, for the scan
+        s_digit_counters = view(
+            Uint16, 2 * RAKING_SEGMENT * THREADS
+        )  # [lane][thread][half]
+        s_scan = view(Int32, WARPS + 1, 4 * RAKING_SEGMENT * THREADS)
+        s_keys = view(self.raw_dtype, padded)
+        s_indices = view(self.index_dtype, padded)
+
         bits = cute.make_rmem_tensor(ITEMS, word_t)
         index = cute.make_rmem_tensor(ITEMS, Int32)
-        digit = cute.make_rmem_tensor(ITEMS, Int32)
         rank = cute.make_rmem_tensor(ITEMS, Int32)
+        segment = cute.make_rmem_tensor(RAKING_SEGMENT, Int32)
+        blocked = tidx * Int32(ITEMS)
+        # Padded smem slots (one per 32 items): blocked item k of thread t sits at
+        # 33 t + k, striped item k at k (T + T / 32) + t + t / 32.
+        blocked_pad = tidx * Int32(ITEMS + 1)
+        striped_pad = tidx + (tidx >> Int32(5))
+        STRIPED_STEP = const_expr(THREADS + THREADS // 32)
+
+        # BLOCK_LOAD_TRANSPOSE: coalesced striped loads, then blocked via smem.
         for k in cutlass.range_constexpr(ITEMS):
-            j = warp_base + Int32(k * 32) + lane
-            bits[k] = word_t(0)
-            index[k] = j
+            j = Int32(k * THREADS) + tidx
             if j < n:
-                bits[k] = word_t(mX[row, j])
+                s_keys[striped_pad + Int32(k * STRIPED_STEP)] = mX[row, j]
+        cute.arch.barrier()
+        # Keys stay bit-ordered (to_bit_ordered) between the load and the store;
+        # -0.0 maps to +0.0 only when a digit is extracted, as cub does.
+        for k in cutlass.range_constexpr(ITEMS):
+            raw = word_t(s_keys[blocked_pad + Int32(k)]) & key_mask
+            bits[k] = radix_ordinal(
+                raw, self.kind, self.key_bits, desc, keep_negative_zero=True
+            )
+            j = blocked + Int32(k)
+            if j >= n:
+                bits[k] = key_mask
+            index[k] = j
+        cute.arch.barrier()
+        neg_zero = radix_ordinal(
+            word_t(1 << (self.key_bits - 1)),
+            self.kind,
+            self.key_bits,
+            desc,
+            keep_negative_zero=True,
+        )
+        pos_zero = radix_ordinal(word_t(0), self.kind, self.key_bits, desc)
 
         for p in cutlass.range_constexpr(PASSES):
-            for i in cutlass.range_constexpr(NUM_WARPS * RADIX_BINS // NUM_THREADS):
-                s_count[tidx + i * NUM_THREADS] = Int32(0)
+            shift_p = word_t(p * BITS)
+            # BlockRadixRank::RankKeys. Thread t owns column t of every counter
+            # lane, so counting needs no atomics.
+            for c in cutlass.range_constexpr(RAKING_SEGMENT):
+                s_counters[c * THREADS + tidx] = Int32(0)
+            for k in cutlass.range_constexpr(ITEMS):
+                digit = self._digit(bits[k], neg_zero, pos_zero, shift_p, BITS)
+                counter = (
+                    ((digit & Int32(COUNTER_LANES - 1)) * Int32(THREADS) + tidx)
+                    << Int32(1)
+                ) | (digit >> Int32(3))
+                prefix = Int32(s_digit_counters[counter])
+                s_digit_counters[counter] = Uint16(prefix + Int32(1))
+                # cub keeps digit_counters[ITEM] (a pointer) beside the prefix; the
+                # prefix is below 2^16, so the counter offset rides in the high half.
+                rank[k] = prefix | (counter << Int32(16))
+            cute.arch.barrier()
+
+            # ScanCounters: raking upsweep over this thread's segment, a block
+            # exclusive scan of the packed partials (the low half's total carried
+            # into the high half), then the downsweep back into smem.
+            partial = Int32(0)
+            for c in cutlass.range_constexpr(RAKING_SEGMENT):
+                segment[c] = s_counters[tidx * Int32(RAKING_SEGMENT) + Int32(c)]
+                partial = partial + segment[c]
+            excl, total = block_exclusive_prefix(partial, s_scan, lane, warp, WARPS)
+            running = excl + (total << Int32(16))
+            for c in cutlass.range_constexpr(RAKING_SEGMENT):
+                s_counters[tidx * Int32(RAKING_SEGMENT) + Int32(c)] = running
+                running = running + segment[c]
             cute.arch.barrier()
 
             for k in cutlass.range_constexpr(ITEMS):
-                if warp_base + Int32(k * 32) < n:
-                    j = warp_base + Int32(k * 32) + lane
-                    digit[k] = Int32(RADIX_BINS)  # inactive lanes match only each other
-                    if j < n:
-                        ord_ = radix_ordinal(bits[k], self.kind, self.key_bits, desc)
-                        digit[k] = Int32(
-                            (ord_ >> word_t(p * RADIX_BITS)) & word_t(DIGIT_MASK)
-                        )
-                    peers = Int32(cute.arch.match_sync(0xFFFFFFFF, digit[k]))
-                    earlier = peers & Int32(cute.arch.lanemask_lt())
-                    rank[k] = cute.arch.popc(earlier)
-                    slot = warp * RADIX_BINS + digit[k]
-                    if j < n:
-                        rank[k] = rank[k] + s_count[slot]
-                    cute.arch.sync_warp()
-                    if j < n and earlier == Int32(0):
-                        s_count[slot] = rank[k] + cute.arch.popc(peers)
-                    cute.arch.sync_warp()
+                c = rank[k]
+                rank[k] = (c & Int32(0xFFFF)) + Int32(s_digit_counters[c >> Int32(16)])
             cute.arch.barrier()
 
-            # Thread t owns digits [t * D, (t + 1) * D): per digit, exclusive
-            # offsets over warps, then an exclusive scan of the digit totals.
-            first = tidx * Int32(DIGITS_PER_THREAD)
-            totals = cute.make_rmem_tensor(DIGITS_PER_THREAD, Int32)
-            chunk = Int32(0)
-            for d in cutlass.range_constexpr(DIGITS_PER_THREAD):
-                running = Int32(0)
-                for w in cutlass.range_constexpr(NUM_WARPS):
-                    c = s_count[w * RADIX_BINS + first + d]
-                    s_count[w * RADIX_BINS + first + d] = running
-                    running = running + c
-                totals[d] = running
-                chunk = chunk + running
-            excl, _ = block_exclusive_prefix(chunk, s_scan, lane, warp, NUM_WARPS)
-            for d in cutlass.range_constexpr(DIGITS_PER_THREAD):
-                for w in cutlass.range_constexpr(NUM_WARPS):
-                    s_count[w * RADIX_BINS + first + d] = (
-                        s_count[w * RADIX_BINS + first + d] + excl
-                    )
-                excl = excl + totals[d]
-            cute.arch.barrier()
-
+            # BlockExchange::ScatterToBlocked, keys then values.
             for k in cutlass.range_constexpr(ITEMS):
-                if warp_base + Int32(k * 32) + lane < n:
-                    rank[k] = rank[k] + s_count[warp * RADIX_BINS + digit[k]]
-            for r in cutlass.range_constexpr(1 if packed else 2):
-                for k in cutlass.range_constexpr(ITEMS):
-                    if warp_base + Int32(k * 32) + lane < n:
-                        if const_expr(packed):
-                            s_buf[rank[k]] = (bits[k] << Int32(16)) | index[k]
-                        else:
-                            s_buf[rank[k]] = (
-                                bits[k] if const_expr(r == 0) else word_t(index[k])
-                            )
-                cute.arch.barrier()
-                for k in cutlass.range_constexpr(ITEMS):
-                    j = warp_base + Int32(k * 32) + lane
-                    if j < n:
-                        word = s_buf[j]
-                        if const_expr(packed):
-                            bits[k] = (word >> Int32(16)) & key_mask
-                            index[k] = word & Int32(0xFFFF)
-                        elif const_expr(r == 0):
-                            bits[k] = word
-                        else:
-                            index[k] = Int32(word)
-                cute.arch.barrier()
+                r = rank[k]
+                s_keys[r + (r >> Int32(5))] = self.raw_dtype(bits[k])
+            cute.arch.barrier()
+            for k in cutlass.range_constexpr(ITEMS):
+                bits[k] = word_t(s_keys[blocked_pad + Int32(k)]) & key_mask
+            cute.arch.barrier()
+            for k in cutlass.range_constexpr(ITEMS):
+                r = rank[k]
+                s_indices[r + (r >> Int32(5))] = self.index_dtype(index[k])
+            cute.arch.barrier()
+            for k in cutlass.range_constexpr(ITEMS):
+                index[k] = Int32(s_indices[blocked_pad + Int32(k)]) & index_mask
+            cute.arch.barrier()
 
+        # BLOCK_STORE_TRANSPOSE: blocked to striped via smem, coalesced stores;
+        # keys, then values.
         for k in cutlass.range_constexpr(ITEMS):
-            j = warp_base + Int32(k * 32) + lane
+            raw = radix_ordinal_inverse(bits[k], self.kind, self.key_bits, desc)
+            s_keys[blocked_pad + Int32(k)] = self.raw_dtype(raw)
+        cute.arch.barrier()
+        for k in cutlass.range_constexpr(ITEMS):
+            j = Int32(k * THREADS) + tidx
             if j < n:
-                mValues[row, j] = self.raw_dtype(bits[k])
-                mIndices[row, j] = self.index_dtype(index[k])
+                mValues[row, j] = s_keys[striped_pad + Int32(k * STRIPED_STEP)]
+        cute.arch.barrier()
+        for k in cutlass.range_constexpr(ITEMS):
+            s_indices[blocked_pad + Int32(k)] = self.index_dtype(index[k])
+        cute.arch.barrier()
+        for k in cutlass.range_constexpr(ITEMS):
+            j = Int32(k * THREADS) + tidx
+            if j < n:
+                mIndices[row, j] = s_indices[striped_pad + Int32(k * STRIPED_STEP)]
 
 
 def spec_name(spec: dict) -> str:
