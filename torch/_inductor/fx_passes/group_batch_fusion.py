@@ -653,15 +653,6 @@ _OPERATOR_TO_ATEN = {
     operator.neg: torch.ops.aten.neg,
     operator.pow: torch.ops.aten.pow,
     operator.matmul: torch.ops.aten.matmul,
-    torch.nn.functional.leaky_relu: torch.ops.aten.leaky_relu,
-    torch.nn.functional.hardswish: torch.ops.aten.hardswish,
-    torch.nn.functional.elu: torch.ops.aten.elu,
-    torch.nn.functional.gelu: torch.ops.aten.gelu,
-    torch.nn.functional.hardsigmoid: torch.ops.aten.hardsigmoid,
-    torch.nn.functional.hardtanh: torch.ops.aten.hardtanh,
-    torch.nn.functional.relu6: torch.ops.aten.relu6,
-    torch.nn.functional.selu: torch.ops.aten.selu,
-    torch.nn.functional.celu: torch.ops.aten.celu,
 }
 
 # Aliases that never merge source dimensions are traversable: their users are
@@ -767,18 +758,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
 )
 
 
-_INPLACE_ARG_INDEX = {
-    torch.nn.functional.elu: 2,
-    torch.nn.functional.leaky_relu: 2,
-    torch.nn.functional.hardtanh: 3,
-    torch.nn.functional.relu6: 1,
-    torch.nn.functional.selu: 1,
-    torch.nn.functional.celu: 1,
-    torch.nn.functional.hardswish: 1,
-    torch.nn.functional.hardsigmoid: 1,
-}
-
-
 def _node_value(value):
     if isinstance(value, torch.fx.Node):
         return value.meta.get("example_value", value.meta.get("val"))
@@ -815,13 +794,6 @@ def _layout_user_overloads(user: torch.fx.Node):
             if target is torch.nn.functional.sigmoid
             else torch.ops.aten.tanh
         )
-    elif target in _INPLACE_ARG_INDEX:
-        index = _INPLACE_ARG_INDEX[target]
-        if get_arg_value(user, index, "inplace") not in (None, False):
-            return []
-        args = args[:index] + args[index + 1 :]
-        kwargs.pop("inplace", None)
-        target = _OPERATOR_TO_ATEN[target]
     elif target in _OPERATOR_TO_ATEN:
         target = _OPERATOR_TO_ATEN[target]
     elif isinstance(target, str):
