@@ -823,9 +823,9 @@ class CompiledFxGraph(OutputCode):
         # later runs without capture. SAC is a dispatch mode, so the flag is
         # only needed while this thread has one active (checked per thread;
         # is_in_torch_dispatch_mode() is process-global).
-        set_in_graph = torch._C._len_torch_dispatch_stack() > 0
+        has_dispatch_mode = torch._C._len_torch_dispatch_stack() > 0
         prev_in_graph = False
-        if set_in_graph:
+        if has_dispatch_mode:
             prev_in_graph = getattr(_in_inductor_graph, "value", False)
             _in_inductor_graph.value = self.cudagraph_info is None
         # Autotune cache writes happen during the first call. End the bundler
@@ -848,7 +848,7 @@ class CompiledFxGraph(OutputCode):
                     if has_active_autotune_cache_bundler:
                         AutotuneCacheBundler.end_compile()
         finally:
-            if set_in_graph:
+            if has_dispatch_mode:
                 _in_inductor_graph.value = prev_in_graph
             if (
                 has_active_autotune_cache_bundler
