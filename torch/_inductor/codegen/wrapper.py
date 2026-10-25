@@ -6610,6 +6610,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
+        self.multi_kernel_state = MultiKernelState(parent_wrapper.multi_kernel_state)
         # Its code goes into the root unscanned, so it reports its own uses. The set is
         # the root's, as kernel_sources is, so that a nested subgraph reports straight to
         # the root rather than through each parent; a name reported for code the root
