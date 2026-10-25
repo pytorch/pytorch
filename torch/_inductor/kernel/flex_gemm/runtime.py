@@ -434,12 +434,22 @@ def gemm_epilogue(
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
-        SFA = quack_blockscaled_scale_view(
-            SFA, a.shape[0], a.shape[1], blockscaled_format
-        )
-        SFB = quack_blockscaled_scale_view(
-            SFB, b.shape[1], b.shape[0], blockscaled_format
-        )
+        if cu_seqlens_m is not None:
+            SFB = SFB.view(
+                b.shape[0],
+                ceildiv(b.shape[-1], 128),
+                ceildiv(b.shape[-2], 128),
+                32,
+                4,
+                4,
+            )
+        elif cu_seqlens_k is None:
+            SFA = quack_blockscaled_scale_view(
+                SFA, a.shape[0], a.shape[1], blockscaled_format
+            )
+            SFB = quack_blockscaled_scale_view(
+                SFB, b.shape[1], b.shape[0], blockscaled_format
+            )
     if (
         isinstance(output_transform, FlexGemmOutputContraction)
         and output_transform.chunked

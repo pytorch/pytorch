@@ -222,8 +222,9 @@ def _compile_gemm_epi(
         m if varlen_m else None,
         has_cu_tiles_m=varlen_m and _has_m_fold_sink(ops, epi_keys),
     )
-    mSFA = make_fake_sf_tensor(sf_dtype, l if sf_batched else None) if sf_dtype else None
-    mSFB = make_fake_sf_tensor(sf_dtype, l if sf_batched else None) if sf_dtype else None
+    sf_batch = l if sf_batched else None
+    mSFA = make_fake_sf_tensor(sf_dtype, 1 if varlen_m or varlen_k else sf_batch) if sf_dtype else None
+    mSFB = make_fake_sf_tensor(sf_dtype, 1 if varlen_k else sf_batch) if sf_dtype else None
     post_init = None
     if post_init_attrs:
 
