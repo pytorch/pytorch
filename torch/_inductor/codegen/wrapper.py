@@ -943,8 +943,9 @@ class _LineIfNamesUsed(DeferredLineBase):
 
 
 class _OmittedFromScan(DeferredLineBase):
-    """A block of the module that is not looked at for uses of the preamble's names: a
-    module-level kernel, which brings its own imports."""
+    """A block of the module that is not looked at for uses of the preamble's names:
+    a module-level kernel, which brings its own imports, or a subgraph's code, which
+    reported its uses when it was generated."""
 
     def __init__(self, line: str, wrapper: PythonWrapperCodegen) -> None:
         super().__init__(line)
@@ -2241,10 +2242,12 @@ class PythonWrapperCodegen(CodeGen):
         # until _generate scans the module, and until then every such line is emitted.
         self.used_names: OrderedSet[str] | None = None
         self.scanning_for_uses = False
-        # The lines write_if_used wrote; _generate scans only if there are any. The FX
-        # wrapper writes this header too but has its own _generate, which never scans,
-        # so it keeps every line.
+        # The lines write_if_used wrote. The FX wrapper writes this header too but has
+        # its own _generate, which never scans, so it keeps every line.
         self.conditional_lines: list[_LineIfNamesUsed] = []
+        # The names each subgraph uses, which the subgraph's own scan adds, since the
+        # root splices its code in unscanned.
+        self.names_used_unscanned: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -2456,8 +2459,12 @@ class PythonWrapperCodegen(CodeGen):
         if text:
             buf.writeline(_OmittedFromScan(text[code_start:], self))
 
-    def scan_for_used_names(self, module: IndentedBuffer) -> None:
-        """Record which names ``module``, the finished wrapper, uses."""
+    def needs_use_scan(self) -> bool:
+        """Whether _generate scans the finished module for uses of the preamble's names."""
+        return bool(self.conditional_lines)
+
+    def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
+        """The names ``module`` uses, leaving out what write_omitted_from_scan wrote."""
         self.scanning_for_uses = True
         try:
             text = module.getvalue()
@@ -2466,12 +2473,16 @@ class PythonWrapperCodegen(CodeGen):
         # Each kernel's provenance comment names its source ops ("Original ATen:
         # [aten.mul, ...]"), so whole-line comments are not uses. Trailing comments and
         # strings still count, which can only keep a line.
-        used = OrderedSet(
+        return OrderedSet(
             word
             for line in text.splitlines()
             if not line.lstrip().startswith("#")
             for word in re.findall(r"\w+", line)
         )
+
+    def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Record which names ``module``, the finished wrapper, uses."""
+        used = self.names_used_in(module) | self.names_used_unscanned
         # A kept binding uses the names its right-hand side starts from, which another
         # line may bind: `async_compile = AsyncCompile()`.
         rhs_words = [
@@ -3578,7 +3589,7 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
-        if self.conditional_lines:
+        if self.needs_use_scan():
             self.scan_for_used_names(result)
 
         return (
@@ -4534,7 +4545,7 @@ class PythonWrapperCodegen(CodeGen):
         return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
-        self.subgraph_definitions.splice(subgraph_code.value)
+        self.write_omitted_from_scan(self.subgraph_definitions, subgraph_code.value)
 
     @classmethod
     def _get_triton_info_kernel_cls(cls):
@@ -6586,6 +6597,11 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
         self.multi_kernel_state = MultiKernelState(parent_wrapper.multi_kernel_state)
+        # Its code goes into the root unscanned, so it reports its own uses. The set is
+        # the root's, as kernel_sources is, so that a nested subgraph reports straight to
+        # the root rather than through each parent; a name reported for code the root
+        # does not splice in can only keep a preamble line, never drop one.
+        self.names_used_unscanned = root.names_used_unscanned
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
@@ -6598,6 +6614,20 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def add_benchmark_harness(self, output):
         pass
+
+    def needs_use_scan(self) -> bool:
+        # The root needs this subgraph's uses even if it writes no conditional line.
+        return True
+
+    def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Add the names ``module``, this subgraph's code, uses to the set shared with
+        the root, which splices that code in unscanned. Unlike the root's scan, it sets
+        no ``used_names``: it keeps or drops no line of its own."""
+        if self.conditional_lines:
+            # Only the root keeps or drops them; this scan never would.
+            name = self.subgraph_name
+            raise AssertionError(f"subgraph {name} wrote a line kept only if used")
+        self.names_used_unscanned |= self.names_used_in(module)
 
     def benchmark_compiled_module(self, output):
         pass
