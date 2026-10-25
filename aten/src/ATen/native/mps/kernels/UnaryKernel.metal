@@ -760,6 +760,13 @@ struct pow_scalar_functor {
   }
 };
 
+struct frac_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return static_cast<T>(float(x) - trunc(float(x)));
+  }
+};
+
 struct round_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -803,6 +810,10 @@ REGISTER_UNARY_OP(round, half, half);
 REGISTER_ROUNDING_OPS(float);
 REGISTER_ROUNDING_OPS(half);
 REGISTER_ROUNDING_OPS(bfloat);
+
+REGISTER_UNARY_OP(frac, float, float);
+REGISTER_UNARY_OP(frac, half, half);
+REGISTER_UNARY_OP(frac, bfloat, bfloat);
 
 REGISTER_UNARY_OP(sqr, char, char);
 REGISTER_UNARY_OP(sqr, uchar, uchar);
