@@ -1,13 +1,13 @@
 """CuTeDSL kernels for ``torch.sort(x, out=(values, indices))`` with narrow indices.
 
-Each kernel mirrors one leaf of the stock CUDA sort and lives in its own module;
-this module is the single ``build(spec)`` entry point the AOT export imports.
+Each kernel lives in its own module; this module is the single ``build(spec)``
+entry point the AOT export imports.
 """
 
-from . import cutedsl_inplace
+from . import cutedsl_inplace, cutedsl_register
 
 
-_KERNELS = {"inplace": cutedsl_inplace}
+_KERNELS = {"inplace": cutedsl_inplace, "register": cutedsl_register}
 
 
 def build(spec: dict) -> dict:
