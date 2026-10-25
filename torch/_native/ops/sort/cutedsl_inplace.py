@@ -120,7 +120,9 @@ class InplaceSort:
     ):
         rows_per_cta = const_expr(self.block[1])
         self.kernel(mX, mValues, mIndices).launch(
-            grid=[(mX.shape[0] + rows_per_cta - 1) // rows_per_cta, 1, 1],
+            # Rows are at least 1 (empty sorts return before launch) and up to
+            # policy.MAX_ROWS; rounding up as (M + r - 1) // r would wrap Int32.
+            grid=[(mX.shape[0] - 1) // rows_per_cta + 1, 1, 1],
             block=[self.block[0], self.block[1], 1],
             stream=stream,
             min_blocks_per_mp=self.min_blocks,

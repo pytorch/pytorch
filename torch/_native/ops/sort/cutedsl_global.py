@@ -125,7 +125,7 @@ class OnesweepSort:
     ):
         num_items = mKeys.shape[0]
         PASSES = const_expr(self.passes)
-        portions = (num_items + Int32(self.portion - 1)) // Int32(self.portion)
+        portions = (num_items - Int32(1)) // Int32(self.portion) + Int32(1)
         bins = portions * Int32(PASSES)
         lookback = bins * Int32(1 + RADIX_BINS)
         # cub clears the tile counters and the first portion's bins.
@@ -226,8 +226,11 @@ class OnesweepSort:
         cute.arch.barrier()
         keys = cute.make_rmem_tensor(ITEMS, self.word)
         pad = self.pad_key(nsort, segment_bits)
-        step = grid * Int32(THREADS * ITEMS)
-        for tile in cutlass.range(bidx * Int32(THREADS * ITEMS), num_items, step):
+        # Loop over tile indices: an element-offset counter would pass 2^31 - 1
+        # (and wrap) on rows within one grid step of it.
+        tiles = (num_items - Int32(1)) // Int32(THREADS * ITEMS) + Int32(1)
+        for t in cutlass.range(bidx, tiles, grid):
+            tile = t * Int32(THREADS * ITEMS)
             for u in cutlass.range_constexpr(ITEMS):
                 j = tile + Int32(u * THREADS) + tidx
                 keys[u] = pad
@@ -484,7 +487,7 @@ class OnesweepSort:
 class FullSortPostprocess:
     """sort_postprocess_kernel: gather the sorted positions back into rows."""
 
-    def __init__(self, key_bits: int, index_dtype: type[cutlass.Numeric]):
+    def __init__(self, index_dtype: type[cutlass.Numeric]):
         self.index_dtype = index_dtype
 
     @cute.jit
@@ -499,7 +502,7 @@ class FullSortPostprocess:
     ):
         n = mX.shape[0]
         self.kernel(mX, mValues, mIndices, mPositions, nsort).launch(
-            grid=[(n + 511) // 512, 1, 1], block=[512, 1, 1], stream=stream
+            grid=[(n - 1) // 512 + 1, 1, 1], block=[512, 1, 1], stream=stream
         )
 
     @cute.kernel
@@ -556,7 +559,7 @@ def compile_args(spec: dict) -> tuple[OnesweepSort | FullSortPostprocess, list]:
     if spec["kernel"] == "full_sort_postprocess":
         raw = RAW_CUTE[spec["key_bits"]]
         index = INDEX_DTYPES[getattr(torch, spec["index"])]
-        kernel = FullSortPostprocess(spec["key_bits"], index)
+        kernel = FullSortPostprocess(index)
         fake = [fake_compact(t, (sym(),)) for t in (raw, raw, index, Int32)]
         return kernel, [*fake, Int32(1), stream]
     kernel = _sorter(spec)

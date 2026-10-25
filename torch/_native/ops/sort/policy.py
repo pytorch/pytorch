@@ -14,6 +14,9 @@ kernel replaces exactly one stock leaf:
 INPLACE_MAX_NSORT = 4096
 PER_ROW_MIN_NSORT = 1_000_000
 SEGMENTED_MIN_ROWS = 128
+# The DSL kernels take the row count and the row length as Int32.
+MAX_ROWS = (1 << 31) - 1
+MAX_NSORT = (1 << 31) - 1
 INDEX_MAX = {
     "uint8": (1 << 8) - 1,
     "int8": (1 << 7) - 1,

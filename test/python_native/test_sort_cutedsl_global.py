@@ -9,6 +9,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -114,6 +115,51 @@ class TestCuTeDSLGlobalSort(TestCase):
         for key_dtype in (torch.bool, torch.float32):
             x = _make_keys(key_dtype, (rows, 1_000_001))
             self._check(x, torch.int32, True)
+
+    @largeTensorTest("12GB", device="cuda")
+    def test_long_row_portions(self):
+        # Past 2^31 - 2^28 elements the portion count once wrapped Int32.
+        n = 2**31 - 2**28 + 2**20
+        x = torch.randint(0, 256, (1, n), dtype=torch.uint8, device="cuda")
+        values = torch.empty_like(x)
+        indices = torch.empty(1, n, dtype=torch.int32, device="cuda")
+        torch.sort(x, stable=True, out=(values, indices))
+        self.assertTrue(bool((values[0, 1:] >= values[0, :-1]).all()))
+        sample = indices[0, :: 2**20].long()
+        self.assertEqual(x[0, sample], values[0, :: 2**20])
+        del x, values, indices
+
+    def test_histogram_grid_larger_than_row(self):
+        # The histogram loop's counter once wrapped Int32 when a block's last
+        # tile plus the grid step passed 2^31 - 1; a huge grid on a short row
+        # exercises the same step without 2^31 elements.
+        from torch._native.cutedsl.launch import compile_kernel
+        from torch._native.ops.sort import cutedsl_global as g
+
+        x = _make_keys(torch.uint8, (1, 100_000))
+        spec = g.onesweep_spec(_arch(), "unsigned", 8, "int32", False)
+        sorter, fake = g.compile_args(spec)
+        run = compile_kernel(sorter, *fake)
+        values = torch.empty_like(x)
+        indices = torch.empty(x.shape, dtype=torch.int32, device="cuda")
+        state = torch.empty(
+            sorter.state_words(x.numel()), dtype=torch.int32, device="cuda"
+        )
+        # One pass for 8-bit keys: the outputs double as the pass buffers.
+        run(
+            x[0],
+            values[0],
+            values[0],
+            indices[0],
+            indices[0],
+            state,
+            1 << 20,
+            x.shape[1],
+            0,
+        )
+        ref_values, ref_indices = torch.sort(x, stable=True)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices.long(), ref_indices)
 
     def test_portions(self):
         # cub carries each portion's bins into the next; shrink the portion

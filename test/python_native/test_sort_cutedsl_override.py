@@ -85,6 +85,116 @@ class TestCuTeDSLSortOverride(TestCase):
             self._launches(lambda: torch.sort(x, stable=True, out=int64_out)), 0
         )
 
+    def test_indices_on_another_device_falls_back(self):
+        x = torch.randn(4, 100, device="cuda")
+        out = (torch.empty_like(x), torch.empty(4, 100, dtype=torch.uint16))
+        self.assertEqual(
+            self._launches(
+                lambda: self.assertRaises(RuntimeError, torch.sort, x, out=out)
+            ),
+            0,
+        )
+
+    def test_row_length_beyond_int32_declines(self):
+        # uint32 indices address rows the Int32 kernel shapes cannot.
+        from torch._native.ops.sort import cutedsl_impl
+
+        n = 2**31 + 16
+        x = torch.zeros(1, 1, device="cuda").expand(1, n)
+        out = {
+            "values": torch.zeros(1, 1, device="cuda").expand(1, n),
+            "indices": torch.zeros(1, 1, dtype=torch.uint32, device="cuda").expand(
+                1, n
+            ),
+        }
+        self.assertFalse(cutedsl_impl._out_cond(x, stable=True, dim=-1, **out))
+
+    @parametrize("nsort", (1000, 5000))
+    def test_outs_aliasing_input_fall_back(self, nsort):
+        # Some leaves read x while writing values: aliasing goes to stock, which
+        # copies first, or raises on a partial overlap.
+        x = torch.randn(64, nsort, device="cuda")
+        ref_values, ref_indices = torch.sort(x, stable=True)
+        indices = torch.empty(x.shape, dtype=torch.int16, device="cuda")
+        self.assertEqual(
+            self._launches(lambda: torch.sort(x, stable=True, out=(x, indices))), 0
+        )
+        self.assertEqual(x, ref_values)
+        self.assertEqual(indices.long(), ref_indices)
+        buf = torch.randn(65 * nsort, device="cuda")
+        x, values = buf[: 64 * nsort].view(64, nsort), buf[nsort:].view(64, nsort)
+        with self.assertRaisesRegex(RuntimeError, "single memory location"):
+            torch.sort(x, stable=True, out=(values, indices))
+
+    def test_outs_aliasing_each_other_fall_back(self):
+        # values and indices in one storage would race in the leaves.
+        from torch._native.ops.sort import cutedsl_impl
+
+        x = torch.randn(64, 1000, device="cuda")
+        buf = torch.empty(2 * x.numel(), dtype=torch.int32, device="cuda")
+        values, indices = (
+            buf[: x.numel()].view(torch.float32).view(x.shape),
+            buf[x.numel() :].view(x.shape),
+        )
+        self.assertFalse(
+            cutedsl_impl._out_cond(
+                x, stable=True, dim=-1, values=values, indices=indices
+            )
+        )
+        self.assertEqual(
+            self._launches(lambda: torch.sort(x, stable=True, out=(values, indices))), 0
+        )
+        ref_values, ref_indices = torch.sort(x, stable=True)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices.long(), ref_indices)
+
+    def test_resized_outs_take_input_strides(self):
+        x = torch.randn(1000, 64, device="cuda").t()
+        values = torch.empty(0, device="cuda")
+        indices = torch.empty(0, dtype=torch.int16, device="cuda")
+        self.assertEqual(
+            self._launches(lambda: torch.sort(x, stable=True, out=(values, indices))), 1
+        )
+        ref = torch.sort(x, stable=True)
+        self.assertEqual(values.stride(), ref.values.stride())
+        self.assertEqual(indices.stride(), ref.values.stride())
+        self.assertEqual(values, ref.values)
+        self.assertEqual(indices.long(), ref.indices)
+
+    def test_cow_outs_fire(self):
+        x = torch.randn(64, 1000, device="cuda")
+        source = torch.zeros(64, 1000, device="cuda")
+        values = torch._lazy_clone(source)
+        indices = torch._lazy_clone(
+            torch.zeros(64, 1000, dtype=torch.int16, device="cuda")
+        )
+        self.assertEqual(
+            self._launches(lambda: torch.sort(x, stable=True, out=(values, indices))), 1
+        )
+        self.assertEqual(values, torch.sort(x, stable=True).values)
+        self.assertEqual(source, torch.zeros_like(source))
+
+    def test_rows_beyond_int32_decline(self):
+        # The kernels take the row count as Int32; stride-0 views avoid the memory.
+        from torch._native.ops.sort import cutedsl_impl
+
+        x = torch.zeros(1, 1, device="cuda").expand(2**31, 2)
+        out = {
+            "values": torch.zeros(1, 1, device="cuda").expand(2**31, 2),
+            "indices": torch.zeros(1, 1, dtype=torch.uint8, device="cuda").expand(
+                2**31, 2
+            ),
+        }
+        self.assertFalse(cutedsl_impl._out_cond(x, stable=True, dim=-1, **out))
+        self.assertTrue(
+            cutedsl_impl._out_cond(
+                x[: 2**31 - 1],
+                stable=True,
+                dim=-1,
+                **{k: v[: 2**31 - 1] for k, v in out.items()},
+            )
+        )
+
     @parametrize("shape", ((50, 8000), (1, 70000), (300, 5000)))
     def test_wide_leaves_fire(self, shape):
         # Full-sort (< 128 rows), per-row (one row) and segmented leaves.

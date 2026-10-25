@@ -11,6 +11,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -125,6 +126,17 @@ class TestCuTeDSLInplaceSort(TestCase):
         for nsort, stable in ((17, False), (100, True), (300, True), (2000, True)):
             x = _make_keys(torch.float16, (4099, nsort))
             self._check(x, torch.uint16, False, stable)
+
+    @largeTensorTest("7GB", device="cuda")
+    def test_max_rows(self):
+        # policy.MAX_ROWS rows: the grid count must not wrap Int32.
+        from torch._native.ops.sort.policy import MAX_ROWS
+
+        x = torch.zeros(MAX_ROWS, 1, dtype=torch.uint8, device="cuda")
+        values, indices = torch.empty_like(x), torch.empty_like(x)
+        for stable in (False, True):
+            torch.sort(x, stable=stable, out=(values, indices))
+            self.assertEqual(int(indices.max()), 0)
 
     def test_empty(self):
         for shape in ((0, 64), (5, 0)):

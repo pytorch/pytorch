@@ -14,7 +14,7 @@ import torch
 from torch._prims_common.wrappers import _maybe_resize_out
 
 from ... import cutedsl_utils as cu
-from .policy import INDEX_MAX, stock_leaf
+from .policy import INDEX_MAX, MAX_NSORT, MAX_ROWS, stock_leaf
 
 
 _KEY_DTYPES = frozenset(
@@ -79,15 +79,22 @@ def _out_cond(
         return False
     if values.dtype != self.dtype or values.device != self.device:
         return False
-    if torch.cuda.get_device_capability(self.device)[0] < 9:
+    if indices.device != self.device or _arch(self.device.index or 0) < 90:
         return False
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(values) or is_cow(indices):
+    # Some leaves read x while writing values, and overlapping outs race; stock
+    # copies first (or raises on a partial overlap), so leave any aliasing to it.
+    is_alias_of = torch._C._is_alias_of  # pyrefly: ignore[missing-attribute]
+    if any(
+        is_alias_of(a, b)
+        for a, b in ((values, self), (indices, self), (values, indices))
+    ):
         return False
     nsort = self.size(dim)
     if nsort - 1 > INDEX_MAX[_INDEX_NAMES[indices.dtype]]:
         return False  # meta raises the user-facing error
-    return True
+    if nsort > MAX_NSORT:
+        return False
+    return self.numel() // nsort <= MAX_ROWS
 
 
 def _out_impl(
@@ -102,9 +109,14 @@ def _out_impl(
     dim = dim % self.dim()
     nsort = self.size(dim)
     kernel = _launcher(self, nsort, bool(stable), descending)
-    # The router replaces the generated out= wrapper, so resize as it would.
-    _maybe_resize_out(values, self.shape)
-    _maybe_resize_out(indices, self.shape)
+    # The router replaces the generated out= wrapper, so resize as it would,
+    # with self's dense strides like the meta function.
+    if values.shape != self.shape or indices.shape != self.shape:
+        strides = torch.empty_like(self, device="meta").stride()
+        for out in (values, indices):
+            if out.shape != self.shape:
+                _maybe_resize_out(out, self.shape)
+                out.as_strided_(self.shape, strides)
 
     # Sort a dim-last row-major view; copy in and out only when the caller's
     # layout differs, as sort_cuda_kernel does.
