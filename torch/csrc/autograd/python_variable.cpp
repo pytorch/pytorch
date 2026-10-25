@@ -135,6 +135,9 @@ class OperatorArgsKwargsView {
       return false;
     }
     const auto& default_ivalue = *arg.default_value();
+    if (default_ivalue.isDouble() || default_ivalue.isComplexDouble()) {
+      return false;
+    }
     const auto& ivalue = arguments_[idx];
     if (default_ivalue != ivalue) {
       return false;
