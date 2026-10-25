@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import inspect
 import logging
 import operator
 from collections import OrderedDict
@@ -764,72 +765,76 @@ def _node_value(value):
     return value
 
 
+def _unwrap_functional(target, args, kwargs):
+    if getattr(target, "__module__", None) != "torch.nn.functional":
+        return None
+    name = getattr(target, "__name__", None)
+    packet = getattr(torch.ops.aten, name, None) if name else None
+    if not isinstance(packet, torch._ops.OpOverloadPacket):
+        return None
+    try:
+        params = list(inspect.signature(target).parameters)
+    except (TypeError, ValueError):
+        params = []
+    if "inplace" in params:
+        index = params.index("inplace")
+        value = args[index] if len(args) > index else kwargs.get("inplace")
+        if value not in (None, False):
+            return "inplace"
+        if len(args) > index:
+            args = args[:index] + args[index + 1 :]
+        kwargs.pop("inplace", None)
+    return packet, args, kwargs
+
+
 def _layout_user_overloads(user: torch.fx.Node):
     target = user.target
     args = tuple(user.args)
     kwargs = dict(user.kwargs)
-    # These Python wrappers are not C builtins, so map them to their ATen
-    # packet before resolving the overload from the example values.
-    if target in (torch.nn.functional.relu, torch.nn.functional.silu):
-        if get_arg_value(user, 1, "inplace") not in (None, False):
-            return []
-        args = args[:1]
-        kwargs.pop("inplace", None)
-        target = (
-            torch.ops.aten.relu
-            if target is torch.nn.functional.relu
-            else torch.ops.aten.silu
-        )
-    elif target is torch.nn.functional.softmax:
+    if target is torch.nn.functional.softmax:
         if get_arg_value(user, 1, "dim") is None:
-            return []
+            return None
         args = (*args[:2], *args[3:])
         kwargs.pop("_stacklevel", None)
         target = torch.ops.aten.softmax
     elif target is torch.nn.functional.layer_norm:
         target = torch.ops.aten.layer_norm
-    elif target in (torch.nn.functional.sigmoid, torch.nn.functional.tanh):
-        target = (
-            torch.ops.aten.sigmoid
-            if target is torch.nn.functional.sigmoid
-            else torch.ops.aten.tanh
-        )
-    elif target in _OPERATOR_TO_ATEN:
-        target = _OPERATOR_TO_ATEN[target]
-    elif isinstance(target, str):
-        if not hasattr(torch.Tensor, target):
-            return []
-        target = getattr(torch.ops.aten, target, None)
-        if target is None:
-            return []
+    else:
+        unwrapped = _unwrap_functional(target, args, kwargs)
+        if unwrapped == "inplace":
+            return None
+        if isinstance(unwrapped, tuple):
+            target, args, kwargs = unwrapped
+        elif target in _OPERATOR_TO_ATEN:
+            target = _OPERATOR_TO_ATEN[target]
+        elif isinstance(target, str):
+            if not hasattr(torch.Tensor, target):
+                return None
+            target = getattr(torch.ops.aten, target, None)
+            if target is None:
+                return None
     if not args and "input" in kwargs:
         args = (kwargs.pop("input"),)
     if isinstance(target, torch._ops.OpOverload):
-        return [target] if target.namespace == "aten" else []
+        return target if target.namespace == "aten" else None
     if isinstance(target, torch._ops.OpOverloadPacket):
         qualname = target._qualified_op_name
         packet = target
     else:
         qualname = torch.jit._builtins._find_builtin(target)
         if qualname is None:
-            return []
+            return None
         namespace, _, op_name = qualname.partition("::")
         packet = getattr(getattr(torch.ops, namespace, None), op_name, None)
         if not isinstance(packet, torch._ops.OpOverloadPacket):
-            return []
+            return None
     args, kwargs = torch.fx.node.map_arg((args, kwargs), _node_value)
     try:
-        overload_name = torch._C._jit_resolve_packet(
-            qualname,
-            *args,
-            **kwargs,
-        )
+        overload_name = torch._C._jit_resolve_packet(qualname, *args, **kwargs)
     except RuntimeError:
-        return []
+        return None
     overload = getattr(packet, overload_name, None)
-    if overload is None or overload.namespace != "aten":
-        return []
-    return [overload]
+    return overload if overload is not None and overload.namespace == "aten" else None
 
 
 def _shape_value(value):
@@ -907,26 +912,18 @@ def _memory_format(user: torch.fx.Node):
     return user.kwargs.get("memory_format")
 
 
-def _is_conversion_user(user: torch.fx.Node, ops) -> bool:
+def _is_conversion_user(user: torch.fx.Node, op) -> bool:
     if user.op == "call_method":
         return user.target in _CONVERSION_METHODS
-    if user.op != "call_function":
-        return False
-    if not ops:
-        return False
-    return OrderedSet(op.overloadpacket.__name__ for op in ops) <= OrderedSet(
+    return op is not None and op.overloadpacket.__name__ in OrderedSet(
         ["_to_copy", "to", "type_as"]
     )
 
 
-def _is_contiguous_user(user: torch.fx.Node, ops) -> bool:
+def _is_contiguous_user(user: torch.fx.Node, op) -> bool:
     if user.op == "call_method":
         return user.target == "contiguous"
-    if user.op != "call_function":
-        return False
-    return bool(ops) and OrderedSet(
-        op.overloadpacket.__name__ for op in ops
-    ) == OrderedSet(["contiguous"])
+    return op is not None and op.overloadpacket.__name__ == "contiguous"
 
 
 def _contiguous_aliases(user: torch.fx.Node) -> bool:
@@ -936,13 +933,13 @@ def _contiguous_aliases(user: torch.fx.Node) -> bool:
     return _memory_format(user) in (None, torch.contiguous_format)
 
 
-def _direct_is_mutable(user: torch.fx.Node, ops) -> bool:
+def _direct_is_mutable(user: torch.fx.Node, op) -> bool:
     if user.op not in ("call_method", "call_function"):
         return False
     if user.op == "call_function" and user.target is operator.getitem:
         return False
-    if ops:
-        if any(op._schema.is_mutable for op in ops):
+    if op is not None:
+        if op._schema.is_mutable:
             return True
         return _is_mutable_node(user.target)
     if user.op == "call_function":
@@ -953,7 +950,7 @@ def _direct_is_mutable(user: torch.fx.Node, ops) -> bool:
     return _is_mutable_node(user.target)
 
 
-def _allowed_alias(user: torch.fx.Node, ops) -> bool:
+def _allowed_alias(user: torch.fx.Node, op) -> bool:
     # Traversable alias: safe only when it cannot merge dimensions.
     if user.op == "call_function" and user.target is operator.getitem:
         return True
@@ -963,14 +960,12 @@ def _allowed_alias(user: torch.fx.Node, ops) -> bool:
         if user.target in _SPLIT_VIEW_OPS:
             return _is_split_only_view(user)
         return False
-    if user.op != "call_function":
+    if user.op != "call_function" or op is None:
         return False
-    if not ops:
-        return False
-    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
-    if names <= _NON_MERGING_ALIAS_OPS:
+    name = op.overloadpacket.__name__
+    if name in _NON_MERGING_ALIAS_OPS:
         return True
-    if names <= _SPLIT_VIEW_OPS:
+    if name in _SPLIT_VIEW_OPS:
         return _is_split_only_view(user)
     return False
 
@@ -1020,15 +1015,12 @@ def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
 
 _STORAGE_SENSITIVE_OPS = OrderedSet(
     [
+        # A row view such as b[1].contiguous() can read neighboring storage
+        # through as_strided, and its storage offset differs from the copy.
         "as_strided",
-        "as_strided_copy",
         "storage_offset",
-        "sym_storage_offset",
-        "data_ptr",
         "is_set_to",
         "_has_same_storage_numel",
-        "stride",
-        "sym_stride",
     ]
 )
 
@@ -1043,8 +1035,8 @@ def _has_storage_sensitive_user(node: torch.fx.Node) -> bool:
         visited.add(user)
         if user.op not in ("call_method", "call_function"):
             continue
-        ops = _layout_user_overloads(user)
-        if any(op.overloadpacket.__name__ in _STORAGE_SENSITIVE_OPS for op in ops):
+        op = _layout_user_overloads(user)
+        if op is not None and op.overloadpacket.__name__ in _STORAGE_SENSITIVE_OPS:
             return True
         if _is_aliasing_user(user, assume_alias=True):
             pending.extend(user.users)
@@ -1052,10 +1044,6 @@ def _has_storage_sensitive_user(node: torch.fx.Node) -> bool:
 
 
 def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
-    # Eager contiguous() can return the projection itself, so a mutation
-    # anywhere behind it also changes the original tensor. Traverse every
-    # aliasing user, including merging views and no-op conversions, to catch
-    # that mutation.
     pending = list(node.users)
     visited = OrderedSet()
     while pending:
@@ -1063,19 +1051,19 @@ def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
         if user in visited:
             continue
         visited.add(user)
-        ops = (
+        op = (
             _layout_user_overloads(user)
             if user.op in ("call_method", "call_function")
             else None
         )
-        if _direct_is_mutable(user, ops):
+        if _direct_is_mutable(user, op):
             return True
         if _is_aliasing_user(user, assume_alias=True):
             pending.extend(user.users)
     return False
 
 
-def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops) -> bool:
+def _direct_layout_user_is_sensitive(user: torch.fx.Node, op) -> bool:
     """Return True if fusing the producer would change this user's semantics.
 
     Fusion replaces a contiguous ``[M, N_i]`` linear output with
@@ -1093,35 +1081,26 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops) -> bool:
         return True
     if user.target is torch.nn.functional.dropout:
         return get_arg_value(user, 3, "inplace") not in (None, False)
-    if ops and ops[0].overloadpacket.__name__ == "clone":
+    if op is not None and op.overloadpacket.__name__ == "clone":
         return False
-    if _is_conversion_user(user, ops):
-        # A copying conversion produces dense output with the same dimension
-        # order. A no-op conversion aliases the input and is traversed by the
-        # caller instead of being accepted here.
+    if _is_conversion_user(user, op):
         return False
-    if not ops or any(op._schema.is_mutable for op in ops):
+    if op is None or op._schema.is_mutable:
         return True
-    if any(op.namespace != "aten" for op in ops):
+    if op.namespace != "aten":
         return True
-    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
-    if names.intersection(_LAYOUT_SENSITIVE_OPS) or any(
-        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
+    name = op.overloadpacket.__name__
+    if (
+        name in _LAYOUT_SENSITIVE_OPS
+        or op.is_view
+        or (torch.Tag.maybe_aliasing_or_mutating in op.tags)
     ):
         return True
-    return not (
-        all(torch.Tag.pointwise in op.tags for op in ops)
-        or all(op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops)
-    )
+    return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
-    """True if any consumer, including one behind an alias, is unsafe.
-
-    Traverses non-merging aliases and split-only views so later consumers are
-    checked. Default contiguous() can alias the eager output, so mutations
-    behind it are scanned separately.
-    """
+    """True if any consumer, including one behind an alias, is unsafe."""
     pending = list(node.users)
     visited = OrderedSet()
     while pending:
@@ -1129,34 +1108,27 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         if user in visited:
             continue
         visited.add(user)
-        ops = (
+        op = (
             _layout_user_overloads(user)
             if user.op in ("call_method", "call_function")
             else None
         )
-        if _is_contiguous_user(user, ops):
+        if _is_contiguous_user(user, op):
             if not _contiguous_aliases(user):
                 return True
-            # contiguous() may return the input itself; only then can its users
-            # observe the fused layout. A real copy is terminal safe.
             if _is_aliasing_user(user, assume_alias=True):
                 if _has_mutable_alias_user(user) or _has_storage_sensitive_user(user):
                     return True
             continue
-        if _allowed_alias(user, ops):
+        if _allowed_alias(user, op):
             pending.extend(user.users)
-        elif _direct_layout_user_is_sensitive(user, ops):
+        elif _direct_layout_user_is_sensitive(user, op):
             return True
         elif _is_aliasing_user(user, assume_alias=True):
-            # Safe ops that return the input itself (eval or p=0 dropout) must
-            # still have their users checked. Missing metadata is treated as an
-            # alias so an unchecked mutation cannot slip through.
             pending.extend(user.users)
     return False
 
 
-# Poor person's check for if a node in the graph mutates its input.
-# (the graph is torch IR, so we will see torch fns and python operators)
 def _is_mutable_node(tgt):
     if str(tgt).endswith("_"):
         # e.g. torch.mul_, torch.Tensor.mul_

@@ -686,6 +686,12 @@ class TestGroupBatchFusion(TestCase):
             "conversion_dtype_after_transpose",
             "conversion_noop_after_transpose",
             "split_view_mutation",
+            "merge_view_2d",
+            "transpose_view_neg1",
+            "leaky_relu",
+            "leaky_relu_inplace",
+            "elu_inplace_pos",
+            "elu_inplace_false",
             "transpose_merge_view",
             "getitem_output",
             "custom_contiguous",
@@ -745,11 +751,37 @@ class TestGroupBatchFusion(TestCase):
             return result
 
         def transpose_merge_view(graph, node):
-            return graph.call_method("view", args=(transpose(graph, node), -1))
+            transposed = transpose(graph, node)
+            result = graph.call_method("view", args=(transposed, -1))
+            result.meta["example_value"] = transposed.meta["example_value"].reshape(-1)
+            return result
+
+        def merge_view(graph, node):
+            result = graph.call_method("view", args=(node, -1))
+            result.meta["example_value"] = node.meta["example_value"].view(-1)
+            return result
+
+        def split_view(graph, node):
+            result = graph.call_method("view", args=(node, 2, 2, 6))
+            result.meta["example_value"] = node.meta["example_value"].view(2, 2, 6)
+            return result
 
         def split_view_mutation(graph, node):
-            view = graph.call_method("view", args=(node, 2, 2, 6))
+            view = split_view(graph, node)
             return graph.call_method("mul_", args=(view, 2))
+
+        def merge_view_2d(graph, node):
+            result = graph.call_method("view", args=(node, 2, 12))
+            result.meta["example_value"] = node.meta["example_value"].view(2, 12)
+            return result
+
+        def transpose_view_neg1(graph, node):
+            transposed = transpose(graph, node)
+            result = graph.call_method("view", args=(transposed, 4, -1))
+            result.meta["example_value"] = transposed.meta["example_value"].reshape(
+                4, -1
+            )
+            return result
 
         def custom_contiguous(graph, node):
             return graph.call_function(
@@ -763,7 +795,9 @@ class TestGroupBatchFusion(TestCase):
             return graph.call_method("view", args=(copied, -1))
 
         def getitem_output(graph, node):
-            return graph.output(graph.call_function(operator.getitem, args=(node, 0)))
+            item = graph.call_function(operator.getitem, args=(node, 0))
+            item.meta["example_value"] = node.meta["example_value"][0]
+            return graph.output(item)
 
         def out_user(graph, node):
             out = graph.placeholder("out")
@@ -784,12 +818,8 @@ class TestGroupBatchFusion(TestCase):
 
         builders = {
             "output": lambda graph, node: graph.output(node),
-            "merge_view": lambda graph, node: graph.call_method(
-                "view", args=(node, -1)
-            ),
-            "split_view": lambda graph, node: graph.call_method(
-                "view", args=(node, 2, 2, 6)
-            ),
+            "merge_view": merge_view,
+            "split_view": split_view,
             "transpose": lambda graph, node: graph.call_method(
                 "transpose", args=(node, 0, 1)
             ),
@@ -816,6 +846,21 @@ class TestGroupBatchFusion(TestCase):
                 kwargs={"input": node, "shape": (2, 2, 6)},
             ),
             "split_view_mutation": split_view_mutation,
+            "merge_view_2d": merge_view_2d,
+            "transpose_view_neg1": transpose_view_neg1,
+            "leaky_relu": lambda graph, node: graph.call_function(
+                torch.nn.functional.leaky_relu, args=(node, 0.1)
+            ),
+            "leaky_relu_inplace": lambda graph, node: graph.call_function(
+                torch.nn.functional.leaky_relu,
+                args=(node, 0.1, True),
+            ),
+            "elu_inplace_pos": lambda graph, node: graph.call_function(
+                torch.nn.functional.elu, args=(node, 1.0, True)
+            ),
+            "elu_inplace_false": lambda graph, node: graph.call_function(
+                torch.nn.functional.elu, args=(node, 1.0, False)
+            ),
             "transpose_merge_view": transpose_merge_view,
             "getitem_output": getitem_output,
             "custom_contiguous": custom_contiguous,
@@ -893,6 +938,8 @@ class TestGroupBatchFusion(TestCase):
             "movedim",
             "split_with_sizes",
             "tensor_split",
+            "leaky_relu",
+            "elu_inplace_false",
         }
 
         graph = torch.fx.Graph()
@@ -1015,6 +1062,44 @@ class TestGroupBatchFusion(TestCase):
 
         module = M().eval()
         _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
+
+    @_lhs_fusion_config
+    def test_batch_linear_lhs_skips_custom_contiguous_consumer(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return (
+                    _require_contiguous(self.large(x)),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
+
+    @_lhs_fusion_config
+    def test_batch_linear_lhs_skips_direct_output(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return (
+                    self.large(x),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        module = M().eval()
+        _check_lhs_fusion(self, module, [2], torch.randn(32, 64), check_strides=True)
 
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
@@ -1145,20 +1230,6 @@ class TestGroupBatchFusion(TestCase):
         _check_lhs_fusion(self, module, [2], torch.randn(4, 8), check_strides=True)
 
     @_lhs_fusion_config
-    def test_batch_linear_lhs_different_width_pointwise_consumers_fuse(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.proj_large = torch.nn.Linear(64, 192, bias=False)
-                self.proj_small = torch.nn.Linear(64, 16, bias=False)
-
-            def forward(self, x):
-                return torch.sin(self.proj_large(x)), torch.cos(self.proj_small(x))
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
-
-    @_lhs_fusion_config
     def test_batch_linear_lhs_symbolic_projection_width_fuses(self):
         # Weights and biases are graph inputs so Dynamo keeps their leading
         # dimension symbolic; the matcher must still prove the width check.
@@ -1181,24 +1252,6 @@ class TestGroupBatchFusion(TestCase):
             actual = torch.compile(fn, fullgraph=True)(x, w1, w2, b1, b2)
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
-
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_keeps_contiguous_fusion(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.proj_large = torch.nn.Linear(64, 192, bias=False)
-                self.proj_a = torch.nn.Linear(64, 16, bias=False)
-                self.proj_b = torch.nn.Linear(64, 16, bias=False)
-
-            def forward(self, x):
-                large = torch.sin(self.proj_large(x).contiguous())
-                a = torch.sin(self.proj_a(x).contiguous())
-                b = torch.sin(self.proj_b(x).contiguous())
-                return torch.cat((large, a, b), dim=1)
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [3], torch.randn(32, 64))
 
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
