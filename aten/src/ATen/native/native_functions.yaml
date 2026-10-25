@@ -9723,8 +9723,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: signbit_out
-    MPS: signbit_out_mps
+    CPU, CUDA, MPS, XPU: signbit_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: signbit_sparse_csr_out
   tags: pointwise
