@@ -1,18 +1,16 @@
-"""In-place leaves: mirror ``sortKeyValueInplace`` for rows of at most 4096.
+"""In-place leaves: mirror ``sortKeyValueInplace`` for the rows policy.route
+sends here (the register kernel takes the other rows of at most 2048).
 
 Stock ``Sort.cpp`` copies ``self`` into ``values``, fills ``indices`` with iota
 and sorts both in place. These kernels read ``x`` and write ``values`` and the
 out= index dtype directly, with the leaf and launch shape stock picks by row
 length (``sort_size``):
 
-- 32, unstable only: ``bitonicSortKVInPlace``, 16 threads x 2 items per row and
-  16 rows per CTA. Its compare-exchange network runs in registers, so ties
-  resolve exactly as in stock.
-- 128: ``warpMergeSortKVInPlace``, one warp x 4 items per row and 16 rows per
-  CTA. Its result is the unique stable order, computed by the same network on
-  keys made unique by their index.
-- 1024 / 2048 / 4096: ``radixSortKVInPlace``, ``sort_size / 32`` threads x 32
-  items, one row per CTA: cub ``BlockRadixSort`` with its defaults (4-bit digits,
+- 32, unstable rows of at most 32: ``bitonicSortKVInPlace``, 16 threads x 2
+  items per row and 16 rows per CTA. Its compare-exchange network runs in
+  registers, so ties resolve exactly as in stock.
+- 4096, rows of 2049 .. 4096: ``radixSortKVInPlace``, 128 threads x 32 items,
+  one row per CTA: cub ``BlockRadixSort`` with its defaults (4-bit digits,
   packed-counter ranking, padded exchanges, transpose load and store).
 
 Stock uses these shapes for every key width, 8-byte keys included.
@@ -42,7 +40,7 @@ from .cutedsl_common import (
     RAW_CUTE,
     raw_view,
 )
-from .policy import inplace_sort_size
+from .policy import BITONIC_MAX_NSORT, INPLACE_MAX_NSORT, inplace_sort_size
 
 
 # Bits of +inf; larger magnitudes are NaN.
@@ -52,12 +50,12 @@ _INF_BITS = {
     "float32": 0x7F800000,
     "float64": 0x7FF0000000000000,
 }
-# max_block_y of the bitonic and warp merge leaves.
+# max_block_y of the bitonic leaf.
 _ROWS_PER_CTA = 16
-# Registers per thread that ptxas gives stock's radixSortKVInPlace for keys and
-# narrow values of at most 4 bytes with 64 and 128 threads (cuobjdump
-# -res-usage); the radix leaf asks for the residency that implies. 8-byte keys
-# and 32-thread CTAs get no budget, as stock's run near 255 there.
+# Registers per thread that ptxas gives stock's 128-thread radixSortKVInPlace
+# for keys and narrow values of at most 4 bytes (cuobjdump -res-usage); the
+# radix leaf asks for the residency that implies. 8-byte keys get no budget, as
+# stock's run near 255 there.
 _STOCK_RADIX_REGISTERS = 168
 _REGISTERS_PER_SM = 65536
 
@@ -93,18 +91,16 @@ class InplaceSort:
         self.raw_dtype = RAW_CUTE[self.key_bits]
         self.index_dtype = index_dtype
         self.descending = descending
+        if sort_size not in (BITONIC_MAX_NSORT, INPLACE_MAX_NSORT):
+            raise ValueError(f"no in-place leaf of sort size {sort_size}")
         self.sort_size = sort_size
-        if sort_size == 32:
-            self.block = (16, _ROWS_PER_CTA)
-        elif sort_size == 128:
-            self.block = (32, _ROWS_PER_CTA)
-        else:
-            self.block = (sort_size // 32, 1)
+        bitonic = sort_size == BITONIC_MAX_NSORT
+        self.block = (16, _ROWS_PER_CTA) if bitonic else (sort_size // 32, 1)
         threads = self.block[0] * self.block[1]
         self.min_blocks = (
-            _REGISTERS_PER_SM // (_STOCK_RADIX_REGISTERS * threads)
-            if sort_size > 128 and threads >= 64 and self.key_bits <= 32
-            else 0
+            0
+            if bitonic or self.key_bits > 32
+            else _REGISTERS_PER_SM // (_STOCK_RADIX_REGISTERS * threads)
         )
 
     @cute.jit
@@ -124,13 +120,13 @@ class InplaceSort:
             stream=stream,
             min_blocks_per_mp=self.min_blocks,
             # Without a preference the driver sizes the carveout for min_blocks
-            # only, which starves the 1-warp CTAs of the 1024 leaf.
+            # only, which leaves the radix leaf short of shared memory.
             preferred_smem_carveout=100,
         )
 
     @cute.kernel
     def kernel(self, mX: cute.Tensor, mValues: cute.Tensor, mIndices: cute.Tensor):
-        if const_expr(self.sort_size <= 128):
+        if const_expr(self.sort_size == BITONIC_MAX_NSORT):
             self.bitonic(mX, mValues, mIndices)
         else:
             self.radix(mX, mValues, mIndices)
@@ -221,16 +217,11 @@ class InplaceSort:
     def less(self, ka, wa: Int32, kb, wb: Int32, IDX_BITS: cutlass.Constexpr):
         """bitonicSwap's ``comp(kA, kB) && validA || !validB`` on encoded keys.
 
-        The unstable leaf compares ordinals only, so ties swap exactly as in
-        stock. The stable leaf also compares indices, so keys are unique and
-        the network yields the stable order.
+        Only ordinals are compared, so ties swap exactly as in stock.
         """
         if const_expr(self.key_bits <= 32):
-            shift = const_expr(IDX_BITS if self.sort_size == 32 else 0)
-            return (ka >> shift) < (kb >> shift)
-        if const_expr(self.sort_size == 32):
-            return ka < kb or (wb >> IDX_BITS) != Int32(0)
-        return ka < kb or (ka == kb and wa < wb)
+            return (ka >> IDX_BITS) < (kb >> IDX_BITS)
+        return ka < kb or (wb >> IDX_BITS) != Int32(0)
 
     @cute.jit
     def _digit(self, ord_, neg_zero, pos_zero, shift, bits: cutlass.Constexpr) -> Int32:
@@ -469,8 +460,9 @@ def inplace_sort(
 ) -> None:
     """Sort each row of 2D row-major ``x`` into ``values`` and ``indices``.
 
-    The caller checks eligibility: key and index dtypes supported, row length
-    at most 4096 and addressable by the index dtype, contiguous outputs.
+    The caller checks eligibility: key and index dtypes supported, rows that
+    policy.route sends here (unstable of at most 32, or 2049 .. 4096) and the
+    index dtype addresses, contiguous outputs.
     """
     if x.numel() == 0:
         return

@@ -1,15 +1,14 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Correctness tests for the CuTeDSL in-place sort leaves (rows of at most 4096).
-# Each kernel mirrors the stock leaf for its row length and must match it
-# bit-exactly on values and indices, including the leaf's order of special
-# values: the comparison leaves (n <= 128) tie all NaNs above +inf, the radix
-# leaf puts negative NaN first; both tie -0.0 with +0.0. Key widths are 1, 2, 4
-# and 8 bytes.
-
-import unittest
+# Correctness tests for the CuTeDSL in-place sort leaves at the rows the router
+# sends them: unstable rows of at most 32 (bitonic) and rows of 2049 .. 4096
+# (radix). Each kernel mirrors the stock leaf and must match it bit-exactly on
+# values and indices, including the leaf's order of special values: the bitonic
+# leaf ties all NaNs above +inf, the radix leaf puts negative NaN first; both tie
+# -0.0 with +0.0. Key widths are 1, 2, 4 and 8 bytes.
 
 import itertools
+import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
@@ -26,8 +25,8 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# bool keys take the partition kernel.
 _KEY_DTYPES = (
-    torch.bool,
     torch.uint8,
     torch.int8,
     torch.int16,
@@ -46,8 +45,12 @@ _INDEX_DTYPES = (
     torch.uint32,
     torch.int32,
 )
-# Each side of every leaf boundary: 32 (bitonic), 128 (warp merge), 4096.
-_NSORTS = (1, 2, 31, 32, 33, 127, 128, 129, 4095, 4096)
+# (nsort, stable) the router sends here: unstable rows of at most 32 (bitonic)
+# and rows of 2049 .. 4096 (radix), each side of both boundaries.
+_LEAF_ROWS = (
+    *((n, False) for n in (1, 2, 31, 32)),
+    *((n, s) for n in (2049, 4095, 4096) for s in (False, True)),
+)
 _NEG_NAN = {
     torch.float16: 0xFE00,
     torch.bfloat16: 0xFFC0,
@@ -125,9 +128,8 @@ class TestCuTeDSLInplaceSort(TestCase):
 
     @parametrize("key_dtype", _slow_unless(lambda k: k in _FAST_KEYS, _KEY_DTYPES))
     @parametrize("descending", (False, True))
-    @parametrize("stable", (False, True))
-    def test_leaf_boundaries(self, key_dtype, descending, stable):
-        for nsort in _NSORTS:
+    def test_leaf_boundaries(self, key_dtype, descending):
+        for nsort, stable in _LEAF_ROWS:
             x = _make_keys(key_dtype, (_ROWS, nsort))
             self._check(x, torch.int16, descending, stable)
 
@@ -137,18 +139,20 @@ class TestCuTeDSLInplaceSort(TestCase):
         _slow_unless(
             lambda i, k: k == torch.int32 or i == torch.int16,
             _INDEX_DTYPES,
-            (torch.bool, torch.bfloat16, torch.int32, torch.float64),
+            (torch.uint8, torch.bfloat16, torch.int32, torch.float64),
         ),
     )
     def test_index_dtypes(self, index_dtype, key_dtype):
+        # 8-bit indices cannot address the radix leaf's rows.
         limit = min(4096, torch.iinfo(index_dtype).max + 1)
-        for nsort, stable in ((32, False), (min(128, limit), True), (limit, True)):
+        rows = [(32, False)] + ([(limit, True)] if limit > 2048 else [])
+        for nsort, stable in rows:
             for descending in (False, True):
                 x = _make_keys(key_dtype, (_ROWS, nsort))
                 self._check(x, index_dtype, descending, stable)
 
     def test_many_rows(self):
-        for nsort, stable in ((17, False), (100, True), (300, True), (2000, True)):
+        for nsort, stable in ((17, False), (3000, True)):
             x = _make_keys(torch.float16, (4099, nsort))
             self._check(x, torch.uint16, False, stable)
 

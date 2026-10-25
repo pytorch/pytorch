@@ -40,12 +40,12 @@ INDEX_MAX = {
 
 
 def inplace_sort_size(nsort: int, stable: bool) -> int:
-    """Padded sort size of the stock in-place leaf for a row of ``nsort``."""
+    """Padded sort size of the in-place leaf route() sends a row of ``nsort``
+    to: the bitonic leaf for unstable rows of at most BITONIC_MAX_NSORT, else
+    the radix leaf (rows of REGISTER_MAX_NSORT + 1 .. INPLACE_MAX_NSORT)."""
     if not stable and nsort <= BITONIC_MAX_NSORT:
         return BITONIC_MAX_NSORT
-    if nsort <= WARP_MERGE_MAX_NSORT:
-        return WARP_MERGE_MAX_NSORT
-    return max(1024, 1 << (nsort - 1).bit_length())
+    return INPLACE_MAX_NSORT
 
 
 def register_rung(nsort: int) -> int:
