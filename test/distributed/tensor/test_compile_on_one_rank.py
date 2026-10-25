@@ -1129,8 +1129,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         from torch._inductor import utils as inductor_utils
         from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 
+        def mask_configs(table):
+            return re.sub(r": \{.*\},$", ": {...},", table.group(0), flags=re.MULTILINE)
+
         def norm(s):
-            return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+            s = re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+            # Each device autotunes on its own, so the configs it pins can differ.
+            table = r"^KERNEL_CONFIGS = \{\n(?:    .*\n)*?\}"
+            return re.sub(table, mask_configs, s, flags=re.MULTILINE)
 
         cases = {
             "benchmark_kernel": (
