@@ -1915,6 +1915,30 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+
+def _custom_op_modules() -> tuple[str, ...]:
+    """Return the importable modules that registered Python custom ops in this process."""
+    from torch._library.custom_ops import OPDEFS
+
+    names = set()
+    for opdef in list(OPDEFS.values()):
+        name = getattr(opdef._init_fn, "__module__", None)
+        module = sys.modules.get(name) if name and name != "__main__" else None
+        if module is not None and getattr(module, "__spec__", None) is not None:
+            names.add(name)
+    return tuple(sorted(names))
+
+
+def _write_custom_op_imports(buf: Any) -> None:
+    # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
+    # path imports the module whose torch.library.custom_op registers it; under lazy
+    # imports the model's own import of that module may never resolve either.
+    buf.writeline(f"CUSTOM_OP_MODULES = {_custom_op_modules()!r}")
+    buf.writeline("import importlib as _importlib")
+    buf.writeline("for _module in CUSTOM_OP_MODULES:")
+    buf.writeline("    _importlib.import_module(_module)")
+    buf.writeline("")
+
 def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
@@ -1924,6 +1948,7 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
+    _write_custom_op_imports(buf)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -1977,6 +2002,7 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
+    _write_custom_op_imports(buf)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2302,6 +2328,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
+    _write_custom_op_imports(buf)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
