@@ -699,6 +699,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 if _coor_device_index_is_current(device):
                     with graph.inserting_before(node):
                         device = graph.call_function(current_device)
+                        device.meta["val"] = fake_tensor.device
 
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(

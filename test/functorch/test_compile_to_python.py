@@ -65,12 +65,6 @@ def _flat_inputs(m, x):
     )
 
 
-def _exec(src):
-    ns = {"__name__": "_compiled"}
-    exec(compile(src, "<compiled>", "exec"), ns)
-    return ns["call"]
-
-
 # A stand-in for the authoritative inner-call placeholder that compile_to_python threads
 # into _compose_standalone_module. The guard tests below build wrappers by hand and never
 # reference the real inner call, so any distinct object serves as its identity.
@@ -192,7 +186,7 @@ class TestAOTCompileToPython(TestCase):
         # Return contract: cache is the opaque acceleration bytes or None.
         self.assertIsInstance(cache, (bytes, type(None)))
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_load_from_python_standalone_and_warm(self):
         # load_from_python is the inverse of compile_to_python: python_code runs standalone
@@ -219,7 +213,7 @@ class TestAOTCompileToPython(TestCase):
         src, _cache = _compose(m, x)
         _assert_composed(self, src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_sequential_linear_relu_runs_like_eager(self):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
@@ -227,7 +221,7 @@ class TestAOTCompileToPython(TestCase):
         src, _cache = _compose(m, x)
         _assert_composed(self, src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_reduction_runs_like_eager(self):
         m = _SumDim1().eval()
@@ -235,7 +229,7 @@ class TestAOTCompileToPython(TestCase):
         src, _cache = _compose(m, x)
         _assert_composed(self, src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_dynamic_shapes_runs_at_multiple_shapes(self):
         # compile_to_python has no dynamic_shapes knob: it auto-detects symbolic shapes
@@ -249,7 +243,7 @@ class TestAOTCompileToPython(TestCase):
         gm = _capture(m, x, tracing_mode="symbolic")
         src, _cache = compile_to_python(gm, _flat_inputs(m, x))
         _assert_composed(self, src)
-        fn = _exec(src)
+        fn = load_from_python(src)
         for n in (8, 16, 5):
             xi = torch.randn(n, 4)
             with torch.no_grad():
@@ -276,7 +270,7 @@ class TestAOTCompileToPython(TestCase):
         )
         src, _cache = compile_to_python(gm, example_inputs)
         _assert_composed(self, src)
-        fn = _exec(src)
+        fn = load_from_python(src)
         for n in (8, 16, 5):
             xi = torch.randn(n, 4)
             with torch.no_grad():
@@ -291,7 +285,7 @@ class TestAOTCompileToPython(TestCase):
         _assert_composed(self, src)
         eager = m(x)
         with torch.no_grad():
-            out = _exec(src)(_flat_inputs(m, x))
+            out = load_from_python(src)(_flat_inputs(m, x))
         self.assertEqual(len(out), len(eager))
         for got, want in zip(out, eager):
             self.assertEqual(got, want)
@@ -311,7 +305,7 @@ class TestAOTCompileToPython(TestCase):
 
         buf = torch.zeros(4)
         with torch.no_grad():
-            composed_out = _exec(src)([buf, x])[0]
+            composed_out = load_from_python(src)([buf, x])[0]
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(buf, eager.b)
 
@@ -333,7 +327,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertIn("ViewMeta(", src)
         xc = x.clone()
         with torch.no_grad():
-            out = _exec(src)([xc])[0]
+            out = load_from_python(src)([xc])[0]
         self.assertEqual(out, m(x))
         self.assertEqual(
             out.untyped_storage().data_ptr(), xc.untyped_storage().data_ptr()
@@ -365,7 +359,7 @@ class TestAOTCompileToPython(TestCase):
 
         xc, yc = x.clone(), y.clone()
         with torch.no_grad():
-            composed_out = _exec(src)([xc, xc, yc, yc])[0]
+            composed_out = load_from_python(src)([xc, xc, yc, yc])[0]
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(yc, ye)  # mutation landed on the right tensor
         self.assertEqual(yc._version, ye._version)  # and bumped the right version
@@ -395,7 +389,7 @@ class TestAOTCompileToPython(TestCase):
 
         ac, bc = make()
         with torch.no_grad():
-            composed_out = _exec(src)([ac, bc])[0]
+            composed_out = load_from_python(src)([ac, bc])[0]
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(ac, ae)
         self.assertEqual(bc, be)
@@ -416,7 +410,7 @@ class TestAOTCompileToPython(TestCase):
         src, _cache = compile_to_python(gm, [tt])
         _assert_composed(self, src)
         with torch.no_grad():
-            out = _exec(src)([tt])[0]
+            out = load_from_python(src)([tt])[0]
         eager = f(tt)
         self.assertIsInstance(out, TwoTensor)
         self.assertEqual(out.a, eager.a)
@@ -444,7 +438,7 @@ class TestAOTCompileToPython(TestCase):
         src, _cache = compile_to_python(gm, [ta, tb])
         _assert_composed(self, src)
         with torch.no_grad():
-            out = _exec(src)([ta, tb])[0]
+            out = load_from_python(src)([ta, tb])[0]
         eager = f(ta, tb)
         self.assertIsInstance(out, TwoTensor)
         self.assertEqual(out.a, eager.a)
@@ -481,7 +475,7 @@ class TestAOTCompileToPython(TestCase):
         _assert_composed(self, src)
         self.assertIn("_DisableAutocast_", src)
         with torch.no_grad():
-            out = _exec(src)(pb)[0]
+            out = load_from_python(src)(pb)[0]
         with torch.no_grad(), torch.autocast("cpu", dtype=torch.bfloat16):
             eager = m(x)
         self.assertEqual(out, eager)
@@ -502,7 +496,7 @@ class TestAOTCompileToPython(TestCase):
         _assert_composed(self, src)
         self.assertIn("isnan", src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_orchestration_inlined_as_real_def(self):
         # The orchestration is spliced as a real top-level ``def _runtime_wrapper`` that the
@@ -521,7 +515,7 @@ class TestAOTCompileToPython(TestCase):
         # positional slots. A future change re-threading a real context here would fail.
         self.assertIn(", contextlib.nullcontext, lambda: None,", src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_chain_wrapper_inlined_as_real_def(self):
         # A graph with a chain wrapper (tensor subclass -> ``inner_fn``, which closes over
@@ -542,7 +536,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertIn("compiled_fn = _inner_call", src)
         self.assertIn("def _runtime_wrapper(", src)
         with torch.no_grad():
-            out = _exec(src)([tt])[0]
+            out = load_from_python(src)([tt])[0]
         eager = f(tt)
         self.assertIsInstance(out, TwoTensor)
         self.assertEqual(out.a, eager.a)
@@ -577,7 +571,7 @@ class TestAOTCompileToPython(TestCase):
             src, _cache = compile_to_python(gm, [x])
         _assert_composed(self, src)
         self.assertIn("CUDARngStateHelper", src)
-        fn = _exec(src)
+        fn = load_from_python(src)
         torch.manual_seed(123)
         with torch.no_grad():
             out = fn([x])[0]
@@ -638,7 +632,7 @@ class TestAOTCompileToPython(TestCase):
             src, _cache = _compose(m, x)
         _assert_composed(self, src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_concurrent_compile_to_python_smoke(self):
         # End-to-end concurrency smoke test: _COMPILE_LOCK serializes the entry point (the
@@ -686,7 +680,7 @@ class TestAOTCompileToPython(TestCase):
         for src, m, x in results.values():
             _assert_composed(self, src)
             with torch.no_grad():
-                self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+                self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_capture_sink_is_thread_local(self):
         # The capture sink MUST be thread-local: two threads forced (via a barrier) to be
@@ -875,7 +869,7 @@ class TestAOTCompileToPythonDevice(TestCase):
         _assert_composed(self, src)
         self.assertIn("@triton.jit", src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     @onlyAccelerator
     def test_output_alias_regen_runs_like_eager(self, device):
@@ -886,7 +880,7 @@ class TestAOTCompileToPythonDevice(TestCase):
         self.assertIn("gen_alias_from_base", src)
         xc = x.clone()
         with torch.no_grad():
-            out = _exec(src)([xc])[0]
+            out = load_from_python(src)([xc])[0]
         self.assertEqual(out, m(x))
         self.assertEqual(
             out.untyped_storage().data_ptr(), xc.untyped_storage().data_ptr()
@@ -906,7 +900,7 @@ class TestAOTCompileToPythonDevice(TestCase):
         src, _cache = compile_to_python(gm, [tt])
         _assert_composed(self, src)
         with torch.no_grad():
-            out = _exec(src)([tt])[0]
+            out = load_from_python(src)([tt])[0]
         eager = f(tt)
         self.assertIsInstance(out, TwoTensor)
         self.assertEqual(out.a, eager.a)
@@ -928,7 +922,7 @@ class TestAOTCompileToPythonDevice(TestCase):
 
         buf = torch.zeros(4, device=device)
         with torch.no_grad():
-            composed_out = _exec(src)([buf, x])[0]
+            composed_out = load_from_python(src)([buf, x])[0]
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(buf, eager.b)
 
@@ -1064,7 +1058,7 @@ class TestAOTComposeGuards(TestCase):
         )
         self.assertIn("def _rebuild", src)  # helper spliced (needs_rebuild=True)
         self.assertIn("_rebuild(", src)
-        out = _exec(src)(
+        out = load_from_python(src)(
             []
         )  # exec the module; _rebuild runs to rebuild the baked value
         self.assertEqual(out[0], baked)
@@ -1237,7 +1231,7 @@ call = runner.call
         # pin that the Assign form (not just some ``call``) was the accepted one, then exec to
         # confirm the spliced ``_inner_call = call`` actually resolves at runtime.
         self.assertIn("call = runner.call", src)
-        self.assertEqual(_exec(src)([7]), [7])
+        self.assertEqual(load_from_python(src)([7]), [7])
 
 
 instantiate_device_type_tests(
