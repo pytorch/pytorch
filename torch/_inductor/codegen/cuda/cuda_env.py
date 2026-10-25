@@ -29,6 +29,7 @@ def get_cuda_arch() -> str | None:
 @clear_on_fresh_cache
 @functools.lru_cache(1)
 def is_datacenter_blackwell_arch() -> bool:
+    """True for NVIDIA GPUs with tcgen05: SM 10.x and SM 11.x (Jetson Thor)."""
     # ROCm reports the gfx version as the capability, e.g. (11, 0) for RDNA3.
     if torch.version.hip:
         return False
