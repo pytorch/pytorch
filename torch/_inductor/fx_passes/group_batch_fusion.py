@@ -1167,7 +1167,7 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
                 return True
             # contiguous() may return the input itself; only then can its users
             # observe the fused layout. A real copy is terminal safe.
-            if _is_aliasing_user(user):
+            if _is_aliasing_user(user, assume_alias=True):
                 if _has_mutable_alias_user(user) or _has_storage_sensitive_user(user):
                     return True
             continue
