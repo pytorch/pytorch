@@ -5978,6 +5978,12 @@ class SIMDScheduling(BaseScheduling):
     ):
         if not isinstance(tiling, dict):
             raise AssertionError(f"expected tiling to be a dict, got {type(tiling)}")
+        if any(
+            node.is_split_scan()
+            for node in NodeScheduleMarker.only_nodes(node_schedule)
+        ):
+            if len(tiling) != 2 or "r0_" not in tiling:
+                return False
         return all(
             SIMDKernel.is_compatible(
                 tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
@@ -6068,6 +6074,14 @@ class SIMDScheduling(BaseScheduling):
                     range_r = node_ranges[1]  # (K)
                     tiling = cls.create_tiling(range_y_x, range_r)
                     return _TilingSelection(tiling, None, None)
+
+        # TritonSplitScanKernel requires 1-D pointwise and 1-D scan (x, r0_).
+        # Multi-dimensional pointwise tiling is not supported for split scan.
+        if any(
+            node.is_split_scan()
+            for node in NodeScheduleMarker.only_nodes(node_schedule)
+        ):
+            return _TilingSelection(default_tiling, None, None)
 
         # # TODO: enable by default
         if (

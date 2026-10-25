@@ -110,7 +110,9 @@ class TritonSplitScanKernel(TritonKernel):
         cse_compute = functools.partial(self.cse.generate, self.compute)
 
         if len(self.numels) != 2:
-            raise AssertionError("Unexpected tiling")
+            raise AssertionError(
+                f"Unexpected tiling for split scan: expected 2 dimensions (x, r0_), got {self.numels}"
+            )
         min_rblock = config.triton.min_split_scan_rblock
         reduction_numel = sympy_product(
             numel

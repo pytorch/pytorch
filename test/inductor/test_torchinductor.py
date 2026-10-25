@@ -3513,6 +3513,19 @@ class CommonTemplate:
         inp = torch.randint(0, 10, (8, 16), dtype=torch.uint8, device=self.device)
         self.assertEqual(cfn(inp), fn(inp))
 
+    def test_cumsum_transposed_split_scan(self):
+        # https://github.com/pytorch/pytorch/issues/201978
+        # Scan over dim 0 of transposed tensor with scan dimension >= 129 (split scan path)
+        def fn1(x):
+            return torch.cumsum(x.transpose(-1, -2), 0)
+
+        def fn2(x):
+            return torch.cumsum(x.transpose(-1, -2).contiguous(), 0)
+
+        x = torch.randn(130, 63, 8, device=self.device)
+        self.common(fn1, (x,))
+        self.common(fn2, (x,))
+
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
