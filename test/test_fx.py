@@ -8,6 +8,7 @@ import contextlib
 import copy
 import gc
 import functools
+import importlib
 import inspect
 import io
 import math
@@ -20,6 +21,7 @@ import traceback
 import types
 import typing
 import unittest
+import unittest.mock
 import weakref
 import warnings
 from math import sqrt
@@ -1666,6 +1668,27 @@ class TestFX(JitTestCase):
         # Test scriptability
         traced_scripted = torch.jit.script(traced)
         self.assertEqual(traced_scripted(torch.rand(4)), 2)
+
+    def test_autowrap_skips_unresolved_lazy_imports(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        class Globals(dict):
+            def items(self):
+                raise AssertionError("autowrap read every global")
+
+            def __getitem__(self, name):
+                if name == "lazy":
+                    raise AssertionError("autowrap resolved a lazy import")
+                return super().__getitem__(name)
+
+        frame_dict = Globals(sqrt=math.sqrt, lazy=object())
+        with unittest.mock.patch.object(
+            importlib, "is_lazy_import", lambda d, name: name == "lazy", create=True
+        ):
+            with _Patcher() as patcher:
+                _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
+                self.assertIsNot(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
