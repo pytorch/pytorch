@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON
@@ -4973,9 +4974,11 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertGreaterEqual(len(seen), 2 if tracer == "dynamo" else 1)
         for patches in seen:
             self.assertEqual(patches["max_autotune_gemm_backends"], "ATEN")
-        # A graph-breaking capture mints resume names this process already holds.
+        # A graph-breaking capture mints resume names this process already holds,
+        # and under crossref its guards hold only inside the harness's mode.
         if tracer == "dynamo":
-            self._serve_in_fresh_process([((self.x2,), {}, y)])
+            if not TEST_WITH_CROSSREF:
+                self._serve_in_fresh_process([((self.x2,), {}, y)])
         else:
             self.assertEqual(load(self.artifact, self.cache)(self.model, self.x2), y)
 
