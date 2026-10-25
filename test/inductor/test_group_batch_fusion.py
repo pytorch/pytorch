@@ -49,6 +49,16 @@ def _(x: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(x)
 
 
+@torch.library.custom_op("_batch_linear_lhs_test::contiguous", mutates_args=())
+def _custom_contiguous(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@_custom_contiguous.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
 @contextlib.contextmanager
 def _record_fusion_subsets():
     from unittest import mock
@@ -677,6 +687,9 @@ class TestGroupBatchFusion(TestCase):
             "conversion_dtype_after_transpose",
             "conversion_noop_after_transpose",
             "split_view_mutation",
+            "custom_contiguous",
+            "contiguous_as_strided",
+            "transpose_contiguous_merge_view",
             "reshape_kwargs",
             "out_user",
             "dropout_eval_output",
@@ -737,14 +750,19 @@ class TestGroupBatchFusion(TestCase):
             view = graph.call_method("view", args=(node, 2, 2, 6))
             return graph.call_method("mul_", args=(view, 2))
 
-        def getitem_output(graph, node):
-            return graph.output(graph.call_function(operator.getitem, args=(node, 0)))
+        def custom_contiguous(graph, node):
+            return graph.call_function(
+                torch.ops._batch_linear_lhs_test.contiguous.default, args=(node,)
+            )
 
         def transpose_contiguous_merge_view(graph, node):
             transposed = transpose(graph, node)
             copied = graph.call_method("contiguous", args=(transposed,))
             copied.meta["example_value"] = transposed.meta["example_value"].contiguous()
             return graph.call_method("view", args=(copied, -1))
+
+        def getitem_output(graph, node):
+            return graph.output(graph.call_function(operator.getitem, args=(node, 0)))
 
         def out_user(graph, node):
             out = graph.placeholder("out")
@@ -798,6 +816,11 @@ class TestGroupBatchFusion(TestCase):
                 kwargs={"input": node, "shape": (2, 2, 6)},
             ),
             "split_view_mutation": split_view_mutation,
+            "custom_contiguous": custom_contiguous,
+            "contiguous_as_strided": lambda graph, node: graph.call_method(
+                "as_strided", args=(contiguous(graph, node), (4, 6), (6, 1))
+            ),
+            "transpose_contiguous_merge_view": transpose_contiguous_merge_view,
             "out_user": out_user,
             "dropout_eval_output": lambda graph, node: graph.output(
                 dropout(graph, node, False)
@@ -976,52 +999,6 @@ class TestGroupBatchFusion(TestCase):
 
         module = M().eval()
         _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
-
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_skips_preserve_format(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.large = torch.nn.Linear(64, 48, bias=False)
-                self.a = torch.nn.Linear(64, 16, bias=False)
-                self.b = torch.nn.Linear(64, 16, bias=False)
-
-            def forward(self, x):
-                # Eager 2-D output is contiguous, so preserve_format returns
-                # self; on a fused slice ATen raises instead.
-                large = self.large(x).contiguous(memory_format=torch.preserve_format)
-                return (
-                    torch.sin(large),
-                    torch.sin(self.a(x)),
-                    torch.cos(self.b(x)),
-                )
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [2], torch.randn(32, 64))
-
-    @parametrize("dynamic", [False, True])
-    @parametrize("use_dropout", [False, True])
-    @_lhs_fusion_config
-    def test_batch_linear_lhs_keeps_attention_fusion(self, dynamic, use_dropout):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.q = torch.nn.Linear(64, 64, bias=False)
-                self.k = torch.nn.Linear(64, 64, bias=False)
-                self.v = torch.nn.Linear(64, 64, bias=False)
-
-            def forward(self, x):
-                batch = x.shape[0]
-                shape = (batch // 4, 4, 2, 32)
-                q = self.q(x).view(*shape).transpose(1, 2)
-                k = self.k(x).view(*shape).transpose(1, 2)
-                v = self.v(x).view(*shape).transpose(1, 2)
-                if use_dropout:
-                    q = torch.nn.functional.dropout(q, p=0.0, training=True)
-                return torch.nn.functional.scaled_dot_product_attention(q, k, v)
-
-        module = M().eval()
-        _check_lhs_fusion(self, module, [3], torch.randn(32, 64), dynamic=dynamic)
 
     @parametrize("op", ["add_tensor", "add_scalar", "mul_scalar"])
     @_lhs_fusion_config

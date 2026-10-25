@@ -715,7 +715,6 @@ _LAYOUT_SENSITIVE_OPS = OrderedSet(
         "sym_is_contiguous",
         "_has_same_storage_numel",
         "is_set_to",
-        "clone",
     ]
 )
 
@@ -774,16 +773,6 @@ def _node_value(value):
     return value
 
 
-def _fake_value(value):
-    if isinstance(value, torch.fx.Node):
-        return _fake_value(_node_value(value))
-    if isinstance(value, (list, tuple)):
-        return type(value)(_fake_value(item) for item in value)
-    if isinstance(value, dict):
-        return {key: _fake_value(item) for key, item in value.items()}
-    return value
-
-
 def _layout_user_overloads(user: torch.fx.Node):
     target = user.target
     args = tuple(user.args)
@@ -825,7 +814,7 @@ def _layout_user_overloads(user: torch.fx.Node):
     if not args and "input" in kwargs:
         args = (kwargs.pop("input"),)
     if isinstance(target, torch._ops.OpOverload):
-        return [target]
+        return [target] if target.namespace == "aten" else []
     if isinstance(target, torch._ops.OpOverloadPacket):
         qualname = target._qualified_op_name
         packet = target
@@ -837,20 +826,19 @@ def _layout_user_overloads(user: torch.fx.Node):
         packet = getattr(getattr(torch.ops, namespace, None), op_name, None)
         if not isinstance(packet, torch._ops.OpOverloadPacket):
             return []
+    args, kwargs = torch.fx.node.map_arg((args, kwargs), _node_value)
     try:
         overload_name = torch._C._jit_resolve_packet(
             qualname,
-            *_fake_value(args),
-            **_fake_value(kwargs),
+            *args,
+            **kwargs,
         )
     except RuntimeError:
         return []
     overload = getattr(packet, overload_name, None)
-    return [overload] if overload is not None else ()
-
-
-def _dim_value(dim):
-    return _node_value(dim)
+    if overload is None or overload.namespace != "aten":
+        return []
+    return [overload]
 
 
 def _shape_value(value):
@@ -868,7 +856,7 @@ def _view_target_shape(user: torch.fx.Node):
             size = get_arg_value(user, 1, "shape")
     if not isinstance(size, (tuple, list)):
         return None
-    dims = tuple(_dim_value(dim) for dim in size)
+    dims = tuple(_node_value(dim) for dim in size)
     if any(not isinstance(dim, (int, torch.SymInt)) for dim in dims):
         return None
     return dims
@@ -896,14 +884,16 @@ def _is_split_only_view(user: torch.fx.Node) -> bool:
             total *= dim
         known = 1
         for dim in target:
-            if dim != -1:
+            if not (isinstance(dim, int) and dim == -1):
                 known *= dim
         if not statically_known_true(known != 0):
             return False
         inferred = total // known
         if not statically_known_true(inferred * known == total):
             return False
-        target = tuple(inferred if dim == -1 else dim for dim in target)
+        target = tuple(
+            inferred if isinstance(dim, int) and dim == -1 else dim for dim in target
+        )
     src = [dim for dim in source if not _is_one(dim)]
     tgt = [dim for dim in target if not _is_one(dim)]
     index = 0
@@ -1029,6 +1019,39 @@ def _is_aliasing_user(user: torch.fx.Node, assume_alias: bool = False) -> bool:
     return any(_is_alias_of(source, result) for source in sources for result in results)
 
 
+_STORAGE_SENSITIVE_OPS = OrderedSet(
+    [
+        "as_strided",
+        "as_strided_copy",
+        "storage_offset",
+        "sym_storage_offset",
+        "data_ptr",
+        "is_set_to",
+        "_has_same_storage_numel",
+        "stride",
+        "sym_stride",
+    ]
+)
+
+
+def _has_storage_sensitive_user(node: torch.fx.Node) -> bool:
+    pending = list(node.users)
+    visited = OrderedSet()
+    while pending:
+        user = pending.pop()
+        if user in visited:
+            continue
+        visited.add(user)
+        if user.op not in ("call_method", "call_function"):
+            continue
+        ops = _layout_user_overloads(user)
+        if any(op.overloadpacket.__name__ in _STORAGE_SENSITIVE_OPS for op in ops):
+            return True
+        if _is_aliasing_user(user, assume_alias=True):
+            pending.extend(user.users)
+    return False
+
+
 def _has_mutable_alias_user(node: torch.fx.Node) -> bool:
     # Eager contiguous() can return the projection itself, so a mutation
     # anywhere behind it also changes the original tensor. Traverse every
@@ -1071,6 +1094,8 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, ops) -> bool:
         return True
     if user.target is torch.nn.functional.dropout:
         return get_arg_value(user, 3, "inplace") not in (None, False)
+    if ops and ops[0].overloadpacket.__name__ == "clone":
+        return False
     if _is_conversion_user(user, ops):
         # A copying conversion produces dense output with the same dimension
         # order. A no-op conversion aliases the input and is traversed by the
@@ -1116,9 +1141,8 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             # contiguous() may return the input itself; only then can its users
             # observe the fused layout. A real copy is terminal safe.
             if _is_aliasing_user(user):
-                if _has_mutable_alias_user(user):
+                if _has_mutable_alias_user(user) or _has_storage_sensitive_user(user):
                     return True
-                pending.extend(user.users)
             continue
         if _allowed_alias(user, ops):
             pending.extend(user.users)
