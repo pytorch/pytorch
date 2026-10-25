@@ -37,6 +37,7 @@ from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
+import torch._prims_common
 import torch._refs
 import torch.fx
 import torch.nn
@@ -113,7 +114,12 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
+from .object_protocol import (
+    mro_lookup,
+    pynumber_index,
+    python_constant_repr_impl,
+    vt_is_iterable,
+)
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -681,6 +687,12 @@ class BaseTorchVariable(VariableTracker):
             return True
 
         return getattr(self.value, "__module__", None) in ("math", "cmath")
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx, fn=str)
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
@@ -2129,9 +2141,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if fill_value.is_tensor() and not issubclass(
+            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
                 fill_value.python_type(), torch.nn.Parameter
             ):
+                dtype = kwargs.get("dtype")
+                out = kwargs.get("out")
+                if (
+                    dtype is None
+                    or (isinstance(dtype, ConstantVariable) and dtype.value is None)
+                ) and (
+                    out is None
+                    or (isinstance(out, ConstantVariable) and out.value is None)
+                ):
+                    kwargs["dtype"] = ConstantVariable.create(
+                        torch._prims_common.type_to_dtype(
+                            torch._prims_common.dtype_to_type(fill_value.dtype)
+                        )
+                    )
+
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(

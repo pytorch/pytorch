@@ -605,7 +605,7 @@ class FxConverter:
                     zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                     device=device,
                     outer_name=unique_name,
-                    dtype=buffer.get_dtype(),
+                    dtype=node.get_dtype(),
                 )
 
                 # Generate FX IR for the view.
@@ -965,6 +965,10 @@ class FxConverter:
 
         # Map ReinterpretView to as_strided.
         result_node = self._create_as_strided(input_node, size, stride, offset)
+        if layout.dtype != input_buffer.get_dtype():
+            result_node = self.gm.graph.call_function(
+                torch.ops.aten.view.dtype, args=(result_node, layout.dtype)
+            )
         result_node.name = name
         self._record_allocation(result_buffer, result_node)
 

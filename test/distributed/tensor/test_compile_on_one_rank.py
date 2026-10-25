@@ -674,6 +674,91 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_constant_folding_feeds_backward_under_coor(self):
+        # The partitioner exempts a device node from the recompute ban only if it has
+        # a meta["val"], so a folded full() whose device node lacks one gets saved for
+        # the backward instead of recomputed there.
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+        from torch._inductor.utils import fresh_cache
+
+        graphs = []
+
+        class Capture(CustomGraphPass):
+            def __call__(self, graph):
+                graphs.append(graph.python_code("self").src)
+
+            def uuid(self):
+                return None
+
+        def f(x):
+            return x.sin() * (torch.zeros(x.shape, device=x.device) + 3)
+
+        torch._dynamo.reset()
+        x = torch.randn(8, 8, device="cuda", requires_grad=True)
+        ref = x.detach().clone().requires_grad_()
+        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Capture())
+        with cfg, fresh_cache():
+            torch.compile(f, backend="inductor")(x).sum().backward()
+        f(ref).sum().backward()
+        self.assertEqual(x.grad, ref.grad)
+        _, bw = graphs
+        self.assertIn("coor.current_device", bw)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("trace", ("fwd_only", "partial", "joint_fwd_bwd"))
+    def test_replacement_with_device_rank_agnostic_under_coor(self, trace):
+        # trace_fns trace the replacement with CooR off, so its device has to be
+        # swapped for current_device() whatever the trace_fn, not just a bare fwd_only.
+        import functools
+
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            joint_fwd_bwd,
+            PatternMatcherPass,
+            register_replacement,
+        )
+        from torch._inductor.utils import fresh_cache
+
+        def search(x):
+            return (x * torch.full(x.shape, 2.0, device=x.device)).sin()
+
+        def replace(x):
+            return (x + x * torch.ones(x.shape, device=x.device)).sin()
+
+        patterns = PatternMatcherPass()
+        trace_fn = {
+            "fwd_only": fwd_only,
+            "partial": functools.partial(fwd_only),
+            "joint_fwd_bwd": joint_fwd_bwd,
+        }[trace]
+        training = trace == "joint_fwd_bwd"
+        example = [torch.empty(4, device="cuda", requires_grad=training)]
+        register_replacement(search, replace, example, trace_fn, patterns)
+
+        replaced, devices = [], []
+
+        class Apply(CustomGraphPass):
+            def __call__(self, graph):
+                replaced.append(patterns.apply(graph))
+                devices.extend(
+                    n.kwargs["device"] for n in graph.nodes if "device" in n.kwargs
+                )
+
+            def uuid(self):
+                return None
+
+        torch._dynamo.reset()
+        x = torch.randn(4, device="cuda", requires_grad=training)
+        cfg = torch._inductor.config.patch(joint_custom_pre_pass=Apply())
+        with cfg, fresh_cache(), torch.set_grad_enabled(training):
+            self.assertEqual(torch.compile(search, backend="inductor")(x), search(x))
+        self.assertEqual(replaced, [1])
+        self.assertEqual([d for d in devices if isinstance(d, torch.device)], [])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_post_grad_replacement_with_device_under_coor(self):
         # pointless_cumsum_replacement builds an arange on the matched device, and it
         # runs after respecialize_current_device_nodes. Tracing it with CooR live would
