@@ -3,6 +3,7 @@ import collections
 import contextlib
 import copy
 import functools
+import importlib
 import inspect
 import logging
 import math
@@ -1304,7 +1305,14 @@ def _autowrap_check(
     This method searches a scope for them and patches them if found.
     """
     if patcher.visit_once(frame_dict):
-        for name, value in frame_dict.items():
+        # Reading an unresolved lazy import runs its module body mid-trace, with
+        # torch.fx.wrap'd globals still patched; one never resolved can't be an
+        # autowrap target.
+        is_lazy_import = getattr(importlib, "is_lazy_import", None)
+        for name in list(frame_dict):
+            if is_lazy_import is not None and is_lazy_import(frame_dict, name):
+                continue
+            value = frame_dict[name]
             if (
                 not name.startswith("_")
                 and callable(value)
