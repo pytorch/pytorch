@@ -2907,8 +2907,31 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = Mod()
         mod.torchdynamo_force_dynamic = False
         x = torch.randn(3)
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        opt_mod = torch.compile(mod, backend="eager")
         self.assertEqual(opt_mod(x), mod(x))
+
+        def check_alias(x, original):
+            alias = mod.value
+            y = alias(mod)
+            torch._dynamo.graph_break()
+            return x + y, alias is mod.value, alias is original, alias
+
+        original = mod.value
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_check_alias = torch.compile(check_alias, backend=counter)
+        for _ in range(2):
+            result = opt_check_alias(x, original)
+            self.assertEqual(result[:3], check_alias(x, original)[:3])
+            self.assertIs(result[3], original)
+        self.assertEqual(counter.frame_count, 1)
+
+        Mod.value = staticmethod(partial(get_value, scale=2))
+        for _ in range(2):
+            result = opt_check_alias(x, original)
+            self.assertEqual(result[:3], check_alias(x, original)[:3])
+            self.assertIs(result[3], mod.value)
+            self.assertIsNot(result[3], original)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
