@@ -1089,6 +1089,12 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
+        # Only exact ints and bools use CPython's arithmetic fast path.
+        if maybe_get_python_type(args[0]) not in (int, bool):
+            return RangeVariable(
+                [specialize_symnode(item) for item in self.items]
+            ).list_count(tx, args, kwargs)
+
         return SourcelessBuilder.create(tx, self.range_count(*args))
 
     def index(
