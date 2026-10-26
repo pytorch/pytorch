@@ -138,7 +138,6 @@ for input, target in dataset:
 
     Optimizer.add_param_group
     Optimizer.load_state_dict
-    Optimizer.preserve_state_dtype_on_load
     Optimizer.register_load_state_dict_pre_hook
     Optimizer.register_load_state_dict_post_hook
     Optimizer.state_dict
@@ -437,6 +436,8 @@ hooks that apply to every optimizer instead of one optimizer instance.
 ## Utilities
 
 ```{eval-rst}
+.. autofunction:: preserve_state_dtype_on_load
+
 .. autofunction:: swap_in_optimizer_params_and_state
 ```
 

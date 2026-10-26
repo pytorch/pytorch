@@ -1719,7 +1719,7 @@ class TestOptimRenewed(TestCase):
         context = (
             nullcontext()
             if preserve_dtype is None
-            else optimizer.preserve_state_dtype_on_load(preserve_dtype)
+            else torch.optim.preserve_state_dtype_on_load(preserve_dtype)
         )
         with warnings.catch_warnings(record=True) as caught, context:
             warnings.simplefilter("always", FutureWarning)
@@ -1727,9 +1727,10 @@ class TestOptimRenewed(TestCase):
         self.assertEqual(len(caught), int(preserve_dtype is None))
         if preserve_dtype is None:
             self.assertIs(caught[0].category, FutureWarning)
+            self.assertEqual(caught[0].filename, __file__)
             message = str(caught[0].message)
             self.assertIn("the default will preserve their saved dtype", message)
-            self.assertIn("preserve_state_dtype_on_load(False)", message)
+            self.assertIn("torch.optim.preserve_state_dtype_on_load(False)", message)
         loaded_state = optimizer.state[param]
 
         expected_dtype = torch.float32 if preserve_dtype else param.dtype
@@ -1753,6 +1754,23 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(loaded_state["step"].item(), 3.0)
         else:
             self.assertIs(loaded_state["step"], saved_state["step"])
+
+    @parametrize("has_state", [False, True])
+    def test_load_state_dict_matching_dtype_does_not_warn(self, device, has_state):
+        param = Parameter(torch.ones(2, device=device, dtype=torch.float32))
+        optimizer = torch.optim.Adam([param])
+        if has_state:
+            optimizer.state[param] = {
+                "step": torch.tensor(3.0, dtype=torch.float64),
+                "exp_avg": torch.zeros_like(param),
+                "exp_avg_sq": torch.zeros_like(param),
+            }
+        saved_dict = optimizer.state_dict()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", FutureWarning)
+            optimizer.load_state_dict(saved_dict)
+        self.assertEqual(caught, [])
+        self.assertEqual(optimizer.state_dict(), saved_dict, exact_device=True)
 
     @skipMPS
     @parametrize("impl", ["forloop", "fused", "capturable"])
@@ -1811,7 +1829,7 @@ class TestOptimRenewed(TestCase):
                 expected[0]["step"] = step
             else:
                 expected[0]["step"] = step.to(device=device, dtype=torch.float32)
-        with optimizer_c.preserve_state_dtype_on_load():
+        with torch.optim.preserve_state_dtype_on_load():
             optimizer_c.load_state_dict(saved_state)
         self.assertEqual(
             optimizer_c.state_dict()["state"],
@@ -2692,7 +2710,7 @@ class TestOptimRenewed(TestCase):
 
         param_c = param.clone()
         optimizer_c = torch.optim.AdamW([param_c], fused=True)
-        with optimizer_c.preserve_state_dtype_on_load():
+        with torch.optim.preserve_state_dtype_on_load():
             optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
         # The fused kernel picks its bf16-state path from the exp_avg dtype alone.
         for key in ("exp_avg", "exp_avg_sq"):
@@ -2891,7 +2909,7 @@ class TestOptimizerLoadStateDictContext(TestCase):
 
         optimizer, param, checkpoint = self._make_optimizer_and_checkpoint(CustomSGD)
         with (
-            optimizer.preserve_state_dtype_on_load(),
+            torch.optim.preserve_state_dtype_on_load(),
             warnings.catch_warnings(record=True) as caught,
         ):
             warnings.simplefilter("always", FutureWarning)
@@ -2913,7 +2931,7 @@ class TestOptimizerLoadStateDictContext(TestCase):
             optimizer.load_state_dict(checkpoint)
             return optimizer.state[param]["momentum_buffer"].dtype
 
-        with optimizer.preserve_state_dtype_on_load():
+        with torch.optim.preserve_state_dtype_on_load():
             self.assertEqual(load_dtype(), torch.float32)
             other_optimizer = SGD([param], momentum=0.9)
             other_optimizer.load_state_dict(checkpoint)
@@ -2922,7 +2940,7 @@ class TestOptimizerLoadStateDictContext(TestCase):
             )
             error = "different number of parameter groups"
             with self.assertRaisesRegex(ValueError, error):
-                with optimizer.preserve_state_dtype_on_load(False):
+                with torch.optim.preserve_state_dtype_on_load(False):
                     self.assertEqual(load_dtype(), torch.bfloat16)
                     optimizer.load_state_dict({"state": {}, "param_groups": []})
             self.assertEqual(load_dtype(), torch.float32)
@@ -2943,7 +2961,7 @@ class TestOptimizerLoadStateDictContext(TestCase):
         with ThreadPoolExecutor(max_workers=1) as executor:
             # Start the worker before it can inherit the preservation setting.
             executor.submit(load_default).result()
-            with optimizer.preserve_state_dtype_on_load():
+            with torch.optim.preserve_state_dtype_on_load():
                 executor.submit(load_default).result()
                 optimizer.load_state_dict(checkpoint)
                 self.assertEqual(
@@ -2961,12 +2979,12 @@ class TestOptimizerLoadStateDictContext(TestCase):
                 return optimizer.state[param]["momentum_buffer"].dtype
 
             async def load_cast():
-                with Optimizer.preserve_state_dtype_on_load(False):
+                with torch.optim.preserve_state_dtype_on_load(False):
                     cast_ready.set()
                     await preserve_loaded.wait()
                     return load_dtype()
 
-            with Optimizer.preserve_state_dtype_on_load():
+            with torch.optim.preserve_state_dtype_on_load():
                 cast_task = asyncio.create_task(load_cast())
                 await cast_ready.wait()
                 preserved_dtype = load_dtype()
