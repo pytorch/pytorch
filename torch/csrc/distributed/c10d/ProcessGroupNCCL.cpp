@@ -131,16 +131,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
