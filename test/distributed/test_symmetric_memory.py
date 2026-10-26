@@ -25,6 +25,11 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch._prims_common import make_contiguous_strides_for
+from torch.cuda._utils import (
+    _check_cuda_bindings,
+    _cuda_bindings_driver as drv,
+    _HAS_CUDA_BINDINGS,
+)
 from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -2085,6 +2090,24 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         del t
         self._verify_symmetric_memory(symm_mem_hdl)
 
+    @skipIf(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_teardown_releases_virtual_address_ranges(self) -> None:
+        # Freed ranges (multicast where supported) can be re-reserved at their base.
+        self._init_process(set_device=True)
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        t = symm_mem.empty(1024, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        ptrs = [p for p in (*hdl.buffer_ptrs, hdl.multicast_ptr) if p]
+        ranges = [_check_cuda_bindings(drv.cuMemGetAddressRange(p)) for p in ptrs]
+        del hdl, t
+        device_module.synchronize()
+        for base, size in ranges:
+            ptr = _check_cuda_bindings(drv.cuMemAddressReserve(size, 0, base, 0))
+            _check_cuda_bindings(drv.cuMemAddressFree(ptr, size))
+            self.assertEqual(int(ptr), int(base))
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2931,7 +2954,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
     def test_lowering_one_shot_all_reduce(self):
@@ -3003,7 +3029,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_comm_buffer_reuse(self):
@@ -3108,7 +3137,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_output_buffer_reuse(self):
@@ -3162,7 +3194,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_output_buffer_reuse_copy_variant(self):
@@ -3202,7 +3237,6 @@ class LoweringTest(MultiProcContinuousTest):
             "one_shot_all_reduce_copy_out should have out= parameter.",
         )
 
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @requires_multicast_support()
     @fresh_inductor_cache()
@@ -3271,7 +3305,10 @@ class LoweringTest(MultiProcContinuousTest):
         finally:
             lc._has_multicast_support = old_has_multicast_support
 
-    @skip_if_rocm_multiprocess
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     def test_low_contention_all_gather_out_rewrite_preserves_out(self) -> None:
         self._init_process()
@@ -3294,7 +3331,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess  # test requires support for registered buffers
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_external_allocation_fallback(self):
@@ -3333,7 +3373,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_comm_buffer_inplace_prevention(self):
@@ -3381,7 +3424,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="is_symm_mem_tensor is always False on XPU (has_allocation not overridden): https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_custom_op_symm_mem_realization(self):
@@ -3424,7 +3470,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skip_if_rocm_multiprocess
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_symm_mem_alloc_id_no_collision_after_reseed(self):
@@ -3457,7 +3506,82 @@ class LoweringTest(MultiProcContinuousTest):
 
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class SymmMemCleanupTest(TestCase):
-    def _run_cleanup(self, device, backend, body):
+    @parametrize("retain_handle", [False, True])
+    def test_cuda_peer_pointer_tables_cleanup(self, device, retain_handle):
+        if torch.cuda.memory.get_allocator_backend() != "native":
+            self.skipTest("allocation counts require the native caching allocator")
+        self._run_cleanup(
+            device,
+            "CUDA",
+            f"""
+            test.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+            dist.init_process_group(
+                "gloo", store=dist.HashStore(), rank=0, world_size=1
+            )
+            group_name = dist.group.WORLD.group_name
+            warm_handle = _SymmetricMemory.rendezvous(tensor, group_name)
+            del warm_handle, tensor
+            torch.cuda.synchronize(device)
+            baseline = torch.cuda.memory_stats(device)["allocation.all.current"]
+            for _ in range(3):
+                tensor = _SymmetricMemory.empty_strided_p2p(
+                    (1024,), (1,), torch.float32, device
+                )
+                handles = [
+                    _SymmetricMemory.rendezvous(tensor, group_name),
+                    _SymmetricMemory.rendezvous(tensor, group_name),
+                ]
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline + 2,
+                )
+                if {retain_handle!r}:
+                    del tensor
+                    del handles[0]
+                else:
+                    del handles
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline + 2,
+                )
+                if {retain_handle!r}:
+                    del handles
+                else:
+                    del tensor
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline,
+                )
+            dist.destroy_process_group()
+            """,
+            env_overrides={"TORCH_SYMM_MEM_DISABLE_MULTICAST": "1"},
+        )
+
+    # torch.cuda._utils disables cuda.bindings on ROCm, so hipMemAddressFree is
+    # not covered.
+    @skipIf(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    def test_free_releases_virtual_address_range(self, device):
+        # The address passed to cuMemAddressReserve is only a hint, so reserving
+        # at a freed block's base lands there only if free() released the range.
+        self._run_cleanup(
+            device,
+            "CUDA",
+            """
+            from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+            base, size = _check_cuda_bindings(drv.cuMemGetAddressRange(tensor.data_ptr()))
+            del tensor
+            torch.cuda.synchronize(device)
+            ptr = _check_cuda_bindings(drv.cuMemAddressReserve(size, 0, base, 0))
+            _check_cuda_bindings(drv.cuMemAddressFree(ptr, size))
+            test.assertEqual(int(ptr), int(base))
+            """,
+        )
+
+    def _run_cleanup(self, device, backend, body, env_overrides=None):
         if backend == "NCCL" and (
             not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
         ):
@@ -3477,7 +3601,12 @@ if {backend!r} == "NVSHMEM":
     dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
 tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device)
 """
-        env = {**os.environ, "TORCH_SYMMMEM": backend, "CUDA_LAUNCH_BLOCKING": "0"}
+        env = {
+            **os.environ,
+            "TORCH_SYMMMEM": backend,
+            "CUDA_LAUNCH_BLOCKING": "0",
+            **(env_overrides or {}),
+        }
         result = subprocess.run(
             [sys.executable, "-c", script + textwrap.dedent(body)],
             env=env,

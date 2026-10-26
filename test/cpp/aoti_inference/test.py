@@ -168,9 +168,6 @@ def generate_cuda_alloc_test():
 
 # AOTI model which will create additional tensors during autograd.
 def generate_test_with_additional_tensors():
-    if not torch.cuda.is_available():
-        return
-
     model = NetWithTensorConstants()
     x = torch.randn((30, 1), device="cuda")
     y = torch.randn((30, 1), device="cuda")
