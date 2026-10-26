@@ -2721,7 +2721,12 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
     }
   }
 
-#if LLVM_VERSION_MAJOR > 17
+#if LLVM_VERSION_MAJOR >= 24
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  llvm::Instruction* I =
+      irb_.CreateMalloc(LongTy_, size, nullptr, nullptr, "");
+  varToVal_[v->buffer_var()] = I;
+#elif LLVM_VERSION_MAJOR > 17
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Instruction* I = irb_.CreateMalloc(
       LongTy_, dtypeToLLVM(v->dtype()), size, nullptr, nullptr, "");
