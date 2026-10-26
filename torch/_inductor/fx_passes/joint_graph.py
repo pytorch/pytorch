@@ -35,10 +35,13 @@ from ..pattern_matcher import (
     CallFunction,
     Ignored,
     init_once_fakemode,
+    insert_current_device_node,
     KeywordArg,
     Match,
     MULTIPLE,
     PatternMatcherPass as PatternMatcherPassBase,
+    rank_agnostic,
+    rank_agnostic_passes,
     register_graph_pattern,
     stable_topological_sort,
 )
@@ -473,7 +476,7 @@ class UniformValueConstantFolder(ConstantFolder):
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
-        # handle device_put op
+        # handle device_put, and current_device since it feeds constructors' device
         if node.target in (
             prims.device_put.default,
             torch.ops.coor.current_device.default,
@@ -625,7 +628,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         node_replacements_shapes = cf.node_replacements_shapes
 
         graph = gm.graph
-        current_device = torch.ops.coor.current_device.default
+        device_node = None
 
         zeros = OrderedSet[Any]()
         ones = OrderedSet[Any]()
@@ -696,10 +699,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
                 # Under compile-on-one-rank, don't bake the compiling rank's device.
                 device = fake_tensor.device
-                if _coor_device_index_is_current(device):
-                    with graph.inserting_before(node):
-                        device = graph.call_function(current_device)
-                        device.meta["val"] = fake_tensor.device
+                if rank_agnostic() and _coor_device_index_is_current(device):
+                    if device_node is None:
+                        device_node = insert_current_device_node(graph, device)
+                    device = device_node
 
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
@@ -809,6 +812,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
     canonicalize_quant_mapping(gm)
 
 
+@rank_agnostic_passes()
 def joint_graph_passes(
     graph: torch.fx.GraphModule,
     input_device: torch.device | None = None,

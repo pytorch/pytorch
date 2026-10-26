@@ -13,6 +13,8 @@ import torch
 import torch.compiler.config as compiler_config
 import torch.distributed as dist
 import torch.nn as nn
+import torch.utils._pytree as pytree
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
@@ -49,6 +51,19 @@ def extract_graph(fx_g, _, graph_cell):
     """Extract the FX graph code into a mutable cell."""
     graph_cell[0] = fx_g.code
     return fx_g
+
+
+class CaptureGraphs(CustomGraphPass):
+    """An inductor custom pass that records the code of every graph it sees."""
+
+    def __init__(self):
+        self.graphs = []
+
+    def __call__(self, graph):
+        self.graphs.append(graph.python_code("self").src)
+
+    def uuid(self):
+        return None
 
 
 class TestCompileOnOneRank(DTensorTestBase):
@@ -594,29 +609,19 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The fx graph cache key hashes the graph before post_grad respecializes
         # current_device(), so a replacement that bakes the compiling rank's device
         # there is invisible in the output code but still splits the cache per rank.
-        from torch._inductor.custom_graph_pass import CustomGraphPass
         from torch._inductor.utils import fresh_cache
 
-        graphs = []
-
-        class Capture(CustomGraphPass):
-            def __call__(self, graph):
-                graphs.append(graph.python_code("self").src)
-
-            def uuid(self):
-                return None
-
         def graphs_on(dev):
-            graphs.clear()
+            capture = CaptureGraphs()
             torch._dynamo.reset()
             cfg = torch._inductor.config.patch(
                 align_random_eager=align_random_eager,
-                post_grad_custom_pre_pass=Capture(),
+                post_grad_custom_pre_pass=capture,
             )
             with torch.cuda.device(dev), cfg, fresh_cache():
                 x = torch.randn(64, 128, device=f"cuda:{dev}", requires_grad=True)
                 torch.compile(self._rng_fn, backend="inductor")(x).sum().backward()
-            return "\n".join(graphs)
+            return "\n".join(capture.graphs)
 
         graph0, graph1 = graphs_on(0), graphs_on(1)
         self.assertIn("coor.current_device", graph0)
@@ -630,17 +635,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # uniform-value constant folding has turned it into a full(); both the folding
         # and the pattern's exact recheck have to accept a current_device() operand.
         from torch._dynamo.utils import counters
-        from torch._inductor.custom_graph_pass import CustomGraphPass
         from torch._inductor.utils import fresh_cache
-
-        graphs = []
-
-        class Capture(CustomGraphPass):
-            def __call__(self, graph):
-                graphs.append(graph.python_code("self").src)
-
-            def uuid(self):
-                return None
 
         def f(query, key, value):
             q, k, v = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
@@ -652,10 +647,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             return torch.matmul(torch.softmax(scores, dim=-1), v)
 
         def graphs_on(dev):
-            graphs.clear()
+            capture = CaptureGraphs()
             counters.clear()
             torch._dynamo.reset()
-            cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Capture())
+            cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=capture)
             args = [
                 torch.randn(4, 2, 4, 16, device=f"cuda:{dev}", dtype=torch.half)
                 for _ in range(3)
@@ -664,7 +659,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 out = torch.compile(f, backend="inductor")(*args)
             self.assertEqual(out, f(*args), atol=1e-2, rtol=1e-2)
             self.assertEqual(counters["inductor"]["fuse_attention"], 1)
-            return "\n".join(graphs)
+            return "\n".join(capture.graphs)
 
         graph0, graph1 = graphs_on(0), graphs_on(1)
         self.assertIn("coor.current_device", graph0)
@@ -677,17 +672,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The partitioner exempts a device node from the recompute ban only if it has
         # a meta["val"], so a folded full() whose device node lacks one gets saved for
         # the backward instead of recomputed there.
-        from torch._inductor.custom_graph_pass import CustomGraphPass
         from torch._inductor.utils import fresh_cache
-
-        graphs = []
-
-        class Capture(CustomGraphPass):
-            def __call__(self, graph):
-                graphs.append(graph.python_code("self").src)
-
-            def uuid(self):
-                return None
 
         def f(x):
             return x.sin() * (torch.zeros(x.shape, device=x.device) + 3)
@@ -695,23 +680,25 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         torch._dynamo.reset()
         x = torch.randn(8, 8, device="cuda", requires_grad=True)
         ref = x.detach().clone().requires_grad_()
-        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Capture())
+        capture = CaptureGraphs()
+        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=capture)
         with cfg, fresh_cache():
             torch.compile(f, backend="inductor")(x).sum().backward()
         f(ref).sum().backward()
         self.assertEqual(x.grad, ref.grad)
-        _, bw = graphs
+        _, bw = capture.graphs
         self.assertIn("coor.current_device", bw)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize("trace", ("fwd_only", "partial", "joint_fwd_bwd"))
-    def test_replacement_with_device_rank_agnostic_under_coor(self, trace):
+    @parametrize("search_has_device", (True, False))
+    def test_replacement_with_device_rank_agnostic_under_coor(
+        self, trace, search_has_device
+    ):
         # trace_fns trace the replacement with CooR off, so its device has to be
-        # swapped for current_device() whatever the trace_fn, not just a bare fwd_only.
-        import functools
-
-        from torch._inductor.custom_graph_pass import CustomGraphPass
+        # swapped for current_device() whatever the trace_fn -- including when the
+        # matched graph has no device operand, so no current_device() node, yet.
         from torch._inductor.pattern_matcher import (
             fwd_only,
             joint_fwd_bwd,
@@ -721,7 +708,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         from torch._inductor.utils import fresh_cache
 
         def search(x):
-            return (x * torch.full(x.shape, 2.0, device=x.device)).sin()
+            if search_has_device:
+                return (x * torch.full(x.shape, 2.0, device=x.device)).sin()
+            return (x * 2.0).sin()
 
         def replace(x):
             return (x + x * torch.ones(x.shape, device=x.device)).sin()
@@ -736,14 +725,16 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         example = [torch.empty(4, device="cuda", requires_grad=training)]
         register_replacement(search, replace, example, trace_fn, patterns)
 
-        replaced, devices = [], []
+        replaced, devices, device_nodes_used = [], [], []
+        current_device = torch.ops.coor.current_device.default
 
         class Apply(CustomGraphPass):
             def __call__(self, graph):
                 replaced.append(patterns.apply(graph))
-                devices.extend(
-                    n.kwargs["device"] for n in graph.nodes if "device" in n.kwargs
-                )
+                operands = pytree.tree_leaves([(n.args, n.kwargs) for n in graph.nodes])
+                devices.extend(a for a in operands if isinstance(a, torch.device))
+                nodes = graph.find_nodes(op="call_function", target=current_device)
+                device_nodes_used.append(any(n.users for n in nodes))
 
             def uuid(self):
                 return None
@@ -754,14 +745,15 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with cfg, fresh_cache(), torch.set_grad_enabled(training):
             self.assertEqual(torch.compile(search, backend="inductor")(x), search(x))
         self.assertEqual(replaced, [1])
-        self.assertEqual([d for d in devices if isinstance(d, torch.device)], [])
+        self.assertEqual(devices, [])
+        self.assertEqual(device_nodes_used, [True])
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_post_grad_replacement_with_device_under_coor(self):
         # pointless_cumsum_replacement builds an arange on the matched device, and it
-        # runs after respecialize_current_device_nodes. Tracing it with CooR live would
-        # splice in a current_device() node that nothing concretises before lowering.
+        # runs after respecialize_current_device_nodes, outside rank_agnostic_passes.
+        # A current_device() node spliced in there is never concretised before lowering.
         from torch._inductor.utils import fresh_cache, run_and_get_code
 
         def f(x):

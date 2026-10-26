@@ -36,6 +36,7 @@ successful match or a `FailedMatch` object for a failure to match.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import dataclasses
 import functools
 import importlib
@@ -68,7 +69,11 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_constant,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current, make_fx
+from torch.fx.experimental.proxy_tensor import (
+    _coor_device_index_is_current,
+    _coor_enabled,
+    make_fx,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     ShapeEnv,
@@ -359,9 +364,7 @@ class Match:
         with context:
             if trace_fn is None:
                 trace_fn = functools.partial(
-                    fwd_only,
-                    run_functional_passes=run_functional_passes,
-                    is_replacement=_is_rank_agnostic(self.graph),
+                    fwd_only, run_functional_passes=run_functional_passes
                 )
 
             if should_propagate_eager_input_vals(self.nodes):
@@ -432,6 +435,8 @@ class Match:
                         example_vals, _convert_to_fake_mode
                     )
                 replacement = trace_fn(replacement_fn, example_vals)
+            if rank_agnostic():
+                _use_current_device_node(replacement)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
@@ -1119,8 +1124,10 @@ class _TargetArgsExpr(_TargetExpr):
                 if not is_match(child_match):
                     return child_match
                 m.extend(child_match)
-            elif _is_current_device_node(child_node) and isinstance(
-                pattern, torch.device
+            elif (
+                isinstance(pattern, torch.device)
+                and isinstance(child_node, torch.fx.Node)
+                and child_node.target is torch.ops.coor.current_device.default
             ):
                 # Under compile-on-one-rank, patterns are traced on the compiling
                 # rank's device while the graph keeps a rank-agnostic device node.
@@ -2219,7 +2226,7 @@ def register_replacement(
                 match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
-                if _is_rank_agnostic(match.graph):
+                if rank_agnostic():
                     _use_current_device_node(match.replacement_graph)
                 match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
@@ -3151,29 +3158,52 @@ def fx_to_pattern(
     return pattern
 
 
-def _is_current_device_node(n: object) -> bool:
-    return (
-        isinstance(n, torch.fx.Node)
-        and n.op == "call_function"
-        and n.target is torch.ops.coor.current_device.default
-    )
+_in_rank_agnostic_passes = contextvars.ContextVar(
+    "_in_rank_agnostic_passes", default=False
+)
 
 
-def _is_rank_agnostic(graph: torch.fx.Graph) -> bool:
-    # Under compile-on-one-rank the graph stays rank-agnostic until post_grad's
-    # respecialize_current_device_nodes, so a replacement spliced in before then
-    # must not bake the compiling rank's device.
-    return bool(
-        graph.find_nodes(
-            op="call_function", target=torch.ops.coor.current_device.default
-        )
-    )
+@contextlib.contextmanager
+def rank_agnostic_passes() -> Generator[None, None, None]:
+    """Mark passes that run on a graph still carrying coor.current_device() nodes.
+
+    Under compile-on-one-rank the graph stays rank-agnostic until post_grad's
+    respecialize_current_device_nodes. That can't be read off the graph: one with
+    no device operands has no such node either before or after.
+    """
+    token = _in_rank_agnostic_passes.set(True)
+    try:
+        yield
+    finally:
+        _in_rank_agnostic_passes.reset(token)
+
+
+def rank_agnostic() -> bool:
+    """Whether anything inserted into the graph must not bake this rank's device."""
+    return _in_rank_agnostic_passes.get() and _coor_enabled()
+
+
+def insert_current_device_node(
+    graph: torch.fx.Graph, device: torch.device
+) -> torch.fx.Node:
+    """Insert a coor.current_device() node standing for ``device``.
+
+    It goes before the first non-placeholder so it precedes every use. It carries
+    meta["val"] like the nodes make_fx creates: the partitioner only lets a device
+    node be recomputed in the backward when it has one.
+    """
+    first = next(n for n in graph.nodes if n.op != "placeholder")
+    with graph.inserting_before(first):
+        node = graph.call_function(torch.ops.coor.current_device.default)
+    node.meta["val"] = device
+    return node
 
 
 def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
     # trace_fns trace with CooR off, so a replacement bakes this rank's device.
     # Under CooR the inputs are on the current accelerator by invariant, so swap
     # that device for the current_device() node a CooR trace would have emitted.
+    # Only the top-level graph is walked, not HOP subgraphs.
     graph = gm.graph
     current_device = None
 
@@ -3182,18 +3212,14 @@ def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
         if not (isinstance(a, torch.device) and _coor_device_index_is_current(a)):
             return a
         if current_device is None:
-            first = next(n for n in graph.nodes if n.op != "placeholder")
-            with graph.inserting_before(first):
-                current_device = graph.call_function(
-                    torch.ops.coor.current_device.default
-                )
-            current_device.meta["val"] = a
+            current_device = insert_current_device_node(graph, a)
         return current_device
 
     for n in list(graph.nodes):
         n.args = torch.fx.node.map_aggregate(n.args, swap)
         n.kwargs = torch.fx.node.map_aggregate(n.kwargs, swap)
-    gm.recompile()
+    if current_device is not None:
+        gm.recompile()
 
 
 @torch.no_grad()
@@ -3203,26 +3229,17 @@ def fwd_only(
     *,
     run_functional_passes: bool = True,
     get_decomp_fn: Callable[..., Any] = select_decomp_table,
-    is_replacement: bool = False,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
-    import contextlib
-
     from torch.compiler import config as compiler_config
 
     # TODO - look into using aot autograd, asserting no mutating ops here
-    # A pattern template is matched against, never spliced in, so tracing it with a
-    # fixed example device is fine -- and CooR's single-device check would reject it.
-    # A replacement spliced into a still rank-agnostic graph has to be traced with
-    # CooR live or it bakes a rank-specific device into that graph.
-    coor_ctx = (
-        contextlib.nullcontext()
-        if is_replacement
-        # pyrefly: ignore [missing-attribute]
-        else compiler_config.patch(compile_on_one_rank=False)
-    )
+    # Traced on a fixed example device, which CooR's single-device check would reject.
+    # A replacement spliced into a rank-agnostic graph gets its device swapped back
+    # afterwards; see _use_current_device_node.
     with (
-        coor_ctx,
+        # pyrefly: ignore [missing-attribute]
+        compiler_config.patch(compile_on_one_rank=False),
         enable_python_dispatcher(),
         preserve_node_meta(),
     ):
