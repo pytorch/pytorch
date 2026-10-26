@@ -14,7 +14,7 @@ import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.runtime.triton_compat import Config, HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -39,6 +39,9 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.heuristics.registry import CodegenConfigHeuristics
+from torch._inductor.heuristics.triton_codegen.pointwise import PointwiseHeuristic
+from torch._inductor.runtime.coordinate_descent_tuner import CoordescTuner
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -58,13 +61,21 @@ from torch._inductor.runtime.triton_heuristics import (
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
+    _warn_ignored_pin,
     autotune_hints_to_configs,
     cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
+    CappedGrid1D,
     check_autotune_cache,
+    check_capped_grid_config,
     DEFER,
+    generate_lookup_hash_from_source_code,
+    GridExpr,
+    lookup_autotune_config,
     make_matmul_triton_config,
+    pointwise,
+    reduction,
     template,
     triton_config,
 )
@@ -1590,6 +1601,420 @@ class TestGridExprMaximum(TestCase):
         self.assertNotIn("(long)", result)
         # All ints: constant-folds
         self.assertEqual(grid.maximum([10, 20, 5]), 20)
+
+
+@instantiate_parametrized_tests
+class TestCappedGrid1D(TestCase):
+    def test_grid_is_capped(self):
+        for mode, x_grid in (
+            ("python", "min(-((xnumel) // -(1024)), 66)"),
+            ("cpp", "std::min<int64_t>(((xnumel + (1024 - 1)) / (1024)), 66)"),
+        ):
+            grid = CappedGrid1D(inductor_meta={"grid_cap": 66}, mode=mode)
+            grid.generate({"XBLOCK": 1024})
+            self.assertEqual((grid.x_grid, grid.y_grid, grid.z_grid), (x_grid, 1, 1))
+        # GridExpr.minimum folds the int constants into one, after the other items
+        nested = "std::min<int64_t>(std::min<int64_t>(a, b), 3)"
+        self.assertEqual(grid.minimum(["a", "b", 3, 5]), nested)
+
+    def test_symbolic_xnumel_gives_a_symbolic_grid(self):
+        # The FX IR wrapper evaluates grids on symbolic sizes
+        from torch.utils._sympy.functions import Min
+
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        grid = CappedGrid1D(inductor_meta={"grid_cap": 66}, mode="python")
+        grid.generate({"XBLOCK": 1024})
+        x, y, z = grid.eval_slow({"xnumel": s0})
+        self.assertIsInstance(x, Min)
+        self.assertEqual([x.subs(s0, n) for n in (10, 10000, 1 << 24)], [1, 10, 66])
+        self.assertEqual((y, z), (1, 1))
+
+    @parametrize("grid_cap,block", [(0, "XBLOCK"), (None, "XBLOCK"), (44, "YBLOCK")])
+    def test_invalid_grids_are_errors(self, grid_cap, block):
+        grid = CappedGrid1D(inductor_meta={"grid_cap": grid_cap}, mode="python")
+        with self.assertRaisesRegex(AssertionError, "at least 1, got|along x only"):
+            grid.generate({"XBLOCK": 1024, block: 16})
+
+    def test_from_meta_resolves_the_capped_grid(self):
+        meta = {"grid_type": "CappedGrid1D", "grid_cap": 44}
+        grid = GridExpr.from_meta(meta, {"XBLOCK": 512})
+        self.assertEqual(grid.eval_slow({"xnumel": 1 << 20, "XBLOCK": 512}), (44, 1, 1))
+        # A lazy grid's meta names every block; only resolved configs are checked
+        lazy = GridExpr.from_meta_lazy(meta, "triton_poi_fused_0")
+        xblock = "triton_poi_fused_0_result.xblocks[0]"
+        self.assertEqual(
+            lazy.x_grid,
+            f"std::min<int64_t>(((xnumel + ({xblock} - 1)) / ({xblock})), 44)",
+        )
+
+
+# Configs, stock and capped, as outside ROCm, whatever the build
+@patch.object(torch.version, "hip", None)
+@instantiate_parametrized_tests
+class TestCappedGridAutotuneConfigs(TestCase):
+    _ALL = [(16384, 16), (16384, 32), (32768, 8), (32768, 16)]
+    _F = [(8192, 32), (8192, 16), (8192, 8)]
+    _OFF = {"autotune_pointwise": False}
+    _X, _R = {"x": 1 << 24}, {"x": 128, "r0_": 32768}
+    _TH = "torch._inductor.runtime.triton_heuristics"
+    _cuda = TestTritonHeuristics._fake_cuda_device_properties()
+
+    def _configs(
+        self, size_hints, device=None, elements=0, types=(), threads=None, **meta
+    ):
+        size_hints = dict(size_hints)  # reduction() sets x to 1 for no_x_dim
+        # A grid_cap gets its grid type unless the test sets one
+        if "grid_cap" in meta:
+            meta.setdefault("grid_type", "CappedGrid1D")
+        device = device or self._cuda
+        if threads:
+            device = device._replace(max_threads_per_block=threads)
+        signature = {f"arg{i}": arg_type for i, arg_type in enumerate(types)}
+        common = {"inductor_meta": meta, "return_configs": True}
+        common["triton_meta"] = {"device": device, "signature": signature}
+        if "r0_" in size_hints:
+            configs = reduction(size_hints, ReductionHint.INNER, **common)
+        else:
+            configs = pointwise(size_hints, min_elem_per_thread=elements, **common)
+        return [(c.kwargs, c.num_warps, c.num_stages) for c in configs]
+
+    @parametrize(
+        "numel,elements,meta,expected",
+        [
+            # The table, of which grid_max_xblock keeps the blocks up to it
+            (1 << 24, 0, {}, _ALL),
+            (1 << 24, 0, {"grid_max_xblock": 16384}, _ALL[:2]),
+            # Only the first without pointwise autotuning or max-autotune
+            (1 << 24, 0, _OFF, _ALL[:1]),
+            (1 << 24, 0, {**_OFF, "max_autotune": True}, _ALL),
+            # A block per program, or 128 elements, or the rounded hint if smaller
+            (1 << 20, 0, {}, _F),
+            (32768, 0, {"grid_cap": 66}, [(128, 4)]),
+            (1, 0, {}, [(1, 1)]),
+            # The fallback: 4 elements per thread, then the table's smaller warps
+            (1 << 24, 0, {"grid_max_xblock": 8192}, _F),
+            (1 << 24, 0, {"grid_max_xblock": 1024}, [(1024, 8)]),
+            # Raised for min_elem_per_thread; at the max block the warps drop instead
+            (1 << 24, 16, {"grid_max_xblock": 8192}, [(8192, 16), (8192, 8)]),
+            (1 << 24, 4, {"grid_max_xblock": 64}, [(512, 4)]),
+            (100, 4, {}, [(128, 4)]),
+            (1 << 17, 5, {}, [(2048, 8)]),
+            # A dynamic xnumel's size hint bounds nothing
+            (1, 0, {"grid_dynamic_xnumel": True}, _ALL),
+            (1 << 16, 4, {"grid_dynamic_xnumel": True}, _ALL),
+            # Warps within the device's thread limit, in powers of 2
+            (1 << 24, 0, {"threads": 768}, [(16384, 16), (32768, 8), (32768, 16)]),
+        ],
+    )
+    def test_pointwise_candidates(self, numel, elements, meta, expected):
+        meta = {"grid_cap": 44, **meta}
+        configs = self._configs({"x": numel}, elements=elements, **meta)
+        self.assertEqual(configs, [({"XBLOCK": x}, w, 1) for x, w in expected])
+
+    @parametrize(
+        "types,expected",
+        [
+            (("*bf16", "*fp16", "i32"), _ALL),
+            (("*fp32", "*fp32"), _ALL[:2]),
+            (("*fp8e4nv",) * 4, _ALL),
+            (("tensordesc<bf16[64, 64]>", "*fp16"), _ALL),
+            (("nvTmaDesc", "*"), _ALL[:2]),
+            (("*fp32",) * 4, _F),
+        ],
+    )
+    def test_candidates_fit_the_bytes_per_block(self, types, expected):
+        # At most 128 KiB of the kernel's tensors per block: 4 bytes per element fill
+        # XBLOCK 32,768; descriptors count their dtype, or 4 bytes
+        meta = {"grid_cap": 44, "grid_max_xblock": 65536}
+        configs = self._configs(self._X, types=types, **meta)
+        self.assertEqual(configs, [({"XBLOCK": x}, w, 1) for x, w in expected])
+
+    def test_candidates_short_of_min_elem_per_thread_are_dropped(self):
+        # The byte budget leaves 1,024 and 256 elements, short of min_elem_per_thread
+        # on 4 warps, which fp8 conversions need: get_configs' configs apply
+        for numel, grid_cap, count, elements, dynamic in (
+            (1 << 24, 44, 20, 16, False),
+            (1 << 24, 44, 20, 16, True),
+            (1 << 20, 132, 65, 4, False),
+        ):
+            kwargs = {"types": ("*fp32",) * count, "elements": elements}
+            stock = self._configs({"x": numel}, **kwargs)
+            meta = {"grid_cap": grid_cap, "grid_dynamic_xnumel": dynamic}
+            self.assertEqual(self._configs({"x": numel}, **kwargs, **meta), stock)
+
+    def test_stock_configs_are_kept(self):
+        # Outside capped_grid_device_types, for reductions and without the hook
+        for device_type in ("hip", "xpu"):
+            device = self._cuda._replace(type=device_type)
+            capped = self._configs(self._X, device, grid_cap=44)
+            self.assertEqual(capped, self._configs(self._X, device))
+        self.assertEqual(self._configs(self._R, grid_cap=66), self._configs(self._R))
+
+        class _Bare(CodegenConfigHeuristics):
+            def get_configs(self, *args, **kwargs):
+                return PointwiseHeuristic().get_configs(*args, **kwargs)
+
+        lookup = "torch._inductor.heuristics.registry.get_codegen_heuristic"
+        with patch(lookup, return_value=_Bare()):
+            capped = self._configs(self._X, grid_cap=44)
+            self.assertEqual(capped, self._configs(self._X))
+
+    def test_meta_is_checked_before_the_device_hook(self):
+        y_hints, r_y_hints = {"y": 1024, "x": 1024}, {"x": 128, "y": 8, "r0_": 32768}
+        fail = {"side_effect": RuntimeError}
+        with (
+            patch.object(PointwiseHeuristic, "get_capped_grid_configs", **fail),
+            patch(f"{self._TH}._reduction_configs", **fail),
+        ):
+            self.assertRaises(RuntimeError, self._configs, self._X, grid_cap=44)
+            self.assertRaises(RuntimeError, self._configs, self._R, grid_cap=66)
+            for size_hints, meta, message in (
+                (self._X, {"grid_cap": 44, "grid_type": "Grid1D"}, "needs grid_type"),
+                (self._X, {"grid_type": "CappedGrid1D"}, "grid_cap, .*got None"),
+                (self._X, {"grid_cap": 0}, "at least 1, got 0"),
+                (self._R, {"grid_cap": True}, "an int .*got True"),
+                (y_hints, {"grid_cap": 44}, "along x only"),
+                (r_y_hints, {"grid_cap": 44}, "along x only"),
+                (self._R, {"grid_cap": 66, "no_x_dim": True}, "got no_x_dim"),
+                (self._X, {"grid_cap": 44, "grid_max_xblock": 3000}, "power of 2"),
+                (self._R, {"grid_cap": 66, "grid_max_xblock": 4096.0}, "power of 2"),
+            ):
+                with self.subTest(size_hints=size_hints, **meta):
+                    with self.assertRaisesRegex(AssertionError, message):
+                        self._configs(size_hints, **meta)
+
+    def test_cached_autotune_checks_capped_meta(self):
+        # Other heuristic types, combo kernels (no size hints), and cooperative and
+        # mix-order (RSPLIT_SIZE) reductions are rejected
+        def autotune(heuristic_type, size_hints, triton_meta, meta):
+            return cached_autotune(
+                size_hints,
+                [Config({"XBLOCK": 64, "R0_BLOCK": 64}, num_warps=4, num_stages=1)],
+                triton_meta={"device": self._cuda, **triton_meta},
+                heuristic_type=heuristic_type,
+                inductor_meta={"grid_type": "CappedGrid1D", "grid_cap": 44, **meta},
+            )
+
+        rows = {"x": 64, "r0_": 64}
+        for args in (
+            (HeuristicType.PERSISTENT_REDUCTION, rows, {}, {}),
+            (HeuristicType.TEMPLATE, None, {}, {}),
+            (HeuristicType.POINTWISE, None, {}, {}),
+            (HeuristicType.REDUCTION, rows, {"launch_cooperative_grid": True}, {}),
+            (HeuristicType.REDUCTION, rows, {}, {"RSPLIT_SIZE": 8}),
+        ):
+            with self.subTest(args=args):
+                with self.assertRaisesRegex(AssertionError, "only for pointwise"):
+                    autotune(*args)
+        autotune(HeuristicType.POINTWISE, rows, {}, {})
+        autotune(HeuristicType.REDUCTION, rows, {}, {})
+        with self.assertRaisesRegex(AssertionError, "needs grid_type CappedGrid1D"):
+            autotune(HeuristicType.POINTWISE, rows, {}, {"grid_type": "Grid1D"})
+
+    def test_every_config_of_a_capped_kernel_is_checked(self):
+        # Also get_configs' and the TMA filter's: XBLOCK 65,536 divides neither the
+        # default max block nor TRITON_MAX_BLOCK["X"], which uncapped kernels keep
+        wide = Config({"XBLOCK": 65536}, num_warps=8, num_stages=1)
+        wide_r = Config({"XBLOCK": 65536, "R0_BLOCK": 8}, num_warps=8, num_stages=1)
+        rows = {"x": 1 << 20, "r0_": 32768}
+        with (
+            patch.object(PointwiseHeuristic, "capped_grid_device_types", ()),
+            patch.object(PointwiseHeuristic, "get_configs", return_value=[wide]),
+            patch(f"{self._TH}._reduction_configs", return_value=[wide_r]),
+        ):
+            for size_hints in (self._X, rows):
+                self.assertEqual(len(self._configs(size_hints)), 1)
+                with self.assertRaisesRegex(AssertionError, "must divide"):
+                    self._configs(size_hints, grid_cap=44)
+        tma = {"tma_min_block_sizes": {"XBLOCK": 65536}}
+        for size_hints in (self._X, rows):
+            with self.assertRaisesRegex(AssertionError, "must divide"):
+                self._configs(size_hints, grid_cap=44, **tma)
+        # A device hook's configs
+        with patch.object(PointwiseHeuristic, "get_capped_grid_configs") as hook:
+            for xblock, numel, message in (
+                (3072, 1 << 24, "must divide"),
+                (0, 1 << 24, "at least 1"),
+                (2, 1, "one x element needs XBLOCK 1"),
+            ):
+                hook.return_value = [Config({"XBLOCK": xblock}, num_warps=1)]
+                with self.assertRaisesRegex(AssertionError, message):
+                    self._configs({"x": numel}, grid_cap=44)
+
+    def test_capped_reduction_blocks_keep_the_stock_limits(self):
+        # XBLOCK divides TRITON_MAX_BLOCK["X"] whatever grid_max_xblock (a pointwise
+        # kernel's max block grows with it); R0_BLOCK within TRITON_MAX_BLOCK; a block
+        # within TRITON_MAX_TENSOR_NUMEL elements
+        x_max, r0_max = TRITON_MAX_BLOCK["X"], TRITON_MAX_BLOCK["R0_"]
+        edge = {"XBLOCK": x_max, "R0_BLOCK": TRITON_MAX_TENSOR_NUMEL // x_max}
+        capped = {"grid_type": "CappedGrid1D", "grid_cap": 66}
+        wide = {**capped, "grid_max_xblock": 65536}
+        for blocks, message in (
+            ({"XBLOCK": 2 * x_max, "R0_BLOCK": 1}, "must divide"),
+            ({"XBLOCK": 1, "R0_BLOCK": 2 * r0_max}, "'R0_BLOCK' too large"),
+            ({**edge, "R0_BLOCK": 2 * edge["R0_BLOCK"]}, "TRITON_MAX_TENSOR_NUMEL"),
+        ):
+            with self.assertRaisesRegex(AssertionError, message):
+                check_capped_grid_config(Config(blocks, num_warps=8), wide, self._R)
+        check_capped_grid_config(Config(edge, num_warps=8), wide, self._R)
+        check_capped_grid_config(Config({"XBLOCK": 65536}, num_warps=8), wide, self._X)
+
+    @parametrize(
+        "size_hints,xblock,larger_is_faster",
+        [
+            # Above TRITON_MAX_BLOCK["X"], coordinate descent only halves XBLOCK
+            (_X, 32768, True),
+            (_X, 16384, False),
+            # Below it, XBLOCK rises up to it, the max block of a looped reduction
+            (_X, 1024, True),
+            ({"x": 1 << 20, "r0_": 64}, 64, True),
+        ],
+    )
+    def test_coordinate_descent_keeps_capped_configs_valid(
+        self, size_hints, xblock, larger_is_faster
+    ):
+        # Every config it times passes the capped check (warp_size and
+        # max_threads_per_block spare it a device query)
+        meta = {"grid_type": "CappedGrid1D", "grid_cap": 44, "grid_max_xblock": 65536}
+        meta.update(warp_size=32, max_threads_per_block=1024)
+        blocks = {"XBLOCK": xblock}
+        if "r0_" in size_hints:
+            blocks["R0_BLOCK"] = 8
+        tried = []
+
+        def bench(cfg):
+            tried.append(cfg)
+            block = cfg.kwargs["XBLOCK"]
+            return 1 / block if larger_is_faster else block
+
+        tuner = CoordescTuner(size_hints=size_hints, inductor_meta=meta)
+        tuner.autotune(bench, Config(blocks, num_warps=8))
+        for cfg in tried:
+            check_capped_grid_config(cfg, meta, size_hints)
+        top = max(xblock, TRITON_MAX_BLOCK["X"])
+        self.assertEqual(max(cfg.kwargs["XBLOCK"] for cfg in tried), top)
+
+    def test_lookup_table_pins_of_capped_kernels_are_checked(self):
+        # A failing pin is ignored with one warning per pin and reason
+        _warn_ignored_pin.cache_clear()
+        fn = types.SimpleNamespace(
+            src="def triton_poi_fused_0(): pass", __name__="triton_poi_fused_0"
+        )
+        capped = {"grid_type": "CappedGrid1D", "grid_cap": 44}
+
+        def pinned(blocks, inductor_meta, size_hints=None):
+            size_hints = size_hints or self._X
+            fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+            pin = {**blocks, "num_warps": 8, "num_stages": 1}
+            with config.patch(autotune_lookup_table={fn_hash: pin}):
+                return lookup_autotune_config(size_hints, fn, inductor_meta)
+
+        # XBLOCK 65,536 does not divide the default max block
+        with self.assertLogs(self._TH, level="WARNING") as logs:
+            self.assertIsNone(pinned({"XBLOCK": 65536}, capped))
+        self.assertIn("'num_stages': 1} of triton_poi_fused_0", logs.output[0])
+        with self.assertNoLogs(self._TH, level="WARNING"):
+            self.assertIsNone(pinned({"XBLOCK": 65536}, capped))
+        self.assertEqual(pinned({"XBLOCK": 65536}, {}).kwargs, {"XBLOCK": 65536})
+        self.assertEqual(pinned({"XBLOCK": 16384}, capped).kwargs, {"XBLOCK": 16384})
+        rows = {"x": 1 << 20, "r0_": 32768}
+        for blocks, size_hints in (
+            ({"XBLOCK": 16384.0}, None),
+            ({"XBLOCK": 1024, "YBLOCK": 2}, None),
+            ({"XBLOCK": 1024}, rows),
+            ({"XBLOCK": TRITON_MAX_BLOCK["X"], "R0_BLOCK": 512}, rows),
+        ):
+            with self.assertLogs(self._TH, level="WARNING"):
+                self.assertIsNone(pinned(blocks, capped, size_hints))
+        # A meta error raises, as in pointwise() and reduction()
+        with self.assertRaisesRegex(AssertionError, "power of 2"):
+            pinned({"XBLOCK": 16384}, {**capped, "grid_max_xblock": 3000})
+
+    @parametrize(
+        "meta,r0_blocks",
+        [
+            ({}, [4096]),
+            ({"grid_type": "CappedGrid1D", "grid_cap": 66}, []),
+            ({"grid_type": "CappedGrid1D", "grid_cap": 1000}, [4096]),
+            ({"grid_cap": 66}, [4096]),
+        ],
+    )
+    def test_rblock_scaling_counts_the_capped_programs(self, meta, r0_blocks):
+        # 64 registers per thread on 16 warps: 2 programs per SM, 264 on 132 SMs, so
+        # a smaller R0_BLOCK cannot raise the occupancy of 66 programs
+        autotuner = CachingAutotuner.__new__(CachingAutotuner)
+        autotuner.device_props = self._cuda._replace(multi_processor_count=132)
+        autotuner.size_hints = {"x": 4096, "r0_": 65536}
+        autotuner.inductor_meta = meta
+        result = MagicMock()
+        blocks = {"XBLOCK": 1, "R0_BLOCK": 8192}
+        result.config = Config(blocks, num_warps=16, num_stages=1)
+        result.kernel.n_regs = 64
+        autotuner.compile_results = [result]
+        autotuner._ensure_kernel_loaded = lambda: None
+        candidates = autotuner._iter_rblock_scale_candidates()
+        self.assertEqual([c.kwargs["R0_BLOCK"] for c in candidates], r0_blocks)
+
+
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+class TestCappedGridLaunch(TestCase):
+    @skipUnless(GPU_TYPE == "cuda" and not torch.version.hip, "candidates for CUDA")
+    def test_pointwise_candidates_run_through_the_python_launcher(self):
+        # Each candidate for a bf16-to-fp16 cast, alone in its autotuner, casts every
+        # element on at most grid_cap programs; each program stores the count it saw
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        @triton.jit
+        def triton_(in_ptr0, out_ptr0, programs_ptr0, xnumel, XBLOCK: tl.constexpr):
+            for x_block in tl.range(
+                tl.program_id(0), (xnumel - 1) // XBLOCK + 1, tl.num_programs(0)
+            ):
+                xindex = x_block * XBLOCK + tl.arange(0, XBLOCK)[:]
+                xmask = xindex < xnumel
+                tmp0 = tl.load(in_ptr0 + xindex, xmask).to(tl.float32)
+                tl.store(out_ptr0 + xindex, (tmp0 * 2.0).to(tl.float16), xmask)
+            tl.store(programs_ptr0 + tl.program_id(0), tl.num_programs(0))
+
+        device = DeviceProperties.create(torch.device(GPU_TYPE))
+        meta = {"grid_type": "CappedGrid1D", "grid_cap": 4, "grid_max_xblock": 65536}
+        # The cast's own pointers, 4 bytes per element, fill the budget at 32,768
+        signature = {"in_ptr0": "*bf16", "out_ptr0": "*fp16"}
+        triton_meta = {"device": device, "signature": signature, "constants": {}}
+        configs = pointwise(
+            {"x": 1 << 24}, triton_meta, inductor_meta=meta, return_configs=True
+        )
+        self.assertEqual(max(cfg.kwargs["XBLOCK"] for cfg in configs), 32768)
+        signature |= {"programs_ptr0": "*i32", "xnumel": "i32", "XBLOCK": "constexpr"}
+        wrapper = AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
+        triton_meta["configs"] = [wrapper]
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        for cfg in configs:
+            autotuner = CachingAutotuner(
+                fn=triton_,
+                triton_meta={**triton_meta, "constants": {}},
+                configs=[cfg],
+                save_cache_hook=False,
+                mutated_arg_names=[],
+                reset_to_zero_arg_names=[],
+                optimize_mem=True,
+                heuristic_type=HeuristicType.POINTWISE,
+                inductor_meta=meta,
+            )
+            xblock = cfg.kwargs["XBLOCK"]
+            # bf16 values from 1 to 2, which convert to fp16 exactly when doubled
+            for xnumel in (4 * 65536 + 5, xblock + 3):
+                x = (torch.rand(xnumel, device=GPU_TYPE) + 1).to(torch.bfloat16)
+                out = torch.zeros(xnumel, device=GPU_TYPE, dtype=torch.float16)
+                # one slot per block, so a broken cap shows as extra programs
+                blocks = triton.cdiv(xnumel, xblock)
+                seen = torch.zeros(blocks, device=GPU_TYPE, dtype=torch.int32)
+                autotuner.run(x, out, seen, xnumel, stream=stream)
+                device_interface.synchronize()
+                self.assertEqual(out, (x.float() * 2).half(), atol=0, rtol=0)
+                programs = min(blocks, 4)
+                expected = [programs] * programs + [0] * (blocks - programs)
+                self.assertEqual(seen.tolist(), expected)
 
 
 class TestGrid2DWithYZOverflowZeroYnumel(TestCase):

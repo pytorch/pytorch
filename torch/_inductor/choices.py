@@ -29,7 +29,12 @@ from .heuristics.template.triton import (
 from .kernel_inputs import KernelInputs, MMKernelInputs
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
-from .runtime.hints import DeviceProperties, ReductionHint
+from .runtime.hints import (
+    DeviceProperties,
+    is_valid_grid_cap,
+    is_valid_grid_max_xblock,
+    ReductionHint,
+)
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
@@ -115,6 +120,33 @@ class FusionScore:
             other.buffer_overlap_score,
             other.proximity_score,
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class GridPolicy:
+    """
+    A capped launch grid for a Triton kernel with one x dimension: at most `programs`
+    programs, each looping over the kernel's x blocks. `max_xblock`, an int power of
+    2, or None for the runtime's default (CAPPED_GRID_DEFAULT_MAX_XBLOCK), limits a
+    capped pointwise kernel's candidate XBLOCKs; min_elem_per_thread and coordinate
+    descent can raise XBLOCK up to the larger of it and TRITON_MAX_BLOCK["X"]. A
+    capped looped reduction keeps its stock configs and max block.
+    """
+
+    programs: int
+    max_xblock: int | None = None
+
+    def __post_init__(self) -> None:
+        if not is_valid_grid_cap(self.programs):
+            raise ValueError(
+                f"programs must be an int of at least 1, got {self.programs!r}"
+            )
+        if self.max_xblock is not None and not is_valid_grid_max_xblock(
+            self.max_xblock
+        ):
+            raise ValueError(
+                f"max_xblock must be an int power of 2, got {self.max_xblock!r}"
+            )
 
 
 class InductorChoices:
@@ -553,6 +585,18 @@ class InductorChoices:
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
 
+    def triton_grid_policy(self, features: SIMDKernelFeatures) -> GridPolicy | None:
+        """
+        A capped launch grid for a Triton kernel, or None (the default) for one
+        program per x block. TritonKernel asks once per kernel, after the persistent,
+        cooperative and mix-order decisions, for the pointwise kernels and looped
+        reductions that TritonKernel._grid_policy_eligible accepts, and raises
+        TypeError for a result other than a GridPolicy or None. The FX graph cache
+        key covers a policy through the uuid() of a registered handler or of
+        config.inductor_choices_class.
+        """
+        return None
+
     def _inner_reduction_no_split_threshold(
         self,
         props: DeviceProperties,
@@ -913,7 +957,9 @@ class _ComposedInductorChoices(InductorChoices):
         return (
             "composed_inductor_choices",
             tuple(
-                _validate_choice_uuid(f"config:{index}", choice)()
+                _validate_choice_uuid(
+                    f"composed handler {index} ({type(choice).__qualname__})", choice
+                )()
                 for index, choice in enumerate(self._choices)
             ),
         )
@@ -923,6 +969,30 @@ def create_inductor_choices(
     factory: InductorChoicesFactoryConfig,
 ) -> InductorChoices:
     return _create_inductor_choices(factory, registered_inductor_choices())
+
+
+def compose_inductor_choices(
+    choices: typing.Sequence[InductorChoices],
+) -> InductorChoices:
+    """A handler that dispatches each InductorChoices hook to the first of `choices`
+    that overrides it, as registered choices do. A single handler is returned as it
+    is; among several, a composition built here is replaced by the handlers it holds."""
+    contributors: list[InductorChoices] = []
+    for choice in choices:
+        if not isinstance(choice, InductorChoices):
+            raise TypeError(
+                "compose_inductor_choices takes InductorChoices instances, "
+                f"got {type(choice).__qualname__}"
+            )
+        if isinstance(choice, _ComposedInductorChoices):
+            contributors.extend(choice._choices)
+        else:
+            contributors.append(choice)
+    if not choices:
+        raise ValueError("compose_inductor_choices needs at least one handler")
+    if len(choices) == 1:
+        return choices[0]
+    return _ComposedInductorChoices(contributors)
 
 
 def _create_inductor_choices(
@@ -945,11 +1015,13 @@ def _create_inductor_choices(
                 f"got {type(choice).__qualname__} from {key!r}"
             )
         _validate_choice_uuid(key, choice)
+        if isinstance(choice, _ComposedInductorChoices):
+            # A composition defines uuid() itself, so check each handler it holds
+            for index, inner in enumerate(choice._choices):
+                _validate_choice_uuid(f"{key}:{index}", inner)
         choices.append(choice)
 
-    if len(choices) == 1:
-        return choices[0]
-    return _ComposedInductorChoices(choices)
+    return compose_inductor_choices(choices)
 
 
 def registered_inductor_choices() -> tuple[tuple[str, InductorChoicesFactory], ...]:
