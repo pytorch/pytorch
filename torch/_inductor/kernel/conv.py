@@ -564,10 +564,12 @@ def convolution(
         result = L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
-        # Eager runs the conv without bias and then adds the bias to the rounded
-        # low-precision output (cudnn order), so fused consumers must see the
-        # rounded sum (https://github.com/pytorch/pytorch/issues/201296); the
-        # rounding is gated on emulate_precision_casts_on_saved_tensors.
+        # The peeled add is not a user-visible op: the declared output of the
+        # convolution is the rounded low-precision sum, so fused consumers must
+        # see it rounded whether or not the output is saved
+        # (https://github.com/pytorch/pytorch/issues/201296).  This matches
+        # cudnn eager, which peels the bias itself; XPU eager (oneDNN) fuses
+        # the bias instead.  Gated on emulate_precision_casts_on_saved_tensors.
         return emulate_lowp_output_cast(result)
 
     x.realize()
