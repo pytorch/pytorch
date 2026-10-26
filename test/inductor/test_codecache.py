@@ -709,7 +709,7 @@ class TestCppPortableKey(TestCase):
         paths = {
             "data": "/usr",
             "purelib": "/usr/lib/python3/dist-packages",
-            # A toolchain can sit next to the interpreter.
+            # A system Python's scripts directory is shared with other tools.
             "scripts": "/usr/local/bin",
         }
         with (

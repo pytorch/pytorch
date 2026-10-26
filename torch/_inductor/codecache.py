@@ -4026,9 +4026,12 @@ def _relocatable_roots() -> tuple[str, ...]:
     """The torch and Python install roots, which move when a packaged job does.
 
     These are the torch root, the Python prefixes and the sysconfig paths that
-    belong to the Python installation, but not ``scripts``, where a toolchain can
-    live. System prefixes such as ``/usr`` are not roots: they hold headers and
-    toolchains of their own that do not move with the package.
+    belong to the Python installation. ``scripts`` is left out, since with a
+    system Python it is a shared directory such as ``/usr/local/bin``; in a venv
+    or conda environment it lies under ``sys.prefix`` anyway. System prefixes
+    such as ``/usr`` are not roots: they hold headers and toolchains of their
+    own that do not move with the package. Anything under a root, a compiler in
+    an environment's ``bin`` included, is compared by relative path only.
     """
     paths = sysconfig.get_paths()
     roots = dict.fromkeys(
@@ -4090,8 +4093,10 @@ def _portable_cpp_key(sources: Sequence[str], command_lines: Sequence[str]) -> s
     build time. A path in a source is compiled into the binary, so the sources
     are hashed as they are.
 
-    The compiler is named by its path in the command line, as in the cache key,
-    not by the serving host's compiler version. The command line still carries
+    The compiler is named by its path in the command line, with the roots
+    stripped like any other path, and not by the serving host's compiler
+    version: a different compiler at the same place under a root is not
+    detected. The command line still carries
     the vector ISA flags the host resolves, so a host with a different ISA gets a
     different key and rebuilds.
     """
