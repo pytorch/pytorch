@@ -227,4 +227,6 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autoclass:: torch.distributed.fsdp.experimental.AllGatherInput
 .. autoclass:: torch.distributed.fsdp.experimental.DefaultAllGatherLayout
     :members:
+.. autoclass:: torch.distributed.fsdp.experimental.NativeReduceScatterInputLayout
+    :members:
 ```

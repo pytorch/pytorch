@@ -62,9 +62,9 @@ device_type = torch.device(get_devtype())
 
 
 def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):
-    def copy_in(grads, buffer, world_size):
+    def copy_in(grads, *args):
         grad_dtypes.append(tuple(grad.dtype for grad in grads))
-        foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+        foreach_reduce_scatter_copy_in(grads, *args)
 
     return patch(
         "torch.distributed.fsdp._fully_shard._fsdp_collectives."
