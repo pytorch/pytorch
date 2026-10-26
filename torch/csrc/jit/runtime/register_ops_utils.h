@@ -72,9 +72,7 @@ inline double round_to_even(double a) {
 void checkImplicitTensorToNum(const at::Tensor& t, bool toInt);
 
 [[maybe_unused]] static int64_t floordiv(int64_t a, int64_t b) {
-  if (b == 0) {
-    throw std::runtime_error("division by 0");
-  }
+  TORCH_CHECK(b != 0, "division by 0");
   if ((a > 0) == (b > 0)) {
     // simple case, both have same sign
     return a / b;
@@ -124,9 +122,9 @@ template <typename T>
 auto getItem(const c10::List<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
+  TORCH_CHECK_INDEX(
+      normalized_idx >= 0 && normalized_idx < list_size,
+      "list index out of range");
   return list.get(normalized_idx);
 }
 
@@ -134,9 +132,9 @@ template <typename T>
 void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
+  TORCH_CHECK_INDEX(
+      normalized_idx >= 0 && normalized_idx < list_size,
+      "list index out of range");
   list.set(normalized_idx, std::forward<T>(value));
 }
 
@@ -206,9 +204,7 @@ template <typename T>
 void listMin(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   size_t list_size = list.size();
-  if (list_size == 0) {
-    throw std::runtime_error("min() arg is an empty sequence");
-  }
+  TORCH_CHECK(list_size != 0, "min() arg is an empty sequence");
 
   T min_elem = list[0];
   for (const auto i : c10::irange(1, list_size)) {
@@ -223,9 +219,7 @@ template <typename T>
 void listMax(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   size_t list_size = list.size();
-  if (list_size == 0) {
-    throw std::runtime_error("max() arg is an empty sequence");
-  }
+  TORCH_CHECK(list_size != 0, "max() arg is an empty sequence");
 
   T max_elem = list[0];
   for (const auto i : c10::irange(1, list_size)) {

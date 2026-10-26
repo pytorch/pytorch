@@ -48,7 +48,7 @@ class TestNativeDecompTable(TestCase):
         self.dsl_name = f"test_{uuid.uuid4().hex[:8]}"
 
         # Snapshot registry state that registrations / deregistrations
-        # touch. `_graphs` is the source of truth; `_aten_override_libs`
+        # touch. `_graphs` is the source of truth; `_override_libs`
         # and `_libs` are derived (materialized dispatcher registrations)
         # and get rebuilt from `_graphs` on tearDown rather than restored
         # directly -- restoring destroyed Library objects would leave the
@@ -74,9 +74,10 @@ class TestNativeDecompTable(TestCase):
             ),
         }
 
-        # Destroy live aten overrides and _native IMPL libs so the test's
-        # own registrations see pristine aten kernels. These are rebuilt
-        # from the snapshotted `_graphs` on tearDown.
+        # Destroy live overrides -- every namespace, not just the aten ones
+        # this class registers -- and _native IMPL libs, so the test's own
+        # registrations see pristine kernels. These are rebuilt from the
+        # snapshotted `_graphs` on tearDown.
         self._destroy_live_libs()
 
         # Clear dicts that won't corrupt process-wide state.
@@ -90,12 +91,14 @@ class TestNativeDecompTable(TestCase):
         self.registry._filter_state._dispatch_keys.clear()
 
     def _destroy_live_libs(self):
-        """Tear down every live aten override + _native IMPL library and
-        clear their dicts. The C++ dispatcher has no per-kernel removal,
-        so Library._destroy() is the only way to unregister."""
-        for lib in list(self.registry._aten_override_libs.values()):
+        """Tear down every live override + _native IMPL library and clear
+        their dicts. `_override_libs` is keyed by (namespace, op, dispatch
+        key), so this covers all namespaces. The C++ dispatcher has no
+        per-kernel removal, so Library._destroy() is the only way to
+        unregister."""
+        for lib in list(self.registry._override_libs.values()):
             lib._destroy()
-        self.registry._aten_override_libs.clear()
+        self.registry._override_libs.clear()
         for lib in list(self.registry._libs.values()):
             lib._destroy()
         self.registry._libs.clear()
@@ -145,7 +148,18 @@ class TestNativeDecompTable(TestCase):
 
     def _export_add(self, cond, impl):
         """Export a module that calls `x + y`; decompose with the native table."""
-        self._register("add.Tensor", cond, impl)
+        self.registry.register_op_override(
+            self.dsl_name,
+            "aten",
+            "add.Tensor",
+            "CPU",
+            cond,
+            impl,
+            try_initialize_runtime=lambda: self.fail(
+                "runtime initialization ran during export"
+            ),
+        )
+        self.registry._register_all_overrides()
 
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -249,7 +263,7 @@ class TestNativeDecompTable(TestCase):
     # ------------------------------------------------------------------
 
     def test_export_with_matching_cond_routes_to_native(self):
-        """When cond matches, run_decompositions rewrites aten call to _native."""
+        """A matching cond rewrites aten to _native without runtime initialization."""
         ep = self._export_add(_always_true, _make_fill_impl(7))
         self.assertGraphRoutedToNative(ep)
 

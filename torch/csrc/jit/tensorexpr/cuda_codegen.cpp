@@ -33,9 +33,8 @@ class ScopedVarName {
   ScopedVarName(VarNameMap* mapping, const VarPtr& var, const std::string& name)
       : mapping_(mapping), var_(var) {
     auto iter = mapping->find(var);
-    if (iter != mapping->end()) {
-      throw std::runtime_error("Duplicate var entry: " + var->name_hint());
-    }
+    TORCH_CHECK(
+        iter == mapping->end(), "Duplicate var entry: " + var->name_hint());
     mapping->insert(std::make_pair(var, name));
   }
 
@@ -88,10 +87,10 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
 }
 
 void CudaAnalysis::visit(const FreePtr& v) {
-  if (!thread_local_bufs_.contains(v->buffer_var()) &&
-      !cross_block_bufs_.contains(v->buffer_var())) {
-    throw std::runtime_error("Global free not supported yet");
-  }
+  TORCH_CHECK(
+      thread_local_bufs_.contains(v->buffer_var()) ||
+          cross_block_bufs_.contains(v->buffer_var()),
+      "Global free not supported yet");
 }
 
 void CudaAnalysis::visit(const AllocatePtr& v) {
@@ -111,11 +110,11 @@ void CudaAnalysis::visit(const AllocatePtr& v) {
     }
     p = p->get_parent();
   }
-  throw std::runtime_error("Global alloc not supported yet");
+  TORCH_CHECK(false, "Global alloc not supported yet");
 }
 
 void CudaAnalysis::visit(const PlacementAllocatePtr& v) {
-  throw std::runtime_error("Memory reuse not supported yet");
+  TORCH_CHECK(false, "Memory reuse not supported yet");
 }
 
 void CudaAnalysis::visit(const ForPtr& v) {
@@ -125,20 +124,17 @@ void CudaAnalysis::visit(const ForPtr& v) {
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
-    if (gpu_block_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_block_index");
-    }
+    TORCH_CHECK(gpu_block_index < 3, "support only 3D gpu_block_index");
     ExprPtr prev = nullptr;
     if (gpu_block_extents_.size() <= static_cast<size_t>(gpu_block_index)) {
       gpu_block_extents_.resize(gpu_block_index + 1);
     } else {
       prev = gpu_block_extents_[gpu_block_index];
     }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
-    }
+    TORCH_CHECK(
+        is_zero(v->start()),
+        "start must be zero for gpu_block_index: " +
+            std::to_string(v->start()));
 
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (prev == nullptr) {
@@ -153,20 +149,17 @@ void CudaAnalysis::visit(const ForPtr& v) {
     }
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
-    if (gpu_thread_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_thread_index");
-    }
+    TORCH_CHECK(gpu_thread_index < 3, "support only 3D gpu_thread_index");
     ExprPtr prev = nullptr;
     if (gpu_thread_extents_.size() <= static_cast<size_t>(gpu_thread_index)) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
     } else {
       prev = gpu_thread_extents_[gpu_thread_index];
     }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_thread_index: " +
-          std::to_string(v->start()));
-    }
+    TORCH_CHECK(
+        is_zero(v->start()),
+        "start must be zero for gpu_thread_index: " +
+            std::to_string(v->start()));
 
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (prev == nullptr) {
@@ -191,7 +184,7 @@ void CudaPrinter::print_flat_alloc(const AllocatePtr& alloc) {
     if (dim_i) {
       flat_size *= *dim_i;
     } else {
-      throw std::runtime_error("Only integer dimensions are supported for now");
+      TORCH_CHECK(false, "Only integer dimensions are supported for now");
     }
   }
   os() << dtypeToCppString(alloc->dtype()) << ' ' << (*alloc->buffer_var())
@@ -213,7 +206,7 @@ void CudaPrinter::visit(const AllocatePtr& v) {
     return;
   }
 
-  throw std::runtime_error("Encountered Alloc not local to block or thread");
+  TORCH_CHECK(false, "Encountered Alloc not local to block or thread");
 }
 
 void CudaPrinter::visit(const FreePtr& v) {
@@ -275,7 +268,7 @@ void CudaPrinter::visit(const IntrinsicsPtr& v) {
 }
 
 void CudaPrinter::visit(const ExternalCallPtr& v) {
-  throw unimplemented_lowering(v);
+  TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
 }
 
 void CudaPrinter::visit(const LoadPtr& v) {
@@ -670,9 +663,7 @@ StmtPtr GPUMetaVarRewriter::mutate(const ForPtr& v) {
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
-    if (gpu_block_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_block_index");
-    }
+    TORCH_CHECK(gpu_block_index < 3, "support only 3D gpu_block_index");
     old_reach = current_block_reach_[gpu_block_index];
 
     // Extents must be positive, assume >= 1.
@@ -687,9 +678,7 @@ StmtPtr GPUMetaVarRewriter::mutate(const ForPtr& v) {
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
-    if (gpu_thread_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_thread_index");
-    }
+    TORCH_CHECK(gpu_thread_index < 3, "support only 3D gpu_thread_index");
     old_reach = current_thread_reach_[gpu_thread_index];
 
     // Extents must be positive, assume >= 1.
@@ -974,9 +963,8 @@ void CudaCodeGen::Initialize() {
   const std::vector<ExprPtr>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
-    if (!gpu_block_extents[i]) {
-      throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
-    }
+    TORCH_CHECK(
+        gpu_block_extents[i], "Missing gpu_block_index: " + std::to_string(i));
   }
 
   // Precompute block and thread extents for call_with_numel().  If
@@ -1118,10 +1106,9 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
       metavar_rewriter_->gpu_block_extents();
   const std::vector<ExprPtr>& gpu_thread_extents =
       metavar_rewriter_->gpu_thread_extents();
-  if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
-    throw malformed_input(
-        "cuda_codegen: block or thread extent greater than 3D");
-  }
+  TORCH_CHECK(
+      gpu_block_extents.size() <= 3 && gpu_thread_extents.size() <= 3,
+      "MALFORMED INPUT: cuda_codegen: block or thread extent greater than 3D");
 
   std::vector<int64_t> gpu_block_extents_v(3, 1);
   std::vector<int64_t> gpu_thread_extents_v(3, 1);
@@ -1231,9 +1218,9 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
 }
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
-  if (args.size() != buffer_args().size()) {
-    throw malformed_input("cuda_codegen: wrong number of args in call");
-  }
+  TORCH_CHECK(
+      args.size() == buffer_args().size(),
+      "MALFORMED INPUT: cuda_codegen: wrong number of args in call");
 
   auto const& buffer_args = this->buffer_args();
   std::vector<void*> raw_args(buffer_args.size());
@@ -1312,7 +1299,7 @@ void CudaCodeGen::CompileToNVRTC(
     cu << log.data() << '\n';
     cu << "nvrtc compilation failed: " << '\n';
     cu << code << '\n';
-    throw std::runtime_error(std::move(cu).str());
+    TORCH_CHECK(false, std::move(cu).str());
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });

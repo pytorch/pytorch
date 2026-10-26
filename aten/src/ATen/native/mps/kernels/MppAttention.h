@@ -5,7 +5,8 @@
 
 #include <ATen/native/mps/kernels/PrefillAttention.h>
 
-#if __METAL_VERSION__ >= 400
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
 
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
 
@@ -805,7 +806,7 @@ prefill_attention_mpp(
       Stile.elems()[ii] *= scale2;
     }
 
-    // Mask out the partial K column when kL is not BK-aligned.
+    // Mask out the partial K column when kL is not a multiple of 32 (BK).
     if (!align_K && is_last_k) {
       MPP_PRAGMA_UNROLL
       for (short iq = 0; iq < TQ; iq++) {
@@ -899,7 +900,7 @@ prefill_attention_mpp(
             if constexpr (is_bool) {
               fg[jj] = mfrag[jj] ? fg[jj] : (AccumType)-INFINITY;
             } else {
-              fg[jj] += 1.44269504089f * static_cast<AccumType>(mfrag[jj]);
+              fg[jj] += mask_log2e(static_cast<AccumType>(mfrag[jj]));
             }
           }
         }
@@ -1035,8 +1036,8 @@ prefill_attention_mpp(
   instantiate_mpp_attn_arch(                                                \
       "a9", false, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype);
 
-// BK is always 32: mpp_prefill_block_shape_for_head_dim returns it for every
-// supported head dim.
+// Keep in sync with Attention.h: the tiles (kMppTiles), bq 64 (kMppBQ),
+// bk 32 (kMppBK) and wm 4 (kPrefillSimdgroups).
 #define instantiate_mpp_attn_shapes(iname, itype, hm, dc, mname, mtype)        \
   instantiate_mpp_attn(iname, itype, 64, 32, 256, 4, 1, hm, dc, mname, mtype); \
   instantiate_mpp_attn(iname, itype, 64, 32, 128, 4, 1, hm, dc, mname, mtype); \
@@ -1052,9 +1053,10 @@ prefill_attention_mpp(
 #define instantiate_mpp_attn_mask(iname, itype)               \
   instantiate_mpp_attn_causal(iname, itype, 0, iname, itype); \
   instantiate_mpp_attn_causal(iname, itype, 1, iname, itype); \
-  instantiate_mpp_attn_causal(iname, itype, 1, bool_, bool);
+  instantiate_mpp_attn_causal(iname, itype, 1, bool_, bool);  \
+  instantiate_mpp_attn_causal(iname, itype, 1, float32, float);
 
 instantiate_mpp_attn_mask(float16, half);
 instantiate_mpp_attn_mask(bfloat16, bfloat);
 
-#endif // __METAL_VERSION__ >= 400
+#endif // __METAL_VERSION__ >= 400 && __has_include(MetalPerformancePrimitives)
