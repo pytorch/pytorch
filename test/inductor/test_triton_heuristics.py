@@ -167,6 +167,27 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(unique_configs([first, cfg]), [first])
 
+    @parametrize("options", [{"option": {1, 2}}, {1: "a", "option": "b"}])
+    def test_invalid_extra_options_error(self, options):
+        from torch._inductor.runtime.hints import HeuristicType
+        from torch._inductor.runtime.triton_heuristics import (
+            cached_autotune,
+            hash_configs,
+        )
+
+        message = "Config.extra_options must be JSON-serializable"
+        cfg = self._config_with_extra_options(options)
+        with self.assertRaisesRegex(TypeError, message):
+            hash_configs([cfg])
+        with self.assertRaisesRegex(TypeError, message):
+            cached_autotune(
+                size_hints=None,
+                configs=[cfg],
+                triton_meta={},
+                heuristic_type=HeuristicType.POINTWISE,
+                inductor_meta={"force_disable_caches": True},
+            )
+
     def test_empty_extra_options_preserve_identity(self):
         from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
         from torch._inductor.runtime.triton_heuristics import hash_configs
@@ -1463,7 +1484,12 @@ class TestRecheckAutotuneCache(TestCase):
 
     def test_static_restore_selects_extra_options_winner(self):
         from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.hints import DeviceProperties, HeuristicType
         from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        @triton.jit
+        def kernel(XBLOCK: tl.constexpr):
+            pass
 
         configs = []
         for value in (2, 4):
@@ -1471,12 +1497,7 @@ class TestRecheckAutotuneCache(TestCase):
             cfg.extra_options = {"backend_option": value}
             configs.append(cfg)
         results = [self._make_compile_result(cfg) for cfg in configs]
-        # Only the device artifacts are mocked; use the real cache reader and
-        # static restore method, without creating a device context.
-        tuner = object.__new__(CachingAutotuner)
-        tuner.compile_results = results
-        tuner._could_rblock_scale = False
-        tuner.inductor_meta = {
+        inductor_meta = {
             "autotune_local_cache": True,
             "autotune_remote_cache": False,
             "coordinate_descent_tuning": False,
@@ -1484,7 +1505,30 @@ class TestRecheckAutotuneCache(TestCase):
         }
         reload_source = MagicMock(side_effect=AssertionError("unexpected compilation"))
         with tempfile.TemporaryDirectory() as directory:
-            tuner.filename = os.path.join(directory, "kernel.py")
+            # Synthetic device properties avoid querying a GPU.
+            tuner = CachingAutotuner(
+                fn=kernel,
+                triton_meta={
+                    "device": DeviceProperties(
+                        type="cuda",
+                        index=0,
+                        multi_processor_count=1,
+                        cc=80,
+                        warp_size=32,
+                        max_threads_per_block=1024,
+                    ),
+                    "signature": {},
+                    "constants": {},
+                },
+                configs=configs,
+                save_cache_hook=None,
+                mutated_arg_names=[],
+                optimize_mem=True,
+                heuristic_type=HeuristicType.POINTWISE,
+                inductor_meta=inductor_meta,
+                filename=os.path.join(directory, "kernel.py"),
+            )
+            tuner.compile_results = results
             cache = AutotuneCache.create(
                 tuner.inductor_meta, tuner.filename, hash_configs(configs)
             )

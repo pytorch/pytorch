@@ -742,12 +742,8 @@ def _load_cached_autotuning(
             ]
             if len(exact_matches) == 1:
                 matched_config = exact_matches[0]
-            elif (
-                not exact_matches
-                and len(matching_configs) == 1
-                and not getattr(matching_configs[0], "extra_options", None)
-            ):
-                # Backends may attach tuned options only after candidate creation.
+            elif len(matching_configs) == 1:
+                # Backends may tune options after candidate creation.
                 matched_config = matching_configs[0]
             else:
                 return None

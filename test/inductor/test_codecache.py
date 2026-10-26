@@ -6135,10 +6135,43 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertEqual(result.extra_options, {"tile": [2, 4]})
 
     @requires_triton()
+    def test_cache_hit_restores_tuned_extra_options(self):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        initial = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+        initial.extra_options = {"option": 2}
+        configs_hash = hash_configs([initial])
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "kernel.py")
+            cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+            self.assertIsNotNone(cache)
+            initial.extra_options = {"option": 4}
+            cache.save(initial, time_taken_ns=1000)
+
+            candidate = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            candidate.extra_options = {"option": 2}
+            cache = AutotuneCache.create(
+                inductor_meta, filename, hash_configs([candidate])
+            )
+            self.assertIsNotNone(cache)
+            result = cache.read_best(inductor_meta, [candidate])
+
+        self.assertIs(result, candidate)
+        self.assertEqual(result.extra_options, {"option": 4})
+        self.assertEqual(result.num_ctas, 2)
+
+    @requires_triton()
     @parametrize(
         "options",
         [
-            [{"option": 2}],
             [{"option": 2}, {"option": 3}],
             [None, None],
             [{"option": 4}, {"option": 4}],
