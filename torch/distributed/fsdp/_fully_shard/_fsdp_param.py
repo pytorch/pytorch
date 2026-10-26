@@ -209,6 +209,9 @@ class FSDPParam:
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
+    # Whether _unsharded_param views _sharded_param_data, which then holds the
+    # whole parameter, instead of all_gather_outputs
+    _unsharded_param_views_shard: bool
     _sharding_spec: DTensorSpec
     # Sharding specs for sharded grads, whose dtype can differ from the param's.
     # Cached per dtype so each backward doesn't build a DTensorSpec per param,
@@ -263,6 +266,7 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
+        self._unsharded_param_views_shard = False
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -912,8 +916,13 @@ class FSDPParam:
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
         ]
 
-    def init_unsharded_param(self):
-        if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
+    def init_unsharded_param(self, view_shard: bool = False):
+        """``view_shard`` makes the unsharded parameter view the shard, which must
+        hold the whole parameter, instead of ``all_gather_outputs``."""
+        if (
+            hasattr(self, "_unsharded_param")  # after the 1st all-gather
+            and view_shard == self._unsharded_param_views_shard
+        ):
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
@@ -941,6 +950,12 @@ class FSDPParam:
                 self.param_dtype or self.orig_dtype,
             )
             self._all_gather_metadata = None
+        elif view_shard:
+            # The view keeps the shard's storage offset, and a whole-parameter
+            # shard has no padding
+            view = self._sharded_param_data.view(self._orig_size)
+            self._set_unsharded_param(view, views_shard=True)
+            return
         else:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
@@ -955,6 +970,12 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
+        self._set_unsharded_param(unsharded_param, views_shard=False)
+        self._release_all_gather_outputs_if_needed()
+
+    def _set_unsharded_param(
+        self, unsharded_param: torch.Tensor, *, views_shard: bool
+    ) -> None:
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored before module compute
         elif self._unsharded_dtensor_spec is not None:
@@ -964,11 +985,18 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(
                 unsharded_param, unsharded_dtensor_spec
             )
-        self._unsharded_param = nn.Parameter(
+        param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
-        self._unsharded_param.grad_dtype = self.unsharded_grad_dtype
-        self._release_all_gather_outputs_if_needed()
+        prev_param = getattr(self, "_unsharded_param", None)
+        if prev_param is not None and prev_param.grad is not None:
+            # A rebuilt leaf keeps the gradient it accumulates across backwards
+            param.grad_dtype = prev_param.grad_dtype
+            param.grad = prev_param.grad
+        else:
+            param.grad_dtype = self.unsharded_grad_dtype
+        self._unsharded_param = param
+        self._unsharded_param_views_shard = views_shard
 
     def _release_all_gather_outputs_if_needed(self) -> None:
         if self._release_all_gather_outputs_after_post_all_gather:
@@ -1151,6 +1179,17 @@ class FSDPParam:
         self.free_all_gather_outputs()
         for tensor in self._unsharded_inner_tensors:
             free_storage(tensor)
+
+    @property
+    def can_view_shard(self) -> bool:
+        """Whether the unsharded parameter can view a shard that holds the whole
+        parameter: nothing casts, offloads or transforms it before gathering."""
+        return (
+            self.sharded_state == ShardedState.SHARDED
+            and self.param_dtype is None
+            and not self.offload_to_cpu
+            and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
+        )
 
     @property
     def all_gather_inputs(self) -> list[torch.Tensor]:  # 1D
@@ -1499,6 +1538,15 @@ class FSDPParam:
             updated_local_tensor = True
         if not same_local_tensor:
             self._sharded_param_data = local_tensor.view(-1)
+            if self._unsharded_param_views_shard:
+                # Repoint now, and empty the old view, which autograd graphs may
+                # still hold, so that it does not keep the old shard alive
+                stale_param = self._unsharded_param
+                view = self._sharded_param_data.view(self._orig_size)
+                self._set_unsharded_param(view, views_shard=True)
+                if not isinstance(stale_param, DTensor):
+                    stale_param.grad = None
+                    stale_param.data = stale_param.new_empty(0)
         if not isinstance(self.sharded_param, DTensor):
             raise AssertionError(f"Expected DTensor, got {type(self.sharded_param)}")
         if updated_local_tensor:

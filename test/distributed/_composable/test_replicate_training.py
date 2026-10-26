@@ -21,6 +21,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
+    MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
 )
@@ -252,6 +253,65 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+
+
+class TestReplicateUnshardedParamViews(FSDPTestMultiThread):
+    """Unsharded parameters view their shards, which hold the whole parameters,
+    instead of copying them (#201858)."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _init_model(self, mp_policy: MixedPrecisionPolicy | None = None):
+        torch.manual_seed(42)
+        model = MLP(8, torch.device(device_type.type, 0))
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        replicate(model, mp_policy=mp_policy or MixedPrecisionPolicy())
+        fsdp_params = model._get_fsdp_state()._fsdp_param_group.fsdp_params
+        self.assertEqual(len(fsdp_params), len(list(ref_model.parameters())))
+        return model, ref_model, fsdp_params
+
+    def _views_shard(self, fsdp_param) -> bool:
+        storage = fsdp_param.unsharded_param.untyped_storage()
+        shard_storage = fsdp_param._sharded_param_data.untyped_storage()
+        return storage.data_ptr() == shard_storage.data_ptr()
+
+    @skip_if_lt_x_gpu(1)
+    def test_unsharded_params_view_shards(self):
+        model, _, fsdp_params = self._init_model()
+        model(torch.randn((2, 8), device=device_type.type))
+        for fsdp_param in fsdp_params:
+            self.assertTrue(self._views_shard(fsdp_param))
+
+    @skip_if_lt_x_gpu(1)
+    def test_param_dtype_copies_shards(self):
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        model, _, fsdp_params = self._init_model(mp_policy)
+        model(torch.randn((2, 8), device=device_type.type))
+        for fsdp_param in fsdp_params:
+            self.assertFalse(self._views_shard(fsdp_param))
+            self.assertEqual(fsdp_param.unsharded_param.dtype, torch.bfloat16)
+
+    @skip_if_lt_x_gpu(1)
+    def test_load_state_dict_assign_repoints_views(self):
+        model, ref_model, fsdp_params = self._init_model()
+        inp = torch.randn((2, 8), device=device_type.type)
+        # The graph outlives the load and holds the old views
+        loss = model(inp).sum()
+        loss.backward()
+        stale_params = [fsdp_param.unsharded_param for fsdp_param in fsdp_params]
+        new_state_dict = {k: v.detach() * 2 for k, v in model.state_dict().items()}
+        model.load_state_dict(new_state_dict, assign=True)
+        for fsdp_param, stale_param in zip(fsdp_params, stale_params):
+            self.assertTrue(self._views_shard(fsdp_param))
+            # Emptied, so that the graph does not keep the old shard alive
+            self.assertEqual(stale_param.numel(), 0)
+        for param in ref_model.parameters():
+            param.detach().mul_(2)
+        self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestReplicate1DTrainingCore(FSDPTest):
