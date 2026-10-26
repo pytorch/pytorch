@@ -5428,6 +5428,35 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
+    def test_copy_reduce_override(self):
+        # object.__reduce_ex__ must defer to a type's overridden __reduce__
+        # rather than the copyreg __newobj__ path.
+
+        class Custom:
+            def __init__(self, a, b=None):
+                self.a = a
+                self.b = b
+
+            def __reduce__(self):
+                return (type(self), (self.a,), {"b": self.b})
+
+            def __setstate__(self, state):
+                self.b = state["b"]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        # graph break on equality comparison for py_functools.args tuples
+        cfn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        obj = Custom(1, [10, 20])
+        c, d = cfn(obj)
+        self.assertEqual(c.a, 1)
+        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
+        self.assertEqual(d.a, 1)
+        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
+        self.assertEqual(d.b, obj.b)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
@@ -10621,6 +10650,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         loaded_model = imp.load_pickle(package_name, resource_name)
 
         optimized_loaded_model = torch.compile(loaded_model, backend="eager")(*inputs)
+
+    def test_precompile_entry_survives_reset(self):
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+        )
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        guard_manager = torch._dynamo.guards.GuardManagerWrapper()
+        guard_ref = weakref.ref(guard_manager)
+        _load_precompile_entry(fn.__code__, guard_manager, fn.__code__)
+        del guard_manager
+        entries = _debug_get_precompile_entries(fn.__code__)
+        self.assertEqual(len(entries), 1)
+
+        torch._dynamo.reset()
+        self.assertEqual(_debug_get_precompile_entries(fn.__code__), [])
+        gc.collect()
+        self.assertIsNotNone(guard_ref())
+        self.assertIs(entries[0].guard_manager, guard_ref())
 
     def test_precompile_entry_hit(self):
         from torch._C._dynamo.eval_frame import (
@@ -16615,7 +16669,55 @@ fn
         # move cache entry to front
         opt_fn(inp, 2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertIs(c1[1], c2[0])
+        self.assertEqual(c2, [c1[1], c1[0], c1[2]])
+
+    @parametrize("getter", ("debug", "region"))
+    @parametrize("isolate_recompiles", (False, True))
+    def test_cache_entry_survives_reset(self, getter, isolate_recompiles):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(
+            fn, backend="eager", isolate_recompiles=isolate_recompiles
+        )
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        region_id = opt_fn._isolate_recompiles_id
+        if getter == "debug":
+            entries = _debug_get_cache_entry_list(fn)
+        else:
+            entries = torch._dynamo.eval_frame._get_cache_entries_for_region(
+                fn, region_id
+            )
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        code_ref = weakref.ref(entry.code)
+        guard_ref = weakref.ref(entry.guard_manager)
+        compile_id = entry.compile_id
+        trace_annotation = entry.trace_annotation
+        entry_hash = hash(entry)
+        with self.assertRaises(RuntimeError):
+            entry.update_diff_guard_root_manager()
+        with self.assertRaises(RuntimeError):
+            entry.guard_manager.extra_state.invalidate(entry, entry.guard_manager)
+
+        torch._dynamo.reset()
+        self.assertEqual(_debug_get_cache_entry_list(fn), [])
+        self.assertEqual(
+            torch._dynamo.eval_frame._get_cache_entries_for_region(fn, region_id), []
+        )
+        gc.collect()
+        # Check liveness before dereferencing a potentially freed C++ entry.
+        self.assertIsNotNone(code_ref())
+        self.assertIsNotNone(guard_ref())
+        self.assertIs(entry.code, code_ref())
+        self.assertIs(entry.guard_manager, guard_ref())
+        self.assertIs(entry.compile_id, compile_id)
+        self.assertEqual(entry.trace_annotation, trace_annotation)
+        self.assertEqual(entry.isolate_recompiles_id, region_id)
+        self.assertEqual(hash(entry), entry_hash)
+        self.assertIsNone(entry.guard_manager.cache_entry)
+        self.assertIsNone(entry.guard_manager.extra_state)
 
     def test_inspect_signature_bind(self):
         import inspect
