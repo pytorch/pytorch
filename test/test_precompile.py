@@ -7266,14 +7266,15 @@ class TestPrecompileNoCompilation(TestCase):
         self.assertEqual(autotuner.mock_calls, [])
 
 
-def _never_run_kernel(shape):
-    """A kernel that never ran: no launchers yet, or two configs never autotuned."""
+def _never_run_kernel(shape, backward=True):
+    """A backward kernel that never ran: no launchers, or two never autotuned."""
     kernel = _static_runtime_kernel(32)
     if shape == "unlaunched":
         kernel.launchers = []
     else:
         kernel.launchers.append(_static_runtime_kernel(128).launchers[0])
     kernel._cached_launcher = None
+    kernel.is_backward = backward
     return kernel
 
 
@@ -7568,10 +7569,14 @@ class TestPrecompileRuntimeCache(TestCase):
         original_launchers = kernel.launchers
         with (
             mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+            mock.patch.object(StaticTritonCompileResult, "make_launcher") as load,
             self.assertLogs(_runtime_cache.log, "WARNING") as logs,
         ):
             payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
-        self.assertIn("froze never-run Triton kernel runtime_kernel", logs.output[0])
+        # Only a config that never loaded is test-loaded before it is frozen.
+        self.assertEqual(load.call_count, 1 if shape == "unlaunched" else 0)
+        self.assertIn("backward Triton kernel runtime_kernel", logs.output[0])
+        self.assertIn("{'XBLOCK': 32}", logs.output[0])
         self.assertIs(kernel.launchers, original_launchers)
         saved = pickle.loads(payload)
         self.assertEqual(saved.cache_key, "source")
@@ -7592,6 +7597,59 @@ class TestPrecompileRuntimeCache(TestCase):
         [[selected]] = made
         self.assertEqual(selected.config.kwargs, {"XBLOCK": 32})
         self.assertEqual(loaded.compile_results, [selected])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_never_run_kernel_skips_a_non_static_first_candidate(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler import _runtime_cache
+
+        kernel = _never_run_kernel("ambiguous")
+        kernel.launchers[0] = types.SimpleNamespace(_compile_result=object())
+        with (
+            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+            self.assertLogs(_runtime_cache.log, "WARNING") as logs,
+        ):
+            payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+        saved = pickle.loads(payload)
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 128})
+        self.assertIn("candidate 1 of 2", logs.output[0])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_never_run_kernel_skips_a_config_that_fails_to_load(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler import _runtime_cache
+
+        kernel = _never_run_kernel("unlaunched")
+        kernel.compile_results.append(_static_runtime_kernel(64).compile_results[0])
+        loads = iter([RuntimeError("out of shared memory"), None])
+
+        def load(result):
+            outcome = next(loads)
+            if outcome is not None:
+                raise outcome
+
+        with (
+            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+            mock.patch.object(
+                StaticTritonCompileResult,
+                "make_launcher",
+                autospec=True,
+                side_effect=load,
+            ),
+        ):
+            payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+        saved = pickle.loads(payload)
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_never_run_forward_kernel_stays_unresolved(self):
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
+
+        with self.assertRaisesRegex(_UnresolvedTritonExport, "inside the capture"):
+            _freeze_triton_kernel("source", [_never_run_kernel("ambiguous", False)])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("tuning", ("coordesc", "combo"))
@@ -7626,7 +7684,9 @@ class TestPrecompileRuntimeCache(TestCase):
         with self.assertRaises(_UnresolvedTritonExport) as failure:
             _freeze_triton_kernel("source", [_never_run_kernel("unlaunched"), dynamic])
         reasons = {r["reason"] for r in failure.exception.sources[0]["instances"]}
-        self.assertEqual(reasons, {"launcher_count_not_one", "non_static_compile_result"})
+        self.assertEqual(
+            reasons, {"launcher_count_not_one", "non_static_compile_result"}
+        )
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_fallback_reports_an_unavailable_cubin(self):
@@ -7731,7 +7791,8 @@ class TestPrecompileRuntimeCache(TestCase):
         with fresh_cache():
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
-                payload = pickle.dumps({lib.key: binary.read()})
+                portable_key = CppCodeCache._portable_keys[lib.key]
+                payload = pickle.dumps({portable_key: binary.read()})
         artifact = _runtime_cache.InductorCppCacheArtifact(
             hashlib.sha256(payload).hexdigest(), payload
         )
@@ -7775,7 +7836,10 @@ class TestPrecompileRuntimeCache(TestCase):
                 torch.load(cache, weights_only=True)["artifact"]
             )
             (frozen,) = artifacts["inductor_cpp"]
-            self.assertEqual(pickle.loads(frozen.content), {lib.key: binary})
+            self.assertEqual(
+                pickle.loads(frozen.content),
+                {CppCodeCache._portable_keys[lib.key]: binary},
+            )
 
     def test_cpp_kernel_is_recorded_on_every_load(self):
         from torch._inductor.codecache import CppCodeCache
@@ -7788,7 +7852,12 @@ class TestPrecompileRuntimeCache(TestCase):
             CppCodeCache.load_async(source)
             with _runtime_cache.capture_scope():
                 CppCodeCache.load_async(source)
-                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+                [(portable_key, (binary_path, _))] = (
+                    _runtime_cache._capture.cpp_kernels.items()
+                )
+            [key] = [
+                k for k, v in CppCodeCache._portable_keys.items() if v == portable_key
+            ]
             self.assertEqual(CppCodeCache._binary_paths[key], binary_path)
 
     def test_capture_builds_unforced_cpp_loads_and_rejects_missing_binaries(self):
