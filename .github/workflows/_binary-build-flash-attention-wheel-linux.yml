@@ -79,8 +79,8 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_version }}
       CUDA_SHORT: ${{ matrix.cuda_short }}
       TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
-      # building against Python 3.10 and torch 2.10
-      PYTHON_VERSION: "3.10"
+      # building against Python 3.11 and torch 2.10
+      PYTHON_VERSION: "3.11"
       TORCH_VERSION: "2.10.0"
     steps:
       - name: Checkout PyTorch
