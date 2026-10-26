@@ -421,7 +421,9 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         be = g._get_backend(torch.device("cpu"))
         # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
         self.assertNotIn("BackendWrapper", type(be).__name__)
-        t = torch.tensor([self._rank_value], dtype=torch.float32)
+        # The stub PG is a native ProcessGroupGloo; keep the tensor on CPU so
+        # the XPU variant does not feed it a device gloo does not support.
+        t = torch.tensor([self._rank_value], dtype=torch.float32, device="cpu")
         dist.all_reduce(t, group=g)
         self.assertEqual(t.item(), sum(range(1, self.world_size + 1)))
 
