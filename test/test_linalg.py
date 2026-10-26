@@ -11863,8 +11863,7 @@ class TestLinalgCudaOnly(TestCase):
 
             # Both are process-global, so a failure between enabling and
             # disabling them would leave them on for every later test in this
-            # process -- including ones that exercise Inductor, which reads
-            # them. The restore has to survive a failed assertion.
+            # process. The restore has to survive a failed assertion.
             try:
                 torch.cuda.tunable._nearest_match_enable(True)
                 torch.cuda.tunable._record_borrowed_enable(True)
