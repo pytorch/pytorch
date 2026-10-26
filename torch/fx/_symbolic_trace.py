@@ -1163,12 +1163,12 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 
 class _Patcher:
-    def __init__(self) -> None:
+    def __init__(self, outer: "_Patcher | None" = None) -> None:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
         # The patcher of the trace this one is nested in, if any.
-        self.outer: _Patcher | None = None
+        self.outer = outer
         # False while revert_all_patches has its patches suspended.
         self.applied = True
 
@@ -1259,8 +1259,7 @@ def _new_patcher() -> Iterator[_Patcher]:
     global CURRENT_PATCHER
     prior_patcher = CURRENT_PATCHER
     try:
-        CURRENT_PATCHER = _Patcher()
-        CURRENT_PATCHER.outer = prior_patcher
+        CURRENT_PATCHER = _Patcher(outer=prior_patcher)
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
@@ -1299,8 +1298,9 @@ def _resolve_lazy_imports(
     in, reverted.
 
     Reading an unresolved lazy import runs its module body, which must not see the
-    globals FX patches mid-trace. A ``torch.fx.wrap`` that body runs is patched for
-    this trace, as it would be had the module been imported eagerly.
+    globals FX patches mid-trace, nor FX's tracing flag. A ``torch.fx.wrap`` that
+    body runs is patched for this trace, as it would be had the module been
+    imported eagerly.
 
     Only the scopes FX itself scans get this: a lazy name first read inside some
     other function the trace calls still resolves with the patches applied.
@@ -1334,8 +1334,9 @@ def _resolve_lazy_imports(
     for suspended in chain:
         suspended.revert_all_patches()
     try:
-        for name in lazy_names:
-            _ = frame_dict[name]
+        with _is_fx_tracing_context(False):
+            for name in lazy_names:
+                _ = frame_dict[name]
     finally:
         for suspended in reversed(chain):
             suspended.reapply_all_patches()
@@ -1347,13 +1348,6 @@ def _resolve_lazy_imports(
         if key not in wraps_before:
             _resolve_lazy_imports(patcher, wrapped_globals, (key[1],))
             _patch_resolved_function(owner, wrapped_globals, key[1])
-
-
-def _patch_wrapped_function(
-    patcher: _Patcher, frame_dict: dict[str, Any], name: str
-) -> None:
-    _resolve_lazy_imports(patcher, frame_dict, (name,))
-    _patch_resolved_function(patcher, frame_dict, name)
 
 
 def _patch_resolved_function(
@@ -1372,7 +1366,8 @@ def _patch_wrapped_functions(patcher: _Patcher) -> None:
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
     for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
-        _patch_wrapped_function(patcher, frame_dict, name)
+        _resolve_lazy_imports(patcher, frame_dict, (name,))
+        _patch_resolved_function(patcher, frame_dict, name)
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
