@@ -7036,7 +7036,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if (
             factor > 2
             and factor & (factor - 1) == 0
-            and dtype in (torch.int16, torch.float16, torch.bfloat16)
+            and dtype in (torch.int16, torch.uint16, torch.float16, torch.bfloat16)
         ):
             # Move pairs in 32-bit words to avoid repeated 16-bit layout conversions.
             half = factor // 2
