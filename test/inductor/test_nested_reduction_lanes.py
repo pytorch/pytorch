@@ -1,10 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import os
 import re
+import sys
 
 import torch
 import torch._inductor.test_operators
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codecache import PyCodeCache
@@ -25,6 +28,12 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
+
+
+# Make the helper files in test/ importable
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+from higher_order_ops.test_inline_asm_elementwise import combine_inputs_asm, xor_words
 
 
 class _SplitCodegen:
@@ -121,8 +130,53 @@ def lane_input(device, width=6144):
     return torch.arange(17, device=device).float()[:, None] / 8 + columns
 
 
+def pack_words(groups, scale, outputs=3, native=True):
+    """Pack 16-bit lane pairs into ``outputs`` words with inline asm, or with
+    the equivalent XOR reference."""
+    bits = groups.view(torch.int16).to(torch.int32) & 65535
+    pairs = bits[..., ::2] | (bits[..., 1::2] << 16)
+    if not native:
+        return torch.stack(xor_words(pairs, scale, outputs), -1)
+    asm, constraints = combine_inputs_asm(outputs)
+    words = inline_asm_elementwise(
+        *pairs.unbind(-1),
+        scale,
+        asm_str=asm,
+        constraints=constraints,
+        dtype=(torch.int32,) * outputs,
+    )
+    return torch.stack(words, -1)
+
+
+def pack_mxfp6(value, native):
+    groups = value.view(value.shape[0], -1, 32)
+    maximum = groups.float().abs().amax(-1)
+    words = pack_words(groups, maximum.to(torch.int32), native=native)
+    return words.view(value.shape[0], -1), maximum
+
+
+def layer_norm_inputs(device, rows, width=1056):
+    # Repeated signed rows keep the sums exact and BF16 rounding away from
+    # midpoints, so the reference can use a different reduction order.
+    row = (torch.arange(width, device=device) % 32 - 16).float() / 8
+    signs = (torch.arange(rows, device=device) % 2 * 2 - 1).float()
+    weight = ((torch.arange(width, device=device) % 5 + 1).float() / 8).half()
+    bias = ((torch.arange(width, device=device) % 3 - 1).float() / 16).half()
+    return (signs[:, None] * row[None, :]).half(), weight, bias
+
+
+NESTED_CONFIG = {
+    "triton.nested_reduction": True,
+    "cat_fuse_computed_input_copies": True,
+    "loop_ordering_after_fusion": True,
+    "emulate_precision_casts": True,
+    "triton.multi_kernel": 0,
+    "force_disable_caches": True,
+}
+
+
 class NestedLaneTestCase(TestCase):
-    def compare(self, fn, x, persistent, exact=True):
+    def compare(self, fn, x, persistent, exact=True, loop_ordering=True):
         class Choices(InductorChoices):
             @staticmethod
             def should_use_cooperative_reduction(*args, **kwargs):
@@ -138,7 +192,7 @@ class NestedLaneTestCase(TestCase):
 
         settings = {
             "triton.multi_kernel": 0,
-            "loop_ordering_after_fusion": True,
+            "loop_ordering_after_fusion": loop_ordering,
             "split_reductions": False,
             "emulate_precision_casts": True,
             "cat_fuse_computed_input_copies": True,
@@ -243,6 +297,228 @@ class TestPitchedLaneSources(TestCase):
             self.assertEqual(kernels[0].count("tl.store("), 2)
 
 
+class TestNestedAsmLaneInputs(NestedLaneTestCase):
+    @parametrize("dynamic_batch", [False, True])
+    @config.patch({**NESTED_CONFIG, "comprehensive_padding": True})
+    def test_pitched_layer_norm_lanes(self, device, dynamic_batch):
+        def fn(x, weight, bias, native=True):
+            value = torch.nn.functional.layer_norm(
+                x.float(), x.shape[-1:], weight.float(), bias.float()
+            )
+            return pack_mxfp6(value.to(torch.bfloat16), native)
+
+        x, weight, bias = layer_norm_inputs(device, 128)
+        if dynamic_batch:
+            torch._dynamo.mark_dynamic(x, 0)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        metrics.reset()
+        _, kernels = run_and_get_kernels(compiled, x, weight, bias)
+        for batch in (128, 2, 17, 129) if dynamic_batch else (128,):
+            x = layer_norm_inputs(device, batch)[0]
+            actual, expected = compiled(x, weight, bias), fn(x, weight, bias, False)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+            self.assertEqual(
+                [t.stride() for t in actual], [t.stride() for t in expected]
+            )
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        compute = [kernel for kernel in kernels if "tl.load(" in kernel]
+        self.assertEqual(len(compute), 1)
+        self.assertNotIn("in_ptr3", compute[0])  # No BF16 intermediate input.
+        # Three FP6 words and the scale.
+        self.assertEqual(compute[0].count("tl.store("), 4)
+
+    @parametrize("persistent", [False, True])
+    @parametrize("width,shift_groups", [(6144, False), (1024, True)])
+    def test_parent_lane_inputs(self, device, persistent, width, shift_groups):
+        def fn(x):
+            groups = realized_rms_groups(x)
+            maximum = groups.abs().amax(-1)
+            if shift_groups:
+                groups = groups.roll(1, dims=1)
+            words = pack_words(groups, maximum.to(torch.int32), 6)
+            return words.view(torch.uint8), maximum
+
+        self.compare(fn, lane_input(device, width), persistent)
+        if shift_groups:
+            self.assertGreater(metrics.generated_kernel_count, 1)
+        else:
+            self.assertEqual(metrics.codegen_nested_reduction, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @parametrize("persistent", [False, True])
+    def test_parent_lane_inputs_without_loop_ordering(self, device, persistent):
+        # fbcode turns loop_ordering_after_fusion off by default. The lane plan
+        # need not form for this graph then, but the result must stay exact.
+        def fn(x):
+            groups = realized_rms_groups(x)
+            maximum = groups.abs().amax(-1)
+            words = pack_words(groups, maximum.to(torch.int32), 6)
+            return words.view(torch.uint8), maximum
+
+        self.compare(fn, lane_input(device), persistent, loop_ordering=False)
+
+    @parametrize("persistent", [False, True])
+    @parametrize("quantized_output", [False, True])
+    def test_parent_full_lane_source(self, device, persistent, quantized_output):
+        # The lanes read a value computed from the grouped reduction's output.
+        def fn(x):
+            groups = realized_rms_groups(x)
+            maximum = groups.abs().amax(-1)
+            scale = maximum[..., None].float() + 1
+            quantized = (groups.float() / scale).to(torch.bfloat16)
+            if not quantized_output:
+                quantized = torch.ops._inductor_test.realize(quantized)
+            packed = pack_words(quantized, maximum.to(torch.int32)).view(torch.uint8)
+            return (packed, maximum, quantized) if quantized_output else (packed,)
+
+        self.compare(fn, lane_input(device), persistent)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @parametrize("rows", [128, 1024])
+    @config.patch(NESTED_CONFIG)
+    def test_padded_two_pass_layer_norm(self, device, rows):
+        # Padding the input (instead of padding the packed outputs with
+        # constants) lets the padded groups flow through the same kernel. The
+        # payload padding is only zero because the conversion maps zero inputs
+        # to zero, which Inductor cannot see through inline asm, so the graph
+        # has to be written this way rather than rewritten automatically.
+        width, padded = 1056, 1152
+
+        def fn(x, weight, bias, native=True):
+            value = torch.nn.functional.pad(x, (0, padded - width)).float()
+            columns = torch.arange(padded, device=x.device)
+            mean = value.sum(-1, keepdim=True) / width
+            centered = torch.where(columns < width, value - mean, 0)
+            variance = centered.square().sum(-1, keepdim=True) / width
+            normalized = centered * torch.rsqrt(variance + 1e-5)
+            weight = torch.nn.functional.pad(weight, (0, padded - width))
+            bias = torch.nn.functional.pad(bias, (0, padded - width))
+            normalized = normalized * weight.float() + bias.float()
+            value = torch.where(columns < width, normalized.to(torch.bfloat16), 0)
+            return pack_mxfp6(value, native)
+
+        x, weight, bias = layer_norm_inputs(device, rows, width)
+        compiled = torch.compile(fn, fullgraph=True)
+        actual, kernels = run_and_get_kernels(compiled, x, weight, bias)
+        self.assertEqual(actual, fn(x, weight, bias, False), atol=0, rtol=0)
+        self.assertEqual(len(kernels), 1)
+        # The 32 bf16 lanes are split once, as 16 packed uint32 pairs.
+        self.assertEqual(kernels[0].count("tl.split("), 16)
+        self.assertIn("tl.uint32", kernels[0])
+
+
+class TestNestedLaneForwarding(NestedLaneTestCase):
+    @parametrize("persistent", [False, True])
+    @parametrize("source_before_reduction", [False, True])
+    def test_source_lifetime(self, device, persistent, source_before_reduction):
+        def fn(x):
+            source = torch.ops._inductor_test.realize(x + 1)
+            mean_square = source.square().mean(-1, keepdim=True)
+            value = source * torch.rsqrt(mean_square + 1e-5)
+            value = torch.ops._inductor_test.realize(value)
+            maximum = value.view(x.shape[0], -1, 32).abs().amax(-1)
+            selected = source if source_before_reduction else value
+            lanes = selected.view(x.shape[0], -1, 32)
+            return maximum + lanes[..., 0], maximum + lanes[..., 31]
+
+        torch.manual_seed(1234)
+        self.compare(fn, torch.randn(16, 6144, device=device), persistent, exact=False)
+        if source_before_reduction:
+            self.assertGreater(metrics.generated_kernel_count, 1)
+        else:
+            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.codegen_nested_reduction, 1)
+
+    @parametrize("persistent", [False, True])
+    @parametrize("operation", ["sub", "pack"])
+    @parametrize(
+        "group_size,pattern",
+        [(2, "aligned"), (2, "reversed")]
+        + [
+            (32, pattern)
+            for pattern in ("aligned", "reversed", "unaligned", "different_source")
+        ],
+    )
+    def test_pair_lane_inputs(self, device, persistent, group_size, operation, pattern):
+        def fn(x):
+            groups = realized_rms_groups(x, group_size)
+            maximum = groups.abs().amax(-1)
+            other = groups
+            if pattern == "different_source":
+                other = torch.ops._inductor_test.realize(groups.view_as(x) + 1).view_as(
+                    groups
+                )
+            outputs = []
+            for base in (0, group_size - 2):
+                left, right = base, base + 1
+                if pattern == "reversed":
+                    left, right = right, left
+                elif pattern == "unaligned":
+                    left, right = (left + 1) % group_size, (right + 1) % group_size
+                a, b = groups[..., left], other[..., right]
+                if operation == "pack":
+                    a = a.view(torch.int16).to(torch.int32) & 65535
+                    b = b.view(torch.int16).to(torch.int32) & 65535
+                    outputs.append((a | (b << 16)) ^ maximum.to(torch.int32))
+                else:
+                    outputs.append(a.float() - b.float() + maximum)
+            return tuple(outputs)
+
+        source = self.compare(fn, lane_input(device), persistent)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        # Exact counts catch a second split tree of the same source.
+        splits = {2: {"sub": 1, "pack": 2}, 32: {"sub": 31, "pack": 31}}
+        expected = splits[group_size][operation]
+        if pattern == "different_source":
+            expected *= 2
+        self.assertEqual(source.count("tl.split("), expected)
+
+    @parametrize("persistent", [False, True])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("lanes", [(0, 31), tuple(range(32))])
+    @parametrize("pattern", ["lane_constants", "pair_constants", "mixed"])
+    def test_shared_bitcast_before_lane_split(
+        self, device, persistent, dtype, lanes, pattern
+    ):
+        def fn(x):
+            groups = realized_rms_groups(x, dtype=dtype)
+            maximum = groups.abs().amax(-1).to(torch.int32)
+            result = maximum
+            for lane in lanes:
+                if pattern == "mixed" and lane != 0:
+                    result = result ^ groups[..., lane].to(torch.int32)
+                    continue
+                bits = groups[..., lane].view(torch.int16).to(torch.int32)
+                if pattern == "pair_constants":
+                    other = groups[..., lane ^ 1].view(torch.int16).to(torch.int32)
+                    result = result ^ (bits - other * (lane + 1))
+                else:
+                    result = result ^ (bits * (lane + 1))
+            return result
+
+        source = self.compare(fn, lane_input(device), persistent)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        bitcast = ".to(tl.int16, bitcast=True)"
+        # Integer carrier unpacking does not repeat the source's floating-point cast.
+        unpacks = source.count(".to(tl.uint16)" + bitcast)
+        source_bitcasts = source.count(bitcast) - unpacks
+        if len(lanes) == 32:
+            self.assertEqual(source_bitcasts, 1)
+            self.assertLess(source.index(bitcast), source.index("tl.split("))
+            # The int16 tile is split as packed uint32 pairs.
+            self.assertIn("tl.uint32", source)
+            splits = 16
+        else:
+            count = {"lane_constants": 2, "pair_constants": 4, "mixed": 1}[pattern]
+            self.assertEqual(source_bitcasts, count)
+            splits = 31
+        # Mixed also splits the floating-point source for its plain lane reads.
+        self.assertEqual(source.count("tl.split("), splits + 31 * (pattern == "mixed"))
+
+
 class TestNestedLaneSplits(NestedLaneTestCase):
     @parametrize("persistent", [False, True])
     @parametrize("lanes", [(1,), (0, 1, 2, 3)])
@@ -269,8 +545,12 @@ class TestNestedLaneSplits(NestedLaneTestCase):
         self.assertEqual(unused, [])
 
 
+# The inline asm strings are PTX or AMDGCN.
 instantiate_device_type_tests(TestRecursiveLaneSplit, globals(), only_for="cuda")
+instantiate_device_type_tests(TestNestedAsmLaneInputs, globals(), only_for="cuda")
+
 instantiate_device_type_tests(TestPitchedLaneSources, globals(), only_for=GPU_TYPE)
+instantiate_device_type_tests(TestNestedLaneForwarding, globals(), only_for=GPU_TYPE)
 instantiate_device_type_tests(TestNestedLaneSplits, globals(), only_for=GPU_TYPE)
 
 

@@ -3255,6 +3255,7 @@ class _InternalsBase:
 
     def setUp(self):
         super().setUp()
+        self.enterContext(inductor_config.patch("loop_ordering_after_fusion", True))
         metrics.reset()
         torch._dynamo.utils.clear_compilation_metrics()
 
