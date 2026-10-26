@@ -82,6 +82,13 @@ TORCH_API Tensor& index_out(
     const Tensor& self,
     const c10::List<std::optional<at::Tensor>>& indices);
 
+TORCH_API void index_copy_out_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const Tensor& result);
+
 using scatter_add_expanded_index_fn =
     void (*)(const Tensor&, const Tensor&, const Tensor&);
 using scatter_reduce_expanded_index_fn = void (*)(
