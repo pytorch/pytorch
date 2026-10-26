@@ -512,7 +512,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         "layout",
         (
             "leading",
+            "leading_short_tile",
             "trailing",
+            "trailing_short_tile",
             "trailing_batch_tile",
             "trailing_batch_partial",
             "interleaved_trailing_batch",
@@ -537,6 +539,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if layout == "leading":
             data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
             axes = (2, 3)
+        elif layout in ("leading_short_tile", "trailing_short_tile"):
+            # Distinct batches expose aliases in the short dim-K tile's compact scale store.
+            batched = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device=device)
+            batched[0].fill_(0.25)
+            batched[1].fill_(2.5)
+            if layout == "leading_short_tile":
+                data_hp, axes = batched, (1, 2)
+            else:
+                data_hp, axes = batched.permute(1, 2, 0).contiguous(), (0, 1)
         elif layout == "trailing":
             data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
             axes = (1, 2)

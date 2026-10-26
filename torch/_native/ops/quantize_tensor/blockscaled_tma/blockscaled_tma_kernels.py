@@ -603,8 +603,13 @@ class _BlockscaledTma:
                     if cutlass.const_expr(not is_scale_swizzled):
                         if input_row_k < M:
                             if scale_col_k < K // scale_group_size:
+                                compact_store_row = (
+                                    input_row_k + cutlass.Int64(batch_idx) * M
+                                    if cutlass.const_expr(is_batched)
+                                    else input_row_k
+                                )
                                 compact_scale_offset = cutlass.Int64(
-                                    input_row_k
+                                    compact_store_row
                                 ) * cutlass.Int64(
                                     K // scale_group_size
                                 ) + cutlass.Int64(scale_col_k)
