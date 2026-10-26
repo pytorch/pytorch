@@ -2002,6 +2002,26 @@ class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
             )
         )
 
+    @onlyAccelerator
+    def test_rms_norm_backward_grad_mode_dynamic_shapes(self, device):
+        # On CPU, rms_norm decomposes and never reaches
+        # infinitely_differentiable_native_rms_norm_backward.
+        def loss(x, w):
+            return torch.nn.functional.rms_norm(x, (64,), w).square().sum()
+
+        # torch.func.grad runs the backward with grad mode on, which selects
+        # infinitely_differentiable_native_rms_norm_backward.
+        grad_fn = torch.func.grad(loss)
+        cnt = CompileCounterWithBackend(backend="inductor")
+        compiled = torch.compile(grad_fn, dynamic=True, fullgraph=True, backend=cnt)
+
+        w = torch.randn(64, device=device)
+        for batch_size in [8, 12, 16]:
+            x = torch.randn(batch_size, 64, device=device)
+            self.assertEqual(compiled(x, w), grad_fn(x, w))
+
+        self.assertEqual(cnt.frame_count, 1)
+
 
 instantiate_device_type_tests(AotAutogradFallbackTestsDevice, globals())
 
