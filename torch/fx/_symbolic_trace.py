@@ -3,6 +3,7 @@ import collections
 import contextlib
 import copy
 import functools
+import importlib
 import inspect
 import logging
 import math
@@ -917,6 +918,11 @@ class Tracer(TracerBase):
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
+                # Before anything is patched, so a torch.fx.wrap that resolving them
+                # runs is registered before _patch_wrapped_functions reads the table.
+                _resolve_lazy_imports(patcher, fn_globals)
+                for module in self._autowrap_search:
+                    _resolve_lazy_imports(patcher, module.__dict__)
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(
                     torch.nn.Module,
@@ -1166,6 +1172,10 @@ class _Patcher:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
+        # The patcher of the trace this one is nested in, if any.
+        self.outer: _Patcher | None = None
+        # False while revert_all_patches has its patches suspended.
+        self.applied = True
 
     def patch(
         self,
@@ -1216,6 +1226,7 @@ class _Patcher:
         """
         for patch in self.patches_made:
             patch.revert()
+        self.applied = False
         return self.patches_made
 
     def reapply_all_patches(self) -> list[_PatchedFn]:
@@ -1224,6 +1235,7 @@ class _Patcher:
         """
         for patch in self.patches_made:
             patch.patch()
+        self.applied = True
         return self.patches_made
 
     def __enter__(self) -> "_Patcher":
@@ -1253,6 +1265,7 @@ def _new_patcher() -> Iterator[_Patcher]:
     prior_patcher = CURRENT_PATCHER
     try:
         CURRENT_PATCHER = _Patcher()
+        CURRENT_PATCHER.outer = prior_patcher
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
@@ -1280,17 +1293,73 @@ def _maybe_revert_all_patches() -> Iterator[None]:
             )
 
 
+def _resolve_lazy_imports(
+    patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
+) -> None:
+    """Resolve the unresolved lazy imports among ``names`` (default: every global of
+    ``frame_dict``) with the patches of ``patcher``, and of every trace it is nested
+    in, reverted.
+
+    Reading an unresolved lazy import runs its module body, which must not see the
+    globals FX patches mid-trace. A ``torch.fx.wrap`` that body runs is patched for
+    this trace, as it would be had the module been imported eagerly.
+
+    ``importlib.is_lazy_import(globals, name)`` exists only on PEP 690-style
+    lazy-import runtimes (Cinder and builds derived from it). It reports an
+    unresolved lazy name without resolving it, and reading ``globals[name]``
+    resolves it. On other runtimes this does nothing.
+    """
+    is_lazy_import = getattr(importlib, "is_lazy_import", None)
+    if is_lazy_import is None:
+        return
+    lazy_names = [
+        name
+        for name in (frame_dict if names is None else names)
+        if name in frame_dict and is_lazy_import(frame_dict, name)
+    ]
+    if not lazy_names:
+        return
+    # Innermost first: a nested patcher recorded the outer one's wrappers as the
+    # originals it restores. A patcher already suspended (Dynamo compiles under
+    # _maybe_revert_all_patches) is left as it is.
+    chain: list[_Patcher] = []
+    current: _Patcher | None = patcher
+    while current is not None:
+        if current.applied:
+            chain.append(current)
+        current = current.outer
+    wraps_before = set(_wrapped_fns_to_patch)
+    for suspended in chain:
+        suspended.revert_all_patches()
+    try:
+        for name in lazy_names:
+            _ = frame_dict[name]
+    finally:
+        for suspended in reversed(chain):
+            suspended.reapply_all_patches()
+    for key, wrapped_globals in _wrapped_fns_to_patch.copy().items():
+        if key not in wraps_before:
+            _patch_wrapped_function(patcher, wrapped_globals, key[1])
+
+
+def _patch_wrapped_function(
+    patcher: _Patcher, frame_dict: dict[str, Any], name: str
+) -> None:
+    _resolve_lazy_imports(patcher, frame_dict, (name,))
+    if name not in frame_dict and hasattr(builtins, name):
+        orig_fn = getattr(builtins, name)
+    else:
+        orig_fn = frame_dict[name]
+    patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+
+
 def _patch_wrapped_functions(patcher: _Patcher) -> None:
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
     for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
-        if name not in frame_dict and hasattr(builtins, name):
-            orig_fn = getattr(builtins, name)
-        else:
-            orig_fn = frame_dict[name]
-        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+        _patch_wrapped_function(patcher, frame_dict, name)
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
@@ -1304,6 +1373,7 @@ def _autowrap_check(
     This method searches a scope for them and patches them if found.
     """
     if patcher.visit_once(frame_dict):
+        _resolve_lazy_imports(patcher, frame_dict)
         for name, value in frame_dict.items():
             if (
                 not name.startswith("_")
