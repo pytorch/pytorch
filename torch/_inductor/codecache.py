@@ -4167,9 +4167,9 @@ class CppCodeCache:
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
         )
         # The key a capture freezes this kernel's binary under, and a replay finds it
-        # by, on a host that may put torch elsewhere. The Inductor cache dir stays in
-        # it; a typical command does not name that dir. The binary itself stays
-        # under key, which this host's paths tell apart.
+        # by, on a host that may put torch elsewhere. The source and any cache-dir
+        # path in the command stay in it (see _relocatable_command_line). The binary
+        # itself stays under key, which this host's paths tell apart.
         frozen_key = relocatable_cpp_key(
             lambda: get_hash(
                 main_code.strip(),
@@ -4315,14 +4315,16 @@ def _relocatable_command_line(cmd: str) -> str:
     own paths. A replay restores a frozen binary to that location too, so the
     capture and replay hosts must run the same torch build.
 
-    Only these trees move. The Inductor cache dir stays in the key, since a
-    library in it that the kernel links against (the Halide runtime, CUTLASS or CK
-    kernels) is recorded by absolute path in the binary: a replay whose cache dir
-    is at the same path restores the binary, which then needs that library there,
-    and one whose cache dir is elsewhere rebuilds the kernel. The Python, compiler, CUDA
-    and other SDK paths stay too, even when they sit next to torch, so the hosts
-    must keep those at the same paths, as a packaged job whose torch is extracted
-    per launch next to a fixed interpreter does.
+    Only these trees move. The Inductor cache dir stays in the key, and so does
+    the kernel's source, which the key also hashes. A path into the cache dir is
+    recorded as is in the binary, whether the command links a library there (the
+    Halide runtime, CUTLASS or CK kernels) or the source names a file there (a GPU
+    cpp_wrapper wrapper's cubin path). So a replay whose cache dir is at the same
+    path restores such a kernel, which then needs those files there, and one whose
+    cache dir is elsewhere rebuilds it. The Python, compiler, CUDA and other SDK
+    paths stay too, even when they sit next to torch, so the hosts must keep those
+    at the same paths, as a packaged job whose torch is extracted per launch next
+    to a fixed interpreter does.
     """
     from torch._inductor import cpp_builder
     from torch.utils import cpp_extension
