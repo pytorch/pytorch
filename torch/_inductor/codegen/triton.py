@@ -5693,7 +5693,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                                     else f"tl.reshape({mask_str}, [])"
                                 )
                             line = f"tl.load({var} + ({index_str}), {mask_str}{ep}{other}{cachemod})"
-                            if self.is_native_matmul:
+                            if self.is_native_matmul and load_shape:
                                 line = f"tl.reshape({line}, {triton_shape_str(tile_shape)})"
                             else:
                                 line = triton_reshape(line, load_shape, tile_shape)
@@ -8407,6 +8407,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.cooperative_reduction:
             add_constexpr_arg("RSPLIT")
 
+        if self.is_native_matmul and not self.is_combo_kernel:
+            add_constexpr_arg("GROUP_M")
+
         if self.mix_order_reduction:
             add_constexpr_arg("RSPLIT_SIZE")
             add_constexpr_arg("NUM_STAGES")
@@ -8449,6 +8452,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_common(),
         }
 
+        if self.is_native_matmul:
+            inductor_meta["native_matmul_shape"] = {
+                prefix: int(V.graph.sizevars.optimization_hint(numel))
+                for prefix, numel in self.numels.items()
+            }
+            inductor_meta["native_matmul_num_dot"] = str(self.body).count(
+                "tl.dot("
+            ) + str(self.compute).count("tl.dot(")
+            if not self.is_combo_kernel:
+                # Native candidates already vary K; generic scaling counts only N tiles.
+                inductor_meta["dynamic_scale_rblock"] = False
+
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -8463,6 +8478,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self._prescan_host_tma_materializability()
         self.codegen_body()
+
+        if self.is_native_matmul:
+            blocks = ("XBLOCK", "YBLOCK", "R0_BLOCK")
+            full_block = any(
+                var.shape is None
+                or all(any(block in str(dim) for dim in var.shape) for block in blocks)
+                for var in self.cse.varname_map.values()
+            )
+            inductor_meta["native_matmul_compact_tensors"] = (
+                not self.persistent_reduction
+                and self.num_store == 1
+                and self.num_reduction == inductor_meta["native_matmul_num_dot"]
+                and not full_block
+            )
 
         tma_fields = (
             "tma_min_block_sizes",
@@ -9036,7 +9065,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             pid = self.iteration_ranges_get_pid(entry)
             if self.is_native_matmul and x in ("y", "x"):
-                # Y is emitted before X; group eight Y tiles to reuse data in L2.
+                # Y is emitted before X; group Y tiles to reuse data in L2.
                 if x == "y":
                     x_entry = next(t for t in self.range_trees if t.prefix == "x")
                     y_pid = pid
@@ -9053,10 +9082,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         code.writeline(f"pid_mn = {x_pid} * {y_tiles} + {y_pid}")
                         y_pid = "pid_mn // tl.cdiv(xnumel, XBLOCK)"
                         x_pid = "pid_mn % tl.cdiv(xnumel, XBLOCK)"
-                    # TODO(nullplay): Tune GROUP_M; currently fixed at 8.
+                    group_m = "GROUP_M" if not self.is_combo_kernel else "8"
                     swizzle = (
                         f"pid_y, pid_x = tl.swizzle2d({y_pid}, {x_pid}, "
-                        f"{y_tiles}, tl.cdiv(xnumel, XBLOCK), 8)"
+                        f"{y_tiles}, tl.cdiv(xnumel, XBLOCK), {group_m})"
                     )
                     if self.is_combo_kernel and not self.per_subkernel_blocks:
                         # Shared combo grids can include masked tiles outside this matmul.
