@@ -2572,6 +2572,20 @@ class PrecompiledModule(PrecompiledRunnable):
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
+        from torch._inductor.standalone_compile import STANDALONE_PYTHON_PINS
+
+        options = inductor_options or {}
+        pins = {**_MAKE_FX_ASSERT_PINS, **STANDALONE_PYTHON_PINS}.items()
+        overridden = {k: v for k, v in pins if options.get(k, v) != v}
+        if overridden:
+            raise PrecompileError(
+                f"a MakeFxTracer capture always compiles with {overridden}: its "
+                "standalone module is a plain Python wrapper whose kernels are tuned "
+                "at compile time, and its size_asserts and scalar_asserts check at "
+                "load that a call's inputs have the layout and ranges its graph was "
+                "compiled for. It compiles unfrozen: freezing's compiler would rewrite "
+                "the graph the module is built from."
+            )
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
@@ -3528,42 +3542,8 @@ def capture(
         # option or a value of the wrong type raises here rather than mid-capture.
         dynamic = tracer.dynamic if isinstance(tracer, DynamoTracer) else None
         inductor = torch._TorchCompileInductorWrapper(mode, options, dynamic)
-        if isinstance(tracer, DynamoTracer):
-            from torch._dynamo.precompile_package import CAPTURE_INDUCTOR_PATCH
-
-            uncached = [
-                k
-                for k in ("freezing", "force_disable_caches", "fx_wrapper")
-                if inductor.config.get(k)
-            ]
-            if uncached:
-                raise PrecompileError(
-                    f"a DynamoTracer capture cannot compile with {uncached} on: the "
-                    "artifact ships each graph's compile from Inductor's caches, which "
-                    "such a compile never files."
-                )
-            pinned = CAPTURE_INDUCTOR_PATCH.items()
-            overridden = {k: v for k, v in pinned if inductor.config.get(k, v) != v}
-            if overridden:
-                raise PrecompileError(
-                    f"a DynamoTracer capture always compiles with {overridden}: an "
-                    "eager backward lowering fails on a remote autotune cache miss."
-                )
     if isinstance(tracer, MakeFxTracer):
         inductor_options = inductor.config if inductor is not None else {}
-        from torch._inductor.standalone_compile import STANDALONE_PYTHON_PINS
-
-        pins = {**_MAKE_FX_ASSERT_PINS, **STANDALONE_PYTHON_PINS}.items()
-        overridden = {k: v for k, v in pins if inductor_options.get(k, v) != v}
-        if overridden:
-            raise PrecompileError(
-                f"a MakeFxTracer capture always compiles with {overridden}: its "
-                "standalone module is a plain Python wrapper whose kernels are tuned "
-                "at compile time, and its size_asserts and scalar_asserts check at "
-                "load that a call's inputs have the layout and ranges its graph was "
-                "compiled for. It compiles unfrozen: freezing's compiler would rewrite "
-                "the graph the module is built from."
-            )
         return _MakeFxCapture(
             fn,
             artifact_path,
