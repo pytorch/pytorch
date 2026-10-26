@@ -7581,8 +7581,39 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertIs(kernel._cached_launcher, original_launchers[0])
         self.assertIs(kernel.fn.fn, original_fn)
         kernel.launchers = []
+        kernel.compile_results = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
+        with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
+            _freeze_triton_kernel("source", [])
+
+    def test_static_export_freezes_a_never_run_kernel(self):
+        from torch.compiler._runtime_cache import _freeze_triton_kernel
+
+        # No instance ran, so none autotuned to one launcher. The first instance has
+        # no static result to fall back to; the second never built its launchers.
+        dynamic = _static_runtime_kernel(16)
+        dynamic.launchers = []
+        dynamic._cached_launcher = None
+        dynamic.compile_results = [object()]
+        unlaunched = _static_runtime_kernel(32)
+        unlaunched.launchers = []
+        unlaunched._cached_launcher = None
+        unlaunched.inductor_meta["coordinate_descent_tuning"] = True
+        unlaunched.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
+        live_meta = dict(unlaunched.inductor_meta)
+        saved = pickle.loads(_freeze_triton_kernel("source", [dynamic, unlaunched]))
+        self.assertEqual(saved.cache_key, "source")
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 32})
+        self.assertFalse(saved.kernel.inductor_meta["coordinate_descent_tuning"])
+        self.assertIsNone(saved.kernel.inductor_meta["combo_tuning_groups"])
+        self.assertEqual(unlaunched.inductor_meta, live_meta)
+
+        # A kernel that built several launchers but never ran freezes the first.
+        ambiguous = _static_runtime_kernel(64)
+        ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
+        saved = pickle.loads(_freeze_triton_kernel("source", [ambiguous]))
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
@@ -8138,8 +8169,12 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched.heuristic_type = HeuristicType.REDUCTION
         unlaunched.configs = [unlaunched.compile_results[0].config]
         unlaunched.inductor_meta["private_config"] = "do not include config values"
+        # Neither has a static result to freeze in place of a launch.
+        unlaunched.compile_results = [object()]
         ambiguous = _static_runtime_kernel(64)
         ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
+        for launcher in ambiguous.launchers:
+            launcher._compile_result = object()
         dynamic = _static_runtime_kernel(64)
         dynamic.launchers[0]._compile_result = object()
         combo = _static_runtime_kernel(64)
@@ -8209,9 +8244,7 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(info["config_count"], 1)
             self.assertEqual(info["launcher_count"], 0)
             self.assertEqual(info["compile_result_count"], 1)
-            self.assertEqual(
-                info["compile_result_types"], ["StaticTritonCompileResult"]
-            )
+            self.assertEqual(info["compile_result_types"], ["object"])
             self.assertEqual(sources["ambiguous"]["instances"][0]["launcher_count"], 2)
             self.assertEqual(
                 sources["dynamic"]["instances"][0]["launcher_result_types"],
@@ -8505,6 +8538,8 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched.launchers = []
         unlaunched._cached_launcher = None
         unlaunched.inductor_meta = {"kernel_name": "triton_poi_unlaunched_0"}
+        # No static result to freeze in place of a launch.
+        unlaunched.compile_results = [object()]
 
         def record():
             _runtime_cache.record_triton_kernel("unlaunched", unlaunched)

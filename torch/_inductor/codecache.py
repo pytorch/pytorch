@@ -4147,7 +4147,9 @@ class CppCodeCache:
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
         key, main_path = write(
-            main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
+            main_code,
+            "main.cpp",
+            extra=f"{optimized_code} {_host_independent_command_line(main_cmd_line)}",
         )
 
         # Don't bother writing if the argument is empty.
@@ -4275,6 +4277,21 @@ class CppCodeCache:
     @classmethod
     def load(cls, *args: Any, **kwargs: Any) -> Any:
         return cls.load_async(*args, **kwargs)()
+
+
+def _host_independent_command_line(cmd: str) -> str:
+    """Strip this host's torch install and Inductor cache paths from a C++ build
+    command so that a kernel's key matches on hosts that extract them elsewhere,
+    which precompile relies on to find frozen binaries.  The install path also
+    told torch builds apart, so torch_key() takes its place."""
+    roots = (
+        (cache_dir(), "<inductor_cache_dir>"),
+        (os.path.dirname(os.path.dirname(os.path.abspath(torch.__file__))), "<torch_root>"),
+    )
+    for root, placeholder in sorted(roots, key=lambda r: -len(r[0])):
+        if root and root != os.sep:
+            cmd = cmd.replace(root, placeholder)
+    return f"{cmd} {torch_key().hex()}"
 
 
 def _worker_compile_cpp(
