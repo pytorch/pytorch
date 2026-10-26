@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
+import inspect
 import os
+import types
 import weakref
 from datetime import timedelta
 
@@ -8,24 +10,71 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
     _create_work_from_future,
-    Backend as C10DBackend,
     ErrorType,
     FakeStore,
     ReconfigureOptions,
 )
-from torch.distributed.distributed_c10d import _get_default_group, is_gloo_available
+from torch.distributed.distributed_c10d import (
+    _coalescing_manager,
+    _get_default_group,
+    _world,
+    is_gloo_available,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_gloo,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+
+_CONFIG_COLLECTIVES = {
+    "broadcast": "broadcast",
+    "all_reduce": "allreduce",
+    "all_reduce_coalesced": "allreduce_coalesced",
+    "reduce": "reduce",
+    "all_gather": "allgather",
+    "all_gather_single": "all_gather_single",
+    "all_gather_into_tensor": "all_gather_single",
+    "_all_gather_base": "all_gather_single",
+    "all_gather_coalesced": "allgather_coalesced",
+    "gather_single": "gather_single",
+    "gather_into_tensor": "gather_single",
+    "reduce_scatter": "reduce_scatter",
+    "reduce_scatter_single": "reduce_scatter_single",
+    "reduce_scatter_tensor": "reduce_scatter_single",
+    "_reduce_scatter_base": "reduce_scatter_single",
+    "all_to_all_single": "all_to_all_single",
+}
+
+
+def _collective_inputs(name):
+    tensor = torch.ones(2)
+    output = torch.empty_like(tensor)
+    return {
+        "broadcast": ((tensor,), {"group_src": 0}),
+        "allreduce": ((tensor,), {"op": dist.ReduceOp.SUM}),
+        "allreduce_coalesced": (([tensor],), {"op": dist.ReduceOp.SUM}),
+        "reduce": ((tensor,), {"group_dst": 0, "op": dist.ReduceOp.SUM}),
+        "allgather": (([output], tensor), {}),
+        "all_gather_single": ((output, tensor), {}),
+        "allgather_coalesced": (([[output]], [tensor]), {}),
+        "gather_single": ((tensor, output), {"group_dst": 0}),
+        "reduce_scatter": ((output, [tensor]), {"op": dist.ReduceOp.SUM}),
+        "reduce_scatter_single": ((output, tensor), {"op": dist.ReduceOp.SUM}),
+        "all_to_all_single": ((output, tensor), {}),
+    }[_CONFIG_COLLECTIVES[name]]
 
 
 if is_gloo_available():
     from torch._C._distributed_c10d import _ProcessGroupWrapper
 
 
-class RecordingWork(dist._Work):
+class RecordingWork(dist.Work):
     def __init__(self, result, backend):
         super().__init__()
         self.result_ = result
@@ -33,7 +82,7 @@ class RecordingWork(dist._Work):
         self.future_.set_result(result)
         self.backend_ = weakref.ref(backend)
 
-    def wait(self, timeout):
+    def wait(self, timeout=timedelta(0)):
         self.backend_().wait_count += 1
         return True
 
@@ -42,11 +91,11 @@ class RecordingWork(dist._Work):
         return self.future_
 
 
-class RecordingBackend(C10DBackend):
+class RecordingBackend(dist.BackendBase):
     def __init__(self, rank, world, name="python-backend"):
         super().__init__(rank, world)
         self._name = name
-        self._options = C10DBackend.Options(name, timeout=timedelta(seconds=5))
+        self._options = dist.BackendBase.Options(name, timeout=timedelta(seconds=5))
         self.wait_count = 0
         self.get_future_count = 0
         self.calls = []
@@ -211,7 +260,8 @@ class RecordingBackend(C10DBackend):
 
     def gather_single(self, output_tensor, input_tensor, opts):
         self.calls.append(("gather_single", opts))
-        output_tensor.copy_(input_tensor)
+        if self.rank() == opts.rootRank:
+            output_tensor.copy_(input_tensor)
         return self._new_work(output_tensor)
 
     def scatter(self, output_tensors, input_tensors, opts):
@@ -342,7 +392,182 @@ def create_process_group(backend):
     return group
 
 
+@instantiate_parametrized_tests
 class TestPyBackend(TestCase):
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    @parametrize("async_op", [False, True])
+    @parametrize("config_kind", ["omitted", "none", "dict", "object"])
+    def test_collective_config(self, name, async_op, config_kind) -> None:
+        backend = RecordingBackend(0, 1, "custom-config-backend")
+        group = create_process_group(backend)
+        config = None if config_kind in ("omitted", "none") else {"value": 1}
+        args, kwargs = _collective_inputs(name)
+        if config_kind == "none":
+            kwargs["config"] = None
+        elif config_kind == "dict":
+            kwargs["config"] = {"value": 1}
+        elif config_kind == "object":
+            kwargs["config"] = types.SimpleNamespace(value=1)
+        result = getattr(dist, name)(*args, group=group, async_op=async_op, **kwargs)
+        self.assertEqual(
+            [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
+        )
+        opts = backend.calls[0][-1]
+        self.assertEqual(opts.config, config)
+        self.assertEqual(opts.asyncOp, async_op)
+        if "op" in kwargs:
+            self.assertEqual(opts.reduceOp, kwargs["op"])
+        if "group_src" in kwargs or "group_dst" in kwargs:
+            self.assertEqual(opts.rootRank, 0)
+        self.assertEqual(backend.wait_count, int(not async_op))
+        if not async_op:
+            self.assertIsNone(result)
+            return
+        if name in ("all_reduce_coalesced", "all_gather_coalesced"):
+            self.assertIsInstance(result, torch.Future)
+            self.assertEqual(backend.get_future_count, 1)
+        else:
+            self.assertIsInstance(result, dist.Work)
+        result.wait()
+
+    @parametrize("config_kind", ["omitted", "none", "value"])
+    def test_raw_optional_config(self, config_kind) -> None:
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+        tensor = torch.ones(2)
+        config = {"value": "custom"} if config_kind == "value" else None
+        kwargs = {} if config_kind == "omitted" else {"config": config}
+        torch.ops.c10d.allreduce_(
+            [tensor],
+            group.boxed(),
+            dist.ReduceOp(dist.ReduceOp.SUM).boxed(),
+            None,
+            False,
+            **kwargs,
+        )
+        self.assertEqual(len(backend.calls), 1)
+        self.assertEqual(backend.calls[0][-1].config, config)
+
+    def test_collective_config_backend_owned_validation(self) -> None:
+        # Direct backend calls own config validation; Python only forwards it.
+        backend = RecordingBackend(0, 1, "custom-backend")
+        config = {"value": 1}
+        args, kwargs = _collective_inputs("gather_single")
+        dist.gather_single(*args, group=backend, config=config, **kwargs)
+        self.assertEqual([call[0] for call in backend.calls], ["gather_single"])
+        self.assertEqual(backend.calls[0][-1].config, config)
+
+    def test_collective_config_selected_backend(self) -> None:
+        cpu_backend = RecordingBackend(0, 1)
+        cuda_backend = RecordingBackend(0, 1, "custom-config-backend")
+        group = create_process_group(cpu_backend)
+        group._register_backend(
+            torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL, cuda_backend
+        )
+        group._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
+        config = {"value": 1}
+        dist.all_reduce(torch.ones(2), group=group, config=config)
+        self.assertEqual(cpu_backend.calls[0][-1].config, config)
+        self.assertEqual(cuda_backend.calls, [])
+
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    @parametrize("config_kind", ["omitted", "none", "object"])
+    def test_collective_config_torch_function(self, name, config_kind) -> None:
+        config = object() if config_kind == "object" else None
+        calls = []
+
+        class Mode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                calls.append(kwargs)
+                return None
+
+        args, kwargs = _collective_inputs(name)
+        if config_kind != "omitted":
+            kwargs["config"] = config
+        with Mode():
+            getattr(dist, name)(*args, **kwargs)
+        self.assertEqual(len(calls), 1)
+        if config is None:
+            self.assertNotIn("config", calls[0])
+        else:
+            self.assertIs(calls[0]["config"], config)
+
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    def test_collective_config_keyword_only(self, name) -> None:
+        param = inspect.signature(getattr(dist, name)).parameters["config"]
+        self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIsNone(param.default)
+
+    @parametrize(
+        "options",
+        [
+            "BroadcastOptions",
+            "AllreduceOptions",
+            "AllreduceCoalescedOptions",
+            "ReduceOptions",
+            "AllgatherOptions",
+            "GatherOptions",
+            "ReduceScatterOptions",
+            "AllToAllOptions",
+        ],
+    )
+    def test_collective_config_conversion(self, options) -> None:
+        class Config:
+            def __init__(self) -> None:
+                self.max_ctas = 4
+                self.alg_selection = "ring"
+                self.vendor_options = ()
+
+        opts = getattr(torch._C._distributed_c10d, options)()
+        self.assertIsNone(opts.config)
+        opts.config = Config()
+        self.assertEqual(
+            opts.config, {"max_ctas": 4, "alg_selection": "ring", "vendor_options": ()}
+        )
+        opts.config = {"min_ctas": None}
+        self.assertEqual(opts.config, {"min_ctas": None})
+        opts.config = None
+        self.assertIsNone(opts.config)
+        with self.assertRaisesRegex(TypeError, "dict or an object with __dict__"):
+            opts.config = object()
+
+    @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
+    @parametrize("device", [None, torch.device("cpu")])
+    def test_collective_config_coalescing(self, name, device) -> None:
+        backend = RecordingBackend(0, 1, "custom-config-backend")
+        group = create_process_group(backend)
+        args, kwargs = _collective_inputs(name)
+        config = {"value": 1}
+        with _coalescing_manager(group, device):
+            getattr(dist, name)(*args, group=group, config=config, **kwargs)
+        self.assertNotIn(group, _world.pg_coalesce_state)
+        self.assertEqual(
+            [call[0] for call in backend.calls],
+            [_CONFIG_COLLECTIVES[name] + "_coalesced"],
+        )
+        self.assertEqual(backend.calls[0][-1].config, config)
+
+    def test_collective_config_coalescing_mismatch(self) -> None:
+        group = create_process_group(RecordingBackend(0, 1, "custom-config-backend"))
+        with self.assertRaisesRegex(RuntimeError, "same config"):
+            with _coalescing_manager(group):
+                dist.all_reduce(torch.ones(2), group=group)
+                dist.all_reduce(torch.ones(2), group=group, config={"value": 1})
+
+    def test_uncaptured_config_in_coalescing_scope(self) -> None:
+        backend = RecordingBackend(0, 1, "custom-config-backend")
+        group = create_process_group(backend)
+        other_backend = RecordingBackend(0, 1, "custom-config-backend")
+        other = create_process_group(other_backend)
+        config = {"value": 1}
+        with _coalescing_manager(group):
+            dist.all_reduce(torch.ones(2), group=other, config=config)
+            dist.broadcast(torch.ones(2), group_src=0, group=group, config=config)
+        self.assertEqual([call[0] for call in backend.calls], ["broadcast"])
+        self.assertEqual(backend.calls[0][-1].config, config)
+        self.assertEqual(other_backend.calls[0][-1].config, config)
+        self.assertNotIn(group, _world.pg_coalesce_state)
+
     def test_attr_overrides(self) -> None:
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
@@ -434,6 +659,41 @@ class TestPyBackend(TestCase):
 
         self.assertGreater(backend.wait_count, 0)
 
+    def test_work_overrides(self) -> None:
+        calls = []
+
+        class OverrideWork(RecordingWork):
+            def is_completed(self):
+                return True
+
+            def synchronize(self):
+                calls.append("synchronize")
+
+            def source_rank(self):
+                return 3
+
+            def result(self):
+                return [torch.ones(1)]
+
+            def block_current_stream(self):
+                calls.append("block_current_stream")
+
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+        work = group.allreduce([torch.zeros(2)])
+        self.assertFalse(work.is_completed())
+        with self.assertRaisesRegex(RuntimeError, "may only be called"):
+            work._source_rank()
+
+        backend._new_work = lambda result=None: OverrideWork(result, backend)
+        work = group.recv_anysource([torch.zeros(2)], 0)
+        self.assertTrue(work.is_completed())
+        self.assertEqual(work._source_rank(), 3)
+        self.assertEqual(work.result(), [torch.ones(1)])
+        work.synchronize()
+        work.block_current_stream()
+        self.assertEqual(calls, ["synchronize", "block_current_stream"])
+
     def test_collective_returns_none(self) -> None:
         backend = RecordingBackend(0, 1)
         backend.allreduce = lambda tensors, opts: [t.add_(2) for t in tensors] and None
@@ -513,7 +773,7 @@ class TestPyBackend(TestCase):
         self.assertTrue(backend.collectives_timing_enabled)
 
         store = dist.HashStore()
-        split_opts = C10DBackend.Options("split")
+        split_opts = dist.BackendBase.Options("split")
         split = group.split_group([0], opts=split_opts)
         self.assertEqual(
             split._get_backend(torch.device("cpu")).name(), "split-backend"
@@ -576,17 +836,17 @@ CAPABILITY_PROPERTIES = (
 )
 
 
-class BareBackend(C10DBackend):
+class BareBackend(dist.BackendBase):
     """Overrides none of the capability properties or options."""
 
     def getBackendName(self):
         return "bare-python-backend"
 
 
-class PropertyOverrideBackend(C10DBackend):
+class PropertyOverrideBackend(dist.BackendBase):
     def __init__(self, rank, world):
         super().__init__(rank, world)
-        self._options = C10DBackend.Options(
+        self._options = dist.BackendBase.Options(
             "property-override", timeout=timedelta(seconds=5)
         )
 
@@ -623,7 +883,7 @@ class PropertyOverrideBackend(C10DBackend):
         return self._options
 
 
-class ClassAttributeOverrideBackend(C10DBackend):
+class ClassAttributeOverrideBackend(dist.BackendBase):
     supports_splitting = True
     supports_coalescing = True
     _supports_time_estimate = True
@@ -631,7 +891,7 @@ class ClassAttributeOverrideBackend(C10DBackend):
     supports_reconfigure = True
     supports_window = True
     supports_abort_hooks = True
-    options = C10DBackend.Options("class-attribute", timeout=timedelta(seconds=5))
+    options = dist.BackendBase.Options("class-attribute", timeout=timedelta(seconds=5))
 
 
 class SuperDelegatingBackend(BareBackend):
@@ -758,7 +1018,7 @@ class TestPyBackendPropertyOverrides(TestCase):
         )
 
 
-class SplittableBackend(C10DBackend):
+class SplittableBackend(dist.BackendBase):
     """Minimal backend that only declares supports_splitting."""
 
     def getBackendName(self):
@@ -800,7 +1060,8 @@ class TestPyBackendSplitGroup(TestCase):
             ):
                 dist.split_group(split_ranks=[[0]])
             split = dist.split_group(
-                split_ranks=[[0]], pg_options=C10DBackend.Options("pybackend_split")
+                split_ranks=[[0]],
+                pg_options=dist.BackendBase.Options("pybackend_split"),
             )
             backend = split._get_backend(torch.device("cpu"))
             self.assertIsInstance(backend, SplittableBackend)
@@ -839,7 +1100,7 @@ class TestPyBackendProcessGroup(MultiProcessTestCase):
 
         pg = _get_default_group()
         backend = pg._get_backend(torch.device("cpu"))
-        self.assertIsInstance(backend, C10DBackend)
+        self.assertIsInstance(backend, dist.BackendBase)
         self.assertNotIsInstance(backend, dist.ProcessGroup)
         self.assertEqual(backend.name(), "registered-python-backend")
 

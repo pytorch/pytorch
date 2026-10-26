@@ -193,6 +193,27 @@ user_stack=None)
         finally:
             torch.set_autocast_cache_enabled(old_cache)
 
+    def test_global_state_reason_autocast(self):
+        guard = GlobalStateGuard()
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertIs(guard.check(), False)
+            self.assertEqual(guard.reason(), "autocast(cpu)_enabled ")
+            guard = GlobalStateGuard()
+            self.assertIs(guard.check(), True)
+            with torch.autocast("cpu", dtype=torch.float16):
+                self.assertIs(guard.check(), False)
+                self.assertEqual(guard.reason(), "autocast(cpu)_dtype ")
+        self.assertIs(guard.check(), False)
+
+    def test_global_state_autocast_round_trip(self):
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            state = GlobalStateGuard().__getstate__()
+        guard = GlobalStateGuard()
+        guard.__setstate__(state)
+        self.assertIs(guard.check(), False)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertIs(guard.check(), True)
+
     def test_python_lambda_leaf_guard(self):
         root = RootGuardManager()
         const_guard = guards.LAMBDA_GUARD(
