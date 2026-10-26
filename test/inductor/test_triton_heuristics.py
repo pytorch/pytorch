@@ -1059,6 +1059,7 @@ class TestCachingAutotunerPlugin(TestCase):
             )
 
         self.assertIs(result, sentinel)
+        self.assertTrue(autotuner._launched)
         mock_precompile.assert_not_called()
         mock_autotune.assert_not_called()
 
@@ -1076,6 +1077,7 @@ class TestCachingAutotunerPlugin(TestCase):
             )
 
         self.assertIs(result, sentinel)
+        self.assertTrue(autotuner._launched)
         mock_autotune.assert_not_called()
 
     def test_hooks_fire_in_registration_order(self):
@@ -1640,6 +1642,53 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
+
+
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+class TestCachingAutotunerLaunched(TestCase):
+    """``_launched`` tells precompile whether a kernel ran, even when ``run()`` left
+    no fast-path launcher."""
+
+    def _run(self, autotuner):
+        return autotuner.run(
+            *TestCachingAutotunerPlugin._make_kernel_inputs(),
+            stream=TestCachingAutotunerPlugin._get_stream(),
+        )
+
+    def _make_autotuner(self):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        args["configs"] = args["configs"][:1]
+        return CachingAutotuner(**args)
+
+    def test_set_by_a_launch_without_the_fast_path(self):
+        autotuner = self._make_autotuner()
+        self.assertFalse(autotuner._launched)
+        with torch.autograd.profiler.profile():
+            self._run(autotuner)
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertTrue(autotuner._launched)
+
+    def test_not_set_by_a_failed_launch(self):
+        autotuner = self._make_autotuner()
+        with (
+            patch.object(autotuner, "_pre_launch", side_effect=RuntimeError("boom")),
+            self.assertRaisesRegex(RuntimeError, "boom"),
+        ):
+            self._run(autotuner)
+        self.assertFalse(autotuner._launched)
+
+    def test_survives_pickling_preparation(self):
+        autotuner = self._make_autotuner()
+        self._run(autotuner)
+        old_values = autotuner.prepare_for_pickle()
+        # The pickled copy has not run in the process that loads it.
+        self.assertFalse(autotuner._launched)
+        autotuner.restore_after_unpickle(old_values)
+        self.assertTrue(autotuner._launched)
+        autotuner.prepare_for_pickle()
+        autotuner.restore_after_unpickle(None)
+        self.assertFalse(autotuner._launched)
 
 
 class TestFastLauncherDeviceSupport(TestCase):

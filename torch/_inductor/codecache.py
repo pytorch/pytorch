@@ -4146,16 +4146,19 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
-        from torch.compiler._runtime_cache import relocatable_cpp_keys
+        from torch.compiler._runtime_cache import (
+            relocatable_cpp_keys,
+            use_relocatable_cpp_key,
+        )
 
-        key_cmd_line = (
-            _relocatable_command_line(main_cmd_line)
-            if relocatable_cpp_keys()
-            else main_cmd_line
-        )
-        key, main_path = write(
-            main_code, "main.cpp", extra=f"{optimized_code} {key_cmd_line}"
-        )
+        extra = f"{optimized_code} {main_cmd_line}"
+        if relocatable_cpp_keys():
+            relocatable_extra = (
+                f"{optimized_code} {_relocatable_command_line(main_cmd_line)}"
+            )
+            if use_relocatable_cpp_key(get_hash(main_code.strip(), relocatable_extra)):
+                extra = relocatable_extra
+        key, main_path = write(main_code, "main.cpp", extra=extra)
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
@@ -4294,8 +4297,14 @@ def _relocatable_command_line(cmd: str) -> str:
     cpp_builder's, which follows this package, when they differ. A root is only
     replaced as whole path components. The install path also told torch builds
     apart, so torch_key() stands in for it. torch_key() hashes the version and the
-    Python sources but not the C++ headers or libraries, which is why only
-    precompile keys drop the paths.
+    Python sources but not the C++ headers or libraries, which is why only a
+    kernel a capture builds, or one a replay installed a frozen binary for, takes
+    this key (see use_relocatable_cpp_key); every other compile in the process
+    keeps the key with this host's paths.
+
+    Only these two roots move: the Python, compiler, CUDA and other SDK paths stay
+    in the key, so the hosts must keep those at the same paths, as a packaged job
+    whose torch is extracted per launch next to a fixed interpreter does.
     """
     from torch._inductor import cpp_builder
     from torch.utils import cpp_extension
@@ -4306,10 +4315,14 @@ def _relocatable_command_line(cmd: str) -> str:
         for path in (cpp_extension._TORCH_PATH, cpp_builder._TORCH_PATH)
     }
     roots[normalize_path_separator(cache_dir())] = "<inductor_cache_dir>"
-    # Longest first, so a root nested in another is replaced before its parent.
+    # Longest first, so a root nested in another is replaced before its parent. A
+    # root starts a path (after a separator, a quote, or a -I or -L flag) and ends a
+    # path component.
+    start = r"(?:^|(?<=[\s'\":;,=])|(?<=-I)|(?<=-L))"
+    end = r"(?=[/\\\s'\":;,=]|$)"
     for root in sorted(roots, key=len, reverse=True):
         if len(root) > 1:
-            cmd = re.sub(re.escape(root) + r"(?=[/\\\s'\":;,=]|$)", roots[root], cmd)
+            cmd = re.sub(start + re.escape(root) + end, roots[root], cmd)
     return f"{cmd} torch_key={torch_key().hex()}"
 
 
