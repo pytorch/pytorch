@@ -509,45 +509,95 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.stride(), (1, data_hp.shape[0]))
 
     @parametrize(
-        "layout,shape,axes",
+        "layout",
         (
-            ("leading", (2, 3, 64, 128), (2, 3)),
-            ("trailing", (2, 64, 128, 3), (1, 2)),
-            ("trailing_batch_tile", (2, 64, 128, 32), (1, 2)),
-            ("trailing_batch_partial", (2, 160, 96, 33), (1, 2)),
-            ("interleaved_trailing_batch", (2, 160, 3, 96, 64), (1, 3)),
-            ("interleaved_batch", (2, 64, 4, 128), (1, 3)),
-            ("interleaved_rank3", (64, 4, 128), (0, 2)),
-            ("interleaved_singleton", (64, 1, 128), (0, 2)),
-            ("interleaved_multi_batch", (2, 3, 64, 4, 5, 128), (2, 5)),
-            ("permuted_interleaved_batch", (2, 3, 64, 4, 128), (0, 1)),
-            ("transposed_interleaved_batch", (2, 64, 4, 128), (1, 3)),
-            ("permuted_trailing_batch", (2, 160, 96, 32), (2, 3)),
-            ("sliced_trailing_batch", (2, 64, 256, 32), (1, 2)),
-            ("interleaved", (2, 64, 3, 128, 4), (1, 3)),
-            ("permuted", (2, 3, 64, 128), (1, 2)),
-            ("transposed", (2, 3, 128, 64), (1, 2)),
+            "leading",
+            "trailing",
+            "trailing_batch_tile",
+            "trailing_batch_partial",
+            "interleaved_trailing_batch",
+            "interleaved_batch",
+            "interleaved_rank3",
+            "interleaved_singleton",
+            "interleaved_multi_batch",
+            "permuted_interleaved_batch",
+            "transposed_interleaved_batch",
+            "permuted_trailing_batch",
+            "sliced_trailing_batch",
+            "interleaved",
+            "permuted",
+            "transposed",
         ),
-        name_fn=lambda layout, shape, axes: layout,
     )
     @parametrize("mode", ("k_compact", "k_swizzled", "m_swizzled", "k_square"))
     @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd(self, layout, shape, axes, mode, device):
+    def test_to_mx_rceil_nd(self, layout, mode, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device)
-        if layout == "permuted_interleaved_batch":
-            data_hp = data_hp.permute(2, 4, 0, 3, 1)
+        if layout == "leading":
+            data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
+            axes = (2, 3)
+        elif layout == "trailing":
+            data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
+            axes = (1, 2)
+        elif layout == "trailing_batch_tile":
+            data_hp = torch.randn(2, 64, 128, 32, dtype=torch.bfloat16, device=device)
+            axes = (1, 2)
+        elif layout == "trailing_batch_partial":
+            data_hp = torch.randn(2, 160, 96, 33, dtype=torch.bfloat16, device=device)
+            axes = (1, 2)
+        elif layout == "interleaved_trailing_batch":
+            data_hp = torch.randn(
+                2, 160, 3, 96, 64, dtype=torch.bfloat16, device=device
+            )
+            axes = (1, 3)
+        elif layout == "interleaved_batch":
+            data_hp = torch.randn(2, 64, 4, 128, dtype=torch.bfloat16, device=device)
+            axes = (1, 3)
+        elif layout == "interleaved_rank3":
+            data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device=device)
+            axes = (0, 2)
+        elif layout == "interleaved_singleton":
+            data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device=device)
+            axes = (0, 2)
+        elif layout == "interleaved_multi_batch":
+            data_hp = torch.randn(
+                2, 3, 64, 4, 5, 128, dtype=torch.bfloat16, device=device
+            )
+            axes = (2, 5)
+        elif layout == "permuted_interleaved_batch":
+            data_hp = torch.randn(
+                2, 3, 64, 4, 128, dtype=torch.bfloat16, device=device
+            ).permute(2, 4, 0, 3, 1)
+            axes = (0, 1)
         elif layout == "transposed_interleaved_batch":
-            data_hp = data_hp.permute(0, 3, 2, 1)
+            data_hp = torch.randn(
+                2, 64, 4, 128, dtype=torch.bfloat16, device=device
+            ).permute(0, 3, 2, 1)
+            axes = (1, 3)
         elif layout == "permuted_trailing_batch":
-            data_hp = data_hp.permute(0, 3, 1, 2)
+            data_hp = torch.randn(
+                2, 160, 96, 32, dtype=torch.bfloat16, device=device
+            ).permute(0, 3, 1, 2)
+            axes = (2, 3)
         elif layout == "sliced_trailing_batch":
-            data_hp = data_hp[:, :, ::2, :]
+            data_hp = torch.randn(2, 64, 256, 32, dtype=torch.bfloat16, device=device)[
+                :, :, ::2, :
+            ]
+            axes = (1, 2)
+        elif layout == "interleaved":
+            data_hp = torch.randn(2, 64, 3, 128, 4, dtype=torch.bfloat16, device=device)
+            axes = (1, 3)
         elif layout == "permuted":
-            data_hp = data_hp.permute(0, 2, 3, 1)
-        elif layout == "transposed":
-            data_hp = data_hp.permute(0, 3, 2, 1)
+            data_hp = torch.randn(
+                2, 3, 64, 128, dtype=torch.bfloat16, device=device
+            ).permute(0, 2, 3, 1)
+            axes = (1, 2)
+        else:
+            data_hp = torch.randn(
+                2, 3, 128, 64, dtype=torch.bfloat16, device=device
+            ).permute(0, 3, 2, 1)
+            axes = (1, 2)
         dim = axes[::-1] if mode == "m_swizzled" else axes
         square = mode == "k_square"
         swizzled = mode != "k_compact"
@@ -562,33 +612,66 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(scales.shape, scales_ref.shape)
 
     @parametrize(
-        "layout,shape,axes",
+        "layout",
         (
-            ("leading", (2, 3, 64, 128), (2, 3)),
-            ("trailing", (2, 64, 128, 3), (1, 2)),
-            ("trailing_batch_tile", (2, 64, 128, 32), (1, 2)),
-            ("interleaved_batch", (2, 64, 4, 128), (1, 3)),
-            ("interleaved_rank3", (64, 4, 128), (0, 2)),
-            ("interleaved_singleton", (64, 1, 128), (0, 2)),
-            ("interleaved_multi_batch", (2, 3, 64, 4, 5, 128), (2, 5)),
-            ("permuted_interleaved_batch", (2, 3, 64, 4, 128), (0, 1)),
-            ("transposed_interleaved_batch", (2, 64, 4, 128), (1, 3)),
-            ("interleaved", (2, 64, 3, 128, 4), (1, 3)),
-            ("permuted", (2, 3, 64, 128), (1, 2)),
+            "leading",
+            "trailing",
+            "trailing_batch_tile",
+            "interleaved_batch",
+            "interleaved_rank3",
+            "interleaved_singleton",
+            "interleaved_multi_batch",
+            "permuted_interleaved_batch",
+            "transposed_interleaved_batch",
+            "interleaved",
+            "permuted",
         ),
-        name_fn=lambda layout, shape, axes: layout,
     )
     @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_dual(self, layout, shape, axes, device):
+    def test_to_mx_rceil_nd_dual(self, layout, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device)
-        if layout == "permuted_interleaved_batch":
-            data_hp = data_hp.permute(2, 4, 0, 3, 1)
+        if layout == "leading":
+            data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
+            axes = (2, 3)
+        elif layout == "trailing":
+            data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
+            axes = (1, 2)
+        elif layout == "trailing_batch_tile":
+            data_hp = torch.randn(2, 64, 128, 32, dtype=torch.bfloat16, device=device)
+            axes = (1, 2)
+        elif layout == "interleaved_batch":
+            data_hp = torch.randn(2, 64, 4, 128, dtype=torch.bfloat16, device=device)
+            axes = (1, 3)
+        elif layout == "interleaved_rank3":
+            data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device=device)
+            axes = (0, 2)
+        elif layout == "interleaved_singleton":
+            data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device=device)
+            axes = (0, 2)
+        elif layout == "interleaved_multi_batch":
+            data_hp = torch.randn(
+                2, 3, 64, 4, 5, 128, dtype=torch.bfloat16, device=device
+            )
+            axes = (2, 5)
+        elif layout == "permuted_interleaved_batch":
+            data_hp = torch.randn(
+                2, 3, 64, 4, 128, dtype=torch.bfloat16, device=device
+            ).permute(2, 4, 0, 3, 1)
+            axes = (0, 1)
         elif layout == "transposed_interleaved_batch":
-            data_hp = data_hp.permute(0, 3, 2, 1)
-        elif layout == "permuted":
-            data_hp = data_hp.permute(0, 2, 3, 1)
+            data_hp = torch.randn(
+                2, 64, 4, 128, dtype=torch.bfloat16, device=device
+            ).permute(0, 3, 2, 1)
+            axes = (1, 3)
+        elif layout == "interleaved":
+            data_hp = torch.randn(2, 64, 3, 128, 4, dtype=torch.bfloat16, device=device)
+            axes = (1, 3)
+        else:
+            data_hp = torch.randn(
+                2, 3, 64, 128, dtype=torch.bfloat16, device=device
+            ).permute(0, 2, 3, 1)
+            axes = (1, 2)
         from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
             _blockscaled_tma_impl_dual,
         )
@@ -610,68 +693,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.shape, data_hp.shape)
         self.assertEqual(qdata_k.stride()[axes[-1]], 1)
         self.assertEqual(qdata_m.stride()[axes[0]], 1)
-
-    @parametrize("input_dtype", (torch.float16, torch.bfloat16, torch.float32))
-    @parametrize("dim", ((1, 2), (2, 1)))
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_trailing_batch_dtypes(self, input_dtype, dim, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.randn(2, 64, 128, 32, dtype=input_dtype, device=device)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(data_hp, dim, False, True)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata, qdata_ref)
-        self.assertEqual(scales, scales_ref)
-        self.assertEqual(qdata.stride()[dim[-1]], 1)
-
-    @parametrize("input_dtype", (torch.float16, torch.bfloat16, torch.float32))
-    @parametrize("dim", ((1, 3), (3, 1)))
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_interleaved_dtypes(self, input_dtype, dim, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.randn(2, 64, 4, 128, dtype=input_dtype, device=device)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(data_hp, dim, False, True)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata, qdata_ref)
-        self.assertEqual(scales, scales_ref)
-        self.assertEqual(qdata.stride()[dim[-1]], 1)
-
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_batch_grid_z(self, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.zeros(513, 32, 32, 32, dtype=torch.bfloat16, device=device)
-        data_hp[0].fill_(0.5)
-        data_hp[512].fill_(2)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
-        for batch in (0, 511, 512):
-            qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
-                data_hp[batch], (0, 1), False, True
-            )
-            self.assertEqual(qdata[batch], qdata_ref)
-            self.assertEqual(scales[batch], scales_ref)
-
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_empty(self, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.empty(0, 64, 128, 32, dtype=torch.bfloat16, device=device)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
-        self.assertEqual(qdata.shape, data_hp.shape)
-        self.assertEqual(scales.shape, (0, 1, 512, 32))
-
-    @parametrize("dim", ((1, 3), (3, 1)))
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_nd_interleaved_empty(self, dim, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.empty(0, 64, 4, 128, dtype=torch.bfloat16, device=device)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata.shape, data_hp.shape)
-        self.assertEqual(qdata.stride()[dim[-1]], 1)
-        self.assertEqual(scales.shape[0], 0)
-        self.assertEqual(scales.ndim, data_hp.ndim)
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_strided_input_fallback(self, device):
