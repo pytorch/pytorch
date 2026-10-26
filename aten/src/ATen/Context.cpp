@@ -638,24 +638,32 @@ at::BlasBackend Context::blasPreferredBackend() {
   return blas_preferred_backend;
 }
 
+#ifdef USE_ROCM
+namespace {
+// Split a comma-separated arch list (from the generated AT_ROCM_CK_SDPA_ARCHS /
+// TORCH_CK_GEMM_ARCH_LIST configuration headers) into individual arch strings.
+std::vector<std::string> parseArchList(std::string_view archs) {
+  std::vector<std::string> result;
+  while (!archs.empty()) {
+    const auto comma = archs.find(',');
+    result.emplace_back(archs.substr(0, comma));
+    if (comma == std::string_view::npos) {
+      break;
+    }
+    archs.remove_prefix(comma + 1);
+  }
+  return result;
+}
+} // namespace
+#endif
+
 bool Context::ckSDPASupported() {
 #ifdef USE_ROCM
   // CK SDPA is only built for a subset of architectures to limit compile time.
   // AT_ROCM_CK_SDPA_ARCHS is the set this build was compiled for, so the check
   // stays in step with the build. It is empty when CK SDPA was not built.
-  static const std::vector<std::string> supported_archs = [] {
-    std::vector<std::string> archs;
-    std::string_view rest{AT_ROCM_CK_SDPA_ARCHS};
-    while (!rest.empty()) {
-      const auto comma = rest.find(',');
-      archs.emplace_back(rest.substr(0, comma));
-      if (comma == std::string_view::npos) {
-        break;
-      }
-      rest.remove_prefix(comma + 1);
-    }
-    return archs;
-  }();
+  static const std::vector<std::string> supported_archs =
+      parseArchList(AT_ROCM_CK_SDPA_ARCHS);
   if (supported_archs.empty()) {
     return false;
   }
@@ -676,21 +684,10 @@ bool Context::ckSDPASupported() {
 bool Context::ckGemmSupported() {
 #ifdef USE_ROCM
   // TORCH_CK_GEMM_ARCH_LIST is the allowlist this build was compiled for (the
-  // same list that drives the ck_gemm build arch filter and the .hip dispatch),
-  // so the check stays in step with the build. It is empty if overridden empty.
-  static const std::vector<std::string> supported_archs = [] {
-    std::vector<std::string> archs;
-    std::string_view rest{TORCH_CK_GEMM_ARCH_LIST};
-    while (!rest.empty()) {
-      const auto comma = rest.find(',');
-      archs.emplace_back(rest.substr(0, comma));
-      if (comma == std::string_view::npos) {
-        break;
-      }
-      rest.remove_prefix(comma + 1);
-    }
-    return archs;
-  }();
+  // same list that drives the ck_gemm build arch filter), so the check stays in
+  // step with the build. It is empty if overridden empty.
+  static const std::vector<std::string> supported_archs =
+      parseArchList(TORCH_CK_GEMM_ARCH_LIST);
   if (supported_archs.empty()) {
     return false;
   }
