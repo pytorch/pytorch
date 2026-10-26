@@ -1339,18 +1339,26 @@ def _resolve_lazy_imports(
     finally:
         for suspended in reversed(chain):
             suspended.reapply_all_patches()
-    # Outermost first, so the trace that outlives the others owns the patch and an
-    # inner trace's exit does not revert it.
+    # The outermost trace owns the patch, so an inner trace's exit does not revert
+    # it; the inner patchers then see it as already patched and skip it. A new wrap
+    # target still lazy is resolved through this patcher's own chain.
+    owner = (chain or [patcher])[-1]
     for key, wrapped_globals in _wrapped_fns_to_patch.copy().items():
         if key not in wraps_before:
-            for owner in reversed(chain or [patcher]):
-                _patch_wrapped_function(owner, wrapped_globals, key[1])
+            _resolve_lazy_imports(patcher, wrapped_globals, (key[1],))
+            _patch_resolved_function(owner, wrapped_globals, key[1])
 
 
 def _patch_wrapped_function(
     patcher: _Patcher, frame_dict: dict[str, Any], name: str
 ) -> None:
     _resolve_lazy_imports(patcher, frame_dict, (name,))
+    _patch_resolved_function(patcher, frame_dict, name)
+
+
+def _patch_resolved_function(
+    patcher: _Patcher, frame_dict: dict[str, Any], name: str
+) -> None:
     if name not in frame_dict and hasattr(builtins, name):
         orig_fn = getattr(builtins, name)
     else:

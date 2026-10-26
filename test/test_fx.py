@@ -1926,6 +1926,8 @@ class TestFX(JitTestCase):
         self.assertIn(leaf_fn, targets)
 
     def test_symbolic_trace_with_lazy_imports_enabled(self):
+        # Only PEP 690-style lazy-import builds run this (Meta's internal Python,
+        # where FX traces torchrec); every OSS CI Python skips it.
         if getattr(importlib, "set_lazy_imports", None) is None:
             self.skipTest("this Python has no PEP 690-style lazy imports")
         script = """\
@@ -1943,8 +1945,6 @@ class TorchStaysEager:
 
 
 importlib.set_lazy_imports(True, excluding=TorchStaysEager())
-directory_context = tempfile.TemporaryDirectory()
-directory = directory_context.name
 sources = {
     # Postponed annotations name a type only this module defines, as torchrec's do.
     "fx_lazy_leaf": (
@@ -1967,21 +1967,21 @@ sources = {
         "        return fx_lazy_leaf.leaf(x) * 2\\n"
     ),
 }
-for name, source in sources.items():
-    with open(os.path.join(directory, name + ".py"), "w") as f:
-        f.write(source)
-sys.path.insert(0, directory)
-import fx_lazy_leaf
-fx_lazy_leaf.leaf  # registers the wrap before tracing
-import fx_lazy_model
-model = fx_lazy_model.M
-assert importlib.is_lazy_import(fx_lazy_model.__dict__, "fx_lazy_scripted")
-gm = torch.fx.symbolic_trace(model())
-assert any(n.target is fx_lazy_leaf.leaf for n in gm.graph.nodes), gm.graph
-x = torch.randn(3)
-assert torch.equal(sys.modules["fx_lazy_scripted"].scripted(x), x + 1)
+with tempfile.TemporaryDirectory() as directory:
+    for name, source in sources.items():
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(source)
+    sys.path.insert(0, directory)
+    import fx_lazy_leaf
+    fx_lazy_leaf.leaf  # registers the wrap before tracing
+    import fx_lazy_model
+    model = fx_lazy_model.M
+    assert importlib.is_lazy_import(fx_lazy_model.__dict__, "fx_lazy_scripted")
+    gm = torch.fx.symbolic_trace(model())
+    assert any(n.target is fx_lazy_leaf.leaf for n in gm.graph.nodes), gm.graph
+    x = torch.randn(3)
+    assert torch.equal(sys.modules["fx_lazy_scripted"].scripted(x), x + 1)
 print("lazy trace ok")
-directory_context.cleanup()
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
@@ -2057,6 +2057,58 @@ directory_context.cleanup()
             _wrapped_fns_to_patch.pop((id(frame_dict), "leaf_fn"), None)
         targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
         self.assertIn(leaf_fn, targets)
+
+    def test_a_nested_trace_resolves_a_lazy_wrap_target_through_its_own_patchers(
+        self,
+    ):
+        from torch.fx._symbolic_trace import _orig_module_call, _wrapped_fns_to_patch
+
+        lazy, seen, inner_graphs = object(), [], []
+
+        def bar_fn(x):
+            return x * 3
+
+        def resolve_bar(frame_dict, name):
+            seen.append(torch.nn.Module.__call__ is _orig_module_call)
+            dict.__setitem__(frame_dict, name, bar_fn)
+
+        # Another module's globals, where bar is still lazy.
+        bar_globals = self._fake_lazy_globals(lazy, resolve_bar, bar=lazy)
+        exec("def call_bar(x):\n    return bar(x)\n", bar_globals)
+        call_bar = dict.__getitem__(bar_globals, "call_bar")
+
+        def resolve_helper(frame_dict, name):
+            # A module body running torch.fx.wrap("bar") on its still-lazy bar.
+            _wrapped_fns_to_patch[(id(bar_globals), "bar")] = bar_globals
+            dict.__setitem__(frame_dict, name, 1)
+
+        frame_dict = self._fake_lazy_globals(lazy, resolve_helper, helper=lazy)
+        exec("def forward(self, x):\n    return self.relu(x + helper)\n", frame_dict)
+
+        class Inner(torch.nn.Module):
+            forward = dict.__getitem__(frame_dict, "forward")
+
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                inner_graphs.append(torch.fx.symbolic_trace(Inner()).graph)
+                return call_bar(x)
+
+        try:
+            with self._patch_is_lazy_import(lazy):
+                gm = torch.fx.symbolic_trace(Outer())
+        finally:
+            _wrapped_fns_to_patch.pop((id(bar_globals), "bar"), None)
+        self.assertEqual(seen, [True])
+        inner_modules = [
+            n.target for n in inner_graphs[0].nodes if n.op == "call_module"
+        ]
+        self.assertEqual(inner_modules, ["relu"])
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(bar_fn, targets)
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
