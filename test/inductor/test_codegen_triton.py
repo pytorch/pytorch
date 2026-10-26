@@ -27,6 +27,7 @@ from torch._inductor.codegen.triton import (
     get_triton_reduction_function,
     IndexingOptions,
     TMACompatibilityChecker,
+    triton_reshape,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
@@ -49,8 +50,10 @@ from torch._inductor.utils import (
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
+    run_and_get_triton_code,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -252,6 +255,26 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(can_use(shape=(size,), storage=size))
         self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
         self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
+
+    @parametrize(
+        "old_shape,new_shape,expected",
+        [
+            ([2, 4], [2, 4], "value"),
+            ([2, 4], [2, 1, 4], "value[:, None, :]"),
+            ([2, 1, 4], [2, 4], "tl.squeeze(value, 1)"),
+            ([1, 2, 4], [2, 4], "tl.squeeze(value, 0)"),
+            ([1, 2, 1, 4], [2, 4], "tl.squeeze(tl.squeeze(value, 2), 0)"),
+            ([2, 1, 4], [2, 4, 1], "tl.squeeze(value, 1)[:, :, None]"),
+            ([1, 2, 1], [2, 1], "tl.squeeze(value, 0)"),
+            ([2, 1], [2, 1, 1], "value[:, :, None]"),
+            ([], [1, 1], "value[None, None]"),
+            ([1, 1], [], "tl.squeeze(tl.squeeze(value, 1), 0)"),
+            ([2, 4], [8], "tl.reshape(value, [8])"),
+        ],
+    )
+    def test_triton_reshape_singletons(self, old_shape, new_shape, expected):
+        with V.set_kernel_handler(SimpleNamespace(index_to_str=str)):
+            self.assertEqual(triton_reshape("value", old_shape, new_shape), expected)
 
     @inductor_config.patch({"triton.native_matmul": True})
     @parametrize(
@@ -2270,6 +2293,32 @@ def helper(x):
             repr(hints),
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
+
+
+@unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+class TestCodegenTritonDevice(InductorTestCase):
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": False,
+            "triton.use_tensor_descriptor": False,
+            "triton.persistent_reductions": False,
+        }
+    )
+    @parametrize("batch_shape", [(), (3,)])
+    def test_pointer_load_singletons(self, device, batch_shape):
+        def f(a, b):
+            return (a[..., None] + b).sum(-1)
+
+        a = torch.randn((*batch_shape, 65), device=device)
+        b = torch.randn((*batch_shape, 65, 65), device=device)
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, a, b)
+        self.assertEqual(compiled(a, b), f(a, b), atol=1e-4, rtol=1e-4)
+        self.assertIn("tl.load(in_ptr0 + (tl.squeeze(", code)
+        self.assertNotIn("tl.load(in_ptr1 + (tl.squeeze(", code)
+
+
+instantiate_device_type_tests(TestCodegenTritonDevice, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":

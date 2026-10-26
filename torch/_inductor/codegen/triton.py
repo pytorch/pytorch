@@ -746,6 +746,9 @@ class BlockDescriptorOptions:
             - First broadcast the value to self.broadcast_shape (strides are descending)
             - Then transpose the value so that dimensions no longer have descending strides
             - Finally reshape the block to the final kernel tile shape
+
+        For implicit load broadcasts, transpose the loaded dimensions before
+        restoring singleton axes.
         """
         current_shape: Sequence[sympy.Expr | int | str] = initial_shape
 
@@ -811,7 +814,6 @@ class BlockDescriptorOptions:
             sympy.S.One if is_broadcasting else dim
             for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
         ]
-        value = apply_reshape(value, initial_shape, pre_broadcast_shape)
 
         implicit_broadcast_shape = pre_broadcast_shape
         if (
@@ -838,6 +840,41 @@ class BlockDescriptorOptions:
                 for pre_dim, post_dim in zip(implicit_broadcast_shape, final_shape)
             )
         )
+
+        if supports_implicit_broadcast and not for_store:
+            # Descriptors load A[Y, R] and B[R, X] for a [Y, X, R] tile.
+            # Previously:
+            #   tmp0 = tl.trans(in_ptr0.load([yoffset, r0_offset])[:, :, None], [0, 2, 1])
+            #   tmp2 = tl.trans(in_ptr1.load([r0_offset, xoffset])[:, :, None], [2, 1, 0])
+            # Now:
+            #   tmp0 = in_ptr0.load([yoffset, r0_offset])[:, None, :]
+            #   tmp2 = tl.trans(in_ptr1.load([r0_offset, xoffset]), [1, 0])[None, :, :]
+            # For bmm's [Z, Y, X, R] tile:
+            #   tmp0 = in_ptr0.load([zoffset, yoffset, r0_offset])[:, :, None, :]
+            #   tmp2 = tl.trans(in_ptr1.load([zoffset, r0_offset, xoffset]),
+            #                   [0, 2, 1])[:, None, :, :]
+            # Keep singleton broadcast axes out of Triton's transpose layout.
+            if not self.stride_sorter.is_identity:
+                loaded_dims = {
+                    dim: i
+                    for i, dim in enumerate(
+                        dim
+                        for dim, broadcasting in enumerate(broadcasting_dims)
+                        if not broadcasting
+                    )
+                }
+                permute_dims = [
+                    loaded_dims[dim]
+                    for dim in self.stride_sorter.revert_sort_idx
+                    if dim in loaded_dims
+                ]
+                if permute_dims != list(range(len(initial_shape))):
+                    value = f"tl.trans({value}, {permute_dims})"
+                    current_shape = [current_shape[i] for i in permute_dims]
+            value = apply_reshape(value, current_shape, implicit_broadcast_shape)
+            return value, current_shape
+
+        value = apply_reshape(value, initial_shape, pre_broadcast_shape)
 
         if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = (
@@ -1000,12 +1037,17 @@ def triton_reshape(
 
     if old_shape_str == new_shape_str:
         return value
-    if [s for s in new_shape_str if s != "1"] != old_shape_str:
+    if [s for s in old_shape_str if s != "1"] != [s for s in new_shape_str if s != "1"]:
         return f"tl.reshape({value}, [{', '.join(new_shape_str)}])"
-    # rewrite to [:, None] syntax, which is less buggy
+
+    # Use squeeze/None for singleton changes to preserve the tile layout.
     idx = 0
     expand = []
+    squeeze = []
     for size in new_shape_str:
+        while idx < len(old_shape_str) and old_shape_str[idx] == "1" and size != "1":
+            squeeze.append(idx)
+            idx += 1
         if idx < len(old_shape_str) and size == old_shape_str[idx]:
             expand.append(":")
             idx += 1
@@ -1013,11 +1055,12 @@ def triton_reshape(
             if size != "1":
                 raise AssertionError(f"expected size '1', got {size!r}")
             expand.append("None")
-    if idx != len(old_shape_str):
-        raise AssertionError(
-            f"expected idx == len(old_shape_str), got {idx} != {len(old_shape_str)}"
-        )
-    return f"{value}[{', '.join(expand)}]"
+    squeeze.extend(range(idx, len(old_shape_str)))
+    for dim in reversed(squeeze):
+        value = f"tl.squeeze({value}, {dim})"
+    if "None" in expand:
+        value = f"{value}[{', '.join(expand)}]"
+    return value
 
 
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
@@ -1838,15 +1881,15 @@ class TritonOverrides(OpOverrides):
             it needs to be reshaped to meet the requirement.
 
             This is done by three steps.
-            1. remove the empty dimension (dim with size 1) and make it 2d with tl.reshape
+            1. remove singleton dimensions with tl.squeeze to make it 2d
             2. permute the dimension if needed (e.g., (X,R) -> (R,X)) with tl.trans
             3. broadcast if needed with broadcast_to.
                 - This shows up when matmul operand is broadcasted with torch.expand/repeat.
                 - e.g., torch.rand((16,)).expand(16,16) @ B
 
-            e.g., (Y,1,R), (Y,R) -> tl.reshape(var, (Y,R))
-            e.g., (1,X,R), (R,X) -> tl.trans(tl.reshape(var, (X,R)))
-            e.g., (1,X,1), (R,X) -> tl.broadcast_to(tl.trans(tl.reshape(var, (X,1))), (R,X))
+            e.g., (Y,1,R), (Y,R) -> tl.squeeze(var, 1)
+            e.g., (1,X,R), (R,X) -> tl.trans(tl.squeeze(var, 0))
+            e.g., (1,X,1), (R,X) -> tl.broadcast_to(tl.trans(tl.squeeze(var, 0)), (R,X))
 
             TODO : eventually we want to remove this function when lazy broadcasting arrives
             """
@@ -5594,6 +5637,67 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     shape = indexing.expand_shape
                 else:
                     shape = TritonSymbols.get_block_shape(indexing.index)
+
+                if shape:
+                    # Singleton axes carry no data, but affect Triton's load layout.
+                    # Load the compact tile, then restore the shape for consumers.
+                    # For an A load with shape [YBLOCK, 1, R0_BLOCK]:
+                    #   tmp0 = tl.load(in_ptr0 + (r0_2 + 1024*y0),
+                    #                  r0_mask & ymask, other=0.0)
+                    # becomes:
+                    #   tmp0 = tl.reshape(tl.load(in_ptr0 + tl.squeeze(r0_2 + 1024*y0, 1),
+                    #                  tl.squeeze(r0_mask & ymask, 1),
+                    #                  other=0.0), [YBLOCK, 1, R0_BLOCK])
+                    # This works for any tile rank, including XR, YXR, and ZYXR.
+                    # Only native bmm fixes ZBLOCK=1; its zindex/zmask may be 1D.
+                    singletons = ("1", "ZBLOCK") if self.is_native_matmul else ("1",)
+                    tile_shape = [
+                        1 if dim in singletons else dim
+                        for dim in triton_shape_dims(shape)
+                    ]
+                    mask_shape = self._broadcast_shape_with_masks(
+                        (), indexing.mask_vars
+                    )
+                    if mask_shape is not None:
+                        mask_shape = [
+                            1 if dim in singletons else dim
+                            for dim in triton_shape_dims(mask_shape)
+                        ]
+                        # A mask varying in X cannot be squeezed out of [Y, 1, R].
+                        if get_broadcasted_shape(tile_shape, mask_shape) == tuple(
+                            tile_shape
+                        ):
+                            load_shape = [dim for dim in tile_shape if dim != 1]
+                            index_str = (
+                                triton_reshape(
+                                    indexing.index_str, tile_shape, load_shape
+                                )
+                                if load_shape
+                                else f"tl.reshape({indexing.index_str}, [])"
+                            )
+                            mask_str = indexing.mask_str
+                            if mask_shape:
+                                padded_mask = [1] * (
+                                    len(tile_shape) - len(mask_shape)
+                                ) + mask_shape
+                                load_mask_shape = [
+                                    mask_dim
+                                    for dim, mask_dim in zip(tile_shape, padded_mask)
+                                    if dim != 1
+                                ]
+                                mask_str = (
+                                    triton_reshape(
+                                        mask_str, mask_shape, load_mask_shape
+                                    )
+                                    if any(dim != 1 for dim in mask_shape)
+                                    else f"tl.reshape({mask_str}, [])"
+                                )
+                            line = f"tl.load({var} + ({index_str}), {mask_str}{ep}{other}{cachemod})"
+                            if self.is_native_matmul:
+                                line = f"tl.reshape({line}, {triton_shape_str(tile_shape)})"
+                            else:
+                                line = triton_reshape(line, load_shape, tile_shape)
+                            shape = tile_shape
 
             if (
                 dtype in (torch.float16, torch.bfloat16)
