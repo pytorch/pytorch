@@ -38,7 +38,7 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import override_qengines
-from torch.testing._internal.common_utils import IS_ARM64, raise_on_run_directly
+from torch.testing._internal.common_utils import HardwareClassification, IS_ARM64, raise_on_run_directly
 
 
 class SubModule(torch.nn.Module):
@@ -96,6 +96,7 @@ class ModelWithFunctionals(torch.nn.Module):
 
 
 class TestNumericSuiteEager(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer"""
