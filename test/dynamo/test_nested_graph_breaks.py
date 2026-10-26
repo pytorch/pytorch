@@ -1891,6 +1891,27 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + 2)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_load_method_getattr_nested_graph_break(self):
+        class Wrapper:
+            def __getattr__(self, name):
+                torch._dynamo.graph_break()
+                return torch.sin
+
+        wrapper = Wrapper()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            return wrapper.sin(x) + 2
+
+        x = torch.randn(3)
+        expected = torch.sin(x + 1) + 2
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 3)
+
     def test_getattr_nested_graph_break_instance_shadow(self):
         class Wrapper:
             def __getattr__(self, name):
