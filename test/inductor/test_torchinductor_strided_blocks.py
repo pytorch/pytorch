@@ -27,7 +27,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM100OrLater
+from torch.testing._internal.common_cuda import SM100OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -47,6 +47,7 @@ from torch.testing._internal.inductor_utils import (
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
+from torch.utils._triton import has_triton_stable_tma_api
 
 
 try:
@@ -2706,6 +2707,10 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
 
 
+@unittest.skipIf(
+    not (SM90OrLater and has_triton_stable_tma_api()) or torch.version.hip,
+    "requires NVIDIA sm90+ with Triton tensor descriptors",
+)
 @config.patch(
     {
         "triton.use_tensor_descriptor": True,
@@ -2714,7 +2719,7 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
         "assume_aligned_inputs": True,
     }
 )
-class TensorDescriptorPoolGateTest(InductorTestCase):
+class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
     def test_pool_pins(self):
         pins = TritonScheduling.tensor_descriptor_variant_pins
         cuda = DeviceProperties(
@@ -2751,21 +2756,6 @@ class TensorDescriptorPoolGateTest(InductorTestCase):
             with config.patch(patches):
                 self.assertEqual(pins(cuda), [], msg=str(patches))
 
-
-@unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
-    or torch.version.hip,
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
-)
-@config.patch(
-    {
-        "triton.use_tensor_descriptor": True,
-        "triton.autotune_tensor_descriptor": "auto",
-        "max_autotune_pointwise": True,
-        "assume_aligned_inputs": True,
-    }
-)
-class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
     def test_pool_benchmarks_pointer_loads_against_tma(self):
         def fn(x):
             return torch.nn.functional.silu(x)
@@ -2777,18 +2767,16 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             with config.patch({"triton.autotune_tensor_descriptor": pool}):
                 result, (code,) = run_and_get_code(torch.compile(fn), x)
             self.assertEqual(result, fn(x), exact_device=True)
-            FileCheck().check_count("@triton.jit", num_kernels, exactly=True).run(
+            FileCheck().check_count("@triton.jit", num_kernels, exactly=True).run(code)
+            FileCheck().check_count("'tma_variant': True", num_tma, exactly=True).run(
                 code
             )
-            FileCheck().check_count(
-                "'tma_variant': True", num_tma, exactly=True
-            ).run(code)
             FileCheck().check("async_compile.multi_kernel").run(code)
 
         check_pool("auto", 2, 1)
         check_pool("all", 3, 2)
 
-    def test_dynamic_shapes_preserve_supported_tma_mode(self):
+    def test_dynamic_shapes_use_pointer_loads(self):
         def rmsnorm(x, weight):
             x_float = x.float()
             scale = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + 1e-6)
@@ -2796,31 +2784,20 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
 
         x = torch.randn(1024, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
         weight = torch.randn(4096, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def compile_with_host_side_tma(enabled):
-            torch._dynamo.reset()
-            with config.patch({"triton.enable_host_side_tma": enabled}):
-                return run_and_get_code(
-                    torch.compile(rmsnorm, dynamic=True), x, weight
-                )
-
-        device_result, (device_code,) = compile_with_host_side_tma(False)
-        self.assertEqual(device_result, rmsnorm(x, weight), exact_device=True)
-        FileCheck().check_not("host_tma_descriptor_args").check(
-            "tl.make_tensor_descriptor"
-        ).run(device_code)
-
-        pointer_result, (pointer_code,) = compile_with_host_side_tma(True)
-        self.assertEqual(pointer_result, rmsnorm(x, weight), exact_device=True)
+        result, (code,) = run_and_get_code(
+            torch.compile(rmsnorm, dynamic=True), x, weight
+        )
+        self.assertEqual(result, rmsnorm(x, weight), exact_device=True)
         FileCheck().check_not("host_tma_descriptor_args").check_not(
             "tl.make_tensor_descriptor"
-        ).run(pointer_code)
+        ).run(code)
 
     @config.patch(
         {
             "triton.autotune_tensor_descriptor": "all",
             "bundle_triton_into_fx_graph_cache": True,
             "use_static_triton_launcher": True,
+            "fx_graph_cache": True,
             "fx_graph_remote_cache": False,
         }
     )
@@ -2858,6 +2835,30 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         result, (code,) = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(result, fn(x), exact_device=True)
         # Bool has no tensor-map dtype, so the TMA choice repeats the baseline.
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
+
+    def test_tma_variant_with_different_call_args_is_dropped(self):
+        codegen = TritonScheduling.codegen_node_schedule_with_kernel
+
+        def add_optional_arg(scheduling, node_schedule, kernel):
+            codegen(scheduling, node_schedule, kernel)
+            if kernel.optional:
+                outer = next(iter(kernel.args.input_buffers))
+                kernel.args.output_buffers[outer] = "injected_out_ptr"
+
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        # Only an Inductor bug gives a TMA variant other call args, so no input reaches this fallback.
+        with mock.patch.object(
+            TritonScheduling,
+            "codegen_node_schedule_with_kernel",
+            add_optional_arg,
+        ):
+            result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
         FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
         FileCheck().check_not("async_compile.multi_kernel").run(code)
 

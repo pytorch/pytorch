@@ -30,6 +30,7 @@ from torch.testing._internal.inductor_utils import (
     IS_BIG_GPU,
     requires_triton,
 )
+from torch.utils._triton import has_triton_stable_tma_api
 
 
 class TransformerSnippet(nn.Module):
@@ -128,6 +129,29 @@ class MultiKernelTest(TestCase):
         self.assertNotIn("run", vars(split))
         self.assertEqual(events, ["run_1", "run_0"])
 
+    def test_failed_subkernels_remap_args_and_skip_single_survivor_benchmark(self):
+        events = []
+        call = self._benchmark_lock_call(events)
+        k0, k1 = call._kernels
+        call.multi_kernel_name = "multi_kernel_test"
+        # An optional sub-kernel that failed to compile comes back as its exception.
+        call._kernels = [k0, RuntimeError("compile failed"), k1]
+        call.arg_index = {i: [slice(i, i + 1)] for i in range(3)}
+        self.assertEqual(call.kernels, [k0, k1])
+        self.assertEqual(call.arg_index, {0: [slice(0, 1)], 1: [slice(2, 3)]})
+        self.assertEqual(call._get_filtered_args(("a", "b", "c"), 1), ["c"])
+
+        single = self._benchmark_lock_call(events)
+        single.multi_kernel_name = "multi_kernel_test"
+        single._kernels[0] = RuntimeError("compile failed")
+        single.arg_index = {0: [slice(0, 1)], 1: [slice(1, 2)]}
+        single.picked_kernel, single._recorded = None, True
+        with unittest.mock.patch.object(single, "benchmark_sub_kernels") as benchmark:
+            single.run("a", "b")
+        benchmark.assert_not_called()
+        self.assertEqual(single.picked_kernel, 0)
+        self.assertEqual(events, ["run_1"])
+
     def test_benchmark_sub_kernels_holds_gpu_lock_across_candidates(self):
         events = []
         multi_kernel_call = self._benchmark_lock_call(events)
@@ -217,6 +241,7 @@ class MultiKernelTest(TestCase):
         {
             "bundle_triton_into_fx_graph_cache": True,
             "use_static_triton_launcher": True,
+            "fx_graph_cache": True,
             "fx_graph_remote_cache": False,
             "compile_threads": 1,
         }
@@ -237,7 +262,10 @@ class MultiKernelTest(TestCase):
         )
 
     @requires_triton()
-    @unittest.skipIf(not SM90OrLater, "requires TMA support")
+    @unittest.skipIf(
+        not (SM90OrLater and has_triton_stable_tma_api()) or torch.version.hip,
+        "requires NVIDIA sm90+ with Triton tensor descriptors",
+    )
     @config.patch(
         {
             "assume_aligned_inputs": True,

@@ -2476,8 +2476,12 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
-    # With use_tensor_descriptor and max_autotune(_pointwise), "auto" races host-side TMA against pointer loads for pointwise/reduction kernels.
-    # "all" also adds device-side TMA; the default "off" preserves use_tensor_descriptor behavior.
+    # "auto" races pointer loads against a host-preferred TMA variant,
+    # which may fall back to device descriptors, for pointwise and reduction kernels;
+    # "all" adds a device-side TMA choice, and dynamic-shape kernels get pointer loads.
+    # It applies only on NVIDIA CUDA sm90+ with use_tensor_descriptor, assume_aligned_inputs
+    # and max_autotune(_pointwise), and not under deterministic, batch_invariant,
+    # multi_kernel 2/3, cpp_wrapper or fx_wrapper; the default "off" keeps existing behavior.
     # pyrefly: ignore [bad-assignment]
     autotune_tensor_descriptor: Literal["off", "auto", "all"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR", "off"

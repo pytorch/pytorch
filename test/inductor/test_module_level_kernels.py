@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._triton import has_triton_stable_tma_api
 
 
 def _code_for(fn, *args, **config_kwargs):
@@ -231,7 +232,10 @@ class TestModuleLevelKernels(TestCase):
         self.assertIn("# kernel path:", code)
 
     @requires_cuda_and_triton
-    @unittest.skipIf(not SM90OrLater, "requires TMA support")
+    @unittest.skipIf(
+        not (SM90OrLater and has_triton_stable_tma_api()) or torch.version.hip,
+        "requires NVIDIA sm90+ with Triton tensor descriptors",
+    )
     def test_optional_kernel_stays_async(self):
         x = torch.randn(1024, 1024, device="cuda", dtype=torch.bfloat16)
         result, code = _code_for(

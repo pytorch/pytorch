@@ -9331,14 +9331,24 @@ class TritonScheduling(SIMDScheduling):
             if allow_tma_variants and not is_scan
             else []
         )
-        if pins and (
-            kernel_features.numel.free_symbols
-            or kernel_features.reduction_numel.free_symbols
-        ):
-            # Host-side descriptors cannot materialize dynamic shapes.
-            if config.triton.enable_host_side_tma:
+        if pins:
+            from .nv_universal_gemm.nv_universal_gemm_scheduling import (
+                NVUniversalGemmScheduling,
+            )
+
+            previous_node = V.graph.scheduler.previous_node
+            # Host-side descriptors cannot materialize dynamic shapes, and device-side TMA trails the baseline.
+            # A kernel right after a PDL-enabled NVGEMM may launch with selective PDL, which no MultiKernel choice takes.
+            if (
+                kernel_features.numel.free_symbols
+                or kernel_features.reduction_numel.free_symbols
+                or (
+                    previous_node is not None
+                    and NVUniversalGemmScheduling.is_pdl_enabled_template(previous_node)
+                )
+            ):
                 kernel_kwargs = {**kernel_kwargs, **pins[0]}
-            pins = []
+                pins = []
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         choices = self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
         # A multi_kernel pool was asked for explicitly.

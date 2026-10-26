@@ -4760,9 +4760,7 @@ def pointwise(
     if inductor_meta.get("tma_variant"):
         device = triton_meta["device"]
         heuristic_meta = dict(inductor_meta)
-        heuristic_meta["tma_variant_sm100"] = (
-            device.type == "cuda" and device.cc == 100
-        )
+        heuristic_meta["tma_variant_sm100"] = device.type == "cuda" and device.cc == 100
     else:
         heuristic_meta = inductor_meta
     pointwise_heuristic = get_codegen_heuristic("pointwise", triton_meta["device"].type)
