@@ -361,9 +361,18 @@ class _UnresolvedTritonExport(RuntimeError):
     def __init__(self, sources: list[dict[str, object]]) -> None:
         self.sources = sources
         self.report = {"sources": sources}
+        hint = ""
+        if any(source.get("untuned_backward_eligible") for source in sources):
+            hint = (
+                " A backward kernel no captured step ran (untuned_backward_eligible) "
+                "can instead be frozen untuned, with "
+                "DynamoTracer(require_tuned_backward=False)."
+            )
         super().__init__(
             "Cannot export Triton sources: no fully resolved static launcher. Run "
-            "every Triton kernel the serving process needs inside the capture block.\n"
+            "every Triton kernel the serving process needs inside the capture block."
+            + hint
+            + "\n"
             + json.dumps(self.report, sort_keys=True)
         )
 
@@ -489,10 +498,11 @@ def _pickle_frozen_triton_kernel(
 def _freeze_triton_kernel(
     key: str,
     instances: list[CachingAutotuner],
-    untuned: list[dict[str, object]],
     *,
     require_tuned_backward: bool,
-) -> bytes:
+) -> tuple[bytes, dict[str, object] | None]:
+    """The frozen record of a source, and its untuned report if it was frozen
+    untuned."""
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
     rejected: list[dict[str, object]] = []
@@ -520,7 +530,7 @@ def _freeze_triton_kernel(
             saved, saved_result = _detached_for_freeze(kernel, result)
         payload = _pickle_frozen_triton_kernel(key, kernel, saved, saved_result)
         if isinstance(payload, bytes):
-            return payload
+            return payload, None
         reject(kernel, payload)
     # A training capture lowers each backward with its forward, so it can compile a
     # backward that no captured step ran, e.g. in a graph variant whose backward no
@@ -528,15 +538,15 @@ def _freeze_triton_kernel(
     # finished autotuning, and serving under no_compilation() cannot finish it
     # either. Its configs compute the same values up to floating-point reduction
     # order, so unless the caller requires tuned backward kernels, freeze the first
-    # static one that loaded, with tuning turned off, and report it in untuned. A
+    # static one that loaded, with tuning turned off, and report it as untuned. A
     # source a forward instance shares is still refused: a forward no call ran
     # means the capture missed a path serving may need.
-    if (
-        not require_tuned_backward
-        and instances
+    untuned_backward_eligible = (
+        bool(instances)
         and all(kernel.is_backward for kernel in instances)
         and not any(kernel._launched for kernel in instances)
-    ):
+    )
+    if untuned_backward_eligible and not require_tuned_backward:
         for kernel in instances:
             with kernel.lock:
                 # Only launchers: each loaded its binary, unlike a bare compile
@@ -568,16 +578,13 @@ def _freeze_triton_kernel(
                 compile_id,
                 len(static),
             )
-            untuned.append(
-                {
-                    "source_key": key,
-                    "kernel_name": kernel_name,
-                    "compile_id": compile_id,
-                    "direction": "backward",
-                    "static_config_count": len(static),
-                }
-            )
-            return payload
+            return payload, {
+                "source_key": key,
+                "kernel_name": kernel_name,
+                "compile_id": compile_id,
+                "direction": "backward",
+                "static_config_count": len(static),
+            }
     kernel_name = instances[0].inductor_meta.get("kernel_name") if instances else None
     raise _UnresolvedTritonExport(
         [
@@ -586,6 +593,7 @@ def _freeze_triton_kernel(
                 "kernel_name": kernel_name,
                 "instance_count": len(instances),
                 "instances": rejected,
+                "untuned_backward_eligible": untuned_backward_eligible,
             }
         ]
     )
@@ -740,9 +748,11 @@ def _freeze_triton_kernels(
     untuned: list[dict[str, object]] = []
     for key, instances in kernels.items():
         try:
-            static_kernels[key] = _freeze_triton_kernel(
-                key, instances, untuned, require_tuned_backward=require_tuned_backward
+            static_kernels[key], report = _freeze_triton_kernel(
+                key, instances, require_tuned_backward=require_tuned_backward
             )
+            if report is not None:
+                untuned.append(report)
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
     if untuned:

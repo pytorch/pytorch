@@ -199,22 +199,22 @@ it.
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own, importing beyond torch only the
-# CUSTOM_OP_MODULES of custom ops it calls that are not registered where it is
-# served -- it inlines the composed graph module (inductor: kernels JIT-compiled on
-# first call, plus AOTAutograd's codegen'd prelude/epilogue) or the captured graph
-# (eager), plus all calling-convention metadata. It NEVER reads the cache, and it
-# is the SINGLE SOURCE OF TRUTH for the calling convention. The ``cache`` holds ONLY the compiled INDUCTOR artifact and is
-# purely an ACCELERATION consumed only by load(): load AST-scrapes the module-level
-# calling convention out of python_code, primes the inductor kernel caches from the bundle
-# (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
-# from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
-# python_code you JIT -- same results either way. The
-# eager backend has no kernels to accelerate, so the eager cache carries no compiled
-# artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
-# always runs the graph inlined in python_code. The metadata
-# lives in one place (python_code); the envelope carries a code_hash (sha256 of
-# python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile capture.
+# CUSTOM_OP_MODULES of custom ops it calls that are not registered where it is served --
+# it inlines the composed graph module (inductor: kernels JIT-compiled on first call,
+# plus AOTAutograd's codegen'd prelude/epilogue) or the captured graph (eager), plus all
+# calling-convention metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF
+# TRUTH for the calling convention. The ``cache`` holds ONLY the compiled INDUCTOR
+# artifact and is purely an ACCELERATION consumed only by load(): load AST-scrapes the
+# module-level calling convention out of python_code, primes the inductor kernel caches
+# from the bundle (torch.compiler.load_cache_artifacts), then execs python_code -- so
+# its kernels load from the precompiled binaries instead of JIT. With the cache you skip
+# JIT; with only python_code you JIT -- same results either way. The eager backend has
+# no kernels to accelerate, so the eager cache carries no compiled artifact
+# (artifact=None) but is still a full integrity-tagged envelope, and load() always runs
+# the graph inlined in python_code. The metadata lives in one place (python_code); the
+# envelope carries a code_hash (sha256 of python_code) alongside the format/version +
+# backend tag, so load() rejects a (python_code, cache) pair that did not come from the
+# same precompile capture.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -2069,22 +2069,28 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
             for fn in (opdef._init_fn, getattr(opdef, "_abstract_fn", None))
             if isinstance(name := getattr(fn, "__module__", None), str)
         ]
-        # Outside torch first; then a torch submodule, but not a torch wrapper.
-        candidates = [n for n in defined_in if not in_torch(n)] + [
-            n for n in defined_in if in_torch(n) and not torch_wrapper(n)
-        ]
-        name = next(
-            (n for n in candidates if n != "__main__" and _importable_by_name(n)),
-            None,
-        )
+
+        def unusable(name: str) -> str | None:
+            if name == "__main__":
+                return "__main__"
+            if torch_wrapper(name):
+                return "a torch wrapper"
+            if not _importable_by_name(name):
+                return "not importable by that name"
+            return None
+
+        # Outside torch first; then a torch submodule.
+        candidates = sorted(dict.fromkeys(defined_in), key=in_torch)
+        reasons = {n: unusable(n) for n in candidates}
+        name = next((n for n in candidates if reasons[n] is None), None)
         if name is None:
             log.warning(
-                "precompile: custom op %s is defined in %r, which a serving process "
-                "cannot import by that name; the artifact serves only where %s is "
-                "already registered by its first call",
+                "precompile: no module a serving process can import registers custom "
+                "op %s (%s); the artifact serves only where it is already registered "
+                "by its first call",
                 op_name,
-                defined_in[0] if defined_in else None,
-                op_name,
+                ", ".join(f"{n!r}: {reason}" for n, reason in reasons.items())
+                or "no defining module",
             )
             continue
         modules.setdefault(name, []).append(op_name)
@@ -3781,10 +3787,12 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by their full build command, which includes
-    the producer's absolute PyTorch include and library paths, so they serve
-    only a host whose PyTorch install and toolchain paths match the producer's.
-    Any other host rebuilds them, which needs a C++ compiler there:
+    Frozen C++ kernels are keyed by their build command with the PyTorch install
+    and the Inductor cache's include paths taken out, so they serve a host that
+    installed the same PyTorch build elsewhere. The Python, compiler, CUDA and
+    other SDK paths must still match the producer's, and a kernel that links a
+    library from the Inductor cache (the Halide runtime, CUTLASS or CK kernels)
+    is rebuilt. Rebuilding needs a C++ compiler on the serving host:
     :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
