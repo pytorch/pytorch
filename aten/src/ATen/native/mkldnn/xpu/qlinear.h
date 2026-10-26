@@ -86,9 +86,9 @@ class QLinearOnednnXPU final {
       Tensor mat_a,
       Tensor mat_b,
       Tensor mat_a_scale,
-      Tensor mat_b_scales,
+      Tensor mat_b_scale,
       Tensor mat_a_zero_point,
-      Tensor mat_b_zero_points,
+      Tensor mat_b_zero_point,
       int64_t group_size,
       std::optional<c10::ScalarType> out_dtype,
       std::optional<Tensor> bias);
