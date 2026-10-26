@@ -74,6 +74,16 @@ def _is_fake_world() -> bool:
     )
 
 
+def _compile_sync_backend() -> str | None:
+    """The backend get_compile_sync_pg builds its group on, or None when this build
+    cannot build it (a real world without gloo)."""
+    if _is_fake_world():
+        return dist.Backend.FAKE
+    if dist.is_gloo_available():
+        return dist.Backend.GLOO
+    return None
+
+
 # NB: Like get_guard_pg, this is only called when the caller explicitly asked for
 # compile time synchronization.
 def get_compile_sync_pg() -> dist.ProcessGroup | None:
@@ -98,10 +108,9 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
         global _COMPILE_SYNC_PG
         if _COMPILE_SYNC_PG is None:
             timeout: timedelta | None = None
-            if _is_fake_world():
-                backend = dist.Backend.FAKE
-            else:
-                if not dist.is_gloo_available():
+            backend = _compile_sync_backend()
+            if backend != dist.Backend.FAKE:
+                if backend is None:
                     # No fallback: per above, the accelerator backend would let a
                     # compile time collective match a runtime one.
                     raise RuntimeError(
@@ -117,7 +126,6 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
                 default_pg = dist.distributed_c10d._get_default_group()
                 coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
                 default_backend = default_pg._get_backend(torch.device(coll_device))
-                backend = dist.Backend.GLOO
                 timeout = default_backend.options._timeout
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend=backend, timeout=timeout, pg_tag="pt2_compile_sync_pg"

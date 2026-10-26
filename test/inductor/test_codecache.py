@@ -18,7 +18,7 @@ import types
 import unittest
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
@@ -5767,7 +5767,8 @@ class TestCppCodeCacheKey(TestCase):
         super().setUp()
         from torch.compiler import _runtime_cache
 
-        # Frozen C++ kernels another test installed would make every key relocatable.
+        # Frozen C++ kernels another test installed would make every kernel compute
+        # its relocatable key.
         patcher = mock.patch.dict(_runtime_cache._frozen_cpp_kernels, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -5775,6 +5776,14 @@ class TestCppCodeCacheKey(TestCase):
     def _key(self, extra_flags: tuple[str, ...] = ()) -> str:
         CppCodeCache.load_async(self.CODE, extra_flags=extra_flags)
         (key,) = CppCodeCache.cache
+        return key
+
+    def _frozen_key(self, extra_flags: tuple[str, ...] = ()) -> str:
+        """The key a capture records the kernel under; call inside capture_scope()."""
+        from torch.compiler import _runtime_cache
+
+        CppCodeCache.load_async(self.CODE, extra_flags=extra_flags)
+        (key,) = _runtime_cache._capture.cpp_kernels
         return key
 
     @contextmanager
@@ -5793,62 +5802,71 @@ class TestCppCodeCacheKey(TestCase):
         ):
             yield
 
-    def test_precompile_key_ignores_install_and_cache_paths(self):
+    def test_frozen_key_ignores_install_and_cache_paths(self):
         from torch.compiler._runtime_cache import capture_scope
 
-        keys = []
-        with capture_scope():
-            for root in ("/install/a", "/install/b"):
-                with fresh_cache(), self._torch_root(root):
-                    keys.append(self._key((f"-I{cache_dir()}/include",)))
-        self.assertEqual(keys[0], keys[1])
-
-    def test_key_keeps_install_path_outside_precompile(self):
-        keys = []
+        keys, paths = [], []
         for root in ("/install/a", "/install/b"):
-            with fresh_cache(), self._torch_root(root):
-                keys.append(self._key())
-        self.assertNotEqual(keys[0], keys[1])
+            with fresh_cache(), self._torch_root(root), capture_scope():
+                keys.append(self._frozen_key((f"-I{cache_dir()}/include",)))
+                (key,) = CppCodeCache.cache
+                paths.append(CppCodeCache._binary_paths[key])
+        self.assertEqual(keys[0], keys[1])
+        # Each install still builds and stores its own binary, so another build
+        # sharing the cache dir never loads it.
+        self.assertNotEqual(paths[0], paths[1])
 
-    def test_precompile_key_tracks_torch_build(self):
+    def test_key_keeps_install_path(self):
         from torch.compiler._runtime_cache import capture_scope
 
-        with capture_scope():
-            with fresh_cache():
-                key = self._key()
-            with (
-                fresh_cache(),
-                mock.patch(
-                    "torch._inductor.codecache.torch_key", return_value=b"other build"
-                ),
-            ):
-                self.assertNotEqual(self._key(), key)
+        for scope in (nullcontext, capture_scope):
+            keys = []
+            for root in ("/install/a", "/install/b"):
+                with fresh_cache(), self._torch_root(root), scope():
+                    keys.append(self._key())
+            self.assertNotEqual(keys[0], keys[1])
+
+    def test_frozen_key_tracks_torch_build(self):
+        from torch.compiler._runtime_cache import capture_scope
+
+        with fresh_cache(), capture_scope():
+            key = self._frozen_key()
+        with (
+            fresh_cache(),
+            capture_scope(),
+            mock.patch(
+                "torch._inductor.codecache.torch_key", return_value=b"other build"
+            ),
+        ):
+            self.assertNotEqual(self._frozen_key(), key)
 
     def test_relocation_replaces_whole_path_components(self):
         from torch._inductor.cpp_builder import normalize_path_separator
         from torch.utils import cpp_extension
 
-        root = normalize_path_separator(os.path.dirname(cpp_extension._TORCH_PATH))
+        torch_dir = normalize_path_separator(cpp_extension._TORCH_PATH)
+        parent = os.path.dirname(torch_dir)
         cmd = _relocatable_command_line(
-            f"cc -I{root}/torch/include -I{root}-ext/inc -I/x{root}/torch/include "
-            f"-L'{root}/torch/lib'"
+            f"cc -I{torch_dir}/include -I{torch_dir}-ext/inc -I/x{torch_dir}/include "
+            f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include"
         )
-        self.assertIn("-I<torch_root>/torch/include", cmd)
-        self.assertIn("-L'<torch_root>/torch/lib'", cmd)
-        self.assertIn(f"-I{root}-ext/inc", cmd)
-        self.assertIn(f"-I/x{root}/torch/include", cmd)
+        self.assertIn("-I<torch>/include", cmd)
+        self.assertIn("-L'<torch>/lib'", cmd)
+        self.assertIn(f"-I{torch_dir}-ext/inc", cmd)
+        self.assertIn(f"-I/x{torch_dir}/include", cmd)
+        # A package installed next to torch (an SDK wheel, say) keeps its path.
+        self.assertIn(f"-I{parent}/other_pkg/include", cmd)
 
-    def test_unrelated_compiles_keep_their_paths_after_a_replay(self):
+    def test_no_frozen_key_outside_precompile(self):
         from torch.compiler import _runtime_cache
 
-        with fresh_cache():
-            key = self._key()
-        # A replay installed a frozen binary for some other kernel.
-        with (
-            fresh_cache(),
-            mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}),
-        ):
-            self.assertEqual(self._key(), key)
+        compute = mock.Mock(return_value="key")
+        self.assertIsNone(_runtime_cache.relocatable_cpp_key(compute))
+        compute.assert_not_called()
+        with _runtime_cache.capture_scope():
+            self.assertEqual(_runtime_cache.relocatable_cpp_key(compute), "key")
+        with mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}):
+            self.assertEqual(_runtime_cache.relocatable_cpp_key(compute), "key")
 
     @unittest.skipIf(
         sys.platform == "win32", "creating symlinks needs extra privileges on Windows"
@@ -5867,8 +5885,12 @@ class TestCppCodeCacheKey(TestCase):
             os.symlink(cpp_extension._TORCH_PATH, os.path.join(root, "torch"))
         with fresh_cache(), self._torch_root(capture_root), capture_scope():
             CppCodeCache.load_async(self.CODE)()
-            (key,) = CppCodeCache.cache
-            payload = _freeze_cpp_kernels({key: CppCodeCache._binary_paths[key]})
+            payload = _freeze_cpp_kernels(
+                {
+                    key: path
+                    for key, (path, _) in _runtime_cache._capture.cpp_kernels.items()
+                }
+            )
         # The replay host's Inductor cache is elsewhere too.
         with (
             fresh_cache(),
@@ -5878,8 +5900,7 @@ class TestCppCodeCacheKey(TestCase):
                 CppBuilder, "build", side_effect=AssertionError("rebuilt")
             ),
         ):
-            self.assertEqual(self._key(), key)
-            self.assertEqual(CppCodeCache.cache[key]().f(), 0)
+            self.assertEqual(CppCodeCache.cache[self._key()]().f(), 0)
 
 
 class TestVecISACheckBuild(TestCase):
