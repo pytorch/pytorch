@@ -8362,7 +8362,6 @@ class TestMPS(TestCaseMPS):
         del y
         del x
 
-    # Test flip
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):

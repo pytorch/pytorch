@@ -439,7 +439,6 @@ class TestShapeOps(TestCase):
 
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
-    @expectedFailure("mps", torch.float32)
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -447,7 +446,7 @@ class TestShapeOps(TestCase):
         def test_flip_impl(input_t, dims, output_t):
             def all_t():
                 yield input_t, output_t
-                if dtype is torch.float:
+                if dtype is torch.float and self.device_type != "mps":
                     # We generate quantized versions as well
                     for qdtype in (torch.quint8, torch.qint8, torch.qint32):
                         qinput_t = torch.quantize_per_tensor(input_t, 0.1, 5, qdtype)
