@@ -7479,7 +7479,17 @@ def inputs():
     return x, torch.randn(128, 32, device="cuda", generator=g, requires_grad=True)
 
 
-if phase == "capture":
+if phase == "strict":
+    # By default the never-run backward is refused, as before.
+    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    try:
+        with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
+            cap(*inputs())
+    except torch.compiler.PrecompileError as e:
+        assert "no fully resolved static launcher" in str(e), e
+    else:
+        raise AssertionError("a strict capture froze a never-run backward kernel")
+elif phase == "capture":
     untuned = []
 
     class Untuned(logging.Handler):
@@ -7488,7 +7498,9 @@ if phase == "capture":
                 untuned.append(record.getMessage())
 
     logging.getLogger("torch.compiler._runtime_cache").addHandler(Untuned())
-    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    tracer = pc.DynamoTracer(
+        require_no_risky_drops=False, require_tuned_backward=False
+    )
     with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
         # Lowers the backward too, but no batch runs it.
         cap(*inputs())
@@ -7619,7 +7631,9 @@ class TestPrecompileRuntimeCache(TestCase):
         original_launchers = kernel.launchers
         original_fn = kernel.fn.fn
         with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
-            payload = _freeze_triton_kernel("source", [unexecuted, kernel])
+            payload = _freeze_triton_kernel(
+                "source", [unexecuted, kernel], [], allow_untuned_backward=False
+            )
         saved = pickle.loads(payload)
         self.assertEqual(saved.cache_key, "source")
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
@@ -7657,7 +7671,9 @@ class TestPrecompileRuntimeCache(TestCase):
             ),
             self.assertRaises(_UnresolvedTritonExport) as failure,
         ):
-            _freeze_triton_kernel("source", [kernel, evicted])
+            _freeze_triton_kernel(
+                "source", [kernel, evicted], [], allow_untuned_backward=False
+            )
         rejected = failure.exception.sources[0]["instances"]
         self.assertEqual(
             [(r["reason"], r["error"]) for r in rejected],
@@ -7669,9 +7685,9 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertIs(kernel.fn.fn, original_fn)
         kernel.launchers = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
-            _freeze_triton_kernel("source", [kernel])
+            _freeze_triton_kernel("source", [kernel], [], allow_untuned_backward=False)
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
-            _freeze_triton_kernel("source", [])
+            _freeze_triton_kernel("source", [], [], allow_untuned_backward=True)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_backward_kernel(self):
@@ -7687,7 +7703,9 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
         live_meta = dict(unlaunched.inductor_meta)
         saved = pickle.loads(
-            _freeze_triton_kernel("source", [dynamic, unlaunched], untuned=[])
+            _freeze_triton_kernel(
+                "source", [dynamic, unlaunched], [], allow_untuned_backward=True
+            )
         )
         self.assertEqual(saved.cache_key, "source")
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 32})
@@ -7700,7 +7718,11 @@ class TestPrecompileRuntimeCache(TestCase):
         ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
         untuned = []
         with self.assertLogs("torch.compiler._runtime_cache", "WARNING") as logs:
-            saved = pickle.loads(_freeze_triton_kernel("source", [ambiguous], untuned))
+            saved = pickle.loads(
+                _freeze_triton_kernel(
+                    "source", [ambiguous], untuned, allow_untuned_backward=True
+                )
+            )
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
         self.assertIn("frozen untuned, with the first of its 2 static", logs.output[0])
         self.assertEqual(
@@ -7722,15 +7744,27 @@ class TestPrecompileRuntimeCache(TestCase):
 
         # A forward kernel no call ran: the capture missed a path serving may need.
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [ambiguous(backward=False)], untuned=[])
-        # The caller asked for every kernel tuned (allow_untuned_backward=False).
+            _freeze_triton_kernel(
+                "source", [ambiguous(backward=False)], [], allow_untuned_backward=True
+            )
+        # A source a forward instance shares.
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [ambiguous()], untuned=None)
+            _freeze_triton_kernel(
+                "source",
+                [ambiguous(), ambiguous(backward=False)],
+                [],
+                allow_untuned_backward=True,
+            )
+        # The caller asked for every kernel tuned (require_tuned_backward).
+        with self.assertRaises(_UnresolvedTritonExport):
+            _freeze_triton_kernel(
+                "source", [ambiguous()], [], allow_untuned_backward=False
+            )
         # Only compile results, which never loaded: replay could fail to load them.
         unloaded = _never_run(_static_runtime_kernel(32))
         unloaded.launchers = []
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [unloaded], untuned=[])
+            _freeze_triton_kernel("source", [unloaded], [], allow_untuned_backward=True)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_kernel_with_one_config(self):
@@ -7745,7 +7779,11 @@ class TestPrecompileRuntimeCache(TestCase):
                 kernel._should_coordesc_tune = True
             else:
                 kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
-            saved = pickle.loads(_freeze_triton_kernel("source", [kernel], untuned=[]))
+            saved = pickle.loads(
+                _freeze_triton_kernel(
+                    "source", [kernel], [], allow_untuned_backward=True
+                )
+            )
             self.assertFalse(saved.kernel.inductor_meta["coordinate_descent_tuning"])
             self.assertIsNone(saved.kernel.inductor_meta["combo_tuning_groups"])
 
@@ -7762,7 +7800,9 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
         with self.assertRaises(_UnresolvedTritonExport) as failure:
-            _freeze_triton_kernel("source", [unlaunched, ran], untuned=[])
+            _freeze_triton_kernel(
+                "source", [unlaunched, ran], [], allow_untuned_backward=True
+            )
         self.assertEqual(
             [r["reason"] for r in failure.exception.sources[0]["instances"]],
             ["non_static_compile_result", "launcher_count_not_one"],
@@ -7771,7 +7811,9 @@ class TestPrecompileRuntimeCache(TestCase):
         # counts as one.
         ran._cached_launcher = None
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [unlaunched, ran], untuned=[])
+            _freeze_triton_kernel(
+                "source", [unlaunched, ran], [], allow_untuned_backward=True
+            )
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_reports_a_never_run_kernel_once(self):
@@ -7791,7 +7833,9 @@ class TestPrecompileRuntimeCache(TestCase):
             ),
             self.assertRaises(_UnresolvedTritonExport) as failure,
         ):
-            _freeze_triton_kernel("source", [unlaunched], untuned=[])
+            _freeze_triton_kernel(
+                "source", [unlaunched], [], allow_untuned_backward=True
+            )
         [source] = failure.exception.sources
         self.assertEqual(source["instance_count"], 1)
         self.assertEqual(
@@ -7805,11 +7849,10 @@ class TestPrecompileRuntimeCache(TestCase):
 
         unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
+        kernels = {"untuned": [unlaunched], "tuned": [_static_runtime_kernel(64)]}
         with mock.patch("torch._logging.trace_structured") as trace:
             frozen = pickle.loads(
-                _freeze_triton_kernels(
-                    {"untuned": [unlaunched], "tuned": [_static_runtime_kernel(64)]}
-                )
+                _freeze_triton_kernels(kernels, require_tuned_backward=False)
             )
         self.assertEqual(set(frozen), {"untuned", "tuned"})
         [call] = trace.call_args_list
@@ -7820,6 +7863,16 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(
             [k["source_key"] for k in call.kwargs["payload_fn"]()["kernels"]],
             ["untuned"],
+        )
+        # Strict: refused, and nothing is reported as untuned.
+        with (
+            mock.patch("torch._logging.trace_structured") as trace,
+            self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"),
+        ):
+            _freeze_triton_kernels(kernels, require_tuned_backward=True)
+        self.assertNotIn(
+            "precompile_triton_untuned_kernels",
+            [c.kwargs["metadata_fn"]().get("name") for c in trace.call_args_list],
         )
 
     def test_static_records_follow_cache_reset(self):
@@ -8598,7 +8651,9 @@ class TestPrecompileRuntimeCache(TestCase):
                     side_effect=check_live_kernel,
                 ),
             ):
-                payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+                payload = _runtime_cache._freeze_triton_kernel(
+                    "source", [kernel], [], allow_untuned_backward=False
+                )
         saved = pickle.loads(payload).kernel
         self.assertEqual(saved.compile_results[0].kernel.cubin_raw, b"from disk")
         self.assertIsNone(live_binary.cubin_raw)
@@ -9369,7 +9424,7 @@ class TestPrecompileRuntimeCache(TestCase):
             module = f"precompile_never_run_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:
                 f.write(_NEVER_RUN_BACKWARD_MODULE)
-            for phase in ("capture", "replay"):
+            for phase in ("strict", "capture", "replay"):
                 out = subprocess.run(
                     [
                         sys.executable,
