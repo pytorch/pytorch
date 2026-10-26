@@ -34,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     munge_exc,
     parametrize,
@@ -6593,6 +6594,39 @@ class GraphModule(torch.nn.Module):
         ):
             torch.func.jvp(fn, (x,), (x,))
 
+    @parametrize("backend", ("eager", "aot_eager"))
+    @parametrize(
+        "op_name",
+        ("quantile", "quantile_tensor_q", "nanquantile", "addr", "layer_norm"),
+    )
+    def test_jvp_op_with_fake_tensor_meta_overload_resolution(self, op_name, backend):
+        # Overload resolution inside the fake tensor meta kernel of quantile and
+        # nanquantile prints their dual tensor arguments, which used to raise an
+        # INTERNAL ASSERT from _fw_primal while tracing. addr and layer_norm are
+        # not traced in full yet (a separate fake tensor issue with ZeroTensor
+        # views), so they graph break and must still return the eager result.
+        x = torch.randn(3, 4)
+        t = torch.randn(3, 4)
+        q = torch.tensor([0.25, 0.75])
+        v1, v2 = torch.randn(3), torch.randn(4)
+        w, b = torch.randn(4), torch.randn(4)
+        layer_norm = torch.nn.functional.layer_norm
+        cases = {
+            "quantile": (lambda a: torch.quantile(a, 0.5), True),
+            "quantile_tensor_q": (lambda a: torch.quantile(a, q, dim=0), True),
+            "nanquantile": (lambda a: torch.nanquantile(a, 0.5), True),
+            "addr": (lambda a: torch.addr(a, v1, v2), False),
+            "layer_norm": (lambda a: layer_norm(a, (4,), w, b), False),
+        }
+        f, fullgraph = cases[op_name]
+
+        def wrapper_fn(x, t):
+            return torch.func.jvp(f, (x,), (t,))
+
+        expected = wrapper_fn(x, t)
+        actual = torch.compile(wrapper_fn, backend=backend, fullgraph=fullgraph)(x, t)
+        self.assertEqual(actual, expected)
+
     @config.patch(error_on_recompile=True)
     def test_grad_recompile(self):
         @torch.compile(backend="eager")
@@ -7738,6 +7772,7 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
 
 
+instantiate_parametrized_tests(FuncTorchHigherOrderOpTests)
 instantiate_device_type_tests(
     TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
