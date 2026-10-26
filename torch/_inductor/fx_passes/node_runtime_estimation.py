@@ -272,6 +272,10 @@ def benchmark_collective_with_cuda_events_impl(
 
     # Cache key by BYTES (dtype-agnostic)
     key = f"{n.target}: ({group_size} group size, {actual_bytes} bytes)"
+    if (config := opt_args_kwargs[1].get("config")) is not None:
+        from torch._inductor.utils import collective_config_value_key
+
+        key += f" config={collective_config_value_key(config)}"
 
     # Check cache
     if (cached := get_cached_runtime(key)) is not None:

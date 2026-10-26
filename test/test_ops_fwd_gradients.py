@@ -73,7 +73,6 @@ class TestFwdGradients(TestGradients):
                 dtypes=(torch.complex64, torch.complex128),
             ),
             skip("as_strided_scatter"),
-            xfail("triangular_solve"),
             skip("svd_lowrank", dtypes=(torch.complex128,)),
             skip("pca_lowrank", dtypes=(torch.complex128,)),
             xfail("polar"),
