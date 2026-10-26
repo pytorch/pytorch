@@ -441,9 +441,7 @@ int register_linear_params() {
 #endif
                   } else if (weight.scalar_type() == at::kFloat) {
                     // NB: fp16 weight is serialized as float
-#if !defined(__aarch64__) && !defined(_M_ARM64)
                     return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
-#endif
                   } else {
                     TORCH_CHECK(
                         false,

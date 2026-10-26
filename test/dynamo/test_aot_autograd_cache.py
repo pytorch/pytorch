@@ -504,6 +504,43 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_nested_invoke_subgraph(self):
+        """
+        A subgraph HOP nested inside another subgraph must not defeat the cache.
+
+        Loading a cached GraphModule re-traces it symbolically, which calls
+        invoke_subgraph with Proxy operands; rejecting those makes every load
+        fail, so the entry is saved on every run and never hit.
+        """
+        from torch.compiler import nested_compile_region
+
+        @nested_compile_region
+        def inner(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        @nested_compile_region
+        def outer(x, y):
+            return inner(x, y) + inner(y, x)
+
+        def fn(x, y):
+            return outer(x, y) + outer(y, x)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        compiled_fn(x, y).sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+        compiled_fn(x, y).sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -3729,6 +3766,36 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_annotation_value_causes_cache_miss(self):
+        """Dynamo recompiles a frame entered under a different annotation; the
+        resulting graphs differ only in node.meta, so the annotation must be in
+        the cache key for joint passes that read it."""
+
+        def fn(x):
+            return (x + 1).relu()
+
+        with fresh_cache():
+            compiled = torch.compile(fn, backend="inductor")
+            for stage in (0, 1, 0):
+                with torch.fx.traceback.annotate({"stage": stage}):
+                    compiled(torch.randn(10, 10, requires_grad=True)).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            with torch.fx.traceback.annotate({"stage": 1}):
+                torch.compile(fn, backend="inductor")(
+                    torch.randn(10, 10, requires_grad=True)
+                ).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -3858,6 +3925,21 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         low_again = self.gen_cache_key(make_fn(0.2), config)
         self.assertNotEqual(low, high)
         self.assertEqual(low, low_again)
+
+    def test_constant_annotation_cache_key(self):
+        def make_fn(value):
+            def fn(x):
+                with torch.fx.traceback.annotate({"knob": value}):
+                    return x.sin()
+
+            return fn
+
+        config = self.default_config()
+        keys = [
+            self.gen_cache_key(make_fn(v), config)[0] for v in (0, 1, True, 1.0, "a")
+        ]
+        self.assertEqual(len(set(keys)), len(keys))
+        self.assertEqual(keys[0], self.gen_cache_key(make_fn(0), config)[0])
 
     def test_region_activation_memory_budget_coverage_config_cache_key(self):
         def fn(x):
