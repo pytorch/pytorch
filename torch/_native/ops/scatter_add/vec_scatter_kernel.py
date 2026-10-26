@@ -5,8 +5,8 @@ contiguous tensors), but works everywhere scalar atomicAdd does. Matches
 the fallback path in https://github.com/pytorch/pytorch/pull/182675.
 
 Algorithm: warp-per-source-row. Each warp reads ``idx[entry]`` once, then
-the 32 lanes chunk through N with vectorized gather (4 fp32 or 8 halves
-per lane per step) and issue atomics into ``out[ind, :]``:
+the 32 lanes chunk through N, loading 16 bytes (4 fp32 or 8 halves) per
+lane per step, and issue atomics into ``out[ind, :]``:
 
 - fp32: per-element ``atomicAdd``.
 - fp16/bf16: paired x2 atomics
@@ -241,7 +241,7 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, contig: bool):
 
 
 def vec_elems_for(dtype: torch.dtype) -> int:
-    """Elements per lane per step (16-byte vector gather)."""
+    """Elements per lane per step (16 bytes)."""
     return _VEC_BYTES // dtype.itemsize
 
 

@@ -352,7 +352,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype):
 
     # Contract the cond guarantees (tvm-ffi rejects calls that break it):
     # 16B-aligned src/out pointers and row strides, 16B-multiple rows.
-    div = 16 // elem_bytes
+    div = min_d_divisor_for(torch_dtype)
 
     def fake_2d():
         return cute.runtime.make_fake_tensor(
