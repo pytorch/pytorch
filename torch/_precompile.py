@@ -425,12 +425,16 @@ class DynamoTracer:
 
     ``require_tuned_backward`` covers a backward Triton kernel the capture compiled
     but no call ran, e.g. in a graph variant whose backward no captured step
-    reached: by default it is refused like any other kernel that cannot be
-    frozen. With ``require_tuned_backward=False`` it is frozen with its first
-    config, tuning off, and reported with a warning and a
+    reached, and that still needed autotuning: several configs, or coordinate
+    descent or combo tuning not done yet. (One with a single config and nothing
+    left to tune is frozen either way.) By default it is refused like any other
+    kernel that cannot be frozen. With ``require_tuned_backward=False`` it is
+    frozen with its first config, tuning off, and reported with a warning and a
     ``precompile_triton_untuned_kernels`` artifact. Every serving process then
     runs it with that config, without ``no_compilation()`` too, which can cost
-    performance.
+    performance. The opt-in still refuses such a kernel if its source also
+    serves a forward, if none of its instances has a launcher with a static
+    compile result to freeze, or if its cubin cannot be carried.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -2003,8 +2007,11 @@ def _custom_op_names_in_source(source: str) -> set[str]:
     return {name for name in names if _is_custom_op(name)}
 
 
-def _backend_custom_op_names(backends: Mapping[str, Any]) -> set[str]:
-    """The custom ops the backend artifacts of a multi-graph capture call.
+def _backend_custom_op_names(
+    backends: Mapping[str, Any],
+) -> tuple[set[str], set[str]]:
+    """The custom ops the backend artifacts of a multi-graph capture call, and
+    those among them an eager graph calls.
 
     A backend whose served code cannot be read is logged: the artifact records
     none of its custom ops, so serving needs them registered by the first call.
@@ -2012,6 +2019,7 @@ def _backend_custom_op_names(backends: Mapping[str, Any]) -> set[str]:
     from torch._dynamo.output_graph import noop_graph_call
 
     names: set[str] = set()
+    eager_names: set[str] = set()
     for backend_id, artifact in sorted(backends.items()):
         content = artifact.content
         if content is noop_graph_call:
@@ -2022,7 +2030,7 @@ def _backend_custom_op_names(backends: Mapping[str, Any]) -> set[str]:
             content, "__self__", content
         )
         if isinstance(gm, torch.fx.GraphModule):
-            names |= _custom_op_names(gm)
+            eager_names |= _custom_op_names(gm)
             continue
         compiled = [
             c
@@ -2046,10 +2054,15 @@ def _backend_custom_op_names(backends: Mapping[str, Any]) -> set[str]:
         for source in sources:
             if isinstance(source, str):
                 names |= _custom_op_names_in_source(source)
-    return names
+    return names | eager_names, eager_names
 
 
-def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
+def _custom_op_modules(
+    op_names: Iterable[str],
+    *,
+    eager_op_names: Iterable[str] = (),
+    retrace: bool = False,
+) -> dict[str, tuple[str, ...]]:
     """The importable modules defining the Python custom ops among ``op_names``,
     each with the ops it defines.
 
@@ -2062,8 +2075,20 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
     imported), but never torch's own wrappers (``torch._library``) or ``__main__``.
     An op with no such candidate is reported instead; serving then needs it
     registered some other way.
+
+    Registrations from other modules that the served code can reach are reported
+    too, since importing the recorded module does not make them: device kernels
+    and ``__torch_dispatch__`` rules always; autograd and vmap rules for the ops in
+    ``eager_op_names``, which an eager graph serves (compiled code has its
+    backward compiled in); and the fake when the artifact can ``retrace``.
     """
     from torch._library.custom_ops import OPDEFS
+
+    eager_op_names = set(eager_op_names)
+
+    def module_of(fn: object) -> str:
+        name = getattr(fn, "__module__", None)
+        return name if isinstance(name, str) else "?"
 
     def in_torch(name: str) -> bool:
         return name == "torch" or name.startswith("torch.")
@@ -2091,10 +2116,10 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
             defining[name] = packet
     for op_name, qualname in sorted(defining.items()):
         opdef = OPDEFS[qualname]
-        defined_in = [getattr(opdef._init_fn, "__module__", "?")]
+        defined_in = [module_of(opdef._init_fn)]
         if torch_wrapper(defined_in[0]):
             # triton_op: the user's function is the fake; torch wrapped it.
-            defined_in.append(getattr(opdef._abstract_fn, "__module__", "?"))
+            defined_in.append(module_of(opdef._abstract_fn))
 
         def unusable(name: str) -> str | None:
             if name == "__main__":
@@ -2120,21 +2145,24 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
             )
             continue
         modules.setdefault(name, []).append(op_name)
+        reached = [
+            *map(_registered_fn, opdef._backend_fns.values()),
+            *opdef._torch_dispatch_fns.values(),
+        ]
+        if {op_name, qualname, op_name.partition(".")[0]} & eager_op_names:
+            reached += [opdef._backward_fn, opdef._setup_context_fn, opdef._vmap_fn]
+        if retrace:
+            reached.append(opdef._abstract_fn)
         others = {
             n
-            for fn in (
-                *map(_registered_fn, opdef._backend_fns.values()),
-                *opdef._torch_dispatch_fns.values(),
-                opdef._backward_fn,
-                opdef._setup_context_fn,
-            )
-            if isinstance(n := getattr(fn, "__module__", None), str)
-            and n != name
+            for fn in reached
+            if fn is not None
+            and (n := module_of(fn)) not in (name, "?")
             and not in_torch(n)
         }
         if others:
             log.warning(
-                "precompile: custom op %s has device kernels or autograd registered "
+                "precompile: custom op %s has kernels, rules or a fake registered "
                 "from %s, which the artifact does not import; serving needs them "
                 "imported by its first call, or it runs the op's other kernels",
                 op_name,
@@ -2179,14 +2207,21 @@ def _importable_by_name(name: str) -> bool:
 
 
 def _write_custom_op_imports(
-    buf: PySourceBuilder, op_names: set[str], *, call: bool = True
+    buf: PySourceBuilder,
+    op_names: set[str],
+    *,
+    eager_op_names: Iterable[str] = (),
+    retrace: bool = False,
+    call: bool = True,
 ) -> None:
     """Emit CUSTOM_OP_MODULES and, when it names any module, the driver code that
     imports them, inlined as text like the rest of the driver (invariant 7). Without
     ``call``, the driver's builder imports them, after its version checks."""
     from torch import _precompile_driver as driver
 
-    modules = _custom_op_modules(op_names)
+    modules = _custom_op_modules(
+        op_names, eager_op_names=eager_op_names, retrace=retrace
+    )
     buf.writeline("# " + "=" * 70)
     buf.writeline(
         "# 0. Custom op modules: imported if their ops are not registered yet"
@@ -2274,7 +2309,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
-    _write_custom_op_imports(buf, _custom_op_names(gm))
+    op_names = _custom_op_names(gm)
+    _write_custom_op_imports(buf, op_names, eager_op_names=op_names)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2602,7 +2638,15 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, _backend_custom_op_names(backends), call=False)
+    op_names, eager_op_names = _backend_custom_op_names(backends)
+    _write_custom_op_imports(
+        buf,
+        op_names,
+        eager_op_names=eager_op_names,
+        # load(allow_serve_time_compiles=True) can trace an installed artifact again.
+        retrace=mode == "installed",
+        call=False,
+    )
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -3660,8 +3704,8 @@ def capture(
     differ from the one picked before the block. Compiled JIT kernel
     specializations and autotuning decisions the block does not produce again
     are kept afterwards. A :class:`DynamoTracer` capture with
-    ``require_tuned_backward=False`` freezes an Inductor backward kernel no call
-    ran untuned instead of raising for it.
+    ``require_tuned_backward=False`` can freeze an Inductor backward kernel no
+    call ran untuned; :class:`DynamoTracer` lists when.
     Triton does not cache the decision of an autotuner with ``pre_hook``
     configs, so one that does not prune its configs keeps its earlier decision
     in the block and is benchmarked again on first use in the serving process.
@@ -3861,11 +3905,10 @@ def load(
     up to a graph break whose continuation fell back, still ran compiled.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
-    taken out, so they serve a host that
-    installed the same PyTorch build elsewhere. The Python, compiler, CUDA and
-    other SDK paths must still match the producer's, and a kernel that links a
-    library from the Inductor cache (the Halide runtime, CUTLASS or CK kernels)
-    is rebuilt. Rebuilding needs a C++ compiler on the serving host:
+    taken out, so they serve a host that installed the same PyTorch build
+    elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
+    producer's, and a kernel that links a library from the Inductor cache (the
+    Halide runtime, CUTLASS or CK kernels) is rebuilt. Rebuilding needs a C++ compiler on the serving host:
     :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the

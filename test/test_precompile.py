@@ -9711,8 +9711,10 @@ else:
         warnings.simplefilter("always")
         try:
             run(pc.load(artifact, cache))
-        except Exception:
-            pass
+        except (AttributeError, RuntimeError) as e:
+            # The op's namespace, as the missing op's first call names it.
+            ns = "precompile_op_test_" + module.rpartition("_")[2]
+            assert ns in str(e), e
         else:
             raise AssertionError("ran a custom op that nothing registered")
     messages = [str(w.message) for w in caught]
@@ -9755,8 +9757,12 @@ class TestPrecompileCustomOpModules(TestCase):
                 os.makedirs(os.path.join(directory, subdir), exist_ok=True)
                 with open(os.path.join(directory, subdir, name + ".py"), "w") as f:
                     f.write(source.replace("{ns}", ns))
-            phases = ["capture", "replay", "registered", "missing"]
-            if tracer == "dynamo":
+            phases = ["capture", "replay"]
+            # The serving-process cases depend on the artifact's form, not on what
+            # the entry calls, so they run once per form.
+            if entry in ("fn", "step"):
+                phases += ["registered", "missing"]
+            if (tracer, backend, entry) == ("dynamo", "inductor", "fn"):
                 phases.append("version")
             for phase in phases:
                 out = subprocess.run(
@@ -9879,20 +9885,77 @@ class TestPrecompileCustomOpModules(TestCase):
 
     def test_custom_op_modules_warn_for_registrations_from_other_modules(self):
         from torch._precompile import _custom_op_modules
+        from torch.utils._python_dispatch import TorchDispatchMode
 
         ns = f"precompile_kernels_{uuid.uuid4().hex}"
-        op = self._define_op(ns, "split", module="unittest")
 
-        def cpu_kernel(x):
+        def elsewhere(fn, module):
+            fn.__module__ = module
+            return fn
+
+        def kernel(x):
             return x.clone()
 
-        cpu_kernel.__module__ = "json"
-        op.register_kernel("cpu")(cpu_kernel)
+        def dispatch(mode, func, types, args, kwargs):
+            return func(*args, **kwargs)
+
+        def backward(ctx, grad):
+            return grad
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def vmap(info, in_dims, x):
+            return x.clone(), in_dims[0]
+
+        def fake(x):
+            return torch.empty_like(x)
+
+        class Mode(TorchDispatchMode):
+            pass
+
+        ops = {name: self._define_op(ns, name, module="unittest") for name in "abcd"}
+        ops["a"].register_kernel("cpu")(elsewhere(kernel, "json"))
+        ops["b"].register_torch_dispatch(Mode, elsewhere(dispatch, "csv"))
+        ops["c"].register_autograd(
+            elsewhere(backward, "base64"),
+            setup_context=elsewhere(setup_context, "base64"),
+        )
+        ops["d"].register_vmap(elsewhere(vmap, "string"))
+        ops["e"] = self._define_op(ns, "e", module="unittest", fake=False)
+        ops["e"].register_fake(elsewhere(fake, "textwrap"))
+        # Autograd and vmap rules only matter where an eager graph calls the op,
+        # and the fake only where the artifact can trace again.
+        for name, module, reached_by in (
+            ("a", "json", {}),
+            ("b", "csv", {}),
+            ("c", "base64", {"eager_op_names": {f"{ns}::c"}}),
+            ("d", "string", {"eager_op_names": {f"{ns}::d"}}),
+            ("e", "textwrap", {"retrace": True}),
+        ):
+            op_name = f"{ns}::{name}"
+            expected = {"unittest": (op_name,)}
+            if reached_by:
+                with self.assertNoLogs("torch._precompile", "WARNING"):
+                    self.assertEqual(_custom_op_modules({op_name}), expected)
+            with self.assertLogs("torch._precompile", "WARNING") as logs:
+                self.assertEqual(_custom_op_modules({op_name}, **reached_by), expected)
+            self.assertIn(module, logs.output[0])
+
+    def test_custom_op_modules_warn_for_a_function_with_no_module(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = f"precompile_nameless_{uuid.uuid4().hex}"
+
+        def body(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        # As for a function exec'd with globals that have no __name__.
+        body.__module__ = None
+        torch.library.custom_op(f"{ns}::nameless", mutates_args=())(body)
         with self.assertLogs("torch._precompile", "WARNING") as logs:
-            self.assertEqual(
-                _custom_op_modules({f"{ns}::split"}), {"unittest": (f"{ns}::split",)}
-            )
-        self.assertIn("json", logs.output[0])
+            self.assertEqual(_custom_op_modules({f"{ns}::nameless"}), {})
+        self.assertIn("not importable", logs.output[0])
 
     def test_custom_ops_registered_under_an_overload_name(self):
         from torch._precompile import (
@@ -10061,12 +10124,12 @@ class TestPrecompileCustomOpModules(TestCase):
         }
         self.assertEqual(
             _backend_custom_op_names(backends),
-            {f"{ns}::eager", "mylib::fw", "mylib::bw"},
+            ({f"{ns}::eager", "mylib::fw", "mylib::bw"}, {f"{ns}::eager"}),
         )
         # Served code it cannot read (RegionalOutputCode, say) is reported.
         unreadable = {"regional": artifact(types.SimpleNamespace(compiled_fw=object()))}
         with self.assertLogs("torch._precompile", "WARNING") as logs:
-            self.assertEqual(_backend_custom_op_names(unreadable), set())
+            self.assertEqual(_backend_custom_op_names(unreadable), (set(), set()))
         self.assertIn("regional", logs.output[0])
 
 

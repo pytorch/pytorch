@@ -4156,14 +4156,20 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
-        from torch.compiler._runtime_cache import relocatable_cpp_key
+        from torch.compiler._runtime_cache import (
+            has_frozen_cpp_kernel,
+            record_cpp_kernel,
+            relocatable_cpp_key,
+            restore_cpp_kernel,
+        )
 
         key, main_path = write(
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
         )
         # The key a capture freezes this kernel's binary under, and a replay finds it
-        # by, on a host that may put torch and the Inductor cache elsewhere. The
-        # binary itself stays under key, which this host's paths tell apart.
+        # by, on a host that may put torch elsewhere. The Inductor cache dir stays in
+        # it; a typical command does not name that dir. The binary itself stays
+        # under key, which this host's paths tell apart.
         frozen_key = relocatable_cpp_key(
             lambda: get_hash(
                 main_code.strip(),
@@ -4182,10 +4188,6 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
-            from torch.compiler._runtime_cache import (
-                has_frozen_cpp_kernel,
-                restore_cpp_kernel,
-            )
             from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
@@ -4291,8 +4293,6 @@ class CppCodeCache:
             cls.cache[key] = load_fn
 
         if frozen_key is not None:
-            from torch.compiler._runtime_cache import record_cpp_kernel
-
             record_cpp_kernel(frozen_key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
@@ -4317,9 +4317,10 @@ def _relocatable_command_line(cmd: str) -> str:
 
     Only these trees move. The Inductor cache dir stays in the key, since a
     library in it that the kernel links against (the Halide runtime, CUTLASS or CK
-    kernels) is recorded by absolute path in the binary, as do the Python,
-    compiler, CUDA and other SDK paths, even when they sit next to torch. The hosts must keep those at the same paths, as a packaged
-    job whose torch is extracted per launch next to a fixed interpreter does.
+    kernels) is recorded by absolute path in the binary. The Python, compiler, CUDA
+    and other SDK paths stay too, even when they sit next to torch, so the hosts
+    must keep those at the same paths, as a packaged job whose torch is extracted
+    per launch next to a fixed interpreter does.
     """
     from torch._inductor import cpp_builder
     from torch.utils import cpp_extension

@@ -5881,10 +5881,13 @@ class TestCppCodeCacheKey(TestCase):
         cmd = _relocatable_command_line(
             f"cc -I{torch_dir}/include -I{torch_dir}-ext/inc -I/x{torch_dir}/include "
             f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include "
+            f'/I "{torch_dir}/msvc" /LIBPATH:"{torch_dir}/lib" '
             f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so"
         )
         self.assertIn("-I<torch>/include", cmd)
         self.assertIn("-L'<torch>/lib'", cmd)
+        self.assertIn('/I "<torch>/msvc"', cmd)
+        self.assertIn('/LIBPATH:"<torch>/lib"', cmd)
         self.assertIn(f"-I{torch_dir}-ext/inc", cmd)
         self.assertIn(f"-I/x{torch_dir}/include", cmd)
         # A package installed next to torch (an SDK wheel, say) keeps its path.
@@ -5893,6 +5896,29 @@ class TestCppCodeCacheKey(TestCase):
         # absolute path in the binary.
         self.assertIn(f"-I{cache}/include", cmd)
         self.assertIn(f" {cache}/halide/libStandaloneHalideRuntime.so", cmd)
+
+    def test_relocation_replaces_both_torch_trees(self):
+        from torch._inductor import cpp_builder
+        from torch.utils import cpp_extension
+
+        # cpp_extension's tree follows torch_parent, so it can sit inside
+        # cpp_builder's or next to it.
+        for layout in ("{root}/torch/shared", "{root}/site/torch"):
+            cmds = []
+            for root in ("/install/a", "/install/b"):
+                builder, extension = f"{root}/torch", layout.format(root=root)
+                with (
+                    mock.patch.object(cpp_builder, "_TORCH_PATH", builder),
+                    mock.patch.object(cpp_extension, "_TORCH_PATH", extension),
+                ):
+                    cmds.append(
+                        _relocatable_command_line(
+                            f"cc -I{builder}/include -I{extension}/include "
+                            f"-L{extension}/lib"
+                        )
+                    )
+                self.assertNotIn(root, cmds[-1])
+            self.assertEqual(cmds[0], cmds[1])
 
     def test_no_frozen_key_outside_precompile(self):
         from torch.compiler import _runtime_cache
