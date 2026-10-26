@@ -36,11 +36,9 @@ constexpr int kCUDANumThreads = 256;
 constexpr int64_t kMaxGridZ = 65535;
 // flexible_launch_configs takes int and runs ceil_div on its arguments, so both
 // have to stay far enough below INT_MAX that the intermediate cannot overflow.
-// The reduction extent only feeds grid.y, which saturates at MAX_H_BLOCK long
-// before this bound, so clamping it is purely conservative and the kernels
-// stride over whatever is left.
+// The kernels stride over any reduction extent past this clamp.
 constexpr int64_t kMaxReductionExtent =
-    std::numeric_limits<int>::max() / (MAX_BLOCK_SIZE * ELEMENTS_PER_THREAD);
+    std::numeric_limits<int>::max() - MAX_BLOCK_SIZE * ELEMENTS_PER_THREAD;
 // The stride extent is different: grid.x is the coverage of the channel axis,
 // so clamping it would leave the channels past the clamp unwritten rather than
 // merely under-parallelized. Only keep ceil_div from overflowing; no real
@@ -447,9 +445,8 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
   using T_ACC = acc_type<T, true>;
   const int64_t G = group;
   const int64_t D = C / G;
-  const int64_t n = blockIdx.x;
-  const int64_t g = blockIdx.y;
-  const int64_t ng = n * G + g;
+  const int64_t ng = blockIdx.x;
+  const int64_t g = ng % G;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
@@ -753,9 +750,8 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
     T_ACC* c3) {
   const int64_t G = group;
   const int64_t D = C / G;
-  const int64_t n = blockIdx.x;
-  const int64_t g = blockIdx.y;
-  const int64_t ng = n * G + g;
+  const int64_t ng = blockIdx.x;
+  const int64_t g = ng % G;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
@@ -1272,7 +1268,7 @@ void GroupNorm1dBackward(
         ? at::cuda::warp_size()
         : cuda_utils::kCUDABlockReduceNumThreads;
     Compute1dBackwardFusedParamsCUDAKernel<T, PT>
-        <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
+        <<<N * G, num_threads, 0, cuda_stream>>>(
             C,
             G,
             dY_data,
@@ -1490,7 +1486,7 @@ void GroupNormBackwardKernelImplInternal(
         ? warp_size
         : cuda_utils::kCUDABlockReduceNumThreads;
     ComputeBackwardFusedParamsCUDAKernel<PT, T_ACC>
-        <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
+        <<<N * G, num_threads, 0, cuda_stream>>>(
             C,
             HxW,
             G,

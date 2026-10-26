@@ -8127,7 +8127,7 @@ class TestNNDeviceType(NNTestCase):
         # here uses a small spatial extent and so only covers the single block
         # case, including the instance norm shapes above.
         for C, G in ((32, 32), (64, 8)):
-            shape = (2, C, 8, 16, 16)
+            shape = (2, C, 16, 16, 16)
             mod = nn.GroupNorm(G, C).to(device=device, dtype=dtype)
             ref_mod = deepcopy(mod)
             input = torch.randn(shape, device=device, dtype=dtype)
@@ -8178,7 +8178,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(input.grad, ref_input.grad, **tol)
 
     @onlyCUDA
-    @dtypes(torch.float)
+    @dtypes(torch.double)
     def test_group_norm_channels_last_many_channels(self, device, dtype):
         # The channels_last kernels size their grid from the channel count, so a
         # channel count past the point where that sizing saturates must still be
@@ -8189,9 +8189,7 @@ class TestNNDeviceType(NNTestCase):
         w = torch.ones(C, device=device, dtype=dtype)
         b = torch.zeros(C, device=device, dtype=dtype)
 
-        # One group per channel exercises the forward reduction. Backward is not
-        # run here: it launches a grid of G blocks in its y extent, which is a
-        # separate pre-existing limit above 65535 groups.
+        # One group per channel exercises the forward reduction.
         with torch.no_grad():
             out, mean, rstd = torch.native_group_norm(x, w, b, 1, C, 4, C, 1e-5)
             ref = torch.native_group_norm(x.contiguous(), w, b, 1, C, 4, C, 1e-5)
@@ -8199,14 +8197,24 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(rstd, ref[2])
         self.assertEqual(out, ref[0])
 
-        # Several channels per group exercises the backward reduction, which
-        # uses the same grid sizing for every group count.
-        G = 5
-        xg = x.detach().clone().requires_grad_()
-        xc = x.detach().clone().contiguous().requires_grad_()
-        F.group_norm(xg, G).sum().backward()
-        F.group_norm(xc, G).sum().backward()
-        self.assertEqual(xg.grad, xc.grad)
+        # Backward uses the same grid sizing for every group count. One group
+        # per channel also puts more than 65535 groups through the per-group
+        # kernels, which channels_last InstanceNorm reaches with large C.
+        grad_out = torch.randn_like(x)
+        for G in (C, 5):
+            xg = x.detach().clone().requires_grad_()
+            xc = x.detach().clone().contiguous().requires_grad_()
+            F.group_norm(xg, G).backward(grad_out)
+            F.group_norm(xc, G).backward(grad_out)
+            self.assertEqual(xg.grad, xc.grad)
+
+        # HxW == 1 takes a separate backward that has the same per-group grid.
+        x1 = torch.randn(2, 140000, device=device, dtype=dtype, requires_grad=True)
+        x1_cpu = x1.detach().cpu().requires_grad_()
+        grad_out1 = torch.randn_like(x1)
+        F.group_norm(x1, 70000).backward(grad_out1)
+        F.group_norm(x1_cpu, 70000).backward(grad_out1.cpu())
+        self.assertEqual(x1.grad, x1_cpu.grad)
 
     @dtypes(torch.half, torch.bfloat16)
     def test_group_norm_mixed_dtype_bias_only(self, device, dtype):
