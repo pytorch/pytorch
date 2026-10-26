@@ -3371,13 +3371,15 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
 
 
 def _accelerator_has_stream_api() -> bool:
-    """Whether the default accelerator's device module provides the stream
-    APIs the traced tests need (torch.mps, for one, has neither Stream nor
-    current_stream)."""
+    """Whether the default accelerator provides the stream APIs the traced
+    tests need and routes current_stream into the handler table (torch.mps
+    has the APIs but its current_stream is in Dynamo's MOD_SKIPLIST)."""
     if not torch.accelerator.is_available():
         return False
     module = torch.get_device_module(torch.accelerator.current_accelerator().type)
-    return hasattr(module, "Stream") and hasattr(module, "current_stream")
+    if not (hasattr(module, "Stream") and hasattr(module, "current_stream")):
+        return False
+    return module.current_stream in TorchInGraphFunctionVariable._get_handlers()
 
 
 class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
