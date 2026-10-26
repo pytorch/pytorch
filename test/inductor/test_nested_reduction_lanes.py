@@ -74,6 +74,7 @@ class TestRecursiveLaneSplit(TestCase):
         "dtype",
         [
             torch.int16,
+            torch.uint16,
             torch.float16,
             torch.bfloat16,
             torch.float32,
@@ -175,7 +176,7 @@ NESTED_CONFIG = {
 
 
 class NestedLaneTestCase(TestCase):
-    def compare(self, fn, x, persistent, exact=True):
+    def compare(self, fn, x, persistent, exact=True, loop_ordering=True):
         class Choices(InductorChoices):
             @staticmethod
             def should_use_cooperative_reduction(*args, **kwargs):
@@ -191,7 +192,7 @@ class NestedLaneTestCase(TestCase):
 
         settings = {
             "triton.multi_kernel": 0,
-            "loop_ordering_after_fusion": True,
+            "loop_ordering_after_fusion": loop_ordering,
             "split_reductions": False,
             "emulate_precision_casts": True,
             "cat_fuse_computed_input_copies": True,
@@ -345,6 +346,18 @@ class TestNestedAsmLaneInputs(NestedLaneTestCase):
         else:
             self.assertEqual(metrics.codegen_nested_reduction, 1)
             self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @parametrize("persistent", [False, True])
+    def test_parent_lane_inputs_without_loop_ordering(self, device, persistent):
+        # fbcode turns loop_ordering_after_fusion off by default. The lane plan
+        # need not form for this graph then, but the result must stay exact.
+        def fn(x):
+            groups = realized_rms_groups(x)
+            maximum = groups.abs().amax(-1)
+            words = pack_words(groups, maximum.to(torch.int32), 6)
+            return words.view(torch.uint8), maximum
+
+        self.compare(fn, lane_input(device), persistent, loop_ordering=False)
 
     @parametrize("persistent", [False, True])
     @parametrize("quantized_output", [False, True])
