@@ -785,15 +785,12 @@ class ComputedLazyConstantTests(TestCase):
                 torch._dynamo.reset()
                 self._check(fn, arg_sets, expected_frames=1)
 
-    def test_unused_int_float_mix_recompiles(self):
+    def test_unused_mixed_type_division_recompiles(self):
         t = torch.ones(2)
         cases = [
             ("floordiv", lambda t, a: (t.sin(), a // 2.0), [(t, 7), (t, 9)]),
             ("mod", lambda t, a: (t.sin(), a % 2.0), [(t, 7), (t, 9)]),
             ("bool", lambda t, a: (t.sin(), a // 2.0), [(t, True), (t, False)]),
-            ("add", lambda t, a: (t.sin(), a + 1.0), [(t, 7), (t, 9)]),
-            ("sub", lambda t, a: (t.sin(), 1.0 - a), [(t, 7), (t, 9)]),
-            ("mul", lambda t, a: (t.sin(), a * 2.0), [(t, 7), (t, 9)]),
         ]
         for name, fn, arg_sets in cases:
             with self.subTest(name=name):
@@ -837,6 +834,30 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), r
 
         self._check(fn, [(t, 7, 2), (t, 7, 0)], expected_frames=2)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_lazy_int_overflow_raises_in_traced_handler(self):
+        # a dynamic a falls back to eager; keep a static
+        t = torch.ones(2)
+
+        def truediv(t, a):
+            try:
+                r = a / 2
+            except OverflowError:
+                r = -1
+            return t.sin(), r
+
+        def floordiv(t, a):
+            try:
+                r = a // 2.0
+            except OverflowError:
+                r = -1
+            return t.sin(), r
+
+        for fn in (truediv, floordiv):
+            with self.subTest(name=fn.__name__):
+                torch._dynamo.reset()
+                self._check(fn, [(t, 7), (t, 10**400)], expected_frames=2)
 
     def test_unused_comparison_does_not_recompile(self):
         t = torch.ones(2)

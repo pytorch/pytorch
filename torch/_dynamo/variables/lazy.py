@@ -607,26 +607,12 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         # min/max return an operand; mixed types make the result type value-dependent
         if op in (min, max) and len({type(v) for v in values}) > 1:
             return None
-        kinds = [{bool: int, int: int, float: float}.get(type(v)) for v in values]
-        if op in (
-            operator.add,
-            operator.sub,
-            operator.mul,
-            operator.truediv,
-            operator.floordiv,
-            operator.mod,
-        ):
-            # a lazy int can overflow when converted to float
-            lazy_int = any(
-                kind is int
-                and isinstance(arg, LazyVariableTracker)
-                and not arg.is_realized()
-                for kind, arg in zip(kinds, args)
-            )
-            if lazy_int and (float in kinds or op is operator.truediv):
-                return None
         if op in (operator.truediv, operator.floordiv, operator.mod):
-            if None in kinds:
+            # an int dividend can overflow when converted to float
+            kinds = [{bool: int, int: int, float: float}.get(type(v)) for v in values]
+            if None in kinds or (
+                kinds[0] is int and (kinds[1] is float or op is operator.truediv)
+            ):
                 return None
             # an unguarded divisor could become zero on a later call
             divisor = args[1]
