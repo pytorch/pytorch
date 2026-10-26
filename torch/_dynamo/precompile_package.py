@@ -1599,6 +1599,7 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
+        self.custom_op_names: set[str] = set()
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1609,6 +1610,11 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         self.note_compute()
         super()._add_backend_id(backend_id, backend)
+
+    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        from torch._precompile import _custom_op_names
+
+        self.custom_op_names |= _custom_op_names(gm)
 
     def add_resume_function(
         self,
@@ -2125,7 +2131,12 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         return _build_multigraph_artifact(
-            self._served_entry()[0], backends, summary, self._backend, self._fn
+            self._served_entry()[0],
+            backends,
+            summary,
+            self._backend,
+            self._fn,
+            self._package.custom_op_names,
         )
 
 
