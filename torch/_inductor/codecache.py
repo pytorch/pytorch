@@ -4300,11 +4300,12 @@ def _relocatable_command_line(cmd: str) -> str:
     from torch._inductor import cpp_builder
     from torch.utils import cpp_extension
 
+    # get_command_line() normalizes the separators, so normalize the roots the same.
     roots = {
-        os.path.dirname(cpp_extension._TORCH_PATH): "<torch_root>",
-        os.path.dirname(cpp_builder._TORCH_PATH): "<torch_root>",
-        cache_dir(): "<inductor_cache_dir>",
+        normalize_path_separator(os.path.dirname(path)): "<torch_root>"
+        for path in (cpp_extension._TORCH_PATH, cpp_builder._TORCH_PATH)
     }
+    roots[normalize_path_separator(cache_dir())] = "<inductor_cache_dir>"
     # Longest first, so a root nested in another is replaced before its parent.
     for root in sorted(roots, key=len, reverse=True):
         if len(root) > 1:

@@ -758,6 +758,10 @@ class CachingAutotuner(KernelInterface):
         # Cached launcher for fast path — bypasses all preamble after first
         # successful steady-state launch.  Set to None until populated.
         self._cached_launcher: LauncherType | None = None
+        # Whether run() has launched this kernel in this process. The fast path
+        # cache does not say: it stays unset under the profiler, debug mode,
+        # benchmark runs and cubin saving.
+        self._launched = False
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1241,6 +1245,7 @@ class CachingAutotuner(KernelInterface):
             self.launchers,
             getattr(self.fn, "_hash_lock", None),
             self.benchmark_failure_reasons,
+            getattr(self, "_launched", False),
         )
         self.fn.fn = None
         self.fn.__globals__ = None
@@ -1248,6 +1253,7 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
         self._cached_launcher = None
+        self._launched = False
         self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
@@ -1263,6 +1269,7 @@ class CachingAutotuner(KernelInterface):
                 self.launchers,
                 self.fn._hash_lock,
                 self.benchmark_failure_reasons,
+                self._launched,
             ) = old_values
         else:
             # even if we don't need/have specific values, we do need the
@@ -2673,6 +2680,7 @@ class CachingAutotuner(KernelInterface):
                 raise
         finally:
             self._post_launch()
+        self._launched = True
 
         # Populate fast path: cache the launcher for future calls.  Static
         # conditions (interpret, dump flags) are pre-computed in _cache_eligible;
