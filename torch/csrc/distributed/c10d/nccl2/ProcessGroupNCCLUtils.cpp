@@ -469,6 +469,10 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 void ProcessGroupNCCL::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
+  if (coalescing_batch_) {
+    coalescing_works_.push_back(work);
+  }
+
   // In graph capture mode, keep the completion state and events alive until
   // the graph gets destroyed, organized per graph.
   if (getGraphCaptureMode()) {

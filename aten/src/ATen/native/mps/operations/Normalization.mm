@@ -7,6 +7,8 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/BatchNorm.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -28,7 +30,7 @@ namespace mps {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/LayerNorm_metallib.h>
+#include <ATen/native/mps/Normalization_metallib.h>
 #endif
 
 static void get_shapes(MPSShape* input_shape_readonly,
@@ -84,6 +86,121 @@ static std::string get_mem_string(c10::MemoryFormat memory_format) {
   }
   TORCH_INTERNAL_ASSERT(false, "Unexpected memory format", memory_format);
 }
+
+static std::string_view batch_norm_variant(const Tensor& x, const Tensor& out) {
+  if (!offsetsFitIn<uint32_t>(x, out)) {
+    return "strided64_";
+  }
+  return x.is_non_overlapping_and_dense() && out.strides() == x.strides() ? "" : "strided_";
+}
+
+static BatchNormLayout<> batch_norm_layout(const Tensor& x, const Tensor& out) {
+  using dim_t = c10::metal::vec3<int64_t>;
+  const auto dim = [&](int64_t d) { return dim_t{x.size(d), x.stride(d), out.stride(d)}; };
+  std::vector<dim_t> sorted, dims;
+  for (const auto d : c10::irange(x.dim())) {
+    if (d != 1 && x.size(d) != 1) {
+      sorted.push_back(dim(d));
+    }
+  }
+  std::ranges::sort(sorted, {}, &dim_t::y);
+  for (const auto& e : sorted) {
+    const auto& f = dims.empty() ? e : dims.back();
+    if (!dims.empty() && e.y == f.x * f.y && e.z == f.x * f.z) {
+      dims.back().x *= e.x;
+    } else {
+      dims.push_back(e);
+    }
+  }
+  const bool has_inner = !dims.empty() && (x.size(1) == 1 || dims[0].y <= x.stride(1));
+  const auto inner = has_inner ? dims[0] : dim_t{1, 0, 0};
+  BatchNormLayout<> layout{.channel = dim(1),
+                           .inner = inner,
+                           .outer_numel = x.numel() / (x.size(1) * inner.x),
+                           .outer_ndim = static_cast<int32_t>(std::max<size_t>(dims.size() - has_inner, 1))};
+  std::ranges::copy(dims | std::views::drop(has_inner), layout.outer_dims.begin());
+  return layout;
+}
+
+static Tensor batch_norm_reduce(const Tensor& x) {
+  constexpr int64_t min_elems_per_thread = 16, groups_per_core = 4;
+  static const auto max_groups = groups_per_core * std::max(at::mps::MPSDevice::getInstance()->getCoreCount(), 1u);
+  const auto layout = batch_norm_layout(x, x);
+  const int64_t C = layout.channel.x, inner = layout.inner.x, outer = layout.outer_numel;
+  const bool channels_last = inner == 1;
+  const auto threads = channels_last
+      ? c10::metal::max_threadgroup_size
+      : std::clamp<int64_t>(
+            outer * inner / min_elems_per_thread, c10::metal::simdgroup_size, c10::metal::max_threadgroup_size);
+  const auto tx = channels_last ? c10::metal::simdgroup_size : std::min(inner, threads);
+  const auto ty = std::clamp<int64_t>(outer, 1, threads / tx);
+  const auto blocks = channels_last ? c10::metal::ceil_div(C, tx) : C;
+  const auto chunks = std::max<int64_t>(1, std::min(max_groups / blocks, c10::metal::ceil_div(outer, ty)));
+  const auto splits = std::max<int64_t>(1, std::min(max_groups / (blocks * chunks), c10::metal::ceil_div(inner, tx)));
+  auto out = at::empty({chunks * splits, C, BN_PARTIAL_SIZE}, x.options().dtype(kFloat));
+  const auto name = fmt::format("batch_norm_reduce_{}{}", batch_norm_variant(x, x), scalarToMetalTypeString(x));
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = getCurrentMPSStream()->commandEncoder();
+      [encoder setComputePipelineState:lib.getPipelineStateForFunc(name)];
+      mtl_setArgs(encoder, x, out, layout);
+      [encoder dispatchThreadgroups:MTLSizeMake(blocks, chunks, splits) threadsPerThreadgroup:MTLSizeMake(tx, ty, 1)];
+    }
+  });
+  return out;
+}
+
+static Tensor batch_norm_stats(const Tensor& x,
+                               const std::optional<Tensor>& part,
+                               std::array<std::optional<Tensor>, bn_idx(BNParam::NumParams)> tensors,
+                               double eps,
+                               double momentum) {
+  const auto C = c10::safe_conv<uint32_t>(x.size(1), "batch_norm channels");
+  const auto dtype = tensors[bn_idx(BNParam::SaveMean)]->scalar_type();
+  for (auto& t : tensors) {
+    t = t.has_value() && t->defined() ? t : std::nullopt;
+    TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "weight, bias, running and saved stats must share a dtype");
+  }
+  BatchNormStatsParams params{.num_channels = C,
+                              .num_partials = part ? c10::safe_conv<uint32_t>(part->size(0)) : 0u,
+                              .eps = static_cast<float>(eps),
+                              .momentum = static_cast<float>(momentum)};
+  std::ranges::transform(tensors, params.strides.begin(), [](const auto& t) { return t ? t->stride(0) : 0; });
+  auto stats = at::empty({C, bn_idx(BNStat::NumStats)}, x.options().dtype(kFloat));
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = getCurrentMPSStream()->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("batch_norm_stats_" + scalarToMetalTypeString(dtype));
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, part, stats, params);
+      std::apply([&](const auto&... t) { mtl_setArgs<3>(encoder, t...); }, tensors);
+      mtl_dispatch1DJob(encoder, pso, C);
+    }
+  });
+  return stats;
+}
+
+static void batch_norm_elemt(const Tensor& out, const Tensor& x, const Tensor& stats) {
+  constexpr int64_t max_grid = std::numeric_limits<uint32_t>::max();
+  auto layout = batch_norm_layout(x, out);
+  // A plane wider than the grid is folded into the outer dims, which the 64-bit variant grid-strides over
+  if (layout.inner.x > max_grid) {
+    std::shift_right(layout.outer_dims.begin(), layout.outer_dims.end(), 1);
+    layout.outer_dims[0] = std::exchange(layout.inner, {1, 0, 0});
+    layout.outer_numel *= layout.outer_dims[0].x;
+    layout.outer_ndim++;
+  }
+  const auto name = fmt::format("batch_norm_elemt_{}{}", batch_norm_variant(x, out), scalarToMetalTypeString(x));
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = getCurrentMPSStream()->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(name);
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, out, x, stats, layout);
+      mtl_dispatch3DJob(encoder, pso, layout.inner.x, layout.channel.x, std::min(layout.outer_numel, max_grid));
+    }
+  });
+}
 } // namespace mps
 
 // Inverse standard deviation now becomes variance (without epsilon)
@@ -98,326 +215,22 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& output,
                                                          Tensor& save_mean,
                                                          Tensor& save_var) {
-  // Flatten 5D to 4D: MPSGraph normalization is significantly slower for rank-5 tensors.
-  // Merging spatial dims is safe since BatchNorm reduces over all dims except channel.
-  // Flattening in the input's own memory format turns channels_last_3d into channels_last, which the 4D path
-  // handles without relying on the strided API (unavailable before macOS 15).
-  if (self.dim() == 5) {
-    const auto memory_format = self.suggest_memory_format();
-    const std::vector<int64_t> sizes_4d{self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)};
-    auto input_4d = self.contiguous(memory_format).view(sizes_4d);
-    auto output_4d = output.is_contiguous(memory_format) ? output.view(sizes_4d) : at::empty_like(input_4d);
-    batch_norm_mps_out(input_4d,
-                       weight_opt,
-                       bias_opt,
-                       running_mean_opt,
-                       running_var_opt,
-                       train,
-                       momentum,
-                       epsilon,
-                       output_4d,
-                       save_mean,
-                       save_var);
-    if (!output_4d.is_alias_of(output)) {
-      output.copy_(output_4d.view(output.sizes()));
-    }
-    return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
-  }
-
   TORCH_CHECK_NOT_IMPLEMENTED(
       isFloatingType(self.scalar_type()), "batch_norm is not implemented for ", self.scalar_type(), " on MPS");
-  using namespace at::native::mps;
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* weightTensor_ = nil;
-    MPSGraphTensor* biasTensor_ = nil;
-    MPSGraphTensor* runningMeanTensor_ = nil;
-    MPSGraphTensor* runningVarTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-    MPSGraphTensor* saveMeanTensor_ = nil;
-    MPSGraphTensor* saveVarTensor_ = nil;
-    MPSGraphTensor* runningMeanInplaceUpdate_ = nil;
-    MPSGraphTensor* runningVarInplaceUpdate_ = nil;
-  };
-
-  auto stream = at::mps::getCurrentMPSStream();
-
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
   TORCH_CHECK_VALUE(has_running_mean == has_running_var,
                     "running_mean and running_var must either both be None or neither be None");
-
-  const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
-  const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
-
-  // Use exact-match: a channel-slice of a channels-last tensor has CL-like
-  // strides but is not NHWC-packed.
-  // See https://github.com/pytorch/pytorch/issues/180984
-  auto memory_format = self.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
-
   if (output.numel() == 0) {
     return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
-    ;
   }
-
-  @autoreleasepool {
-    // Number of elements in one channel, needed for bessel correction term
-    const int64_t N = self.numel() / save_mean.numel();
-    MPSShape* input_shape_readonly = mps::getMPSShape(self);
-    int num_input_dims = [input_shape_readonly count];
-    // Input shape changes based on memory format
-    NSMutableArray<NSNumber*>* input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-    // Shape which can be broadcasted with input
-    NSMutableArray<NSNumber*>* new_mean_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-    // Reduction axes
-    NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
-
-    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, false);
-
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    std::string key = fmt::format("batch_norm_mps_out:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                                  get_mem_string(memory_format),
-                                  epsilon,
-                                  momentum,
-                                  train,
-                                  has_running_mean,
-                                  has_weight,
-                                  has_bias,
-                                  [ns_shape_key UTF8String],
-                                  getTensorsStringKey({self,
-                                                       weight_opt.value_or(Tensor()),
-                                                       bias_opt.value_or(Tensor()),
-                                                       running_mean_opt.value_or(Tensor()),
-                                                       running_var_opt.value_or(Tensor()),
-                                                       save_mean,
-                                                       save_var}));
-    auto input_mps_dtype = getMPSDataType(self);
-    // Like CUDA, accumulate half and bfloat16 in float
-    const auto compute_dtype = getMPSDataType(toAccumulateType(self.scalar_type(), kMPS));
-
-    // Dim where channels are located
-    int channelsDim;
-    if (memory_format == at::MemoryFormat::Contiguous)
-      channelsDim = 1;
-    else
-      channelsDim = num_input_dims - 1;
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
-      auto computeInputTensor = castMPSTensor(mpsGraph, inputTensor, compute_dtype);
-      MPSGraphTensor* weightTensor = nil;
-      // Should have shape of mean
-      if (has_weight)
-        weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight_opt.value()), new_mean_shape);
-      MPSGraphTensor* biasTensor = nil;
-      if (has_bias)
-        biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()), new_mean_shape);
-      MPSGraphTensor* runningMeanTensor = nil;
-      MPSGraphTensor* runningVarTensor = nil;
-      if (has_running_mean) {
-        runningMeanTensor =
-            mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(running_mean_opt.value()), new_mean_shape);
-        runningVarTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(running_var_opt.value()), new_mean_shape);
-      }
-
-      // Mean and inv std tensors to be saved and returned
-      MPSGraphTensor* saveMeanTensor = nil;
-      MPSGraphTensor* saveVarTensor = nil;
-
-      // Running stats inplace update
-      MPSGraphTensor* runningMeanInplaceUpdate = nil;
-      MPSGraphTensor* runningVarInplaceUpdate = nil;
-
-      MPSGraphTensor* updatedRunningMeanTensor = nil;
-      MPSGraphTensor* updatedRunningVarTensor = nil;
-      MPSGraphTensor* scaledInverseSqrtVariance = nil;
-
-      /*
-      If train:
-        If has_running_mean:
-          Update the running stats to be stored into save_mean and save_var,
-          AND to be used in current batchnorm computation
-        Else:
-          Just calculate the var using batch variance
-      If not train:
-        Check if running mean exists (maybe do this check before making graph)
-        Copy the running mean into the mean to be saved
-        Calculate the save_var directly from the running variance
-
-      Compute the batch norm output and stats to be saved
-      */
-      MPSGraphTensor* varTensor = nil;
-
-      if (train) {
-        // Compute mean and variance of the current batch
-        auto batchMeanTensor = [mpsGraph meanOfTensor:computeInputTensor axes:axes name:nil];
-        auto batchVarianceTensor = [mpsGraph varianceOfTensor:computeInputTensor axes:axes name:nil];
-        varTensor = batchVarianceTensor;
-        if (has_running_mean) {
-          // Running stats may have a different dtype (e.g. float32 with float16 input)
-          auto running_mean_dtype = getMPSDataType(running_mean_opt.value());
-          // TODO: This is not the formula used in PyTorch, is this OK? Seems more robust
-          // float besselCorrectionTerm = float(N) / std::max(N - 1.0f, 1.0f);
-          float besselCorrectionTerm = float(N) / float(N - 1.0f);
-          MPSGraphTensor* besselConstantTensor = [mpsGraph constantWithScalar:(double)besselCorrectionTerm
-                                                                        shape:@[ @1 ]
-                                                                     dataType:running_mean_dtype];
-          MPSGraphTensor* unbiasedVarianceTensor =
-              [mpsGraph multiplicationWithPrimaryTensor:castMPSTensor(mpsGraph, batchVarianceTensor, running_mean_dtype)
-                                        secondaryTensor:besselConstantTensor
-                                                   name:nil];
-          MPSGraphTensor* momentumTensor = [mpsGraph constantWithScalar:(double)momentum
-                                                                  shape:@[ @1 ]
-                                                               dataType:running_mean_dtype];
-          MPSGraphTensor* oneMinusMomentum = [mpsGraph constantWithScalar:(double)(1.0 - momentum)
-                                                                    shape:@[ @1 ]
-                                                                 dataType:running_mean_dtype];
-          // Compute updated running mean
-          MPSGraphTensor* scaledBatchMean =
-              [mpsGraph multiplicationWithPrimaryTensor:castMPSTensor(mpsGraph, batchMeanTensor, running_mean_dtype)
-                                        secondaryTensor:momentumTensor
-                                                   name:nil];
-          MPSGraphTensor* scaledRunningMean = [mpsGraph multiplicationWithPrimaryTensor:runningMeanTensor
-                                                                        secondaryTensor:oneMinusMomentum
-                                                                                   name:nil];
-          updatedRunningMeanTensor = [mpsGraph additionWithPrimaryTensor:scaledBatchMean
-                                                         secondaryTensor:scaledRunningMean
-                                                                    name:nil];
-          // Compute updated running var
-          MPSGraphTensor* scaledCorrectedBatchVar = [mpsGraph multiplicationWithPrimaryTensor:unbiasedVarianceTensor
-                                                                              secondaryTensor:momentumTensor
-                                                                                         name:nil];
-          MPSGraphTensor* scaledRunningVar = [mpsGraph multiplicationWithPrimaryTensor:runningVarTensor
-                                                                       secondaryTensor:oneMinusMomentum
-                                                                                  name:nil];
-          updatedRunningVarTensor = [mpsGraph additionWithPrimaryTensor:scaledCorrectedBatchVar
-                                                        secondaryTensor:scaledRunningVar
-                                                                   name:nil];
-        }
-        // Update saved mean and inverse std tensor
-        auto epsilonTensor = [mpsGraph constantWithScalar:(double)epsilon shape:@[ @1 ] dataType:compute_dtype];
-
-        MPSGraphTensor* varianceEps = [mpsGraph additionWithPrimaryTensor:batchVarianceTensor
-                                                          secondaryTensor:epsilonTensor
-                                                                     name:@"varianceEps"];
-
-        MPSGraphTensor* sqrtVariance = [mpsGraph squareRootWithTensor:varianceEps name:@"sqrtVariance"];
-        scaledInverseSqrtVariance = [mpsGraph reciprocalWithTensor:sqrtVariance name:nil];
-        // Update saved mean and inverse std tensor
-        saveMeanTensor = batchMeanTensor;
-        saveVarTensor = scaledInverseSqrtVariance;
-      } else { // Test
-        TORCH_CHECK(has_running_mean);
-        saveMeanTensor = [mpsGraph identityWithTensor:runningMeanTensor name:nil];
-        saveVarTensor = [mpsGraph identityWithTensor:runningVarTensor name:nil];
-        varTensor = saveVarTensor;
-      }
-
-      auto gammaTensor = has_weight ? castMPSTensor(mpsGraph, weightTensor, compute_dtype) : nil;
-      auto betaTensor = has_bias ? castMPSTensor(mpsGraph, biasTensor, compute_dtype) : nil;
-
-      // Compute output of batch norm
-      auto outputTensor = [mpsGraph normalizationWithTensor:computeInputTensor
-                                                 meanTensor:castMPSTensor(mpsGraph, saveMeanTensor, compute_dtype)
-                                             varianceTensor:castMPSTensor(mpsGraph, varTensor, compute_dtype)
-                                                gammaTensor:gammaTensor
-                                                 betaTensor:betaTensor
-                                                    epsilon:(float)epsilon
-                                                       name:nil];
-
-      outputTensor = castMPSTensor(mpsGraph, outputTensor, input_mps_dtype);
-
-      // Reshape saved mean and var to fit output
-      saveMeanTensor = [mpsGraph reshapeTensor:saveMeanTensor withShape:@[ new_mean_shape[channelsDim] ] name:nil];
-      saveVarTensor = [mpsGraph reshapeTensor:saveVarTensor withShape:@[ new_mean_shape[channelsDim] ] name:nil];
-      saveMeanTensor = castMPSTensor(mpsGraph, saveMeanTensor, getMPSDataType(save_mean));
-      saveVarTensor = castMPSTensor(mpsGraph, saveVarTensor, getMPSDataType(save_var));
-
-      if (train && has_running_mean) {
-        // Running stats inplace update
-        runningMeanInplaceUpdate = [mpsGraph reshapeTensor:updatedRunningMeanTensor
-                                                 withShape:@[ input_shape[channelsDim] ]
-                                                      name:nil];
-        runningVarInplaceUpdate = [mpsGraph reshapeTensor:updatedRunningVarTensor
-                                                withShape:@[ input_shape[channelsDim] ]
-                                                     name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->biasTensor_ = biasTensor;
-      newCachedGraph->runningMeanTensor_ = runningMeanTensor;
-      newCachedGraph->runningVarTensor_ = runningVarTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->saveMeanTensor_ = saveMeanTensor;
-      newCachedGraph->saveVarTensor_ = saveVarTensor;
-      newCachedGraph->runningMeanInplaceUpdate_ = runningMeanInplaceUpdate;
-      newCachedGraph->runningVarInplaceUpdate_ = runningVarInplaceUpdate;
-    });
-
-    const auto needs_gather = memory_format != MemoryFormat::ChannelsLast;
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, self, input_shape, needs_gather, MPSDataTypeInvalid, needs_gather);
-    auto weightPlaceholder = Placeholder();
-    if (has_weight)
-      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
-    auto biasPlaceholder = Placeholder();
-    if (has_bias)
-      biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt.value(), new_mean_shape);
-    auto runningMeanPlaceholder = Placeholder();
-    auto runningVarPlaceholder = Placeholder();
-    if (has_running_mean) {
-      runningMeanPlaceholder = Placeholder(cachedGraph->runningMeanTensor_, running_mean_opt.value(), new_mean_shape);
-      runningVarPlaceholder = Placeholder(cachedGraph->runningVarTensor_, running_var_opt.value(), new_mean_shape);
-    }
-
-    auto runningMeanInplaceUpdatePlaceholder = Placeholder();
-    auto runningVarInplaceUpdatePlaceholder = Placeholder();
-
-    if (train && has_running_mean) {
-      runningMeanInplaceUpdatePlaceholder =
-          Placeholder(cachedGraph->runningMeanInplaceUpdate_, running_mean_opt.value());
-      runningVarInplaceUpdatePlaceholder = Placeholder(cachedGraph->runningVarInplaceUpdate_, running_var_opt.value());
-    }
-
-    auto outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, output, input_shape, false, MPSDataTypeInvalid, needs_gather);
-    auto saveMeanPlaceholder = Placeholder(cachedGraph->saveMeanTensor_, save_mean);
-    auto saveVarPlaceholder = Placeholder(cachedGraph->saveVarTensor_, save_var);
-
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    if (has_weight)
-      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-    if (has_bias)
-      feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
-    if (has_running_mean) {
-      feeds[runningMeanPlaceholder.getMPSGraphTensor()] = runningMeanPlaceholder.getMPSGraphTensorData();
-      feeds[runningVarPlaceholder.getMPSGraphTensor()] = runningVarPlaceholder.getMPSGraphTensorData();
-    }
-
-    NSMutableDictionary* results = [[NSMutableDictionary new] autorelease];
-    results[outputPlaceholder.getMPSGraphTensor()] = outputPlaceholder.getMPSGraphTensorData();
-    results[saveMeanPlaceholder.getMPSGraphTensor()] = saveMeanPlaceholder.getMPSGraphTensorData();
-    results[saveVarPlaceholder.getMPSGraphTensor()] = saveVarPlaceholder.getMPSGraphTensorData();
-
-    // If train and has_running_mean, add updated running mean to the output
-    if (train && has_running_mean) {
-      results[runningMeanInplaceUpdatePlaceholder.getMPSGraphTensor()] =
-          runningMeanInplaceUpdatePlaceholder.getMPSGraphTensorData();
-      results[runningVarInplaceUpdatePlaceholder.getMPSGraphTensor()] =
-          runningVarInplaceUpdatePlaceholder.getMPSGraphTensorData();
-    }
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
-
-  if (!train) {
-    save_mean.resize_({0});
-    save_var.resize_({0});
-  }
+  TORCH_CHECK_VALUE(train || has_running_mean, "running_mean must be defined in evaluation mode");
+  save_mean.resize_({train ? self.size(1) : 0});
+  save_var.resize_({train ? self.size(1) : 0});
+  const auto part = train ? std::optional<Tensor>(mps::batch_norm_reduce(self)) : std::nullopt;
+  const auto stats = mps::batch_norm_stats(
+      self, part, {weight_opt, bias_opt, running_mean_opt, running_var_opt, save_mean, save_var}, epsilon, momentum);
+  mps::batch_norm_elemt(output, self, stats);
   return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
 }
 
@@ -429,10 +242,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
                                                   bool train,
                                                   double momentum,
                                                   double epsilon) {
-  // See https://github.com/pytorch/pytorch/issues/180984
-  const auto memory_format = self.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
-
-  auto output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
+  auto output = at::empty_like(self);
 
   int64_t n_input = self.size(1);
   // Saved stats follow CPU: float only when the parameters are float and the input is not

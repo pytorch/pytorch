@@ -46,10 +46,10 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 from ..triton_bundler import TritonBundler
 from ..utils import (
     forwarded_cuda_compile_options,
+    forwarded_hip_compile_options,
     get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
-    tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
@@ -5235,7 +5235,7 @@ def template(
         )
 
     if torch.version.hip:
-        for k in tlx_only_hip_options():
+        for k in forwarded_hip_compile_options():
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 

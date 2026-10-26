@@ -3215,9 +3215,13 @@ class TestPercentile(TestCase):
         assert_raises(ValueError, np.percentile, d, axis=(-1, -1), q=25)
         assert_raises(ValueError, np.percentile, d, axis=(3, -1), q=25)
 
-    def test_keepdims(self):
+    @parametrize("q", [7, [7], [1, 7], [[1, 7]]])
+    def test_keepdims(self, q):
         d = np.ones((3, 5, 7, 11))
-        assert_equal(np.percentile(d, 7, axis=None, keepdims=True).shape, (1, 1, 1, 1))
+        shape = np.shape(q) + (1,) * d.ndim
+        result = np.percentile(d, q, axis=None, keepdims=np.bool_(True))
+        assert_equal(result.shape, shape)
+        assert_equal(result, np.ones(shape))
 
     @xfail  # (reason="pytorch percentile does not support tuple axes.")
     def test_keepdims_2(self):
@@ -3244,18 +3248,7 @@ class TestPercentile(TestCase):
         )
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @parametrize(
-        "q",
-        [
-            7,
-            subtest(
-                [1, 7],
-                decorators=[
-                    skip(reason="Keepdims wrapper incorrect for multiple q"),
-                ],
-            ),
-        ],
-    )
+    @parametrize("q", [7, [1, 7]])
     @parametrize(
         "axis",
         [
@@ -3292,6 +3285,7 @@ class TestPercentile(TestCase):
         if result is not out:
             raise AssertionError("result is not out")
         assert_equal(result.shape, shape_out)
+        assert_equal(result, np.ones(shape_out))
 
     @skip(reason="NP_VER: fails on CI; no method=")
     def test_out(self):

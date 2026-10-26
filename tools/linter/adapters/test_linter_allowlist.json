@@ -364,7 +364,6 @@
   "test/functorch/test_control_flow.py",
   "test/functorch/test_eager_transforms.py",
   "test/functorch/test_memory_efficient_fusion.py",
-  "test/functorch/test_ops.py",
   "test/functorch/test_parsing.py",
   "test/functorch/test_rearrange.py",
   "test/functorch/test_source_emit.py",
