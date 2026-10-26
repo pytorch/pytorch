@@ -50,6 +50,16 @@ def requires_h100():
     )
 
 
+# rocSHMEM device reduce only supports these dtypes.
+ROCSHMEM_REDUCE_SUPPORTED_DTYPES = (
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.float32,
+    torch.float64,
+)
+
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -447,8 +457,10 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        NVSHMEM_SIGNAL_SET = 0  # value defined by NVSHMEM for atomic set
-        SIGNAL_VAL = 1  # Signal completion value
+        NVSHMEM_SIGNAL_SET = (
+            0 if TEST_WITH_ROCM else 9
+        )  # value defined by NVSHMEM for atomic set
+        SIGNAL_VAL = 1 + NVSHMEM_SIGNAL_SET  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
@@ -506,10 +518,10 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        # NVSHMEM_SIGNAL_ADD = 5  (nvshmem_common.h)
+        # NVSHMEM_SIGNAL_ADD = 10  (nvshmem_common.h)
         # ROCSHMEM_SIGNAL_ADD = 1 (rocshmem_common.hpp enum ROCSHMEM_SIGNAL_OPS)
-        NVSHMEM_SIGNAL_ADD = 1 if TEST_WITH_ROCM else 5
-        SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
+        NVSHMEM_SIGNAL_ADD = 1 if TEST_WITH_ROCM else 10
+        SIGNAL_VAL = val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
@@ -600,7 +612,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         # NVSHMEM constants from documentation
         NVSHMEM_CMP_EQ = 0  # equal comparison
-        NVSHMEM_SIGNAL_SET = 0  # atomic set operation
+        NVSHMEM_SIGNAL_SET = 0 if TEST_WITH_ROCM else 9  # atomic set operation
 
         # Message configuration
         msg_size_bytes = 8
@@ -608,7 +620,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         numel = msg_size_bytes // dtype.itemsize
 
         val_to_put = 123  # arbitrary test value
-        COMPLETION_FLAG_VAL = 1
+        COMPLETION_FLAG_VAL = 1 + NVSHMEM_SIGNAL_SET
 
         # Producer (rank 0) prepares the data to send
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val_to_put)
@@ -948,7 +960,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -961,11 +972,15 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.uint8,
             torch.float16,
             torch.float32,
-            # torch.float64,  # Tensor-likes are not close
+            torch.float64,
             torch.bfloat16,
         ],
     )
     def test_triton_sum_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
+        if not TEST_WITH_ROCM and dtype == torch.float64:
+            self.skipTest("NVSHMEM float64 reduce: Tensor-likes are not close")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1006,11 +1021,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
 
         # Verify results
-        torch.testing.assert_close(
-            dst, torch.tensor(expected, device=self.device, dtype=dtype)
-        )
+        self.assertEqual(dst, torch.tensor(expected, device=self.device, dtype=dtype))
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1027,6 +1039,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         ],
     )
     def test_triton_minmax_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1095,7 +1109,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst_max, torch.tensor(expected_max, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1107,11 +1120,15 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.int64,
             torch.float16,
             torch.float32,
-            # torch.float64,  # Tensor-likes are not close
+            torch.float64,
             torch.bfloat16,
         ],
     )
     def test_triton_prod_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
+        if not TEST_WITH_ROCM and dtype == torch.float64:
+            self.skipTest("NVSHMEM float64 reduce: Tensor-likes are not close")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1164,9 +1181,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
 
         # Verify results
-        torch.testing.assert_close(
-            dst, torch.tensor(expected, device=self.device, dtype=dtype)
-        )
+        self.assertEqual(dst, torch.tensor(expected, device=self.device, dtype=dtype))
 
 
 if __name__ == "__main__":
