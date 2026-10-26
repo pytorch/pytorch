@@ -174,7 +174,8 @@ class TunableOpWorkerTest(TestCase):
         tunable.get_filename.return_value = "s.csv"
         tunable.get_max_tuning_duration.return_value = 11
         tunable.get_max_tuning_iterations.return_value = 12
-        tunable.get_rotating_buffer_size.return_value = 13
+        # The getter reports bytes; the setter takes MB. 13 MiB in bytes.
+        tunable.get_rotating_buffer_size.return_value = 13 * 1024 * 1024
         tunable.get_cublaslt_requested_algo_count.return_value = 14
         job = tunableop.BenchmarkJob(None, tuning=False)
         with (
@@ -187,7 +188,7 @@ class TunableOpWorkerTest(TestCase):
             {
                 "set_max_tuning_duration": 11,
                 "set_max_tuning_iterations": 12,
-                "set_rotating_buffer_size": 13,
+                "set_rotating_buffer_size": 13,  # MB, converted from bytes
                 "set_cublaslt_requested_algo_count": 14,
             },
         )
@@ -444,6 +445,24 @@ class TunableOpRocmWorkerTest(TestCase):
     """
 
     hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
+    def test_rotating_buffer_size_round_trips_through_snapshot(self):
+        # The mocked settings test cannot catch a unit mismatch, because it
+        # chooses both sides of the comparison. This drives the real getter and
+        # setter: get reports bytes, set takes MB, so stamping the raw value
+        # would re-scale by 2**20 and overflow the setter's signed int.
+        tunable = torch.cuda.tunable
+        previous = tunable.get_rotating_buffer_size()
+        self.addCleanup(tunable.set_rotating_buffer_size, previous // (1024 * 1024))
+
+        tunable.set_rotating_buffer_size(4)  # MB
+        parent_bytes = tunable.get_rotating_buffer_size()
+        self.assertEqual(parent_bytes, 4 * 1024 * 1024)
+
+        stamped = tunableop.snapshot_settings()["set_rotating_buffer_size"]
+        tunable.set_rotating_buffer_size(stamped)  # what the worker does
+        self.assertEqual(tunable.get_rotating_buffer_size(), parent_bytes)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
