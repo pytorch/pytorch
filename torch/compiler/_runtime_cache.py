@@ -532,6 +532,7 @@ def _freeze_triton_kernel(
         if isinstance(payload, bytes):
             return payload, None
         reject(kernel, payload)
+
     # A training capture lowers each backward with its forward, so it can compile a
     # backward that no captured step ran, e.g. in a graph variant whose backward no
     # captured step reached. No instance of such a source ever launched, so none
@@ -541,21 +542,28 @@ def _freeze_triton_kernel(
     # static one that loaded, with tuning turned off, and report it as untuned. A
     # source a forward instance shares is still refused: a forward no call ran
     # means the capture missed a path serving may need.
-    untuned_backward_eligible = (
+    def static_results(kernel: CachingAutotuner) -> list[StaticTritonCompileResult]:
+        # Only launchers: each loaded its binary, unlike a bare compile result, so
+        # replay cannot fail to load the one frozen here. A launcher Triton built
+        # itself, not statically, has no _compile_result.
+        return [
+            result
+            for launcher in kernel.launchers
+            if isinstance(
+                result := getattr(launcher, "_compile_result", None),
+                StaticTritonCompileResult,
+            )
+        ]
+
+    never_run_backward = (
         bool(instances)
-        and all(kernel.is_backward for kernel in instances)
+        and not any(kernel._forward_use for kernel in instances)
         and not any(kernel._launched for kernel in instances)
     )
-    if untuned_backward_eligible and not require_tuned_backward:
+    if never_run_backward and not require_tuned_backward:
         for kernel in instances:
             with kernel.lock:
-                # Only launchers: each loaded its binary, unlike a bare compile
-                # result, so replay cannot fail to load the one frozen here.
-                static = [
-                    launcher._compile_result
-                    for launcher in kernel.launchers
-                    if isinstance(launcher._compile_result, StaticTritonCompileResult)
-                ]
+                static = static_results(kernel)
                 if not static:
                     continue
                 saved, saved_result = _detached_for_freeze(kernel, static[0])
@@ -593,7 +601,10 @@ def _freeze_triton_kernel(
                 "kernel_name": kernel_name,
                 "instance_count": len(instances),
                 "instances": rejected,
-                "untuned_backward_eligible": untuned_backward_eligible,
+                # Whether DynamoTracer(require_tuned_backward=False) would freeze it.
+                "untuned_backward_eligible": require_tuned_backward
+                and never_run_backward
+                and any(static_results(kernel) for kernel in instances),
             }
         ]
     )

@@ -1374,11 +1374,11 @@ def _extract_fwd_bwd_modules(
     # Stamp is_static_input on primal placeholders for the backward
     # compiler; see Note: [static_input_idxs semantics] in
     # torch/_inductor/compile_fx.py. This must happen here, while primals
-    # are still 1:1 with flat forward inputs, because staticness is tracked
-    # positionally (static_lifetime_input_nodes derives from
-    # fw_metadata.static_input_indices) and the backward graph's input
-    # ordering destroys that correspondence. The meta dict is shared by
-    # reference with the extracted fwd/bwd placeholder nodes
+    # are still in joint-graph input order, because staticness is tracked
+    # positionally: static_lifetime_input_indices are positions among the
+    # joint graph's primal placeholders, effect tokens included, and the
+    # backward graph's input ordering destroys that correspondence. The meta
+    # dict is shared by reference with the extracted fwd/bwd placeholder nodes
     # (_extract_graph_with_inputs_outputs), so the stamp is visible on
     # bw_module's placeholders regardless of how saving reorders them.
     #
