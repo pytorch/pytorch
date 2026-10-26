@@ -9494,6 +9494,31 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_cpu)
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
+    @parametrize_test("mode, input_size, output_size, align_corners", [
+        ("linear", 9, 29, False),
+        ("bilinear", 9, 29, False),
+        ("trilinear", 9, 29, False),
+        ("linear", 3, 83, True),
+        ("bilinear", 3, 83, True),
+        ("trilinear", 3, 83, True),
+    ])
+    def test_upsampling_upper_neighbor_index(self, device, mode, input_size, output_size, align_corners):
+        # These sizes hit source coordinates just below a power of two (gh-201764).
+        dims = {"linear": 1, "bilinear": 2, "trilinear": 3}[mode]
+        x = torch.randn((1, 1) + (input_size,) * dims, device=device)
+        out = F.interpolate(x, output_size, mode=mode, align_corners=align_corners)
+        self.assertEqual(out.cpu(), F.interpolate(x.cpu(), output_size, mode=mode, align_corners=align_corners))
+
+    @parametrize_test("dim", [0, 1, 2])
+    def test_upsamplingTrilinear3d_backward_upper_neighbor_index(self, device, dim):
+        size = [9, 9, 9]
+        size[dim] = 29
+        x = torch.randn(1, 1, 9, 9, 9, device=device, requires_grad=True)
+        x_cpu = x.detach().cpu().requires_grad_()
+        F.interpolate(x, size, mode="trilinear").sum().backward()
+        F.interpolate(x_cpu, size, mode="trilinear").sum().backward()
+        self.assertEqual(x.grad.cpu(), x_cpu.grad)
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
