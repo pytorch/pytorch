@@ -139,10 +139,18 @@ kernel void unary_strided(
     uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(thread_pos, pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  int input_offs = int(thread_pos.x) * int(input_strides[0]);
+  int output_offs = int(thread_pos.x) * int(output_strides[0]);
+  int idx = thread_pos.y;
+  for (uint dim = 1; dim < ndim; ++dim) {
+    int pos = idx;
+    if (dim + 1 < ndim) {
+      pos %= int(sizes[dim]);
+      idx /= int(sizes[dim]);
+    }
+    input_offs += pos * int(input_strides[dim]);
+    output_offs += pos * int(output_strides[dim]);
+  }
   ref_at_offs<res_t>(output, output_offs) =
       f(val_at_offs<T>(input, input_offs));
 }
