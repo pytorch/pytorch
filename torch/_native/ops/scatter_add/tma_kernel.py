@@ -350,15 +350,22 @@ def _compile_tma_scatter(torch_dtype: torch.dtype):
     reduce_op = _reduce_op_for(dtype)
     launcher = _make_kernel(dtype, elem_bytes, chunk_elems, reduce_op)
 
-    mSrc_fake = cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
-    )
+    # Contract the cond guarantees (tvm-ffi rejects calls that break it):
+    # 16B-aligned src/out pointers and row strides, 16B-multiple rows.
+    div = 16 // elem_bytes
+
+    def fake_2d():
+        return cute.runtime.make_fake_tensor(
+            dtype,
+            (cute.sym_int(), cute.sym_int(divisibility=div)),
+            stride=(cute.sym_int64(divisibility=div), 1),
+            assumed_align=16,
+        )
+
+    mSrc_fake, mOut_fake = fake_2d(), fake_2d()
     # Index is guaranteed contiguous by _flatten_for_expanded_1d; fix
     # stride=1 so `mIndex[i]` doesn't emit a runtime stride multiply.
     mIndex_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
-    mOut_fake = cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
-    )
     return cute.compile(
         launcher,
         mSrc_fake,
