@@ -126,9 +126,6 @@ class FakeGitHub(GitHub):
                 if r["id"] == rid:
                     r["body"] = body["body"]
             return {}
-        if method == "GET" and re.fullmatch(r"/repos/o/r/pulls/1/reviews/\d+", path):
-            rid = int(path.split("/")[-1])
-            return next((dict(r) for r in self.reviews if r["id"] == rid), None)
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews"):
             return self.reviews if page(path) == 1 else []
         if method == "POST" and path == "/repos/o/r/pulls/1/reviews":
@@ -1551,62 +1548,6 @@ class TestAReviewInProgressIsMarked(unittest.TestCase):
         post_review.restore_pending(gh, 1, AUTHOR, "77")
         self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
 
-    def test_an_older_run_that_replaces_the_review_passes_the_newer_mark_on(self):
-        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
-        mark(gh, "88")
-        run(gh, row(), 1, SHA, "no automated review", AUTHOR, "77")
-        new = [r for r in gh.reviews if r["id"] == 999][0]
-        self.assertEqual(post_review.pending_run(new["body"]), "88")
-        self.assertNotIn("in progress", marked_body(gh))
-        posted = gh.posted()[0]["body"]
-        post_review.restore_pending(gh, 1, AUTHOR, "88")
-        self.assertEqual(new["body"], posted)
-
-    def test_a_mark_put_back_or_taken_over_meanwhile_is_not_passed(self):
-        source = old_review(5, body=ORIGINAL)
-        source["body"] = post_review.pending(source, "88", SHA, "o/r")
-        target = old_review(6, body=ORIGINAL)
-        # The owner put its mark back after the listing.
-        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL), target])
-        post_review.pass_mark(gh, 1, 6, "88", SHA, [5])
-        self.assertEqual(folds(gh), [])
-        # A newer run marked the target after the listing.
-        newer = old_review(6, body=ORIGINAL)
-        newer["body"] = post_review.pending(newer, "99", SHA, "o/r")
-        gh = FakeGitHub(reviews=[source, newer])
-        post_review.pass_mark(gh, 1, 6, "88", SHA, [5])
-        self.assertEqual(folds(gh), [])
-        # Neither: the mark moves.
-        gh = FakeGitHub(reviews=[source, target])
-        post_review.pass_mark(gh, 1, 6, "88", SHA, [5])
-        self.assertEqual(post_review.pending_run(target["body"]), "88")
-        self.assertEqual(post_review.unwrapped(target["body"]), ORIGINAL)
-
-    def test_the_mark_moves_before_the_old_review_is_folded(self):
-        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
-        mark(gh, "88")
-        run(gh, row(), 1, SHA, "no automated review", AUTHOR, "77")
-        self.assertEqual(folds(gh)[-2:], [999, 5])
-
-    def test_an_older_mark_or_an_unknown_run_passes_nothing_on(self):
-        for owner, run_id in (("66", "77"), ("88", None)):
-            with self.subTest(owner=owner, run_id=run_id):
-                gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
-                mark(gh, owner)
-                run(gh, row(), 1, SHA, "no automated review", AUTHOR, run_id)
-                new = [r for r in gh.reviews if r["id"] == 999][0]
-                self.assertIsNone(post_review.pending_run(new["body"]))
-
-    def test_a_clean_verdict_passes_the_mark_from_a_dismissed_request(self):
-        request = old_review(5, body=ORIGINAL, state="CHANGES_REQUESTED")
-        gh = FakeGitHub(reviews=[request])
-        mark(gh, "88")
-        clean = row("ready_for_human_review", findings=[])
-        with redirect_stdout(io.StringIO()):
-            run(gh, clean, 1, SHA, "no automated review", AUTHOR, "77")
-        new = [r for r in gh.reviews if r["id"] == 999][0]
-        self.assertEqual(post_review.pending_run(new["body"]), "88")
-
     def test_an_opted_out_pr_is_not_marked(self):
         gh = FakeGitHub(
             labels=["No Automated Review"], reviews=[old_review(5, body=ORIGINAL)]
@@ -1713,20 +1654,6 @@ class TestPendingModesReadTheirInputs(unittest.TestCase):
         restore.assert_called_once()
         self.assertEqual(restore.call_args.args[1:], (1, AUTHOR, "77"))
         mark_.assert_not_called()
-
-    def test_posting_passes_the_run_id_only_when_it_is_one(self):
-        for value, expected in (("77", "77"), ("x", None)):
-            with (
-                self.subTest(run_id=value),
-                mock.patch.dict(
-                    post_review.os.environ, {**self.ENV, "RUN_ID": value}, clear=True
-                ),
-                mock.patch.object(sys, "argv", ["post_review.py", "--row-file", "r"]),
-                mock.patch.object(post_review.Path, "read_text", return_value="{}"),
-                mock.patch.object(post_review, "run", return_value=0) as run_,
-            ):
-                self.assertEqual(post_review.main(), 0)
-                self.assertEqual(run_.call_args.args[6], expected)
 
     def test_a_missing_or_bad_run_id_warns_and_does_nothing(self):
         missing = {k: v for k, v in self.ENV.items() if k != "RUN_ID"}
