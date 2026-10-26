@@ -42,10 +42,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 C10_DIAGNOSTIC_POP()
 #endif
 
-#if defined(USE_FBGEMM) && defined(__aarch64__)
-#include <ATen/native/cpu/utils.h>
-#endif
-
 namespace {
 
 using namespace at;
@@ -76,9 +72,7 @@ bool copy_channels_last_transpose_valid(const Tensor& self, const Tensor& src) {
       self.scalar_type() != src.scalar_type() ||
       (element_size != 2 && element_size != 4) || self.is_quantized() ||
       isBitsType(self.scalar_type()) || self.is_neg() != src.is_neg() ||
-      self.is_conj() != src.is_conj() ||
-      std::min(self.size(1), self.size(2) * self.size(3)) < 8 ||
-      !fbgemm::fbgemmSupportedCPU()) {
+      self.is_conj() != src.is_conj() || !fbgemm::fbgemmSupportedCPU()) {
     return false;
   }
   constexpr auto cl = MemoryFormat::ChannelsLast;
@@ -95,14 +89,14 @@ void copy_channels_last_transpose_(Tensor& self, const Tensor& src) {
   const int64_t K = to_contiguous ? C : HW;
   const int64_t r_blocks = divup(R, BLOCK_SZ), k_blocks = divup(K, BLOCK_SZ);
   const T* sp = static_cast<const T*>(src.const_data_ptr());
-  T* dp = static_cast<T*>(self.data_ptr());
-  const int64_t grain_size = at::internal::GRAIN_SIZE / (BLOCK_SZ * BLOCK_SZ);
+  T* dp = static_cast<T*>(self.mutable_data_ptr());
+  const int64_t grain_size = at::internal::GRAIN_SIZE / (std::min(BLOCK_SZ, R) * std::min(BLOCK_SZ, K));
   at::parallel_for(0, self.size(0) * r_blocks * k_blocks, grain_size, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       const int64_t offset = i / (r_blocks * k_blocks) * R * K;
       const int64_t r = i / k_blocks % r_blocks * BLOCK_SZ;
       const int64_t k = i % k_blocks * BLOCK_SZ;
-      native::utils::transpose<T>(
+      fbgemm::transpose_simd<T>(
           std::min(BLOCK_SZ, R - r), std::min(BLOCK_SZ, K - k),
           sp + offset + r * K + k, K, dp + offset + k * R + r, R);
     }
