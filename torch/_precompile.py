@@ -202,8 +202,8 @@ it.
 # CUSTOM_OP_MODULES of custom ops it calls that are not registered where it is
 # served -- it inlines the composed graph module (inductor: kernels JIT-compiled on
 # first call, plus AOTAutograd's codegen'd prelude/epilogue) or the captured graph
-# (eager), plus all calling-convention metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
-# calling convention. The ``cache`` holds ONLY the compiled INDUCTOR artifact and is
+# (eager), plus all calling-convention metadata. It NEVER reads the cache, and it
+# is the SINGLE SOURCE OF TRUTH for the calling convention. The ``cache`` holds ONLY the compiled INDUCTOR artifact and is
 # purely an ACCELERATION consumed only by load(): load AST-scrapes the module-level
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
 # (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
@@ -1937,7 +1937,8 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
 
 
 def _is_custom_op(name: str) -> bool:
-    return name.split("::", 1)[0] not in ("aten", "prims")
+    # The namespaces torch._library.utils.is_builtin treats as builtin.
+    return name.split("::", 1)[0] not in ("aten", "prim", "prims")
 
 
 def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
@@ -2040,15 +2041,15 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
     """The importable modules defining the Python custom ops among ``op_names``,
     each with the ops it defines.
 
-    The module is the one defining the function ``torch.library.custom_op`` wrapped,
-    or, when torch wrapped it for the user (``torch.library.triton_op``), the one
-    defining the user's function, registered as the op's fake. That is where the op
-    registers unless it was built elsewhere (by a factory, say), which the import at
-    load checks. A torch submodule counts like any other module (some register
-    their ops only once imported); torch's own wrappers (``torch._library``) do
-    not. An op whose only module is such a wrapper, ``__main__``, or a module the
-    import system cannot find again by its name is reported instead; serving then
-    needs it registered some other way.
+    The candidates are the modules defining the function ``torch.library.custom_op``
+    wrapped and the op's fake, which for ``torch.library.triton_op`` is the user's
+    function (torch wrapped it for the custom op). That is where the op registers
+    unless it was built elsewhere (by a factory, say), which the import at load
+    checks. The first candidate a serving process can import by name is used:
+    outside torch first, then a torch submodule (some register their ops only once
+    imported), but never torch's own wrappers (``torch._library``) or ``__main__``.
+    An op with no such candidate is reported instead; serving then needs it
+    registered some other way.
     """
     from torch._library.custom_ops import OPDEFS
 
@@ -2068,16 +2069,21 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
             for fn in (opdef._init_fn, getattr(opdef, "_abstract_fn", None))
             if isinstance(name := getattr(fn, "__module__", None), str)
         ]
-        name = next((n for n in defined_in if not in_torch(n)), None) or next(
-            (n for n in defined_in if not torch_wrapper(n)), None
+        # Outside torch first; then a torch submodule, but not a torch wrapper.
+        candidates = [n for n in defined_in if not in_torch(n)] + [
+            n for n in defined_in if in_torch(n) and not torch_wrapper(n)
+        ]
+        name = next(
+            (n for n in candidates if n != "__main__" and _importable_by_name(n)),
+            None,
         )
-        if name is None or name == "__main__" or not _importable_by_name(name):
+        if name is None:
             log.warning(
                 "precompile: custom op %s is defined in %r, which a serving process "
                 "cannot import by that name; the artifact serves only where %s is "
                 "already registered by its first call",
                 op_name,
-                name or (defined_in[0] if defined_in else None),
+                defined_in[0] if defined_in else None,
                 op_name,
             )
             continue
@@ -2107,7 +2113,7 @@ def _importable_by_name(name: str) -> bool:
     return False
 
 
-def _write_custom_op_imports(buf: Any, op_names: set[str]) -> None:
+def _write_custom_op_imports(buf: PySourceBuilder, op_names: set[str]) -> None:
     """Emit CUSTOM_OP_MODULES and, when it names any module, the driver code that
     imports them, inlined as text like the rest of the driver (invariant 7)."""
     from torch import _precompile_driver as driver
@@ -3805,9 +3811,12 @@ def load(
     artifact's ``CUSTOM_OP_MODULES`` cannot be imported or, imported, leaves one of
     its ops unregistered. ``load`` imports such a module, user code, only when one
     of the custom ops it registers is not registered yet, so an op with a recorded
-    module must be registered, or that module importable by its name, by ``load``. A cache whose ``format``/``version`` does not match (a foreign or
-    different-build envelope) is NOT fatal: the cache is acceleration only, so
-    ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
+    module must be registered, or that module importable by its name, by
+    ``load``. The recorded module is the one defining the op's function, which is
+    not always the one calling ``torch.library.custom_op`` on it. A cache whose
+    ``format``/``version`` does not match (a foreign or different-build envelope)
+    is NOT fatal: the cache is acceleration only, so ``load`` degrades to JIT'ing
+    from ``python_code`` rather than crashing.
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)

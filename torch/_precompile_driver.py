@@ -895,7 +895,10 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
         try:
             _importlib.import_module(module)
         except Exception as e:
-            raise _torch.compiler.PrecompileError(
+            # Imported lazily, as in _fail.
+            from torch._precompile import PrecompileError as _PrecompileError
+
+            raise _PrecompileError(
                 f"this artifact's compiled graphs call custom op(s) "
                 f"{', '.join(module_ops)}, registered by module {module!r}, which "
                 f"failed to import here ({type(e).__name__}: {e}). Make it "
@@ -904,7 +907,9 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
             ) from e
         missing = [op for op in module_ops if not _custom_op_registered(op)]
         if missing:
-            raise _torch.compiler.PrecompileError(
+            from torch._precompile import PrecompileError as _PrecompileError
+
+            raise _PrecompileError(
                 f"this artifact's compiled graphs call custom op(s) "
                 f"{', '.join(missing)}, which importing module {module!r} did not "
                 "register. Register them before loading the artifact."
