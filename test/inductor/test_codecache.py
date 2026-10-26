@@ -5850,7 +5850,8 @@ class TestCppCodeCacheKey(TestCase):
         cmd = _relocatable_command_line(
             f"cc -I{torch_dir}/include -I{torch_dir}-ext/inc -I/x{torch_dir}/include "
             f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include "
-            f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so"
+            f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so "
+            f'-I{cache}-other/include /I "{cache}/msvc"'
         )
         self.assertIn("-I<torch>/include", cmd)
         self.assertIn("-L'<torch>/lib'", cmd)
@@ -5862,6 +5863,8 @@ class TestCppCodeCacheKey(TestCase):
         # kernel links against is named by absolute path in the binary.
         self.assertIn("-I<inductor_cache_dir>/include", cmd)
         self.assertIn(f" {cache}/halide/libStandaloneHalideRuntime.so", cmd)
+        self.assertIn(f"-I{cache}-other/include", cmd)
+        self.assertIn('/I "<inductor_cache_dir>/msvc"', cmd)
 
     def test_no_frozen_key_outside_precompile(self):
         from torch.compiler import _runtime_cache

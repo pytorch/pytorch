@@ -3556,10 +3556,12 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by their full build command, which includes
-    the producer's absolute PyTorch include and library paths, so they serve
-    only a host whose PyTorch install and toolchain paths match the producer's.
-    Any other host rebuilds them, which needs a C++ compiler there:
+    Frozen C++ kernels are keyed by their build command with the PyTorch install
+    and the Inductor cache's include paths taken out, so they serve a host that
+    installed the same PyTorch build elsewhere. The Python, compiler, CUDA and
+    other SDK paths must still match the producer's, and a kernel that links a
+    library from the Inductor cache (the Halide runtime, CUTLASS or CK kernels)
+    is rebuilt. Rebuilding needs a C++ compiler on the serving host:
     :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
