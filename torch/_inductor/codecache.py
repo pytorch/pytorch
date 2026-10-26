@@ -3001,7 +3001,7 @@ class AotCodeCompiler:
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
-                consts: bytes | bytearray, align_bytes: int, symbol_prefix: str
+                consts: bytes | bytearray, align_bytes: int
             ) -> tuple[str, str]:
                 consts_size = len(consts)
                 asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
@@ -3013,7 +3013,9 @@ class AotCodeCompiler:
 ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp = asan_attr
                 const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                const_cpp += (
+                    f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
+                )
                 count_bytes = 0
                 for c in consts:
                     const_cpp += f"{c}, "
@@ -3021,7 +3023,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
                 return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
@@ -3080,9 +3082,7 @@ end
                         ALIGN_BYTES, symbol_prefix
                     )
                 else:
-                    consts_code, code_ext = format_consts_to_cpp(
-                        consts, ALIGN_BYTES, symbol_prefix
-                    )
+                    consts_code, code_ext = format_consts_to_cpp(consts, ALIGN_BYTES)
 
             _, consts_s = write(
                 consts_code,
@@ -5027,6 +5027,18 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 def touch(filename: str) -> None:
     with open(filename, "a"):
         pass
+
+
+def exec_from_cache_file(code: str, name: str) -> dict[str, Any]:
+    """Exec ``code`` as module ``name`` from a file in the cache dir, which a
+    module-level Triton kernel needs: @triton.jit reads its source back from it."""
+    # write() keeps a file already at its path, so key on the exact text (not the
+    # stripped default) and apart from PyCodeCache's modules, which may be hand-edited:
+    # the file the kernels read their lines from must hold exactly the code being run.
+    _, path = write(code, "py", key=get_hash(code, "exec_from_cache_file"))
+    namespace: dict[str, Any] = {"__name__": name, "__file__": path}
+    exec(compile(code, path, "exec"), namespace)
+    return namespace
 
 
 @clear_on_fresh_cache
