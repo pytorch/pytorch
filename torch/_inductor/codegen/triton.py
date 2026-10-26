@@ -2665,7 +2665,7 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def load_seed(name, offset):
-        var = V.kernel.args.input(name)
+        var = V.kernel.read_arg(name)
         return (
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
@@ -3595,6 +3595,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._device_tma_buffers: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
+        # Kernel arg names of every buffer this kernel reads; see read_arg.
+        self.read_args = OrderedSet[str]()
         self._pdl_load_index = 0
         self._pdl_has_wait = False
         self.op_trace: list[TritonOpTraceEntry] = []
@@ -3719,6 +3721,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{entry.mask_name()} = "
             f"tl.full([{entry.block_size_str()}], True, tl.int1)[{suffix}]"
         )
+
+    def read_arg(self, name: str) -> str:
+        """Kernel arg of a buffer this kernel reads.
+
+        Every pointer the kernel reads through, including helper-mediated
+        reads such as bucketize boundaries, must come from here: autotuning
+        treats a mutated output that is never read as write-only.
+        """
+        var = self.args.input(name)
+        self.read_args.add(var)
+        return var
 
     def _trace_kernel_arg(self, name: str, *, store: bool) -> str:
         if name in V.graph.removed_buffers:
@@ -5308,7 +5321,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
         """
-        var = self.args.input(name)
+        var = self.read_arg(name)
         load_counts = self._load_counts
         load_counts[name] += 1
         make_line: Callable[[str], str | DelayReplaceLine] = identity
@@ -5692,11 +5705,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # autotuning config with num_elements_per_warp=(warp_size) exists.
         self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
 
-        boundaries_ptr = self.args.input(boundaries[0])
+        boundaries_ptr = self.read_arg(boundaries[0])
         boundary_size = self.index_to_str(boundaries[1])
         boundaries_underlying_numel = self.index_to_str(boundaries[2])
         boundary_stride = self.index_to_str(boundaries[3])
-        sorter_ptr = self.args.input(sorter[0]) if sorter else "None"
+        sorter_ptr = self.read_arg(sorter[0]) if sorter else "None"
         sorter_stride = self.index_to_str(sorter[1]) if sorter else "None"
 
         if indexing_dtype == torch.int32:
@@ -8246,6 +8259,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.inductor_meta.pop("tma_min_block_sizes", None)
 
         self._filter_pdl(self.body)
+
+        if not self.atomic_add_found:
+            # Autotuning protects these once per config instead of every launch.
+            output_args = OrderedSet(
+                arg
+                for arg in self.args.output_buffers.values()
+                if not isinstance(arg, RemovedArg)
+            )
+            self.inductor_meta["write_only_mutated_arg_names"] = [
+                arg
+                for arg in mutated_args
+                if arg in output_args and arg not in self.read_args
+            ]
 
         # Computed after codegen_body() so self.atomic_add_found is accurate.
         triton_meta["configs"] = [
