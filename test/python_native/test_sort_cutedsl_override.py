@@ -1,9 +1,9 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Routing tests for the CuTeDSL override of aten::sort.values_stable: it fires
-# for every out= call with narrow indices, on every stock leaf, never for
-# functional sort or int64 out=, picks the kernel _launcher documents, and the
-# result always matches the stock sort.
+# Routing tests for the CuTeDSL overrides of aten::sort.values_stable and
+# aten::sort.stable: they fire for every out= call with narrow indices, for
+# functional sort and for int64 out=, on every stock leaf, pick the kernel
+# _launcher documents, and the result always matches the stock sort.
 
 import collections
 import contextlib
@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 import torch
+from torch._native import registry
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -35,6 +36,18 @@ class TestCuTeDSLSortOverride(TestCase):
         aot_enabled = torch._native.aot_enabled()
         torch._native.set_aot_enabled(False)
         self.addCleanup(torch._native.set_aot_enabled, aot_enabled)
+        # The references are functional sorts, which the override also routes:
+        # keep them on stock, and let _functional_routed turn it back on.
+        registry.deregister_op_overrides(disable_op_symbols="sort.stable")
+        self.addCleanup(registry.reenable_op_overrides, enable_op_symbols="sort.stable")
+
+    @contextlib.contextmanager
+    def _functional_routed(self):
+        registry.reenable_op_overrides(enable_op_symbols="sort.stable")
+        try:
+            yield
+        finally:
+            registry.deregister_op_overrides(disable_op_symbols="sort.stable")
 
     def _kernels(self, fn) -> collections.Counter:
         """Calls of each top-level kernel entry point while running fn."""
@@ -204,14 +217,100 @@ class TestCuTeDSLSortOverride(TestCase):
         self.assertEqual(kernels, {"partition_sort": 1})
         self.assertEqual(indices.long(), torch.argsort(x, stable=True))
 
-    def test_stock_paths_do_not_fire(self):
-        x = torch.randn(256, 8000, device="cuda").half()
-        values = torch.empty_like(x)
-        int64_out = (values, torch.empty(x.shape, dtype=torch.int64, device="cuda"))
-        self.assertEqual(self._launches(lambda: torch.sort(x, stable=True)), 0)
-        self.assertEqual(
-            self._launches(lambda: torch.sort(x, stable=True, out=int64_out)), 0
+    # One shape per leaf the int64 route reaches:
+    # (shape, key dtype, stable, entry point).
+    _INT64_LEAVES = {
+        "register": ((4096, 128), torch.float32, True, "register_sort"),
+        "bitonic": ((16384, 32), torch.float32, False, "inplace_sort"),
+        "radix": ((256, 3000), torch.bfloat16, True, "inplace_sort"),
+        "partition": ((512, 1024), torch.bool, True, "partition_sort"),
+        "full_sort": ((64, 8000), torch.float32, True, "global_sort"),
+        "per_row": ((1, 600000), torch.float32, True, "global_sort"),
+        "segmented": ((130, 5000), torch.int64, True, "global_sort"),
+    }
+
+    @parametrize("leaf", list(_INT64_LEAVES))
+    @parametrize("functional", (True, False))
+    def test_int64_fires_and_matches(self, leaf, functional):
+        shape, key, stable, entry = self._INT64_LEAVES[leaf]
+        torch.manual_seed(0)
+        x = torch.randn(*shape, device="cuda")
+        x = x > 0 if key == torch.bool else (x * 50).to(key)
+        out = (
+            torch.empty_like(x),
+            torch.empty(shape, dtype=torch.int64, device="cuda"),
         )
+        result = []
+
+        def run():
+            if functional:
+                result.extend(torch.sort(x, stable=stable))
+            else:
+                result.extend(torch.sort(x, stable=stable, out=out))
+
+        with self._functional_routed():
+            kernels = self._kernels(run)
+        self.assertEqual(kernels, {entry: 1})
+        values, indices = result
+        ref_values, ref_indices = torch.sort(x, stable=stable)
+        self.assertEqual(indices.dtype, torch.int64)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+
+    def test_short_int64_calls_fire(self):
+        # No size-based stock fallback for int64 yet (see the TODO in _eligible),
+        # including the calls jit_pays_off sends to stock for narrow indices.
+        for x in (
+            torch.randn(4, 128, device="cuda"),
+            torch.randint(0, 2, (64, 1024), device="cuda").bool(),
+        ):
+            out = (torch.empty_like(x), torch.empty_like(x, dtype=torch.int64))
+            with self._functional_routed():
+                self.assertEqual(self._launches(lambda: torch.sort(x, stable=True)), 1)
+            self.assertEqual(
+                self._launches(lambda: torch.sort(x, stable=True, out=out)), 1
+            )
+            self.assertEqual(out[1], torch.sort(x, stable=True).indices)
+
+    @parametrize("nsort, narrow", ((5000, torch.uint16), (70000, torch.int32)))
+    def test_segmented_int64_sorts_narrow_index(self, nsort, narrow):
+        # The segmented leaf sorts the narrowest index and widens it at the end.
+        from torch._native.ops.sort import cutedsl_global
+
+        x = torch.randn(130, nsort, device="cuda")
+        with (
+            mock.patch.object(
+                cutedsl_global, "global_sort", wraps=cutedsl_global.global_sort
+            ) as global_sort,
+            self._functional_routed(),
+        ):
+            values, indices = torch.sort(x, stable=True)
+        self.assertEqual(global_sort.call_args.args[2].dtype, narrow)
+        ref_values, ref_indices = torch.sort(x, stable=True)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+
+    def test_functional_layout_argsort_and_autograd(self):
+        # Sorting a strided dim: outputs take stock's strides, argsort and
+        # backward go through the same override.
+        x = torch.randn(300, 4096, device="cuda").t().requires_grad_()
+        result = []
+        with self._functional_routed():
+            launches = self._launches(
+                lambda: result.extend(
+                    (torch.sort(x, dim=0, stable=True), torch.argsort(x, dim=0))
+                )
+            )
+        self.assertEqual(launches, 2)
+        (values, indices), argsorted = result
+        ref_values, ref_indices = torch.sort(x.detach(), dim=0, stable=True)
+        self.assertEqual(values.stride(), ref_values.stride())
+        self.assertEqual(indices.stride(), ref_indices.stride())
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+        self.assertEqual(x.detach().gather(0, argsorted), ref_values)
+        values.sum().backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
 
     def test_indices_on_another_device_falls_back(self):
         x = torch.randn(4, 100, device="cuda")

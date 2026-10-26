@@ -11,6 +11,7 @@ import itertools
 import unittest
 
 import torch
+from torch._native import registry
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -106,6 +107,13 @@ def _make_keys(dtype: torch.dtype, shape: tuple[int, int]) -> torch.Tensor:
 @skipIfNoCuteDSL
 class TestCuTeDSLInplaceSort(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        # The references are functional sorts, which the override also routes;
+        # keep them on stock so the expectation is not the code under test.
+        registry.deregister_op_overrides(disable_op_symbols="sort.stable")
+        self.addCleanup(registry.reenable_op_overrides, enable_op_symbols="sort.stable")
 
     def _check(
         self,
