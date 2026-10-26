@@ -68,6 +68,8 @@ def _validate_mxfp8_inputs(
     _build_blockscaled_tma_spec(
         canonical.input,
         dim=canonical.dim,
+        input_matrix_axes=canonical.input_matrix_axes,
+        requested_dim=dim,
         is_square_scaling=square,
         is_scale_swizzled=swizzled,
     )

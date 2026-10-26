@@ -7296,7 +7296,7 @@ def quantize_tensor(
 ) -> tuple[Tensor, Tensor]:
     r"""quantize_tensor(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
 
-    Quantize a tensor along the second axis of ``dim=(row_axis, quant_axis)``.
+    Quantize a tensor along the second axis of ``dim=(outer_axis, inner_axis)``.
     All other axes are independent batch dimensions.
     Returns ``(qdata, scale)`` for use with :func:`scaled_mm`.
     Currently supported formats: ``mxfp8``. See the code samples at the bottom
@@ -7315,9 +7315,7 @@ def quantize_tensor(
     Args:
         input (Tensor): Tensor with at least two dimensions and dtype
           ``float16``, ``bfloat16``, or ``float32``.
-        dim (tuple[int, int]): Ordered row and quantization axes. The second
-          axis must have a size divisible by 32. Dim-m quantization also
-          requires the other axis to have a size divisible by 16.
+        dim (tuple[int, int]): Ordered outer and inner quantization axes.
         scaling_type (ScalingType): The size of the local region corresponding to
           a single inner scale, as well as the layout of the output inner scale.
           Currently supported values: ``ScalingType.BlockWise1x32``.
@@ -7332,7 +7330,7 @@ def quantize_tensor(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
-          ``SwizzleType.SWIZZLE_32_4_4``. Compact scales require a layout
+          ``SwizzleType.SWIZZLE_32_4_4``. Unswizzled scales require a layout
           supported by the dim-k kernel.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
@@ -7346,7 +7344,7 @@ def quantize_tensor(
         tuple[Tensor, Tensor]: Quantized data in the logical input shape and
           scales with the dtype and layout honoring the ``scaling_algorithm``,
           ``scaling_type``, and ``swizzle_type`` settings. For example, for
-          ``mxfp8`` on a 2D tensor with ``dim=(0, 1)``, compact scales have
+          ``mxfp8`` on a 2D tensor with ``dim=(0, 1)``, unswizzled scales have
           shape ``(rows, cols // 32)``; swizzled scales have shape ``(1, L)``, where
           ``L = 512 * ceil(rows / 128) * ceil(cols / 128)``. Batch axes retain
           their positions in both results.
@@ -7371,7 +7369,7 @@ def quantize_tensor(
         >>> qdata_square, scale_square = F.quantize_tensor(
         ...     x, dim=(-2, -1), **mxfp8_kwargs, scaling_type_use_square_block_size=True
         ... )
-        >>> # mxfp8 dim-k with compact, unswizzled scales
+        >>> # mxfp8 dim-k with unswizzled scales
         >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
         >>> qdata_plain, scale_plain = F.quantize_tensor(x, dim=(-2, -1), **plain_kwargs)
     """
@@ -7400,10 +7398,9 @@ def quantize_tensor_dual(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     r"""quantize_tensor_dual(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize a tensor along both axes in ``dim`` with one kernel launch.
-    Return the result quantized along the second axis first, followed by the
-    result quantized along the first axis. See :func:`quantize_tensor` to
-    quantize along only one axis.
+    Quantize a tensor along both the 2d axis in ``dim`` as well as the reversed
+    2d axis in ``dim``. See :func:`quantize_tensor` to quantize along only one
+    direction.
 
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
@@ -7415,8 +7412,7 @@ def quantize_tensor_dual(
     Args:
         input (Tensor): Tensor with at least two dimensions and dtype
           ``float16``, ``bfloat16``, or ``float32``.
-        dim (tuple[int, int]): Ordered row and quantization axes, supporting
-          positive or negative indices. Both axis sizes must be divisible by 32.
+        dim (tuple[int, int]): Ordered outer and inner quantization axes.
         scaling_type (ScalingType): The size of the local region corresponding to
           a single inner scale, as well as the layout of the output inner scale.
           Currently supported values: ``ScalingType.BlockWise1x32``.

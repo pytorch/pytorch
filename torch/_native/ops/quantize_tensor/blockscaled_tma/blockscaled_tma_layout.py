@@ -51,10 +51,12 @@ def _build_blockscaled_tma_spec(
     input: torch.Tensor,
     *,
     dim: _QuantDim,
+    input_matrix_axes: _SingleQuantDim,
+    requested_dim: _QuantDim | list[int],
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaSpec:
-    r"""Build a launch spec and check kernel limits for canonical 2D/4D input."""
+    r"""Check kernel limits for canonical input, reporting the caller's axes."""
 
     ndim = input.dim()
     is_batched = ndim == 4
@@ -62,13 +64,13 @@ def _build_blockscaled_tma_spec(
     is_dual = isinstance(dim[0], tuple)
     do_dim_k = is_dual or dim == dim_k
     do_dim_m = is_dual or dim == dim_k[::-1]
-    row_axis, col_axis = (1, 3) if is_batched else (0, 1)
+    row_axis, col_axis = input_matrix_axes
 
     if not is_scale_swizzled:
         if do_dim_m:
             raise ValueError(
-                f"compact scales require quantization along contiguous input axis {col_axis}; "
-                f"got dim={dim}"
+                f"compact scales require quantization along input axis {col_axis} "
+                f"(the kernel's contiguous axis); got dim={requested_dim}"
             )
         if is_square_scaling:
             raise ValueError("compact scales do not support square scaling")
@@ -79,8 +81,8 @@ def _build_blockscaled_tma_spec(
     if is_square_scaling:
         if do_dim_m:
             raise ValueError(
-                f"square scaling requires quantization along contiguous input axis {col_axis}; "
-                f"got dim={dim}"
+                f"square scaling requires quantization along input axis {col_axis} "
+                f"(the kernel's contiguous axis); got dim={requested_dim}"
             )
     M, K = (input.shape[1], input.shape[3]) if is_batched else input.shape[-2:]
     B_product = input.shape[0] * input.shape[2] if is_batched else 1
@@ -190,10 +192,29 @@ def normalize_quantize_dim(dim: object, ndim: int) -> _SingleQuantDim:
 
 
 class _CanonicalMatrixInput(NamedTuple):
-    """Canonical matrix view/copy and metadata for restoring output axes."""
+    r"""TMA input and metadata for returning results in the caller's axis order.
+
+    For contiguous ``[*B0, M, *B1, K, B2]``, canonicalization moves all batch
+    axes ahead of ``(M, K)`` and folds them into ``B_product``.
+
+    Attributes:
+        input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
+        dim (_QuantDim): Quantization axis pair(s) in ``input`` coordinates;
+          ``(1, 3)`` quantizes the last matrix axis of a 4D input, while
+          ``(3, 1)`` quantizes the first.
+        input_matrix_axes (tuple[int, int]): Caller axes corresponding to the
+          canonical input's ``M`` and ``K`` dimensions, in that order.
+        batch_shape (tuple[int, ...]): Sizes of batch axes in canonical order,
+          before folding them into ``input``.
+        inverse_permutation (tuple[int, ...]): Permutation that restores the
+          original logical axis order after the batch axes are unfolded.
+        swap_dual_outputs (bool): Whether the physical matrix-axis order
+          reversed the two dual-quantization result pairs.
+    """
 
     input: torch.Tensor
     dim: _QuantDim
+    input_matrix_axes: _SingleQuantDim
     batch_shape: tuple[int, ...]
     inverse_permutation: tuple[int, ...]
     swap_dual_outputs: bool
@@ -205,11 +226,22 @@ def _canonicalize_matrix_input(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _CanonicalMatrixInput:
-    r"""Fold batch axes into a 2D or 4D matrix view for the TMA kernel.
+    r"""Arrange matrix and batch axes for the 2D or 4D TMA kernel.
 
-    When a trailing batch axis or incompatible strides prevent a TMA view,
-    materialize the matrices with batch axes leading. The returned permutation
-    restores logical output axes, including packed scale axes.
+    For contiguous ``[*B0, M, *B1, K, B2]``, the trailing ``B2`` prevents
+    TMA from directly loading an ``(M, K)`` tile. Permute to
+    ``[*B0, *B1, B2, M, K]``, materialize contiguous storage, and fold the
+    batch axes into ``(B_product, M, 1, K)``. When the physical matrix axes
+    permit a direct TMA load, instead use a view shaped like
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), without
+    materializing. Return normalized axes and metadata to undo the permutation.
+
+    Args:
+        input (Tensor): Input whose two matrix axes are specified by ``dim``.
+        dim (_QuantDim): One ordered matrix-axis pair, or two pairs for dual
+          quantization.
+        is_square_scaling (bool): Whether square-block scaling is requested.
+        is_scale_swizzled (bool): Whether swizzled scale storage is requested.
     """
     ndim = input.ndim
     if ndim < 2:
@@ -289,14 +321,33 @@ def _canonicalize_matrix_input(
     inverse = tuple(permutation.index(axis) for axis in range(ndim))
     batch_shape = tuple(input.shape[axis] for axis in batch_axes)
     return _CanonicalMatrixInput(
-        matrix_input, canonical_dim, batch_shape, inverse, swap_dual_outputs
+        matrix_input,
+        canonical_dim,
+        (permutation[-2], permutation[-1]),
+        batch_shape,
+        inverse,
+        swap_dual_outputs,
     )
 
 
 def _restore_matrix_output(
     output: _BlockscaledTmaOutput, canonical: _CanonicalMatrixInput
 ) -> _BlockscaledTmaOutput:
-    """Unfold batch axes, restore logical axis order, and order dual outputs."""
+    r"""Restore result axes after quantizing the canonical matrix input.
+
+    For contiguous ``[*B0, M, *B1, K, B2]``, unfold each qdata result's
+    leading ``B_product`` axis from ``(B_product, M, K)`` to
+    ``[*B0, *B1, B2, M, K]``, then permute it to ``[*B0, M, *B1, K, B2]``.
+    Scale tensors undergo the same axis permutation, but their last two axes
+    hold scale data, not necessarily ``M`` and ``K`` elements; swizzled scales
+    use packed storage. Swap the dual result pairs if the physical matrix axes
+    changed their order.
+    This restores logical axes, not the input's strides.
+
+    Args:
+        output (_BlockscaledTmaOutput): Results with folded batch dimensions.
+        canonical (_CanonicalMatrixInput): Axis order and batch shape to restore.
+    """
     if (
         len(canonical.batch_shape) <= 1
         and canonical.inverse_permutation
@@ -341,6 +392,8 @@ def infer_blockscaled_tma_outputs(
     spec = _build_blockscaled_tma_spec(
         canonical.input,
         dim=canonical.dim,
+        input_matrix_axes=canonical.input_matrix_axes,
+        requested_dim=dim,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )

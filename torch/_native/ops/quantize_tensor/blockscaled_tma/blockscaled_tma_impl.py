@@ -190,15 +190,17 @@ def _blockscaled_tma_impl_on_current_device(
     canonical = _canonicalize_matrix_input(
         input, dim, is_square_scaling, is_scale_swizzled
     )
-    input, dim = canonical.input, canonical.dim
-    if input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
-        input = input.clone()
     spec = _build_blockscaled_tma_spec(
-        input,
-        dim=dim,
+        canonical.input,
+        dim=canonical.dim,
+        input_matrix_axes=canonical.input_matrix_axes,
+        requested_dim=dim,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
+    input = canonical.input
+    if input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
+        input = input.clone()
     launch = _prepare_blockscaled_tma_launch(input, spec)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
@@ -296,34 +298,42 @@ def _blockscaled_tma_impl(
 ) -> _TwoTensorOutput:
     r"""_blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled, **kwargs) -> tuple[Tensor, Tensor]
 
-    Quantize a tensor to MXFP8 with block scaling along ``dim[-1]``.
+    Quantize an N-D tensor to MXFP8 with block scaling along ``dim[-1]``.
+
+    ``dim`` defines a logical 2D matrix plane; all other axes are batch axes.
+    Layouts admitting a 2D or 4D TMA view can avoid copying. Other layouts,
+    including trailing batch axes that prevent such a view, are made
+    contiguous. Canonical storage with an unaligned pointer is cloned to
+    meet the 16-byte alignment requirement.
 
     Args:
         input (Tensor): CUDA tensor with at least two dimensions on an SM100+
-            GPU, with dtype float16, bfloat16, or float32. Layouts unsuitable
-            for a direct TMA load are materialized.
+            GPU, with dtype float16, bfloat16, or float32.
         dim (tuple[int, int]): Ordered pair of distinct positive or negative
-            axes. The first is the row axis; the second is the quantized axis.
-            All other axes are batch axes. For 2D input, ``(0, 1)`` or
-            ``(-2, -1)`` quantizes columns, while ``(1, 0)`` or ``(-1, -2)``
-            quantizes rows. Lists are not accepted.
+            axes, outer then inner in the logical matrix plane. The second
+            selects the block-scaled axis and must have size divisible by 32.
+            For 2D input, ``(0, 1)`` or ``(-2, -1)`` quantizes columns, while
+            ``(1, 0)`` or ``(-1, -2)`` quantizes rows. Lists are not accepted.
         is_square_scaling (bool): Use 32x32 instead of 1x32 scale blocks.
-            Requires swizzled scales and a dim-k kernel layout.
+            Requires swizzled scales and a dim-k kernel layout after
+            canonicalization.
         is_scale_swizzled (bool): Return swizzled scales if ``True``; compact
             scales otherwise. Compact scales require a dim-k kernel layout.
         **kwargs: No additional keyword arguments are accepted.
 
     Returns:
         tuple[Tensor, Tensor]: ``(qdata, scales)``. ``qdata`` has dtype
-            ``torch.float8_e4m3fn`` and the input shape, but need not retain
-            its strides. For 2D input of shape ``(M, K)``, qdata strides are
-            ``(K, 1)`` for axis 1 or ``(1, M)`` for axis 0. ``scales`` have
-            dtype ``torch.float8_e8m0fnu`` and, when swizzled, shape
-            ``(1, N)`` for axis 1 or ``(N, 1)`` for axis 0, where
+            ``torch.float8_e4m3fn`` and the input's logical shape and axis
+            order, but need not retain its strides. For 2D input of shape
+            ``(M, K)``, qdata strides are ``(K, 1)`` for ``dim=(0, 1)`` or
+            ``(1, M)`` for ``dim=(1, 0)``. ``scales`` have dtype
+            ``torch.float8_e8m0fnu`` and, when swizzled, shape ``(1, N)`` or
+            ``(N, 1)``, respectively, where
             ``N = ceil(M / 128) * ceil(K / 128) * 512``. When supported,
-            compact scales have shape ``(M, K // 32)`` for axis 1 or
-            ``(M // 32, K)`` for axis 0. For higher-rank input, batch axes
-            retain their positions in both outputs.
+            compact scales have shape ``(M, K // 32)`` or ``(M // 32, K)``.
+            Batch axes retain their positions in both outputs: for input
+            ``(B0, M, B1, K, B2)`` and ``dim=(1, 3)``, swizzled scales have
+            shape ``(B0, 1, B1, N, B2)``.
 
     Examples::
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
@@ -351,24 +361,29 @@ def _blockscaled_tma_impl_dual(
 ) -> _FourTensorOutput:
     r"""_blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled, *, dim=((-2, -1), (-1, -2)), **kwargs) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize both matrix axes of a tensor in one kernel launch.
+    Quantize both matrix axes of an N-D tensor in one kernel launch.
 
     Args:
         input (Tensor): CUDA tensor with the layout and dtypes described by
-            :func:`_blockscaled_tma_impl`. Both matrix axes must be divisible by 32.
+            :func:`_blockscaled_tma_impl`. Both selected axes must have sizes
+            divisible by 32. Inputs not admitting a 2D or 4D TMA view are
+            materialized as described above.
         is_square_scaling (bool): Must be ``False``.
         is_scale_swizzled (bool): Must be ``True``.
-        dim (tuple[tuple[int, int], tuple[int, int]], optional): Ordered axis
-            pair followed by its reverse. The first pair must list its axes
-            in ascending order. Default: ``((-2, -1), (-1, -2))``.
-        **kwargs: No additional keyword arguments are accepted.
+        dim (tuple[tuple[int, int], tuple[int, int]], optional): Ordered matrix
+            axis pair followed by its reverse. The first pair must be in
+            ascending order after normalizing negative axes; all other axes
+            are batch axes. Default: ``((-2, -1), (-1, -2))``.
+        **kwargs: No unlisted keyword arguments are accepted.
 
     Returns:
-        tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_k, s_k, q_m, s_m)``.
-            The first pair quantizes ``dim[0][-1]`` and the second quantizes
-            ``dim[1][-1]``, regardless of input layout. With the default
-            ``dim``, the logical last axis is first. Output strides and scale
-            shapes follow :func:`_blockscaled_tma_impl` for each axis.
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_first, s_first, q_reverse,
+            s_reverse)``. The first pair uses ``dim[0]`` and quantizes its
+            second axis; the second pair uses ``dim[1]`` and quantizes its
+            second axis. Results retain the input's logical axis order, with
+            batch axes in their original positions, but need not retain its
+            strides. Scale shapes follow :func:`_blockscaled_tma_impl` for
+            each axis, regardless of input layout.
 
     Examples::
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
