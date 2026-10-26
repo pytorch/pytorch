@@ -12,11 +12,11 @@ from torch.testing._internal.common_quantized import mxfp8_32x32_swizzle_f, to_m
 
 
 _KERNELS = {
-    "mxfp8_dim_k_swizzle": ("dim_k", False, True),
-    "mxfp8_dim_m_swizzle": ("dim_m", False, True),
-    "mxfp8_dim_km_swizzle": ("dim_km", False, True),
-    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True),
-    "mxfp8_dim_k": ("dim_k", False, False),
+    "mxfp8_dim_k_swizzle": ((-2, -1), False, True),
+    "mxfp8_dim_m_swizzle": ((-1, -2), False, True),
+    "mxfp8_dim_km_swizzle": ("dual", False, True),
+    "mxfp8_dim_k_32x32_swizzle": ((-2, -1), True, True),
+    "mxfp8_dim_k": ((-2, -1), False, False),
 }
 _DTYPES = {
     "bfloat16": torch.bfloat16,
@@ -51,32 +51,40 @@ def _reference_dim_k(input, square, swizzled):
     return qdata, scales
 
 
-def _reference(input, orientation, square, swizzled):
-    if orientation == "dim_m":
-        return _reference_dim_k(input.t().contiguous(), False, True)
-    if orientation == "dim_km":
-        return (
-            *_reference_dim_k(input, False, True),
-            *_reference_dim_k(input.t().contiguous(), False, True),
-        )
+def _reference(input, dim: int, square, swizzled):
+    if input.ndim != 2 or dim not in (-2, -1, 0, 1):
+        raise ValueError(f"unsupported quantization dim: {dim}")
+    dim %= 2
+    if dim == 0:
+        qdata, scales = _reference_dim_k(input.t().contiguous(), False, True)
+        return qdata.t(), scales
     return _reference_dim_k(input, square, swizzled)
 
 
 def _benchmark_one(kernel, M, K, dtype):
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
         _blockscaled_tma_impl,
+        _blockscaled_tma_impl_dual,
     )
 
     torch.manual_seed(0)
     input = torch.randn(M, K, dtype=dtype, device="cuda")
-    orientation, square, swizzled = _KERNELS[kernel]
+    selection, square, swizzled = _KERNELS[kernel]
 
     def run():
-        return _blockscaled_tma_impl(input, orientation, square, swizzled)
+        if selection == "dual":
+            return _blockscaled_tma_impl_dual(input, square, swizzled)
+        return _blockscaled_tma_impl(input, selection, square, swizzled)
 
     outputs = run()
     torch.cuda.synchronize()
-    expected = _reference(input, orientation, square, swizzled)
+    if selection == "dual":
+        expected = (
+            *_reference(input, -1, square, swizzled),
+            *_reference(input, -2, square, swizzled),
+        )
+    else:
+        expected = _reference(input, selection[-1], square, swizzled)
     if len(outputs) != len(expected):
         raise AssertionError(f"expected {len(expected)} outputs, got {len(outputs)}")
     for index, (output, reference) in enumerate(zip(outputs, expected)):
