@@ -3098,6 +3098,10 @@ def local_response_norm(
         return handle_torch_function(
             local_response_norm, (input,), input, size, alpha=alpha, beta=beta, k=k
         )
+    if size <= 0:
+        raise ValueError(
+            f"Expected size to be greater than 0, but got size = {size}"
+        )
     dim = input.dim()
     if dim < 3:
         raise ValueError(

@@ -353,12 +353,30 @@ def geomspace(
     dtype: DTypeLike | None = None,
     axis: int = 0,
 ) -> torch.Tensor:
-    if axis != 0 or not endpoint:
+    if axis != 0:
         raise NotImplementedError
+    if not endpoint:
+        raise NotImplementedError
+    if num == 1:
+        # NumPy returns [start] when num == 1; the general formula below
+        # would divide by zero (1.0 / (num - 1)).
+        result = torch.asarray(start)
+        if dtype is not None:
+            return result.to(dtype).reshape(1)
+        return result.float().reshape(1)
     base = torch.pow(stop / start, 1.0 / (num - 1))
     logbase = torch.log(base)
-    # torch.logspace accepts tensor start/end/base at runtime.
-    return torch.logspace(  # pyrefly: ignore[no-matching-overload]
+    # torch.logspace accepts tensor start/end/base at runtime, but only one
+    # overload accepts a dtype= kwarg; pass it through only when provided.
+    if dtype is not None:
+        return torch.logspace(  # pyrefly: ignore[no-matching-overload]
+            torch.log(start) / logbase,
+            torch.log(stop) / logbase,
+            num,
+            base=base,
+            dtype=dtype,
+        )
+    return torch.logspace(
         torch.log(start) / logbase,
         torch.log(stop) / logbase,
         num,
