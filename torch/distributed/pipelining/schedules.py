@@ -5542,9 +5542,12 @@ def _check_torch_compile_compatibility(
             continue
 
         for module in stage.submod.modules():
-            if isinstance(module, OptimizedModule):
+            if (
+                isinstance(module, OptimizedModule)
+                or module._compiled_call_impl is not None
+            ):
                 raise RuntimeError(
                     f"The {schedule_name} schedule is not supported with "
                     "stage modules that have used torch.compile. "
-                    f"Found OptimizedModule in {type(module).__name__}"
+                    f"Found compiled module {type(module).__name__}"
                 )
