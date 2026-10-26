@@ -524,7 +524,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall(
 void ProcessGroupWrapper::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-  return backend_->monitoredBarrier(opts, waitAllRanks);
+  backend_->monitoredBarrier(opts, waitAllRanks);
 }
 
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
@@ -579,7 +579,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_single_coalesced(
 }
 
 void ProcessGroupWrapper::startCoalescing() {
-  return backend_->startCoalescing();
+  backend_->startCoalescing();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {

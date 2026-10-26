@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Context.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/core/Tensor.h>

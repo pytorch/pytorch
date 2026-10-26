@@ -34,6 +34,7 @@ from .aot_compile_types import (
     SerializableCallable,
 )
 from .hooks import Hooks
+from .symbolic_convert import UNNAMED_SCOPE_PREFIX as _UNNAMED_SCOPE_PREFIX
 
 
 if TYPE_CHECKING:
@@ -93,7 +94,6 @@ _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
 # moving a type off that list means re-checking this one.
 _IMPORT_ALIAS_PREFIX = "__import_"
 _BUILTINS_DICT_PREFIX = "__builtins_dict__"
-_UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 _MINTED_GLOBAL_PREFIXES = (
     _IMPORT_ALIAS_PREFIX,
     _BUILTINS_DICT_PREFIX,

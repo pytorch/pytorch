@@ -525,10 +525,13 @@ runtime_estimations_mms_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
 # None = auto-detect from GPU generation; set to override.
+# Not auto-detected on RDNA GPUs, so the analytical collective estimate and
+# FSDP bucket sizing only use a model there when this is set.
 intra_node_bw: int | None = None
 
 # unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
 # None = auto-detect from GPU generation; set to override.
+# Not auto-detected on RDNA GPUs, so multi-node estimates there require this.
 inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
@@ -581,6 +584,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # An additional JK gate inside the plugin can still block the feature on True.
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
+)
+# Per-state dispatch budget for incremental autotuning; 0 disables the cap.
+# A torch.compile option overrides this default for every generated kernel.
+incremental_autotune_max_dispatches = int(
+    os.getenv("TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_MAX_DISPATCHES", 200)
 )
 
 inductor_default_autotune_warmup = int(
@@ -705,13 +713,10 @@ bmm_shared_a: bool = Config(
 )
 
 
-# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
-# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
-# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
-# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
-# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
-# "none"/"all" to tune all configs.
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM)
+# heuristic-ranked configs to profile per kernel family in max_autotune.
+# Explicitly supplemental, shape-scoped configs may be added after this cap.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
     env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
@@ -719,6 +724,9 @@ def _nvgemm_max_profiling_configs_default() -> int | None:
     return int(env_val)
 
 
+# BF16 medium-M shapes can require a deeper heuristic pool; a sweep over
+# GDN2/attention/MoE and FLUX shapes found that 10 recovered nearly all of the
+# available performance while lower caps lost up to 11%.
 nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
 
 # When enabled, adds supplement kernel configs that nvMatmulHeuristics
@@ -729,11 +737,21 @@ nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
 
-# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
-# large N dimension goes on the M-axis. Improves tile utilization for
-# small-M decode shapes typical in LLM inference (M << N).
+# Force swap_ab NVGEMM choices outside the automatically selected NVFP4
+# decode regime. Swapping A/B puts the large N dimension on the well-tiled
+# M-axis; NVFP4 shapes with M <= 256 and N >= 1024 enable it automatically.
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
+# Control programmatic dependent launch for the vendored SM100 block-scaled
+# NVGEMM kernel: "0" disables it, "auto" applies the measured NVFP4 shape
+# policy, and "1" forces it for every eligible NVFP4 GEMM. Every thread waits
+# before accessing global memory. All threads execute the common release at the
+# kernel tail, so non-epilogue warps can let the dependent grid launch while
+# the epilogue stores continue to drain.
+# Eligible scheduler-adjacent same-stream Triton consumers also continue the
+# PDL chain. Workspace-backed and composite launches are excluded; deferred
+# alignment copies remain ordered on the same stream before the consumer.
+nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "auto")
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
@@ -810,6 +828,8 @@ cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
 
+# Search every tile the vendored FlyDSL kernels implement instead of taking
+# the kernel's own analytic pick.
 flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
 # DEPRECATED. This setting is ignored.
@@ -1154,15 +1174,24 @@ batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
     default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
     implies={
-        mode: {
+        "strict_pointwise": {"strict_pointwise": True},
+        "strict_reduction": {"strict_reduction": True},
+        "strict": {"strict_pointwise": True, "strict_reduction": True},
+    },
+)
+
+strict_pointwise: bool = Config(
+    default=False,
+    implies={
+        True: {
             "eager_numerics.disable_ftz": True,
             "eager_numerics.division_rounding": True,
             "emulate_precision_casts": True,
         }
-        for mode in ("strict_pointwise", "strict")
     },
 )
 
+strict_reduction: bool = False
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -1341,8 +1370,9 @@ _micro_pipeline_tp: bool = False
 
 
 # Enable/disable partitioned scatter optimization for atomic add kernels.
-# Improves kernel performance for high-contention index_put(accumulate=True)
-# at the cost of temporary memory for expanded partition buffers.
+# Improves kernel performance for high-contention accumulating scatters
+# (index_put, index_add, scatter_add, scatter_reduce) at the cost of
+# temporary memory for expanded partition buffers.
 _partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
     os.environ.get(
@@ -1360,7 +1390,9 @@ partitioned_scatter_max_partitions: int = 64
 # Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
 partitioned_scatter_min_index_size: int = 4096
 
-# Skip ops where index_numel / scatter_dim_size is below this ratio.
+# Skip ops where (writes along the scatter dim) / scatter_dim_size is below
+# this ratio. The numerator is index.numel() for index_put and index.shape[dim]
+# for scatter_add / scatter_reduce.
 # Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
 # The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
 # slower scatter kernel (atomics over P copies lose cache residency), whether or not
@@ -1375,8 +1407,19 @@ partitioned_scatter_min_contention_ratio: float = 4.0
 # 1.5 GB is conservative for MI300 (206 GB total); tune down to allow more partitions.
 partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
 
+# Accumulate the partial sums in fp32 when the scatter dtype is a narrower float,
+# rounding once in the reduce. On by default because narrow partials stall once a
+# hot slot outgrows the addend's ulp, and how far they stall depends on
+# num_partitions, which the memory budget picks: the result would vary with free
+# GPU memory. fp32 partials give the same result for any P, and let bf16 scatters
+# be rewritten where bf16 atomic_add falls back (sm<90, XPU). Costs 2x the
+# expanded buffer's bytes for bf16/fp16, charged against the memory budget.
+partitioned_scatter_fp32_accumulation: bool = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FP32_ACCUMULATION", "1") == "1"
+)
+
 # Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
-# diminishing-returns cap on num_partitions). Correctness gates and the hard memory
+# traffic cap on num_partitions). Correctness gates and the hard memory
 # budget are still enforced. Useful for benchmarking or skewed-index workloads where
 # static estimates undercount real contention.
 # Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
@@ -1831,6 +1874,14 @@ assume_aligned_inputs: bool = False
 # with example inputs we throw. This is useful when all dynamic shapes are unbacked and
 # you know you only operate with 32-bit sizes.
 assume_32bit_indexing: bool = False
+
+# By default, when a dynamic size cannot be proven to fit in int32, inductor reads its
+# hint and, if the hint fits, uses 32-bit indexing and guards that the size stays in
+# range. A later input past the bound fails that guard and recompiles a 64-bit variant,
+# so a graph can end up with two variants split on a threshold no example has to
+# cross. With avoid_32bit_indexing_guards, an unprovable size gets 64-bit indexing and
+# no guard: one variant that serves every size, at the cost of 64-bit index math.
+avoid_32bit_indexing_guards: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
@@ -2483,6 +2534,14 @@ class triton:
         os.environ.get(
             "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
         )
+    )
+
+    # Backends for the partial BMM nested inside a decompose-K subgraph. This
+    # is independent of max_autotune_gemm_backends, which gates the outer MM.
+    # TRITON adds the Blackwell persistent TMA partial BMM on datacenter
+    # Blackwell when enable_persistent_tma_matmul is also set.
+    decompose_k_bmm_backends = os.environ.get(
+        "TORCHINDUCTOR_DECOMPOSE_K_BMM_BACKENDS", "ATEN"
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
@@ -3299,6 +3358,7 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+    "bundled_autotune_remote_cache",
 ]
 
 

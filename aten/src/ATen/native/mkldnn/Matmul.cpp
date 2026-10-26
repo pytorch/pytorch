@@ -534,6 +534,57 @@ bool use_mkldnn_matmul(
       use_mkldnn_tf32_matmul(mat1, mat2, result));
 }
 
+#if defined(__aarch64__)
+static void _mkldnn_matmul_i8i8i32_with_primitive(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  // Create ideep tensors for oneDNN computation
+  ideep::tensor::data_type src_dtype;
+  if (mat1.scalar_type() == at::kByte) {
+    src_dtype = ideep::tensor::data_type::u8;
+  } else {
+    src_dtype = ideep::tensor::data_type::s8;
+  }
+  auto src = ideep::tensor(
+      {mat1.sizes().vec(),
+       src_dtype,
+       mat1.strides().vec()},
+      mat1.data_ptr());
+  auto wei = ideep::tensor(
+      {mat2.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat2.strides().vec()},
+      mat2.data_ptr());
+  auto dst = ideep::tensor(
+      {result.sizes().vec(),
+       ideep::tensor::data_type::s32,
+       result.strides().vec()},
+      result.data_ptr());
+  // Create primitive desc
+  auto engine = ideep::engine::cpu_engine();
+  ideep::attr_t op_attr;
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  auto src_desc = src.get_desc();
+  auto wei_desc = dnnl::memory::desc(
+      mat2.sizes().vec(), dnnl::memory::data_type::s8, dnnl::memory::format_tag::any);
+  auto dst_desc = dst.get_desc();
+  auto prim_desc = dnnl::matmul::primitive_desc(
+      engine, src_desc, wei_desc, dst_desc, op_attr);
+  // Reorder mat2 if needed
+  auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
+  // Prepare args for primitive
+  ideep::tensor scratchpad(prim_desc.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  // Create primitive and execute
+  auto primitive = dnnl::matmul(prim_desc);
+  primitive.execute(ideep::stream::default_stream(), args);
+}
+#else
 // How oneDNN's row-major gemm can read `t` in place: as itself ('N') or as its
 // transpose ('T'), with a leading dimension spanning a full row or column.
 static std::optional<std::pair<char, int64_t>> _blas_layout(const Tensor& t) {
@@ -593,6 +644,7 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
       ", self sizes=", self.sizes(), " strides=", self.strides(),
       ", mat2 sizes=", mat2.sizes(), " strides=", mat2.strides());
   }
+#endif
 
 void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
@@ -600,6 +652,12 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &result) {
   // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
+#if defined(__aarch64__)
+  // On AArch64 the matmul primitive dispatches to jit:int8, which only accepts
+  // a row-major src (other layouts fall back to a much slower kernel).
+  // contiguous() is a no-op when mat1 is already row-major.
+  _mkldnn_matmul_i8i8i32_with_primitive(mat1.contiguous(), mat2, result);
+#else
   const Tensor a = _blas_layout(mat1) ? mat1 : mat1.clone(at::MemoryFormat::Preserve);
   const Tensor b = _blas_layout(mat2) ? mat2 : mat2.clone(at::MemoryFormat::Preserve);
   if (a.scalar_type() == at::kByte) {
@@ -607,6 +665,7 @@ void mkldnn_matmul_i8i8i32(
   } else {
     _mkldnn_gemm_i8i8i32_with_blas<int8_t>(a, b, result);
   }
+#endif
 }
 
 } // namespace at
