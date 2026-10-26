@@ -50,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, onlyOn
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -12442,6 +12442,238 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
         if reduction != "none":
             self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
+
+    @staticmethod
+    def _cross_entropy_reference(logits, target):
+        # Per-row cross entropy and its gradient, computed in float64 from the
+        # already-rounded logits (classes in the last dim). The target is left out
+        # of the normalizer, so that small losses and target gradients are not
+        # lost to cancellation; see Barron et al., "A Fix for Softmax and
+        # Cross-Entropy" (arXiv:2610.31642).
+        z = logits.detach().double()
+        max_z = z.amax(-1, keepdim=True)
+        e = (z - max_z).exp()
+        is_target = F.one_hot(target, z.size(-1)).bool()
+        rest = e.masked_fill(is_target, 0).sum(-1, keepdim=True)
+        z_t = z.gather(-1, target.unsqueeze(-1))
+        total = (z_t - max_z).exp() + rest
+        loss = torch.where(z_t == max_z, rest.log1p(), (max_z - z_t) + total.log())
+        grad = torch.where(is_target, -rest / total, e / total)
+        return loss.squeeze(-1), grad
+
+    def _confident_cross_entropy_rtol(self, dtype, sequential_sum=False):
+        # The kernels for a non-last dim may sum exp(x - max) sequentially, and
+        # the CPU last-dim kernel sums in a few vector lanes, so their float32
+        # error grows with the number of classes.
+        if sequential_sum:
+            float_rtol = 2e-3
+        else:
+            float_rtol = 2e-4 if self.device_type == "cpu" else 2e-5
+        return {torch.float: float_rtol, torch.double: 1e-11, torch.half: 1e-2,
+                torch.bfloat16: 5e-2}[dtype]
+
+    def _half_representable(self, ref, dtype):
+        # Half cannot represent the tiny losses and gradients of confident rows;
+        # only compare values in its normal range.
+        if dtype != torch.half:
+            return torch.ones_like(ref, dtype=torch.bool)
+        return ref.abs() >= torch.finfo(torch.half).tiny
+
+    def _assert_cross_entropy_grad_close(self, grad, ref_grad, logits, rtol):
+        grad_rtol = rtol
+        if logits.dtype in (torch.half, torch.bfloat16):
+            # log_softmax is rounded to the low-precision dtype before the
+            # backward, which leaves exp(log_softmax) with a relative error of up
+            # to |log_softmax| times the unit roundoff (2**-8 for bfloat16,
+            # 2**-11 for half).
+            unit = 2 ** -8 if logits.dtype == torch.bfloat16 else 2 ** -11
+            grad_rtol = rtol + F.log_softmax(logits.double(), -1).abs() * unit
+        ratio = (grad.double() - ref_grad).abs() / (grad_rtol * ref_grad.abs())
+        mask = self._half_representable(ref_grad, logits.dtype)
+        self.assertLessEqual(ratio[mask].max().item(), 1)
+
+    def _confident_cross_entropy_inputs(self, num_classes, dtype, device):
+        # Rows with non-target logits 0 and target logit log(C - 1) + m, so that
+        # the target probability is 1 / (1 + exp(-m)), plus a tied maximum, a
+        # target that is not the maximum, and random rows.
+        margins = [0, 8, 18, 30, 60]
+        logits = torch.zeros(len(margins) + 4, num_classes, dtype=torch.double)
+        target = torch.randint(num_classes, (logits.size(0),))
+        for i, m in enumerate(margins):
+            logits[i, target[i]] = math.log(num_classes - 1) + m
+        i = len(margins)
+        logits[i, target[i]] = 20
+        logits[i, (target[i] + 1) % num_classes] = 20
+        logits[i + 1, target[i + 1]] = 20
+        logits[i + 1, (target[i + 1] + 1) % num_classes] = 25
+        logits[i + 2:] = torch.randn(2, num_classes, dtype=torch.double) * 4
+        return logits.to(device=device, dtype=dtype), target.to(device)
+
+    @onlyOn(["cpu", "cuda"])  # Other backends' log_softmax kernels are unchanged.
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @parametrize_test("num_classes", [3, 1000, 2000, 5000, 11000, 40000, 40001])
+    @parametrize_test("layout", ["lastdim", "spatial16", "spatial67"])
+    def test_cross_entropy_loss_confident_target(self, device, dtype, num_classes, layout):
+        # log_softmax leaves one argmax term out of its normalizer and its backward
+        # avoids computing exp(log_softmax) - 1, so the loss and gradient of a
+        # confident prediction keep their relative accuracy instead of rounding
+        # to 0. The sizes cover the different CUDA kernels.
+        logits, target = self._confident_cross_entropy_inputs(num_classes, dtype, device)
+        if layout != "lastdim":
+            # With at least 64 classes, 16 positions use the CUDA spatial kernel's
+            # block reduction over the class dim; 67 positions use one thread per
+            # position on CUDA and give full vector iterations in the CPU kernels.
+            rows = torch.arange(int(layout[len("spatial"):]), device=device) % logits.size(0)
+            logits, target = logits[rows], target[rows]
+        ref_loss, ref_grad = self._cross_entropy_reference(logits, target)
+        upstream = torch.rand(logits.size(0), dtype=torch.double, device=device) + 0.5
+        ref_grad = ref_grad * upstream.unsqueeze(-1)
+
+        x = logits.detach().clone().requires_grad_()
+        if layout != "lastdim":
+            # (1, C, L) with a non-contiguous input, the class dim not being last.
+            inp = x.t().unsqueeze(0)
+            self.assertFalse(inp.is_contiguous())
+            loss = F.cross_entropy(inp, target.unsqueeze(0), reduction="none").squeeze(0)
+        else:
+            loss = F.cross_entropy(x, target, reduction="none")
+        loss.backward(upstream.to(dtype))
+
+        rtol = self._confident_cross_entropy_rtol(dtype, sequential_sum=layout != "lastdim")
+        ok = self._half_representable(ref_loss, dtype)
+        self.assertEqual(loss.double()[ok], ref_loss[ok], atol=0, rtol=rtol)
+        grad_t = x.grad.double().gather(1, target.unsqueeze(1)).squeeze(1)
+        ref_grad_t = ref_grad.gather(1, target.unsqueeze(1)).squeeze(1)
+        ok = self._half_representable(ref_grad_t, dtype)
+        self.assertEqual(grad_t[ok], ref_grad_t[ok], atol=0, rtol=rtol)
+        self._assert_cross_entropy_grad_close(x.grad, ref_grad, logits, rtol)
+        if dtype != torch.half:
+            # The target gradient is minus the sum of the others. (In half, the
+            # others can be subnormal.)
+            self.assertLessEqual(
+                (x.grad.double().sum(1).abs() / grad_t.abs()).max().item(), 4 * rtol)
+
+    @onlyOn(["cpu", "cuda"])  # Other backends' log_softmax kernels are unchanged.
+    @dtypes(torch.float, torch.double)
+    def test_cross_entropy_loss_confident_target_paper_example(self, device, dtype):
+        # Example from Section 2 of Barron et al., arXiv:2610.31642.
+        logits = torch.tensor([[9., -9., -9.]], dtype=dtype, device=device, requires_grad=True)
+        loss = F.cross_entropy(logits, torch.tensor([0], device=device))
+        loss.backward()
+        self.assertEqual(loss.item(), 3.045996e-8, atol=0, rtol=1e-6)
+        self.assertEqual(
+            logits.grad,
+            torch.tensor([[-3.045996e-8, 1.522998e-8, 1.522998e-8]], dtype=dtype, device=device),
+            atol=0, rtol=1e-6)
+
+    @onlyCUDA
+    @parametrize_test("num_classes", [1000, 2000, 11000, 40001])
+    @parametrize_test("layout", ["lastdim", "spatial16", "spatial67"])
+    def test_log_softmax_confident_half_to_float(self, device, num_classes, layout):
+        # log_softmax of a half input with a float output (half_to_float).
+        logits, target = self._confident_cross_entropy_inputs(num_classes, torch.half, device)
+        logits = logits[:5]
+        target = target[:5]
+        ref_loss, ref_grad = self._cross_entropy_reference(logits, target)
+        x = logits.detach().clone().requires_grad_()
+        if layout != "lastdim":
+            rows = torch.arange(int(layout[len("spatial"):]), device=device) % 5
+            out = F.log_softmax(x[rows].t().unsqueeze(0), dim=1, dtype=torch.float)
+            out = out.squeeze(0).t()[:5]
+        else:
+            out = F.log_softmax(x, dim=1, dtype=torch.float)
+        self.assertEqual(out.dtype, torch.float)
+        loss = -out.gather(1, target.unsqueeze(1)).squeeze(1)
+        loss.sum().backward()
+        rtol = 2e-3 if layout != "lastdim" else 2e-5
+        self.assertEqual(loss.double(), ref_loss, atol=0, rtol=rtol)
+        grad_t = x.grad.double().gather(1, target.unsqueeze(1)).squeeze(1)
+        ref_grad_t = ref_grad.gather(1, target.unsqueeze(1)).squeeze(1)
+        # The gradient is rounded to half; margins of 18 and above underflow it.
+        self.assertEqual(grad_t[:2], ref_grad_t[:2], atol=0, rtol=2e-3)
+
+    @onlyOn(["cpu", "cuda"])  # Other backends' log_softmax kernels are unchanged.
+    @dtypes(torch.float, torch.double, torch.bfloat16)
+    @parametrize_test("reduction", ["none", "mean", "sum"])
+    def test_cross_entropy_loss_confident_target_weight_ignore_index(self, device, dtype, reduction):
+        logits, target = self._confident_cross_entropy_inputs(1000, dtype, device)
+        weight = torch.rand(1000, dtype=dtype, device=device) + 0.5
+        target[-1] = -100
+        valid = target != -100
+        ref_loss, ref_grad = self._cross_entropy_reference(logits[valid], target[valid])
+        w = weight.double()[target[valid]]
+        ref_loss = ref_loss * w
+        ref_grad = ref_grad * w.unsqueeze(-1)
+        if reduction == "mean":
+            ref_loss = ref_loss.sum() / w.sum()
+            ref_grad = ref_grad / w.sum()
+        elif reduction == "sum":
+            ref_loss = ref_loss.sum()
+
+        x = logits.detach().clone().requires_grad_()
+        loss = F.cross_entropy(x, target, weight=weight, reduction=reduction)
+        loss.sum().backward()
+        if reduction == "none":
+            self.assertEqual(loss[-1].item(), 0)
+            loss = loss[valid]
+        self.assertEqual(x.grad[-1], torch.zeros_like(x.grad[-1]), atol=0, rtol=0)
+
+        rtol = self._confident_cross_entropy_rtol(dtype)
+        self.assertEqual(loss.double(), ref_loss, atol=0, rtol=rtol)
+        self._assert_cross_entropy_grad_close(x.grad[valid], ref_grad, logits[valid], rtol)
+
+    @onlyOn(["cpu", "cuda"])  # Other backends' log_softmax kernels are unchanged.
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @parametrize_test("dim_size", [5, 1500, 11000, 40001])
+    @parametrize_test("layout", ["lastdim", "spatial16", "spatial67"])
+    def test_log_softmax_nonfinite_rows(self, device, dtype, dim_size, layout):
+        # Excluding the max from the normalizer must keep the results for rows
+        # with infinities and NaNs.
+        x = torch.randn(5, dim_size, dtype=torch.double)
+        x[0, 1] = float("inf")
+        x[1] = float("-inf")
+        x[2, 2:] = float("-inf")
+        x[3, 2] = float("nan")
+        x[4, 1] = x[4, 3] = 100  # tied maxima
+        x = x.to(device=device, dtype=dtype).requires_grad_()
+        if layout != "lastdim":
+            # (1, C, L): reduce over a dim that is not the last one.
+            rows = torch.arange(int(layout[len("spatial"):]), device=device) % 5
+            out = F.log_softmax(x[rows].t().unsqueeze(0), dim=1).squeeze(0).t()[:5]
+        else:
+            out = F.log_softmax(x, dim=1)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        # Rows whose output is NaN get NaN gradients; the others match
+        # grad - exp(out) * sum(grad).
+        self.assertTrue(x.grad[[0, 1, 3]].isnan().all())
+        out64, grad64 = out.detach()[[2, 4]].double(), grad[[2, 4]].double()
+        expected = grad64 - out64.exp() * grad64.sum(1, keepdim=True)
+        self.assertEqual(x.grad[[2, 4]].double(), expected, atol=2e-2, rtol=2e-2)
+        out = out.detach()
+        self.assertTrue(out[:2].isnan().all())
+        self.assertEqual(out[2, :2], F.log_softmax(x[2, :2], dim=0))
+        self.assertTrue((out[2, 2:] == float("-inf")).all())
+        self.assertTrue(out[3].isnan().all())
+        self.assertEqual(out[4, 1].item(), -math.log(2), atol=4e-3, rtol=0)
+        self.assertEqual(out[4, 3].item(), -math.log(2), atol=4e-3, rtol=0)
+
+    @onlyOn(["cpu", "cuda"])
+    @parametrize_test("num_classes", [3, 50])
+    def test_cross_entropy_loss_confident_target_gradgradcheck(self, device, num_classes):
+        logits, target = self._confident_cross_entropy_inputs(num_classes, torch.double, device)
+        # gradcheck perturbs inputs by 1e-6, so keep margins moderate.
+        logits = logits[[0, 1, 5, 6, 7]].requires_grad_()
+        target = target[[0, 1, 5, 6, 7]]
+        weight = torch.rand(num_classes, dtype=torch.double, device=device) + 0.5
+
+        def fn(x):
+            return F.cross_entropy(x, target, weight=weight, reduction="sum")
+
+        self.assertTrue(gradcheck(fn, (logits,)))
+        self.assertTrue(gradgradcheck(fn, (logits,)))
+        self.assertTrue(gradcheck(lambda x: F.log_softmax(x, dim=1), (logits,)))
+        self.assertTrue(gradgradcheck(lambda x: F.log_softmax(x, dim=1), (logits,)))
 
     def test_smoothl1loss_backward_zero_beta(self, device):
         input = torch.randn(300, 256, requires_grad=True, device=device)

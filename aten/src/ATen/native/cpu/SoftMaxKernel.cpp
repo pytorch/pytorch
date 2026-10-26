@@ -180,7 +180,9 @@ inline void _vec_host_softmax_backward_lastdim(
             auto sum = vec::reduce_all<scalar_t>(
                 [](Vec& x, Vec& y) { return x + y; }, grad_data, dim_size);
             vec::map2(
-                [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
+                [sum](Vec x, Vec y) {
+                  return vec_log_softmax_backward(x, y, Vec(sum));
+                },
                 grad_input_data,
                 grad_data,
                 output_data,
@@ -485,12 +487,13 @@ _vec_log_softmax_backward(
               Vec grad_output_vec = Vec::loadu(grad_output_ptr + d2);
               Vec output_vec = Vec::loadu(output_ptr + d2);
               Vec sum_vec = Vec::loadu(tmp_sum_data + d2);
-              Vec grad_input_vec = grad_output_vec - output_vec.exp() * sum_vec;
+              Vec grad_input_vec =
+                  vec_log_softmax_backward(grad_output_vec, output_vec, sum_vec);
               grad_input_vec.store(grad_input_ptr + d2);
             }
             for (; d2 < size; d2++) {
-              grad_input_ptr[d2] = grad_output_ptr[d2] -
-                  std::exp(output_ptr[d2]) * tmp_sum_data[d2];
+              grad_input_ptr[d2] = log_softmax_backward(
+                  grad_output_ptr[d2], output_ptr[d2], tmp_sum_data[d2]);
             }
           }
         }
@@ -594,17 +597,17 @@ _vec_log_softmax_backward(
               fVec grad_output_fvec0 = fVec::loadu(grad_output_buffer_ptr + d2);
               fVec grad_output_fvec1 =
                   fVec::loadu(grad_output_buffer_ptr + d2 + fVec::size());
-              fVec grad_input_fvec0 =
-                  grad_output_fvec0 - output_fvec0.exp() * sum_fvec0;
-              fVec grad_input_fvec1 =
-                  grad_output_fvec1 - output_fvec1.exp() * sum_fvec1;
+              fVec grad_input_fvec0 = vec_log_softmax_backward(
+                  grad_output_fvec0, output_fvec0, sum_fvec0);
+              fVec grad_input_fvec1 = vec_log_softmax_backward(
+                  grad_output_fvec1, output_fvec1, sum_fvec1);
               Vec grad_input_vec =
                   vec::convert_from_float<scalar_t>(grad_input_fvec0, grad_input_fvec1);
               grad_input_vec.store(grad_input_ptr + d2);
             }
             for (; d2 < size; d2++) {
-              grad_input_ptr[d2] = grad_output_buffer_ptr[d2] -
-                  std::exp(float(output_ptr[d2])) * tmp_sum_data[d2];
+              grad_input_ptr[d2] = log_softmax_backward(
+                  grad_output_buffer_ptr[d2], float(output_ptr[d2]), tmp_sum_data[d2]);
             }
           }
         }

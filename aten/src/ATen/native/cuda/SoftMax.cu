@@ -38,8 +38,13 @@ constexpr int ALIGN_BYTES = 16;
 
 template<typename T, typename AccumT, typename OutT>
 struct LogSoftMaxForwardEpilogue {
-  __device__ __forceinline__ LogSoftMaxForwardEpilogue(AccumT max_input, AccumT sum)
-    : max_input(max_input),  logsum(std::log(sum)) {}
+  // The kernels pass sum_j exp(x_j - max) without one argmax term as
+  // sum_without_max, see Note [Accurate log_softmax] in
+  // ATen/native/cpu/LogSoftmaxKernelImpl.h.
+  static constexpr bool is_log_softmax = true;
+
+  __device__ __forceinline__ LogSoftMaxForwardEpilogue(AccumT max_input, AccumT sum_without_max)
+    : max_input(max_input),  logsum(std::log1p(sum_without_max)) {}
 
   __device__ __forceinline__ OutT operator()(T input) const {
     return static_cast<OutT>(input - max_input - logsum);
@@ -55,7 +60,8 @@ struct LogSoftMaxBackwardEpilogue {
     : sum(sum) {}
 
   __device__ __forceinline__ T operator()(OutT gradOutput, OutT output) const {
-    return static_cast<T>(gradOutput - std::exp(static_cast<AccumT>(output)) * sum);
+    return static_cast<T>(log_softmax_backward_element(
+        static_cast<AccumT>(gradOutput), static_cast<AccumT>(output), sum));
   }
 
   const AccumT sum;
@@ -63,6 +69,8 @@ struct LogSoftMaxBackwardEpilogue {
 
 template<typename T, typename AccumT, typename OutT>
 struct SoftMaxForwardEpilogue {
+  static constexpr bool is_log_softmax = false;
+
   __device__ __forceinline__ SoftMaxForwardEpilogue(AccumT max_input, AccumT sum)
     : max_input(max_input)
     , sum(sum) {}
@@ -315,10 +323,21 @@ __global__ void cunn_SpatialSoftMaxForward(
         max_input = spatialBlockReduceX<accscalar_t, Max>(sdata,max_input);
 
         accscalar_t sum = 0;
-        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
-          sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
-                 - max_input);
-        sum = spatialBlockReduceX<accscalar_t, Add>(sdata, sum);
+        if constexpr (Epilogue<scalar_t, accscalar_t, outscalar_t>::is_log_softmax) {
+          // See Note [Accurate log_softmax] in ATen/native/cpu/LogSoftmaxKernelImpl.h
+          accscalar_t max_count = 0;
+          for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+            log_softmax_accumulate(sum, max_count,
+                static_cast<accscalar_t>(input[data_offset + d * dim_stride]) - max_input);
+          sum = spatialBlockReduceX<accscalar_t, Add>(sdata, sum);
+          max_count = spatialBlockReduceX<accscalar_t, Add>(sdata, max_count);
+          sum += max_count - 1;
+        } else {
+          for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+            sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
+                   - max_input);
+          sum = spatialBlockReduceX<accscalar_t, Add>(sdata, sum);
+        }
 
         Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_input, sum);
         for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
@@ -330,9 +349,17 @@ __global__ void cunn_SpatialSoftMaxForward(
           max_input = Max<accscalar_t>()(max_input, value);
         }
         accscalar_t sum = 0;
-        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
-          sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
-                 - max_input);
+        if constexpr (Epilogue<scalar_t, accscalar_t, outscalar_t>::is_log_softmax) {
+          accscalar_t max_count = 0;
+          for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+            log_softmax_accumulate(sum, max_count,
+                static_cast<accscalar_t>(input[data_offset + d * dim_stride]) - max_input);
+          sum += max_count - 1;
+        } else {
+          for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+            sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
+                   - max_input);
+        }
         Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_input, sum);
         for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
@@ -434,6 +461,29 @@ struct SumExpfFloat
   const AccumT max_k;
 };
 
+// Thread-local partial results of log_softmax_accumulate.
+template <typename AccumT>
+struct LogSoftMaxSum {
+  AccumT sum;
+  AccumT max_count;
+};
+
+template<typename T, typename Acc>
+struct LogSoftMaxSumFloat
+{
+  using AccumT = decltype(Acc::sum);
+
+  __device__ __forceinline__ LogSoftMaxSumFloat(AccumT v)
+    : max_k(v) {}
+
+  __device__ __forceinline__ Acc operator()(Acc acc, T v) const {
+    log_softmax_accumulate(acc.sum, acc.max_count, static_cast<AccumT>(v) - max_k);
+    return acc;
+  }
+
+  const AccumT max_k;
+};
+
 template <template<typename> class Reduction, typename AccumT>
 __device__ __forceinline__ AccumT
 blockReduce(AccumT* smem, AccumT val,
@@ -496,6 +546,20 @@ T blockReduceWarp(T* smem_cache, T value, const Reduction<T>& op, T defaultVal)
   return smem_cache[0];
 }
 
+
+// Reduces the per-thread results of log_softmax_accumulate over the block and
+// returns sum_j exp(x_j - max) without one argmax term, see
+// Note [Accurate log_softmax] in ATen/native/cpu/LogSoftmaxKernelImpl.h.
+template <typename AccumT>
+__device__ __forceinline__
+AccumT blockReduceLogSoftMaxSum(AccumT* smem_cache, LogSoftMaxSum<AccumT> value)
+{
+  const AccumT sum = blockReduceWarp<Add, AccumT>(smem_cache, value.sum,
+    Add<AccumT>(), static_cast<AccumT>(0));
+  const AccumT max_count = blockReduceWarp<Add, AccumT>(smem_cache, value.max_count,
+    Add<AccumT>(), static_cast<AccumT>(0));
+  return sum + (max_count - static_cast<AccumT>(1));
+}
 
 template <template<typename> class Reduction, typename T>
 __device__ __forceinline__
@@ -778,10 +842,18 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
     Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   // reduce all values
-  accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
-  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
-    Add<accscalar_t>(), static_cast<accscalar_t>(0));
+  accscalar_t sumAll;
+  if constexpr (Epilogue<scalar_t, accscalar_t, outscalar_t>::is_log_softmax) {
+    using Acc = LogSoftMaxSum<accscalar_t>;
+    Acc threadSum = ilpReduce<LogSoftMaxSumFloat, ILP, scalar_t, Acc>(
+      shift, input, classes, LogSoftMaxSumFloat<scalar_t, Acc>(max_k), Acc{0, 0});
+    sumAll = blockReduceLogSoftMaxSum<accscalar_t>(sdata, threadSum);
+  } else {
+    accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
+      shift, input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+    sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
+      Add<accscalar_t>(), static_cast<accscalar_t>(0));
+  }
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
 
@@ -805,7 +877,6 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
   accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
-  accscalar_t threadExp = static_cast<accscalar_t>(0);
 
   // Load the elements from gmem into reg, and get the max for current thread.
   MaxFloat<scalar_t, accscalar_t> maxFunc;
@@ -823,17 +894,33 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
     Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
-  SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
   // reduce all values
-  #pragma unroll
-  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
-    int offset = threadIdx.x + reg_idx * blockDim.x;
-    if(offset < classes) {
-      threadExp = sumExpFunc(threadExp, reg[reg_idx]);
+  accscalar_t sumAll;
+  if constexpr (Epilogue<scalar_t, accscalar_t, outscalar_t>::is_log_softmax) {
+    using Acc = LogSoftMaxSum<accscalar_t>;
+    LogSoftMaxSumFloat<scalar_t, Acc> sumFunc(max_k);
+    Acc threadSum{0, 0};
+    #pragma unroll
+    for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+      int offset = threadIdx.x + reg_idx * blockDim.x;
+      if(offset < classes) {
+        threadSum = sumFunc(threadSum, reg[reg_idx]);
+      }
     }
+    sumAll = blockReduceLogSoftMaxSum<accscalar_t>(sdata, threadSum);
+  } else {
+    SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
+    accscalar_t threadExp = static_cast<accscalar_t>(0);
+    #pragma unroll
+    for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+      int offset = threadIdx.x + reg_idx * blockDim.x;
+      if(offset < classes) {
+        threadExp = sumExpFunc(threadExp, reg[reg_idx]);
+      }
+    }
+    sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
+      Add<accscalar_t>(), static_cast<accscalar_t>(0));
   }
-  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
-    Add<accscalar_t>(), static_cast<accscalar_t>(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
 
@@ -919,7 +1006,6 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
   accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
-  accscalar_t threadExp = static_cast<accscalar_t>(0);
 
   // The first smem segment is used to cache input values and the last
   // segment is used for thread block reductions
@@ -950,18 +1036,36 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
 
   // Reload input from shared memory to compute the sum. The previous
   // reduce has performed a __syncthreads() so the smem contents are populated.
-  SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
-  for (index_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
-    LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
+  accscalar_t sumAll;
+  if constexpr (Epilogue<scalar_t, accscalar_t, outscalar_t>::is_log_softmax) {
+    using Acc = LogSoftMaxSum<accscalar_t>;
+    LogSoftMaxSumFloat<scalar_t, Acc> sumFunc(max_k);
+    Acc threadSum{0, 0};
+    for (index_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+      LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
 
-    #pragma unroll
-    for (int i = 0; i < ILP; ++i) {
-      threadExp = sumExpFunc(threadExp, crnt_vec.val[i]);
+      #pragma unroll
+      for (int i = 0; i < ILP; ++i) {
+        threadSum = sumFunc(threadSum, crnt_vec.val[i]);
+      }
     }
-  }
 
-  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(smem_reduction_cache, threadExp,
-    Add<accscalar_t>(), static_cast<accscalar_t>(0));
+    sumAll = blockReduceLogSoftMaxSum<accscalar_t>(smem_reduction_cache, threadSum);
+  } else {
+    SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
+    accscalar_t threadExp = static_cast<accscalar_t>(0);
+    for (index_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+      LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
+
+      #pragma unroll
+      for (int i = 0; i < ILP; ++i) {
+        threadExp = sumExpFunc(threadExp, crnt_vec.val[i]);
+      }
+    }
+
+    sumAll = blockReduceWarp<Add, accscalar_t>(smem_reduction_cache, threadExp,
+      Add<accscalar_t>(), static_cast<accscalar_t>(0));
+  }
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
 
@@ -1093,6 +1197,9 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
  template<template<typename, typename, typename> class Epilogue,
           template<typename, typename, typename> class EpilogueWithMul, bool is_log_softmax, bool use_fast_softmax>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float, const Tensor& output){
+  // cunn_SoftMaxForwardFast/Gmem pass the full sum to the epilogue, while
+  // LogSoftMaxForwardEpilogue expects it without one argmax term.
+  static_assert(!(is_log_softmax && use_fast_softmax), "fast softmax kernels do not support log_softmax");
   if (half_to_float) {
     TORCH_CHECK(input_.scalar_type() == ScalarType::Half, "conversion is supported for Half type only");
   }

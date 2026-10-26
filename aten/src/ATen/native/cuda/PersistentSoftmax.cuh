@@ -30,6 +30,37 @@ struct Max {
   }
 };
 
+// The log_softmax helpers below implement Note [Accurate log_softmax] in
+// ATen/native/cpu/LogSoftmaxKernelImpl.h.
+
+// Adds exp(shifted) to sum, where shifted = x - max, or counts x as a max
+// element.
+template <typename acc_t>
+__device__ __forceinline__ void log_softmax_accumulate(acc_t& sum, acc_t& max_count, acc_t shifted) {
+  const bool is_max = shifted == acc_t(0);
+  sum += is_max ? acc_t(0) : std::exp(shifted);
+  max_count += is_max ? acc_t(1) : acc_t(0);
+}
+
+// log(sum_j exp(x_j - max)) from the results of log_softmax_accumulate.
+template <typename acc_t>
+__device__ __forceinline__ acc_t log_softmax_log_sum(acc_t sum, acc_t max_count) {
+  return std::log1p(sum + (max_count - acc_t(1)));
+}
+
+// The backward takes the expm1 form where exp(output) > 1/2.
+constexpr double kLogSoftmaxLogHalf = -0.69314718055994531;
+
+// grad_output - exp(output) * grad_sum without cancellation.
+template <typename acc_t>
+__device__ __forceinline__ acc_t log_softmax_backward_element(acc_t grad_output, acc_t output, acc_t grad_sum) {
+  const acc_t prob = std::exp(output);
+  if (C10_UNLIKELY(output > static_cast<acc_t>(kLogSoftmaxLogHalf))) {
+    return -grad_output * std::expm1(output) - prob * (grad_sum - grad_output);
+  }
+  return grad_output - prob * grad_sum;
+}
+
 template <typename acc_t, int WARP_BATCH, int WARP_SIZE, template<typename> class ReduceOp>
 __device__ __forceinline__ void warp_reduce(acc_t* sum) {
     ReduceOp<acc_t> r;
@@ -145,6 +176,8 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Max>(max_value);
 
     acc_t sum[WARP_BATCH] { 0.0f };
+    // Only used by log_softmax
+    acc_t max_count[WARP_BATCH] { 0.0f };
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         int batch_element_count = (i >= local_batches) ? 0 : element_count;
@@ -152,7 +185,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             if (!is_masked) {
                 if (is_log_softmax) {
-                    sum[i] += std::exp(elements[i][it] - max_value[i]);
+                    log_softmax_accumulate(sum[i], max_count[i], elements[i][it] - max_value[i]);
                 } else {
                     elements[i][it] = std::exp(elements[i][it] - max_value[i]);
                     sum[i] += elements[i][it];
@@ -166,7 +199,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 if (valid) {
                     if (!mask[idx]) {
                         if (is_log_softmax) {
-                            sum[i] += std::exp(elements[i][it] - max_value[i]);
+                            log_softmax_accumulate(sum[i], max_count[i], elements[i][it] - max_value[i]);
                         } else {
                             elements[i][it] = std::exp(elements[i][it] - max_value[i]);
                             sum[i] += elements[i][it];
@@ -186,13 +219,16 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         }
     }
     warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum);
+    if (is_log_softmax) {
+        warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(max_count);
+    }
 
     // store result
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         if (i >= local_batches)
             break;
-        if (is_log_softmax) sum[i] = std::log(sum[i]);
+        if (is_log_softmax) sum[i] = log_softmax_log_sum(sum[i], max_count[i]);
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
@@ -288,7 +324,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
                 }
                 // compute gradients
                 else if (is_log_softmax) {
-                    gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - std::exp(output_reg[i][it]) * sum[i]);
+                    gradInput[i*element_count+it*WARP_SIZE] = log_softmax_backward_element(grad_reg[i][it], output_reg[i][it], sum[i]);
                 } else {
                     gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - output_reg[i][it] * sum[i]);
                 }
