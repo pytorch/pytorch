@@ -15,6 +15,7 @@
 
 #include <type_traits>
 #include <tuple>
+#include <c10/util/irange.h>
 
 #if defined(USE_ROCM) || defined(_MSC_VER)
 #else
@@ -830,8 +831,8 @@ template <typename Element, typename LayoutDest, typename LayoutSrc>
 static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
                          cutlass::TensorRef<Element, LayoutSrc> src,
                          const int problem_size_m, const int problem_size_k) {
-  for (int m = 0; m < problem_size_m; m++) {
-    for (int k = 0; k < problem_size_k; k++) {
+  for (const auto m : c10::irange(problem_size_m)) {
+    for (const auto k : c10::irange(problem_size_k)) {
       // First reorder the rows.
       int group = (sizeof(Element) == 2) ? 32 : 16;
       int interweave = (sizeof(Element) == 2) ? 4 : 2;

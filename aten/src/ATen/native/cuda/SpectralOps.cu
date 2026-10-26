@@ -8,6 +8,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 
 #include <array>
+#include <c10/util/irange.h>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -39,7 +40,7 @@ struct HermitianSymmetryOffsetCalculator {
     dims = sizes.size();
 
     using at::cuda::detail::IntDivider;
-    for (dim_type i = 0; i < MAX_DIMS; ++i) {
+    for (const auto i : c10::irange(MAX_DIMS)) {
       if (i < dims) {
         sizes_[i] = IntDivider<index_t>(sizes[i]);
         strides_[i] = strides[i] / element_size;
@@ -58,7 +59,7 @@ struct HermitianSymmetryOffsetCalculator {
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
     stride_t offset = 0;
 
-    for (dim_type dim = 0; dim < dims; ++dim) {
+    for (const auto dim : c10::irange(dims)) {
       auto divmod = sizes_[dim].divmod(linear_idx);
       linear_idx = divmod.div;
 

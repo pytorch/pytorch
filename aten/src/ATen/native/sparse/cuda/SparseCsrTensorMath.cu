@@ -40,6 +40,7 @@
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
+#include <c10/util/irange.h>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
@@ -288,7 +289,7 @@ Tensor& add_out_dense_sparse_compressed_cuda(
                       index_t end_index = compressed_indices_accessor
                           [batch_idx * compressed_stride0 + i_compressed + 1];
 
-                      for (index_t i = start_index; i < end_index; ++i) {
+                      for (const auto i : c10::irange(start_index, end_index)) {
                         auto i_plain = plain_indices_accessor
                             [batch_idx * plain_stride0 + i];
                         auto index = batch_idx * out_stride_batch +
@@ -424,7 +425,7 @@ __global__ void reduce_sparse_csr_dim0_cuda_kernel(acc_t* new_values,
   if (tid < new_nnz) {
     index_t col = new_col_indices[tid];
     acc_t v = rop.identity();
-    for (int64_t j=0; j < nnz; j++) {
+    for (const auto j : c10::irange(nnz)) {
       if (col == col_indices[j]) {
         v = rop(v, acc_t(values[j]));
       }
@@ -531,7 +532,7 @@ __global__ void reduce_crow_indices_dim1_cuda_kernel(index_t* new_crow_indices,
                                                      ) {
   int64_t nnz = 0;
   new_crow_indices[0] = 0;
-  for(int64_t i=0; i<nrows; i++) {
+  for(const auto i : c10::irange(nrows)) {
     if (crow_indices[i] != crow_indices[i + 1]) {
       row_map[i] = nnz;
       nnz++;
@@ -554,7 +555,7 @@ __global__ void reduce_sparse_csr_dim1_cuda_kernel(acc_t* new_values,
     index_t i_end = crow_indices[tid+1];
     if (i_start != i_end) {
       acc_t acc = rop.identity();
-      for (index_t i = i_start; i < i_end; i++) {
+      for (const auto i : c10::irange(i_start, i_end)) {
         acc = rop(acc, acc_t(values[i]));
       }
       new_values[row_map[tid]] = acc;

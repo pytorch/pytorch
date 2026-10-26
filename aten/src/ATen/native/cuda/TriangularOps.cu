@@ -18,6 +18,7 @@
 #endif
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <c10/util/irange.h>
 
 #define BOOL_SWITCH(COND, CONST_NAME, ...)      \
   [&] {                                         \
@@ -110,7 +111,7 @@ __global__ void triu_tril_kernel(
           frag[i] = self_info.data[self_offset + i * self_info.strides[dims - 1]];
 
         #pragma unroll
-        for (int i = 0; i < elements_per_thread; i++) {
+        for (const auto i : c10::irange(elements_per_thread)) {
           bool mask = upper ? (col + i - row >= k) : (col + i - row <= k);
           frag[i] = mask ? frag[i] : scalar_t(0);
         }

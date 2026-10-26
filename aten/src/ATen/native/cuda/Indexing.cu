@@ -304,7 +304,7 @@ __global__ void indexing_backward_kernel(
 
         while (start_feature < stride) {
           #pragma unroll
-          for (int ii = 0; ii < SZ; ii++) {
+          for (const auto ii : c10::irange(SZ)) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
               gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
@@ -315,7 +315,7 @@ __global__ void indexing_backward_kernel(
           }
 
           #pragma unroll
-          for (int ii = 0; ii < SZ; ii++) {
+          for (const auto ii : c10::irange(SZ)) {
             if (accumulate) {
               weight[ii] += gradient[ii] * scale;
             } else {
@@ -324,7 +324,7 @@ __global__ void indexing_backward_kernel(
           }
 
           #pragma unroll
-          for (int ii = 0; ii < SZ; ii++) {
+          for (const auto ii : c10::irange(SZ)) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
                 grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
@@ -374,7 +374,7 @@ __global__ void indexing_backward_kernel_stride_1(
 
         int laneIdx = threadIdx.x % C10_WARP_SIZE;
         int64_t num_warp_passes = num_duplicates / C10_WARP_SIZE;
-        for (int64_t i = 0; i < num_warp_passes; ++i) {
+        for (const auto i : c10::irange(num_warp_passes)) {
             grad_row = ((int64_t) indices[idx + i * C10_WARP_SIZE + laneIdx]) * stride + z * numel * stride;
             gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
         }
@@ -430,7 +430,7 @@ __global__ void indexing_backward_kernel_small_stride(
           static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale);
       } else {
         opmath_t gradient = (opmath_t)0.0;
-        for (int64_t i = 0; i < num_duplicates; ++i) {
+        for (const auto i : c10::irange(num_duplicates)) {
           grad_row = ((int64_t) indices[idx + i]) * stride + z * numel * stride;
           gradient += static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale;
         }
@@ -469,7 +469,7 @@ __global__ void indexing_backward_kernel_quantized(
 
         while (start_feature < stride) {
           #pragma unroll
-          for (int ii = 0; ii < SZ; ii++) {
+          for (const auto ii : c10::irange(SZ)) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
               gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
@@ -477,12 +477,12 @@ __global__ void indexing_backward_kernel_quantized(
           }
 
           #pragma unroll
-          for (int ii = 0; ii < SZ; ii++) {
+          for (const auto ii : c10::irange(SZ)) {
             weight[ii] = gradient[ii] * scale;
           }
 
           #pragma unroll
-          for (int ii = 0; ii < SZ; ii++) {
+          for (const auto ii : c10::irange(SZ)) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
                 // we do quantization here
@@ -1030,7 +1030,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   // it can be reused as much as possible. This kernel is chosen when
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
-  for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
+  for (const auto srcIndex : c10::irange(indices.sizes[0])) {
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
@@ -1595,7 +1595,7 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
   // it can be reused as much as possible. This kernel is chosen when
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
-  for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
+  for (const auto dstIndex : c10::irange(indices.sizes[0])) {
     IndexType srcIndex =
       indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
     CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
@@ -2033,7 +2033,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
                 index_t* __restrict__ ptr_res_dim_indices_out = ptr_res_dim_indices + offset;
                 const index_t* __restrict__ ptr_argsort_dim_indices_in = ptr_argsort_dim_indices + first_match;
                 index_t* __restrict__ ptr_selected_dim_indices_out = ptr_selected_dim_indices + offset;
-                for (index_t i = 0; i < count; ++i) {
+                for ([[maybe_unused]] const auto _ : c10::irange(count)) {
                   *ptr_res_dim_indices_out++ = idx_idx;
                   *ptr_selected_dim_indices_out++ = *ptr_argsort_dim_indices_in++;
                 }

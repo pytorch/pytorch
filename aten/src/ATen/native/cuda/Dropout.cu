@@ -14,6 +14,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -79,7 +80,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
     // sets of rand.
     if ((VEC >= 4) || (gridxvec_loop_state == 0)) {
       #pragma unroll
-      for (int ii = 0; ii < RAND_SIZE; ii++) {
+      for (const auto ii : c10::irange(RAND_SIZE)) {
         rand[ii] = curand_uniform4(&state);
       }
     } else {
@@ -97,7 +98,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
     }
 
     #pragma unroll
-    for (int ii = 1; ii < RAND_SIZE; ii++) {
+    for (const auto ii : c10::irange(1, RAND_SIZE)) {
       rand[ii].x = rand[ii].x < p;
       rand[ii].y = rand[ii].y < p;
       rand[ii].z = rand[ii].z < p;
@@ -115,9 +116,9 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
 
     // Perform the actual computation
     #pragma unroll
-    for (int jj = 0; jj < RAND_SIZE; jj++) {
+    for (const auto jj : c10::irange(RAND_SIZE)) {
       #pragma unroll
-      for (int ii = 0; ii < std::min(VEC, 4); ii++) {
+      for (const auto ii : c10::irange(std::min(VEC, 4))) {
         r[jj * 4 + ii] = src[jj * 4 + ii]*(&rand[jj].x)[ii]*scale;
         mask[jj * 4 + ii] = (mask_t)(&rand[jj].x)[ii];
       }
@@ -163,7 +164,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
        rand.y = rand.y < p;
        rand.z = rand.z < p;
        rand.w = rand.w < p;
-       for (int ii = 0; ii < UNROLL; ii++) {
+       for (const auto ii : c10::irange(UNROLL)) {
            IndexType li = linearIndex + blockDim.x * gridDim.x * ii;
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `a`
@@ -172,7 +173,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                src[ii] = a.data[aOffset];
            }
        }
-       for (int ii = 0; ii < UNROLL; ii++) {
+       for (const auto ii : c10::irange(UNROLL)) {
            IndexType li = linearIndex + blockDim.x * gridDim.x * ii;
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `b`

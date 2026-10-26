@@ -27,6 +27,7 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_ROCM
 #include <ATen/cuda/detail/ROCmMacros.cuh>
@@ -222,7 +223,7 @@ __device__ WelfordDataLN compute_stats(
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
       #pragma unroll
-      for (int ii=0; ii < vec_size; ii++){
+      for (const auto ii : c10::irange(vec_size)){
         wd = cuWelfordOnlineSum<acc_t, rms_norm>(static_cast<acc_t>(data.val[ii]), wd);
       }
     }
@@ -305,7 +306,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
       // Computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
       if (gamma_vec != nullptr && beta_vec != nullptr) {
         #pragma unroll
-        for (int ii=0; ii < vec_size; ii++){
+        for (const auto ii : c10::irange(vec_size)){
           if constexpr (!rms_norm){
             out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
               + static_cast<T_ACC>(beta_vec[i].val[ii]);
@@ -315,7 +316,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
         }
       } else if (gamma_vec != nullptr) {
         #pragma unroll
-        for (int ii=0; ii < vec_size; ii++){
+        for (const auto ii : c10::irange(vec_size)){
           if constexpr (!rms_norm){
             out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
           } else {
@@ -324,12 +325,12 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
         }
       } else if (beta_vec != nullptr) {
         #pragma unroll
-        for (int ii=0; ii < vec_size; ii++){
+        for (const auto ii : c10::irange(vec_size)){
             out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
       } else {
         #pragma unroll
-        for (int ii=0; ii < vec_size; ii++){
+        for (const auto ii : c10::irange(vec_size)){
           if constexpr (!rms_norm){
             out.val[ii] = rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean);
           } else {
@@ -403,7 +404,7 @@ __device__ __inline__ void compute_gI(
 
     for (; l+unroll - 1 < N; l += blockDim.x * unroll){
       #pragma unroll
-      for (int k=0; k< unroll; k++){
+      for (const auto k : c10::irange(unroll)){
           const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
           const auto c_h = static_cast<T_ACC>(X_i[l+k]);
           const auto c_loss = static_cast<T_ACC>(dY_i[l+k]);
@@ -514,7 +515,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   vec_t* const dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
 
   vec_t X_i_vec_reg, dY_i_vec_reg, gamma_vec_reg, dX_i_vec_reg;
-  for (int k = 0; k < vec_size; ++k) {
+  for (const auto k : c10::irange(vec_size)) {
     gamma_vec_reg.val[k] = T(1);
   }
 
@@ -529,7 +530,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     X_i_vec_reg = X_i_vec_ptr[vec_idx];
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
-    for (int k = 0; k < vec_size; ++k) {
+    for (const auto k : c10::irange(vec_size)) {
       const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
       const auto c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
       const auto c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
@@ -585,7 +586,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     X_i_vec_reg = X_i_vec_ptr[vec_idx];
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
-    for (int k = 0; k < vec_size; ++k) {
+    for (const auto k : c10::irange(vec_size)) {
       const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
       const auto x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
       const auto dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
@@ -637,7 +638,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
   if (j < N) {
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
-    for (int64_t i = 0; i < M; ++i) {
+    for (const auto i : c10::irange(M)) {
       const int64_t index = i * N + j;
       if constexpr (!rms_norm){
         sum1 += dg == nullptr ? T_ACC(0)
@@ -702,7 +703,7 @@ blockReduceGammaBetaBackwardsHelper(
     T_ACC dY_regs[rows_per_thread_y] = {0};
     T_ACC X_regs[rows_per_thread_y] = {0};
     #pragma unroll
-    for (int i = 0; i < rows_per_thread_y; ++i) {
+    for (const auto i : c10::irange(rows_per_thread_y)) {
       int64_t current_y = M_start + threadIdx.y * rows_per_thread_y + i;
       bool active = true;
       if (check_x && thread_x >= N) {
@@ -718,7 +719,7 @@ blockReduceGammaBetaBackwardsHelper(
     }
 
     #pragma unroll
-    for (int i = 0; i < rows_per_thread_y; ++i) {
+    for (const auto i : c10::irange(rows_per_thread_y)) {
       T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, C10_WARP_SIZE);
       if constexpr (!rms_norm){
         T_ACC mean_reg = WARP_SHFL(warp_mean, i, C10_WARP_SIZE);
@@ -1457,7 +1458,7 @@ void cuComputeGradGammaBeta(
     }
 
     if (i2 < N) {
-        for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
+        for (const auto warp_offset : c10::irange(num_warp_reductions)) {
           sum_gamma += part_grad_gamma_ptr[warp_offset*N];
           if constexpr (!rms_norm){
             sum_beta += part_grad_beta_ptr[warp_offset*N];

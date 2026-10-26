@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 
@@ -103,7 +104,7 @@ struct FusedSgdMathFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
 #pragma unroll
-        for (auto i = 0; i < depth; i++) {
+        for (const auto i : c10::irange(depth)) {
           load_store(r_args[i], args[i], 0, i_start);
         }
         sgd_math<scalar_t, opmath_t, depth>(

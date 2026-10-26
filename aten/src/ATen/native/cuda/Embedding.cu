@@ -14,6 +14,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/thread_constants.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -167,7 +168,7 @@ __global__ void embedding_backward_kernel(
       accscalar_t weight[SZ];
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
+      for (const auto ii : c10::irange(SZ)) {
         int feature_dim = start_feature + ii * C10_WARP_SIZE;
         if (feature_dim < stride) {
           gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
@@ -176,12 +177,12 @@ __global__ void embedding_backward_kernel(
       }
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
+      for (const auto ii : c10::irange(SZ)) {
         weight[ii] += gradient[ii] * scale;
       }
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
+      for (const auto ii : c10::irange(SZ)) {
         int feature_dim = start_feature + ii * C10_WARP_SIZE;
         if (feature_dim < stride) {
             grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);

@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 
+#include <c10/util/irange.h>
 #include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -80,7 +81,7 @@ __global__ void multilabel_margin_loss_forward_kernel(
 
   // mark targets in is_target
   if (threadIdx.x == 0) {
-    for (int dt = 0; dt < dim; dt++) {
+    for (const auto dt : c10::irange(dim)) {
       int target_idx = target_k[dt];
       if (target_idx < 0) {
         break;
@@ -92,7 +93,7 @@ __global__ void multilabel_margin_loss_forward_kernel(
 
   // iterate over targets
   accscalar_t sum = 0;
-  for (int dt = 0; dt < dim; dt++) {
+  for (const auto dt : c10::irange(dim)) {
     // next target:
     int target_idx = target_k[dt];
     if (target_idx < 0) {
@@ -162,7 +163,7 @@ __global__ void multilabel_margin_loss_backward_kernel(
   __syncthreads();
 
   // iterate over targets
-  for (int dt = 0; dt < dim; dt++) {
+  for (const auto dt : c10::irange(dim)) {
     // next target:
     int target_idx = static_cast<int>(target_k[dt]);
     if (target_idx < 0) {

@@ -186,7 +186,7 @@ static c10::cuda::CUDAStream _getCarveoutStream(int32_t value) {
   // set bits to 0 based on how many CUs to carve out
   int32_t full_shifts = value / 32;
   int32_t remainder = value % 32;
-  for (int32_t i = 0; i < full_shifts; i++) {
+  for (const auto i : c10::irange(full_shifts)) {
     mask[i] = uint32_t{0xffffffff};
   }
   mask[full_shifts] = uint32_t{0xffffffff} << (32 - remainder);
@@ -2118,7 +2118,7 @@ void scaled_gemm(
     }
     // pick first valid solution
     bool found = false;
-    for (size_t i = 0; i < all_algos.size(); i++) {
+    for (const auto i : c10::irange(all_algos.size())) {
         size_t ret_workspace_size = 0;
         auto is_valid_status = hipblaslt_ext::matmulIsAlgoSupported(
                 ltHandle,
