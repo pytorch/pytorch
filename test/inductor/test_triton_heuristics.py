@@ -175,7 +175,7 @@ class TestTritonHeuristics(TestCase):
             hash_configs,
         )
 
-        message = "Config.extra_options must be JSON-serializable"
+        message = "Config.extra_options cannot be serialized with sorted JSON keys"
         cfg = self._config_with_extra_options(options)
         with self.assertRaisesRegex(TypeError, message):
             hash_configs([cfg])
@@ -1479,10 +1479,12 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
+@instantiate_parametrized_tests
 class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
 
-    def test_static_restore_selects_extra_options_winner(self):
+    @parametrize("tuned_options", [False, True])
+    def test_static_restore_selects_extra_options_winner(self, tuned_options):
         from torch._inductor.runtime.autotune_cache import AutotuneCache
         from torch._inductor.runtime.hints import DeviceProperties, HeuristicType
         from torch._inductor.runtime.triton_heuristics import hash_configs
@@ -1497,6 +1499,8 @@ class TestRecheckAutotuneCache(TestCase):
             cfg.extra_options = {"backend_option": value}
             configs.append(cfg)
         results = [self._make_compile_result(cfg) for cfg in configs]
+        winner = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        winner.extra_options = {"backend_option": 5 if tuned_options else 4}
         inductor_meta = {
             "autotune_local_cache": True,
             "autotune_remote_cache": False,
@@ -1533,11 +1537,27 @@ class TestRecheckAutotuneCache(TestCase):
                 tuner.inductor_meta, tuner.filename, hash_configs(configs)
             )
             self.assertIsNotNone(cache)
-            cache.save(configs[1], 1000)
-            tuner.recheck_autotune_cache(reload_source)
+            cache.save(winner, 1000)
+            compiled_winner = self._make_compile_result(winner)
+            with patch.object(
+                tuner, "_precompile_config", return_value=compiled_winner
+            ) as precompile:
+                tuner.recheck_autotune_cache(reload_source)
         self.assertEqual(tuner.autotune_cache_info["autotune_cache_state"], "hit")
         self.assertEqual(len(tuner.compile_results), 1)
-        self.assertIs(tuner.compile_results[0], results[1])
+        if tuned_options:
+            precompile.assert_called_once()
+            self.assertEqual(
+                precompile.call_args.args[0].extra_options, winner.extra_options
+            )
+            self.assertIs(tuner.compile_results[0], compiled_winner)
+        else:
+            precompile.assert_not_called()
+            self.assertIs(tuner.compile_results[0], results[1])
+        self.assertEqual(
+            [cfg.extra_options for cfg in configs],
+            [{"backend_option": 2}, {"backend_option": 4}],
+        )
         reload_source.assert_not_called()
 
     @staticmethod

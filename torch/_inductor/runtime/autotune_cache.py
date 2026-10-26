@@ -732,28 +732,22 @@ def _load_cached_autotuning(
             and cfg.num_stages == best_config.get("num_stages")
             and getattr(cfg, "maxnreg", None) == maxnreg
         ]
-        if matching_configs:
+        if len(matching_configs) > 1:
             extra_options_key = extra_options_to_hashable(extra_options)
-            exact_matches = [
+            matching_configs = [
                 cfg
                 for cfg in matching_configs
                 if extra_options_to_hashable(getattr(cfg, "extra_options", None))
                 == extra_options_key
             ]
-            if len(exact_matches) == 1:
-                matched_config = exact_matches[0]
-            elif len(matching_configs) == 1:
-                # Backends may tune options after candidate creation.
-                matched_config = matching_configs[0]
-            else:
-                return None
+        if len(matching_configs) == 1:
+            matched_config = matching_configs[0]
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config
 
-    # Reconstruct Config from cached data. This handles both coordesc
-    # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
-    # that aren't in the original config list.
+    # Reconstruct Config when no unique candidate matches, or when the
+    # cached config was found by coordinate descent.
     best_config.pop("found_by_coordesc", None)
     triton_config = _reconstruct_triton_config(best_config, extra_options, maxnreg)
     if found_by_coordesc:

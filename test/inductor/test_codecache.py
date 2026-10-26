@@ -6170,33 +6170,51 @@ class TestAutotuneCacheExtraOptions(TestCase):
 
     @requires_triton()
     @parametrize(
-        "options",
+        "options, winner_options",
         [
-            [{"option": 2}, {"option": 3}],
-            [None, None],
-            [{"option": 4}, {"option": 4}],
+            ([{"option": 2}, {"option": 3}], {"option": 4}),
+            ([None, None], {"option": 4}),
+            ([None, None], None),
+            ([{"option": 4}, {"option": 4}], {"option": 4}),
         ],
     )
-    def test_conflicting_or_ambiguous_extra_options_miss(self, options):
+    def test_conflicting_or_ambiguous_extra_options_reconstruct(
+        self, options, winner_options
+    ):
         from triton import Config
 
-        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
 
         configs = []
         for extra_options in options:
             cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
             cfg.extra_options = extra_options
             configs.append(cfg)
-        best_config = {
-            "XBLOCK": 128,
-            "num_warps": 4,
-            "num_stages": 1,
-            "configs_hash": "test_hash",
-            "extra_options": {"option": 4},
+        winner = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        winner.extra_options = winner_options
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
         }
-        self.assertIsNone(
-            _load_cached_autotuning(best_config, "test_hash", configs, {})
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(winner, time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.kwargs, winner.kwargs)
+        self.assertEqual(result.num_warps, winner.num_warps)
+        self.assertEqual(result.num_stages, winner.num_stages)
+        self.assertEqual(result.extra_options, winner_options)
+        for cfg in configs:
+            self.assertIsNot(result, cfg)
         self.assertEqual([cfg.extra_options for cfg in configs], options)
 
     @requires_triton()

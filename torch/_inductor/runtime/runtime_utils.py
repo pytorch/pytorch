@@ -70,13 +70,13 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 
 
 def extra_options_to_hashable(extra_options: Any) -> str:
-    """Canonicalize backend options with string keys and JSON-serializable values."""
+    """Serialize backend options as sorted JSON; string keys are assumed."""
     try:
         return json.dumps(extra_options or {}, sort_keys=True)
     except (TypeError, ValueError) as exc:
         raise TypeError(
-            "Triton Config.extra_options must be JSON-serializable "
-            "with string dictionary keys, including when autotune caching is disabled."
+            "Triton Config.extra_options cannot be serialized with sorted JSON keys. "
+            "Use JSON-serializable values and string dictionary keys."
         ) from exc
 
 
