@@ -257,7 +257,6 @@ REGISTER_THRESHOLD_OP(int);
 REGISTER_THRESHOLD_OP(short);
 REGISTER_THRESHOLD_OP(char);
 REGISTER_THRESHOLD_OP(uchar);
-REGISTER_THRESHOLD_OP(bool);
 
 struct prelu_functor {
   template <typename T>
@@ -281,11 +280,6 @@ struct silu_functor {
 REGISTER_UNARY_OP(silu, float, float);
 REGISTER_UNARY_OP(silu, half, half);
 REGISTER_UNARY_OP(silu, bfloat, bfloat);
-REGISTER_UNARY_OP(silu, int, int);
-REGISTER_UNARY_OP(silu, short, short);
-REGISTER_UNARY_OP(silu, char, char);
-REGISTER_UNARY_OP(silu, uchar, uchar);
-REGISTER_UNARY_OP(silu, bool, bool);
 
 struct silu_backward_functor {
   template <typename T>

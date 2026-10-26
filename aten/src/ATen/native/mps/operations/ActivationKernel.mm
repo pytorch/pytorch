@@ -106,7 +106,7 @@ static void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, co
 }
 
 static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND3(c10::kHalf, c10::kBFloat16, c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "threshold_mps", [&]() {
     ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
     lib.exec_binary_kernel_with_params(
         iter,
@@ -121,6 +121,10 @@ static void prelu_kernel(TensorIterator& iter) {
 }
 
 static void silu_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()) || isComplexType(iter.common_dtype()),
+                              "\"silu_mps\" not implemented for '",
+                              iter.common_dtype(),
+                              "'");
   if (isComplexType(iter.common_dtype())) {
     auto out = iter.output(0);
     auto self = iter.input(0);
