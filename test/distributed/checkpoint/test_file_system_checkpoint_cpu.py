@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import dataclasses
 import inspect
 import os
 import queue
@@ -27,6 +28,7 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.planner import WriteItemType
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -637,6 +639,27 @@ class TestThreadCountAutoTuning(TestCase):
                 path=path, thread_count=None, max_threads=8, min_size_per_thread=1
             )
             self.assertEqual(writer._calculate_optimal_thread_count(plan), 1)
+
+    def test_calculate_optimal_thread_count_uses_local_shard_size(self) -> None:
+        base = self._create_plan({f"t{i}": torch.ones(1, 256) for i in range(4)})
+        global_size = torch.Size([8, 256])
+        items = [
+            dataclasses.replace(
+                item,
+                type=WriteItemType.SHARD,
+                tensor_data=dataclasses.replace(item.tensor_data, size=global_size),
+            )
+            for item in base.items
+        ]
+        plan = dataclasses.replace(base, items=items)
+        with tempfile.TemporaryDirectory() as path:
+            writer = FileSystemWriter(
+                path=path, thread_count=None, max_threads=8, min_size_per_thread=2048
+            )
+            with mock.patch(
+                "os.sched_getaffinity", return_value=set(range(8)), create=True
+            ):
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 2)
 
     def test_write_data_thread_count_is_optional(self) -> None:
         # Subclasses such as HuggingFaceStorageWriter call _write_data() with the pre-existing signature.

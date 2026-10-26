@@ -3,6 +3,7 @@ import collections
 import dataclasses
 import io
 import json
+import math
 import operator
 import os
 import pickle
@@ -726,7 +727,10 @@ class _FileSystemWriter(StorageWriter):
             return max_threads
 
         total_size = sum(
-            _item_size(item) for item in plan.items if item.tensor_data is not None
+            math.prod(item.tensor_data.chunk.sizes)
+            * torch._utils._element_size(item.tensor_data.properties.dtype)
+            for item in plan.items
+            if item.tensor_data is not None
         )
         suggested_threads = total_size // self.min_size_per_thread
 
