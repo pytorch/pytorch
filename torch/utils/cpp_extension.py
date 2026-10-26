@@ -610,6 +610,9 @@ def _qualified_cudnn_versions() -> list[tuple[tuple[int, int], str]]:
     return qualified
 
 
+_CUDNN_MAJOR_MISMATCH_WARNED: set[tuple[tuple[int, int], str]] = set()
+
+
 def _pick_cudnn_version(qualified: list[tuple[tuple[int, int], str]]) -> str | None:
     # One choice for include, lib, and bin: exact, then newest minor of that
     # major, then newest. 13.10 ranks after 13.2.
@@ -623,6 +626,17 @@ def _pick_cudnn_version(qualified: list[tuple[tuple[int, int], str]]) -> str | N
         same_major = [item for item in qualified if item[0][0] == wanted[0]]
         if same_major:
             return max(same_major)[1]
+        chosen = max(qualified)[1]
+        warned = (wanted, chosen)
+        if warned not in _CUDNN_MAJOR_MISMATCH_WARNED:
+            _CUDNN_MAJOR_MISMATCH_WARNED.add(warned)
+            logger.warning(
+                "cuDNN for CUDA %s.%s was not found; using CUDA %s instead",
+                wanted[0],
+                wanted[1],
+                chosen,
+            )
+        return chosen
     return max(qualified)[1]
 
 

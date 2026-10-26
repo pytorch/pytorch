@@ -377,11 +377,12 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 else:
                     library = os.path.join(root, "lib", "13.0")
                 self.assertEqual(cpp._cudnn_library_dir(), library)
-                flags = cpp._prepare_ldflags([], True, False, False, False)
-                if IS_WINDOWS:
-                    self.assertIn(f"/LIBPATH:{library}", flags)
-                else:
-                    self.assertIn(f"-L{library}", flags)
+                if not cpp.IS_HIP_EXTENSION:
+                    flags = cpp._prepare_ldflags([], True, False, False, False)
+                    if IS_WINDOWS:
+                        self.assertIn(f"/LIBPATH:{library}", flags)
+                    else:
+                        self.assertIn(f"-L{library}", flags)
 
     def test_inline_jit_compile_extension_with_functions_as_list(self):
         cpp_source = """
