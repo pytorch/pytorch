@@ -52,6 +52,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     FSDPCommContext,
     FSDPParamGroup,
 )
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
+)
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -616,6 +620,27 @@ instantiate_device_type_tests(
 )
 
 
+class TestFullyShardNativeReduceScatterInputFn(TestCase):
+    def test_noncontiguous_grads_match_default(self, device):
+        # Noncontiguous gradients sharded on a nonzero dim take the default reorder
+        grads = [torch.randn(8, 4, device=device).t(), torch.randn(4, 6, device=device)]
+        outputs = []
+        for input_fn in (
+            _default_reduce_scatter_input_fn,
+            reduce_scatter_input_fn_with_native_copy,
+        ):
+            output = torch.empty(56, device=device)
+            unsharded_grads = [grad.clone() for grad in grads]
+            input_fn(unsharded_grads, shard_dims=[1, 1], world_size=2)(output)
+            outputs.append(output)
+        self.assertEqual(outputs[0], outputs[1])
+
+
+instantiate_device_type_tests(
+    TestFullyShardNativeReduceScatterInputFn, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
 class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -823,6 +848,153 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
         with self.assertRaisesRegex(NotImplementedError, "not supported for DTensor"):
             fsdp_param.to_sharded_post_forward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_input_fn_setter(self):
+        # The native copy-in passes num_leading_dims and the default one does not
+        num_leading_dims: list[list[int] | None] = []
+
+        class RecordCopyIns(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.ops.fsdp.chunk_cat_mixed_dtype.default:
+                    num_leading_dims.append(kwargs.get("num_leading_dims"))
+                return func(*args, **kwargs)
+
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False, device=device_type),
+            nn.Linear(8, 8, bias=False, device=device_type),
+        )
+        for module in (model[0], model):
+            fully_shard(module, shard_placement_fn=lambda param: Shard(1))
+        inp = torch.randn((2, 8), device=device_type)
+
+        def record_copy_ins():
+            num_leading_dims.clear()
+            loss = model(inp).sum()
+            with RecordCopyIns():
+                loss.backward()
+            return num_leading_dims
+
+        # Backward reduce-scatters the root's weight before model[0]'s
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        self.assertEqual(record_copy_ins(), [[1], [1]])
+        model.set_reduce_scatter_input_fn(None, recurse=False)
+        self.assertEqual(record_copy_ins(), [None, [1]])
+        model.set_reduce_scatter_input_fn(None)
+        self.assertEqual(record_copy_ins(), [None, None])
+
+
+class TestFullyShardCustomAllocation(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @parametrize("shard_dim", [0, 1])
+    @parametrize(
+        "collective,native_copy",
+        [
+            ("all_gather", False),
+            ("all_gather", True),
+            ("reduce_scatter", False),
+            ("reduce_scatter", True),
+        ],
+    )
+    def test_strided_allocation(self, device, shard_dim, collective, native_copy):
+        test_case = self
+        model = nn.Linear(8, 4, bias=False, device=device)
+        dist.broadcast(model.weight.detach(), src=0)
+        reference = copy.deepcopy(model)
+        shard_numel = model.weight.numel() // self.world_size
+        num_strided_allocations = 0
+
+        class StridedAlloc:
+            def allocate(self, size, *, dtype, device):
+                nonlocal num_strided_allocations
+                # FSDP views the reduced gradient with contiguous strides.
+                if collective == "reduce_scatter" and size == (shard_numel,):
+                    return torch.empty(size, dtype=dtype, device=device)
+                num_strided_allocations += 1
+                buffer = torch.empty((*size, 2), dtype=dtype, device=device)[..., 0]
+                test_case.assertFalse(buffer.is_contiguous())
+                return buffer
+
+        class StridedAllGather(StridedAlloc, DefaultAllGather):
+            def __call__(self, output_tensor, input_tensor, group, async_op=False):
+                output = torch.empty_like(output_tensor)
+                super().__call__(output, input_tensor.contiguous(), group)
+                output_tensor.copy_(output)
+
+        class StridedReduceScatter(StridedAlloc, DefaultReduceScatter):
+            def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
+                output = torch.empty_like(output_tensor)
+                super().__call__(output, input_tensor.contiguous(), group, op)
+                output_tensor.copy_(output)
+
+        fully_shard(
+            model,
+            mesh=init_device_mesh(torch.device(device).type, (self.world_size,)),
+            shard_placement_fn=lambda param: Shard(shard_dim),
+        )
+        if collective == "all_gather":
+            model.set_custom_all_gather(StridedAllGather())
+            if native_copy:
+                # FSDPModule has no setter for the all-gather copy-out yet
+                group = fully_shard.state(model)._fsdp_param_group
+                group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+        else:
+            model.set_custom_reduce_scatter(StridedReduceScatter())
+            if native_copy:
+                model.set_reduce_scatter_input_fn(
+                    reduce_scatter_input_fn_with_native_copy
+                )
+        native_ops = {
+            "all_gather": torch.ops.fsdp._all_gather_copy_out_.default,
+            "reduce_scatter": torch.ops.fsdp.chunk_cat_mixed_dtype.default,
+        }
+
+        class RecordCopies(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                # The default copy-in calls chunk_cat_mixed_dtype without
+                # num_leading_dims
+                is_default_copy_in = (
+                    func == native_ops["reduce_scatter"]
+                    and kwargs.get("num_leading_dims") is None
+                )
+                if func in native_counts and not is_default_copy_in:
+                    native_counts[func] += 1
+                return func(*args, **kwargs)
+
+        optim = torch.optim.SGD(model.parameters(), lr=0.1)
+        reference_optim = torch.optim.SGD(reference.parameters(), lr=0.1)
+        for iteration in range(2):
+            # Distinct values make a reordered copy change the results
+            inp = torch.arange(16.0, device=device).view(2, 8) + self.rank + iteration
+            expected = reference(inp)
+            expected.sum().backward()
+            native_counts = dict.fromkeys(native_ops.values(), 0)
+            with RecordCopies():
+                actual = model(inp)
+                actual.sum().backward()
+            self.assertEqual(actual, expected)
+            for direction, op in native_ops.items():
+                self.assertEqual(
+                    native_counts[op] > 0, native_copy and direction == collective
+                )
+            dist.all_reduce(reference.weight.grad)
+            reference.weight.grad.div_(self.world_size)
+            self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
+            optim.step()
+            reference_optim.step()
+            optim.zero_grad()
+            reference_optim.zero_grad()
+        self.assertGreater(num_strided_allocations, 0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardCustomAllocation, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
