@@ -1,13 +1,9 @@
 import copy
-import dis
 import functools
 import json
 import os
 import re
 import sys
-import types
-import unittest
-import unittest.case as _unittest_case
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
@@ -23,102 +19,6 @@ from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
 
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
-
-
-# unittest.skipIf(True) and skipUnless(False) both call skip(), so the
-# wrapper is identical afterwards. Stamp skip() only when those are not
-# the caller. Known-failure decorators set __pt_rerun_code_skip__ themselves.
-_UNCONDITIONAL_SKIP_ATTR = "__pt_unconditional_skip__"
-_RERUN_CODE_SKIP_ATTR = "__pt_rerun_code_skip__"
-_RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
-_RERUN_STAMP_OWNER_ATTR = "__pt_rerun_stamp_owner__"
-_RERUN_DEVICE_STAMP_OWNER_ATTR = "__pt_rerun_device_stamp_owner__"
-
-
-def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str, str]:
-    # Prefer the source file so this plugin loads when torch is not built.
-    import importlib.util
-    from pathlib import Path
-
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "torch"
-        / "testing"
-        / "_internal"
-        / "rerun_code_skip.py"
-    )
-    if path.is_file():
-        spec = importlib.util.spec_from_file_location("_pt_rerun_code_skip", path)
-        if spec is not None and spec.loader is not None:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            return (
-                mod.UNCONDITIONAL_SKIP_ATTR,
-                mod.RERUN_CODE_SKIP_ATTR,
-                mod.RERUN_SKIP_DEVICE_ATTR,
-                mod.RERUN_STAMP_OWNER_ATTR,
-                mod.RERUN_DEVICE_STAMP_OWNER_ATTR,
-            )
-    from torch.testing._internal.rerun_code_skip import (
-        RERUN_CODE_SKIP_ATTR,
-        RERUN_DEVICE_STAMP_OWNER_ATTR,
-        RERUN_SKIP_DEVICE_ATTR,
-        RERUN_STAMP_OWNER_ATTR,
-        UNCONDITIONAL_SKIP_ATTR,
-    )
-
-    return (
-        UNCONDITIONAL_SKIP_ATTR,
-        RERUN_CODE_SKIP_ATTR,
-        RERUN_SKIP_DEVICE_ATTR,
-        RERUN_STAMP_OWNER_ATTR,
-        RERUN_DEVICE_STAMP_OWNER_ATTR,
-    )
-
-
-(
-    _UNCONDITIONAL_SKIP_ATTR,
-    _RERUN_CODE_SKIP_ATTR,
-    _RERUN_SKIP_DEVICE_ATTR,
-    _RERUN_STAMP_OWNER_ATTR,
-    _RERUN_DEVICE_STAMP_OWNER_ATTR,
-) = _load_rerun_code_skip_attrs()
-
-_ORIG_UNITTEST_SKIP = _unittest_case.skip
-_CONDITIONAL_SKIP_CODES = (
-    _unittest_case.skipIf.__code__,
-    _unittest_case.skipUnless.__code__,
-)
-
-
-def _stamp_unconditional_skip(test_item: Any) -> Any:
-    try:
-        setattr(test_item, _UNCONDITIONAL_SKIP_ATTR, True)
-        setattr(test_item, _RERUN_STAMP_OWNER_ATTR, id(test_item))
-    except (AttributeError, TypeError):
-        return test_item
-    return test_item
-
-
-def _rerun_aware_unittest_skip(reason: Any) -> Any:
-    from_conditional = sys._getframe(1).f_code in _CONDITIONAL_SKIP_CODES
-    result = _ORIG_UNITTEST_SKIP(reason)
-    if from_conditional:
-        return result
-    if isinstance(reason, types.FunctionType):
-        return _stamp_unconditional_skip(result)
-
-    def _stamp(test_item: Any) -> Any:
-        return _stamp_unconditional_skip(result(test_item))
-
-    return _stamp
-
-
-# Dynamo names this function as unittest.case.skip. Swap it only while rerun
-# mode is on, so a normal pytest run still sees the original function.
-if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
-    _unittest_case.skip = _rerun_aware_unittest_skip
-    unittest.skip = _rerun_aware_unittest_skip
 
 
 try:
@@ -424,361 +324,19 @@ def pytest_report_teststatus(report, config):
         )
 
 
-def _skip_func(obj: Any) -> Any:
-    if obj is None:
-        return None
-    return getattr(obj, "__func__", obj)
-
-
-def _has_rerun_stamp(obj: Any) -> bool:
-    if obj is None:
-        return False
-    return bool(
-        getattr(obj, _UNCONDITIONAL_SKIP_ATTR, False)
-        or getattr(obj, _RERUN_CODE_SKIP_ATTR, False)
-    )
-
-
-def _copy_rerun_stamps(src: Any, dst: Any) -> None:
-    for attr in (_UNCONDITIONAL_SKIP_ATTR, _RERUN_CODE_SKIP_ATTR):
-        if getattr(src, attr, False):
-            try:
-                setattr(dst, attr, True)
-            except (AttributeError, TypeError):
-                pass
-
-
-def _owns_device_stamp(fn: Any) -> bool:
-    # functools.wraps copies the device name. The owner id is the wrapper
-    # stamp_rerun_device_skip marked, same rule as _owns_rerun_stamp.
-    return getattr(fn, _RERUN_DEVICE_STAMP_OWNER_ATTR, None) == id(fn)
-
-
-def _device_allows_rerun(item: Any, target: Any) -> bool:
-    # A copied device name is not this wrapper's stamp. An outer known-bug
-    # skip stays removable on CUDA when an inner MPS skip's name was copied.
-    if not _owns_device_stamp(target):
-        return True
-    expected = getattr(target, _RERUN_SKIP_DEVICE_ATTR, None)
-    if expected is None:
-        return True
-    cls = getattr(item, "cls", None)
-    return getattr(cls, "device_type", None) == expected
-
-
-# Kept on the item until the test finishes, then written with record_property.
-_CODE_SKIP_REASON_ATTR = "_pt_code_skip_reason"
-# Class-level unittest.skip is cleared on the first method. Later methods
-# still need the original __unittest_skip_why__, and must stay in the run.
-_SAVED_SKIP_WHY_ATTR = "_pt_saved_skip_why"
-
-
-def _remember_code_skip_reason(item: Any, reason: Any) -> None:
-    if reason is None:
-        return
-    text = reason if isinstance(reason, str) else str(reason)
-    text = text.strip()
-    if not text:
-        return
-    prev = getattr(item, _CODE_SKIP_REASON_ATTR, None)
-    if isinstance(prev, str) and prev:
-        if text == prev or text in prev.split("\n"):
-            return
-        text = f"{prev}\n{text}"
-    try:
-        setattr(item, _CODE_SKIP_REASON_ATTR, text)
-    except (AttributeError, TypeError):
-        return
-
-
-def _unittest_skip_why(obj: Any) -> str:
-    why = getattr(obj, "__unittest_skip_why__", None)
-    if not why:
-        why = getattr(obj, _SAVED_SKIP_WHY_ATTR, None)
-    if not why:
-        return ""
-    return why if isinstance(why, str) else str(why)
-
-
-def _clear_unittest_skip(obj: Any) -> None:
-    if not getattr(obj, "__unittest_skip__", False):
-        return
-    why = getattr(obj, "__unittest_skip_why__", None)
-    if why:
-        try:
-            setattr(obj, _SAVED_SKIP_WHY_ATTR, why)
-        except (AttributeError, TypeError):
-            pass
-    obj.__unittest_skip__ = False
-    obj.__unittest_skip_why__ = ""
-
-
-def _replace_item_obj(item: Any, replacement: Any) -> None:
-    cls = getattr(item, "cls", None)
-    name = getattr(item, "originalname", None) or getattr(item, "name", None)
-    if cls is not None and name and hasattr(cls, name):
-        setattr(cls, name, replacement)
-        item._obj = None
-    else:
-        item.obj = replacement
-
-
-def _code_raises_skiptest(code: Any) -> bool:
-    # `raise SkipTest(...)` loads the name and then raises. `except SkipTest`
-    # uses CHECK_EXC_MATCH first; that wrapper must stay in place.
-    loaded = False
-    for instr in dis.get_instructions(code):
-        if instr.argval == "SkipTest" and instr.opname.startswith("LOAD"):
-            loaded = True
-            continue
-        if not loaded:
-            continue
-        if instr.opname == "CHECK_EXC_MATCH":
-            loaded = False
-            continue
-        if instr.opname == "RAISE_VARARGS":
-            return True
-    return False
-
-
-def _is_skiptest_wrapper(fn: Any) -> bool:
-    # A skip wrapper raises SkipTest and wraps the next function. The body
-    # does neither. A wrapper that only catches SkipTest and re-raises it
-    # (the @ops test_wrapper) fails _code_raises_skiptest, so it is not one.
-    # __unittest_skip__ is not enough: functools.wraps copies that flag from
-    # unittest.skip onto instantiated_test, which passes device and dtype
-    # and does not raise.
-    if fn is None:
-        return False
-    code = getattr(fn, "__code__", None)
-    if code is None or "SkipTest" not in getattr(code, "co_names", ()):
-        return False
-    if getattr(fn, "__wrapped__", None) is None:
-        return False
-    return _code_raises_skiptest(code)
-
-
-def _closure_skip_reason(fn: Any) -> str:
-    code = getattr(fn, "__code__", None)
-    closure = getattr(fn, "__closure__", None)
-    if code is None or not closure:
-        return ""
-    freevars = getattr(code, "co_freevars", ())
-    for name, cell in zip(freevars, closure):
-        try:
-            contents = cell.cell_contents
-        except ValueError:
-            continue
-        if name == "reason" and isinstance(contents, str) and contents.strip():
-            return contents.strip()
-        reason = getattr(contents, "reason", None)
-        if isinstance(reason, str) and reason.strip() and hasattr(contents, "dep"):
-            return reason.strip()
-    return ""
-
-
-def _wrapper_skip_reason(fn: Any) -> str:
-    why = _unittest_skip_why(fn)
-    if why:
-        return why
-    return _closure_skip_reason(fn)
-
-
-def _retarget_outer_wrapper(outer: Any, body: Any) -> None:
-    # instantiated_test and the @ops test_wrapper call the closed-over
-    # function, not __wrapped__. Point that cell at the next kept function
-    # so device and dtype are still passed.
-    previous = getattr(outer, "__wrapped__", None)
-    closure = getattr(outer, "__closure__", None)
-    if closure and previous is not None:
-        for cell in closure:
-            try:
-                contents = cell.cell_contents
-            except ValueError:
-                continue
-            if contents is previous:
-                cell.cell_contents = body
-    try:
-        outer.__wrapped__ = body
-    except (AttributeError, TypeError):
-        return
-
-
-def _wrapper_chain(fn: Any) -> list[Any]:
-    chain: list[Any] = []
-    seen: set[int] = set()
-    current = fn
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        chain.append(current)
-        nxt = getattr(current, "__wrapped__", None)
-        if nxt is None:
-            break
-        current = nxt
-    return chain
-
-
-def _owns_rerun_stamp(fn: Any) -> bool:
-    # True on the wrapper rerun_code_skip or stamp_rerun_device_skip marked.
-    # functools.wraps copies the stamp bits, but the owner id stays the
-    # inner function's id, so onlyCUDA and instantiated_test do not match.
-    return getattr(fn, _RERUN_STAMP_OWNER_ATTR, None) == id(fn)
-
-
-def _is_removable_code_skip(item: Any, fn: Any) -> bool:
-    if not _is_skiptest_wrapper(fn) or not _owns_rerun_stamp(fn):
-        return False
-    # Owned device stamps run only on that device. A copied name does not.
-    return _device_allows_rerun(item, fn)
-
-
-def _peel_rerun_skip_wrappers(item: Any, fn: Any) -> Any:
-    # Walk the whole __wrapped__ chain, however long it is. Keep
-    # instantiated_test and any wrapper that only catches SkipTest and
-    # re-raises it. Drop every owned code-skip wrapper. Leave unstamped
-    # capability skips (onlyCUDA, skipIf, skipUnless) where they sit.
-    if fn is None:
-        return fn
-    keep: list[Any] = []
-    for node in _wrapper_chain(fn):
-        if _is_removable_code_skip(item, node):
-            _remember_code_skip_reason(item, _wrapper_skip_reason(node))
-            continue
-        keep.append(node)
-    if not keep:
-        return fn
-    for idx, node in enumerate(keep):
-        if idx + 1 >= len(keep):
-            break
-        nxt = keep[idx + 1]
-        if getattr(node, "__wrapped__", None) in (None, nxt):
-            continue
-        _retarget_outer_wrapper(node, nxt)
-    return keep[0]
-
-
-def _pytest_skip_reason(markers: list[Any]) -> str:
-    parts: list[str] = []
-    for marker in markers:
-        kwargs = getattr(marker, "kwargs", None)
-        reason = kwargs.get("reason") if isinstance(kwargs, dict) else None
-        if not reason:
-            args = getattr(marker, "args", None) or ()
-            if args:
-                reason = args[0]
-        if not reason:
-            continue
-        text = reason if isinstance(reason, str) else str(reason)
-        text = text.strip()
-        if text:
-            parts.append(text)
-    return "\n".join(parts)
-
-
-def _clear_installed_unittest_skip(
-    item: Any, installed: Any, *, kept_outer: bool
-) -> None:
-    # TestCase.run never calls a method with __unittest_skip__ set. wraps
-    # copies that flag onto the next function, so clear it on the method
-    # that is actually installed. A capability or device skip we kept must
-    # stay a skip: its own flag is what suppresses the call.
-    if _is_skiptest_wrapper(installed):
-        return
-    if getattr(installed, "__unittest_skip__", False):
-        _remember_code_skip_reason(item, _wrapper_skip_reason(installed))
-        _clear_unittest_skip(installed)
-    elif kept_outer:
-        _remember_code_skip_reason(item, _wrapper_skip_reason(installed))
-
-
-def _enable_unconditional_unittest_skip(item: Any) -> bool:
-    target = _skip_func(getattr(item, "obj", None))
-    # Device allowance is per wrapper. The name on the outermost function
-    # is often a copy and must not decide the rest of the chain.
-    removable = any(
-        _is_removable_code_skip(item, node) for node in _wrapper_chain(target)
-    )
-    if removable:
-        peeled = _peel_rerun_skip_wrappers(item, target)
-        if peeled is not target:
-            _copy_rerun_stamps(target, peeled)
-            _replace_item_obj(item, peeled)
-        _clear_installed_unittest_skip(item, peeled, kept_outer=peeled is target)
-        return True
-    cls = getattr(item, "cls", None)
-    class_stamped = cls is not None and _has_rerun_stamp(cls)
-    if not class_stamped:
-        return False
-    # Clearing __unittest_skip__ on the first method used to return False for
-    # the rest, so pytest dropped them. Every method on the stamped class runs.
-    if getattr(cls, "__unittest_skip__", False):
-        _remember_code_skip_reason(item, _unittest_skip_why(cls))
-        _clear_unittest_skip(cls)
-    else:
-        _remember_code_skip_reason(item, getattr(cls, _SAVED_SKIP_WHY_ATTR, None))
-    return True
-
-
-def _enable_unconditional_pytest_skip(item: Any) -> bool:
-    own_skip = [m for m in item.own_markers if getattr(m, "name", None) == "skip"]
-    if not own_skip:
-        return False
-    # skipif is conditional. Do not clear it.
-    if any(True for _ in item.iter_markers(name="skipif")):
-        return False
-    _remember_code_skip_reason(item, _pytest_skip_reason(own_skip))
-    item.own_markers[:] = [
-        m for m in item.own_markers if getattr(m, "name", None) != "skip"
-    ]
-    target = _skip_func(getattr(item, "obj", None))
-    if target is not None:
-        setattr(target, _UNCONDITIONAL_SKIP_ATTR, True)
-    return True
-
-
-def _keep_for_rerun(item: Any, disabled_tests: dict[str, set[str]]) -> bool:
-    """Keep GitHub-disabled tests and code skips that rerun mode executes."""
-    parent = item.parent
-    test_class = parent.name if parent is not None else ""
-    # Pytest 7 names a module node after its path relative to rootdir
-    # (`test/tmpX/foo.py`). The disabled JSON, and older pytest, use the
-    # file name. Match both so a module-level listing still collects.
-    parent_keys = {test_class, os.path.basename(test_class)}
-    cls = getattr(item, "cls", None)
-    if cls is not None:
-        parent_keys.add(cls.__name__)
-    listed = any(
-        key in disabled_tests and item.name in disabled_tests[key]
-        for key in parent_keys
-        if key
-    )
-    unittest_skip = _enable_unconditional_unittest_skip(item)
-    pytest_skip = _enable_unconditional_pytest_skip(item)
-    return listed or unittest_skip or pytest_skip
-
-
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list[Any]) -> None:
     """
     This hook is used when rerunning disabled tests to get rid of all skipped tests
     instead of running and skipping them N times. This avoids flooding the console
     and XML outputs with junk. So we want this to run last when collecting tests.
-
-    Unconditional unittest.skip, pytest.mark.skip, and known-failure code
-    skips are kept and their skip is cleared so the body runs. Device
-    instantiation wraps the skip again. On a matching device the outer
-    instantiate wrapper stays and only the inner SkipTest wrapper is
-    removed, so device and dtype are still passed. That reason is stored
-    for the report. A class skip stays cleared for every method. The
-    reason is copied onto the item first. skipIf and other capability
-    skips are not cleared and do not get a code_skip property.
     """
     rerun_disabled_tests = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
     if not rerun_disabled_tests:
         return
 
     disabled_regex = re.compile(r"(?P<test_name>.+)\s+\([^\.]+\.(?P<test_class>.+)\)")
-    disabled_tests: dict[str, set[str]] = defaultdict(set)
+    disabled_tests = defaultdict(set)
 
     # This environment has already been set by run_test before it calls pytest
     disabled_tests_file = os.getenv("DISABLED_TESTS_FILE", "")
@@ -793,47 +351,38 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
                 test_class = m["test_class"]
                 disabled_tests[test_class].add(test_name)
 
-    # When rerunning disabled tests, ignore cases that are neither disabled on
-    # GitHub nor a code skip this mode executes.
+    from torch.testing._internal.rerun_code_skip import rerun_code_skip_reason
+
+    # When rerunning disabled test, ignore all test cases that are not disabled,
+    # except known-failure code skips, which are kept and report their reason
     filtered_items = []
 
     for item in items:
-        if not _keep_for_rerun(item, disabled_tests):
-            continue
+        test_name = item.name
+        test_class = item.parent.name
 
-        reason = getattr(item, _CODE_SKIP_REASON_ATTR, None)
+        code_skip = None
+        if (
+            test_class not in disabled_tests
+            or test_name not in disabled_tests[test_class]
+        ):
+            code_skip = rerun_code_skip_reason(
+                getattr(item, "obj", None), getattr(item, "cls", None)
+            )
+            if code_skip is None:
+                continue
+
         cpy = copy.copy(item)
-        if reason:
-            _remember_code_skip_reason(cpy, reason)
         cpy._initrequest()
+        if code_skip is not None:
+            # A new list: copy.copy shares user_properties with every flake-finder copy
+            cpy.user_properties = [*cpy.user_properties, ("code_skip", code_skip)]
 
         filtered_items.append(cpy)
 
     items.clear()
     # NB: Need to edit items directly here to have the list reflected back to pytest
     items.extend(filtered_items)
-
-
-def _record_property(item: Any, name: str, value: str) -> None:
-    """Same write as pytest's record_property fixture."""
-    props = getattr(item, "user_properties", None)
-    if not isinstance(props, list):
-        return
-    for pair in props:
-        if isinstance(pair, tuple) and pair and pair[0] == name:
-            return
-    props.append((name, value))
-
-
-@pytest.hookimpl(hookwrapper=True, tryfirst=True)
-def pytest_runtest_makereport(item: Any, call: Any) -> None:
-    # junitxml writes record_property values from the teardown report, which
-    # copies item.user_properties when that report is built.
-    if getattr(call, "when", None) == "teardown":
-        reason = getattr(item, _CODE_SKIP_REASON_ATTR, None)
-        if isinstance(reason, str) and reason:
-            _record_property(item, "code_skip", reason)
-    yield
 
 
 def _spawns_multiple_processes(

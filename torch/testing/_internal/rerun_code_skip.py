@@ -1,32 +1,25 @@
 # mypy: allow-untyped-defs
-"""Stamps for tests that rerun-disabled-tests should execute.
+"""Known-failure skips that rerun-disabled-tests runs instead of skipping.
 
-Importing this module must not import torch. The rerun test file loads it
-even when the extension is not built.
+In rerun-disabled-tests mode a marked test runs even though it is not in the
+disabled-tests JSON. test/conftest.py reports its skip reason as the
+``code_skip`` JUnit property, and tools/stats/check_disabled_tests.py uploads
+those results to their own collection.
 """
 
+import functools
+import os
 import unittest
 
 
-# Set on @unittest.skip by test/conftest.py when the caller is not skipIf
-# or skipUnless. Duplicated here so check_if_enable can see it without
-# importing the pytest plugin.
-UNCONDITIONAL_SKIP_ATTR = "__pt_unconditional_skip__"
-RERUN_CODE_SKIP_ATTR = "__pt_rerun_code_skip__"
-# Device-instantiation skips (skipMPS and friends). Collection runs the
-# body only when the instantiated class device matches this value.
-RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
-# functools.wraps copies the stamps above onto every outer wrapper.
-# The value is the id of the function that was actually stamped, so a
-# copy on onlyCUDA or instantiated_test does not look owned.
-RERUN_STAMP_OWNER_ATTR = "__pt_rerun_stamp_owner__"
-# Device name is copied the same way. rerun_code_skip then takes the
-# code-skip owner id for itself, so this id is what still says which
-# wrapper called stamp_rerun_device_skip.
-RERUN_DEVICE_STAMP_OWNER_ATTR = "__pt_rerun_device_stamp_owner__"
+RUN_CODE_SKIPS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 
-# Messages that mean "this ROCm/CUDA API is not there", not "this test is
-# a known failure". Checked before the known-bug phrases.
+# Maps a device type, or None for every device, to the skip reason.
+# functools.wraps copies it onto outer wrappers such as instantiate_test.
+_REASONS_ATTR = "__pt_rerun_code_skip_reasons__"
+
+# Messages that mean "this API is not there on ROCm", not "this test is a
+# known failure". Checked before the known-bug phrases.
 _UNSUPPORTED_API_MARKERS = (
     "ptx",
     "cuda-specific",
@@ -37,48 +30,40 @@ _UNSUPPORTED_API_MARKERS = (
 )
 
 
-def _own_rerun_stamp(fn):
-    try:
-        setattr(fn, RERUN_STAMP_OWNER_ATTR, id(fn))
-    except (AttributeError, TypeError):
-        return fn
-    return fn
+def _forwarding_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def mark_rerun_code_skip(fn, reason, device_type=None):
+    """Mark ``fn`` so rerun-disabled-tests runs it, on ``device_type`` only if given."""
+    # Decorators are often applied to a function shared by several tests
+    # (OpInfo variants, device classes), so mark a fresh wrapper instead.
+    marked = fn if isinstance(fn, type) else _forwarding_wrapper(fn)
+    reasons = {**getattr(fn, _REASONS_ATTR, {}), device_type: reason}
+    setattr(marked, _REASONS_ATTR, reasons)
+    return marked
 
 
 def rerun_code_skip(reason):
-    """unittest.skip that rerun-disabled-tests will execute."""
-
-    def decorator(fn):
-        skipped = unittest.skip(reason)(fn)
-        try:
-            setattr(skipped, RERUN_CODE_SKIP_ATTR, True)
-        except (AttributeError, TypeError):
-            return skipped
-        return _own_rerun_stamp(skipped)
-
-    return decorator
+    """unittest.skip for a known failure, which rerun-disabled-tests runs instead."""
+    if RUN_CODE_SKIPS:
+        return functools.partial(mark_rerun_code_skip, reason=reason)
+    return unittest.skip(reason)
 
 
-def stamp_rerun_device_skip(fn, device_type: str):
-    """Mark a device-instantiation wrapper. Collection unwraps only that device."""
-    try:
-        setattr(fn, RERUN_CODE_SKIP_ATTR, True)
-        setattr(fn, RERUN_SKIP_DEVICE_ATTR, device_type)
-        setattr(fn, RERUN_DEVICE_STAMP_OWNER_ATTR, id(fn))
-    except (AttributeError, TypeError):
-        return fn
-    return _own_rerun_stamp(fn)
-
-
-def has_rerun_skip_stamp(func, cls=None) -> bool:
-    for obj in (func, cls):
-        if obj is None:
-            continue
-        if getattr(obj, UNCONDITIONAL_SKIP_ATTR, False) or getattr(
-            obj, RERUN_CODE_SKIP_ATTR, False
-        ):
-            return True
-    return False
+def rerun_code_skip_reason(fn, cls):
+    """The reason rerun-disabled-tests runs this test, or None if it does not."""
+    device_type = getattr(cls, "device_type", None)
+    for obj in (fn, cls):
+        reasons = getattr(obj, _REASONS_ATTR, {})
+        reason = reasons.get(device_type, reasons.get(None))
+        if reason is not None:
+            return reason
+    return None
 
 
 def rocm_message_is_known_bug(msg: str) -> bool:
@@ -95,6 +80,4 @@ def rocm_message_is_known_bug(msg: str) -> bool:
         return True
     if "doesn't currently work" in text or "does not currently work" in text:
         return True
-    if "numerical" in text:
-        return True
-    return False
+    return "numerical" in text
