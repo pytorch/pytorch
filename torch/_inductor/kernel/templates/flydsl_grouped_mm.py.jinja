@@ -8,7 +8,9 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     make_gemm_param_and_validate,
 )
 from torch._inductor.runtime.flydsl_cache import (
+    compile_flydsl,
     configure_flydsl_cache_dir,
+    is_capturing_flydsl_compiles,
     run_cached_flydsl,
     temporary_env,
 )
@@ -78,7 +80,8 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
             "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
             "by the FlyDSL precompile path"
         )
-    if flydsl_compile_only:
+    aot_compile = is_capturing_flydsl_compiles()
+    if flydsl_compile_only or aot_compile:
         # Precompilation runs on fake tensors that have no device to query, and
         # the persistent kernel reads its grid from gridDim, so the size the disk
         # cache is warmed with does not have to match the one used at runtime.
@@ -109,8 +112,8 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
         stream,
     )
     configure_flydsl_cache_dir()
-    if flydsl_compile_only:
-        flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
+    if flydsl_compile_only or aot_compile:
+        compile_flydsl(flyc.compile, launch_gemm_gfx950_grouped, *compile_args)
     else:
         run_cached_flydsl(
             launch_gemm_gfx950_grouped,

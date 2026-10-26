@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import os
 import threading
 from pathlib import Path
@@ -10,13 +11,44 @@ from typing import Any, TYPE_CHECKING
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
 
 # Serialize cold compiles process-wide; warm cache hits bypass this lock.
-_compiled_cache_lock = threading.Lock()
+_compiled_cache_lock = threading.RLock()
+_compile_observer: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+    "flydsl_compile_observer",
+    default=None,
+)
+
+
+@contextlib.contextmanager
+def flydsl_compile_lock():
+    """Serialize process-global FlyDSL target environment and cold compiles."""
+    with _compiled_cache_lock:
+        yield
+
+
+@contextlib.contextmanager
+def capture_flydsl_compiles(observer):
+    """Observe compile calls in this context without mutating FlyDSL globals."""
+    token = _compile_observer.set(observer)
+    try:
+        yield
+    finally:
+        _compile_observer.reset(token)
+
+
+def is_capturing_flydsl_compiles() -> bool:
+    return _compile_observer.get() is not None
+
+
+def compile_flydsl(compiler, jit_func, *args, **kwargs):
+    observer = _compile_observer.get()
+    if observer is not None:
+        return observer(compiler, jit_func, args, kwargs)
+    return compiler(jit_func, *args, **kwargs)
 
 
 class LazyFlyDSLLauncher:
@@ -134,7 +166,7 @@ def run_cached_flydsl(
                 else compile_args
             )
             with temporary_env({"FLYDSL_GPU_ARCH": _device_gpu_arch(device)}):
-                compiled = compiler(jit_func, *args)
+                compiled = compile_flydsl(compiler, jit_func, *args)
             compiled_cache[cache_key] = compiled
         else:
             dispatch_after_wait = True
@@ -200,8 +232,8 @@ def run_flydsl_template(
             stream,
         )
 
-    if flydsl_compile_only:
-        return compiler(jit_func, *make_compile_args())
+    if flydsl_compile_only or is_capturing_flydsl_compiles():
+        return compile_flydsl(compiler, jit_func, *make_compile_args())
     return run_cached_flydsl(
         jit_func,
         constexpr_param=constexpr_param,
