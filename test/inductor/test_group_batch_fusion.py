@@ -490,7 +490,7 @@ _LAYOUT_GUARD_RESOLUTION_CASES = {
     "dropout_training": (_guard_case_dropout_training, False),
     "dropout_training_omitted": (_guard_case_dropout_training_omitted, False),
     "softmin": (_guard_case_softmin, False),
-    "softmax_no_dim": (_guard_case_softmax_no_dim, True),
+    "softmax_no_dim": (_guard_case_softmax_no_dim, False),
     "cat_after_view": (_guard_case_cat_after_view, True),
     "conj_physical": (_guard_case_conj_physical, True),
     "flip": (_guard_case_flip, True),

@@ -531,7 +531,7 @@ class BatchLinearLHSFusion(BatchFusion):
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
-        ) and is_linear_node_can_be_fused(node, check_mutation=False):
+        ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
@@ -735,6 +735,9 @@ _COPY_OPS = OrderedSet(
     ]
 )
 
+# Ops whose output allocation or stride order does not depend on the input's
+# strides. Consumers may reshape the 2-D linear result, so bmm and SDPA are
+# included; internal fused-attention variants are not present in pre-grad IR.
 _LAYOUT_INDEPENDENT_OPS = OrderedSet(
     [
         "cat",
@@ -751,10 +754,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "native_layer_norm",
         "rms_norm",
         "scaled_dot_product_attention",
-        "_scaled_dot_product_flash_attention",
-        "_scaled_dot_product_efficient_attention",
-        "_scaled_dot_product_cudnn_attention",
-        "_scaled_dot_product_attention_math",
         "log_softmax",
         "rsub",
         "where",
@@ -857,9 +856,9 @@ def _compute_user_overload(user: torch.fx.Node):
     if target is torch.nn.functional.softmax or target is (
         torch.nn.functional.log_softmax
     ):
-        if get_arg_value(user, 1, "dim") is None:
-            return None
-        args = (*args[:2], *args[3:])
+        dim = get_arg_value(user, 1, "dim")
+        args = (args[0], -1 if dim is None else dim, *args[3:])
+        kwargs.pop("dim", None)
         name = "softmax" if target is torch.nn.functional.softmax else "log_softmax"
         target = getattr(torch.ops.aten, name)
     elif target is torch.nn.functional.softmin:
@@ -1267,7 +1266,7 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     return False
 
 
-def is_linear_node_can_be_fused(node: torch.fx.Node, check_mutation=True):
+def is_linear_node_can_be_fused(node: torch.fx.Node):
     input = get_arg_value(node, 0, "input")
     weight = get_arg_value(node, 1, "weight")
     return (
@@ -1279,10 +1278,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node, check_mutation=True):
         # the mm -> bmm transform adds an unbind() op,
         # which is not safe for autograd when the output of the mm is mutated.
         # don't pattern match if any users of the mm mutate the input.
-        and (
-            not check_mutation
-            or not any(_is_mutable_node(user.target) for user in node.users)
-        )
+        and not any(_is_mutable_node(user.target) for user in node.users)
     )
 
 
