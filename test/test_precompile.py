@@ -9718,12 +9718,19 @@ elif phase == "version":
     mismatched = os.path.join(directory, "mismatched.py")
     with open(mismatched, "w") as f:
         f.write(source)
-    try:
-        runpy.run_path(mismatched)
-    except torch.compiler.PrecompileError as e:
-        assert "cannot load on torch" in str(e), e
-    else:
-        raise AssertionError("ran an artifact produced by another torch")
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            runpy.run_path(mismatched)
+        except torch.compiler.PrecompileError as e:
+            assert "cannot load on torch" in str(e), e
+        else:
+            raise AssertionError("ran an artifact produced by another torch")
+    # No import of the missing module was even tried.
+    messages = [str(w.message) for w in caught]
+    assert not any(repr(module) in m for m in messages), messages
 else:
     import warnings
 
@@ -9791,7 +9798,11 @@ class TestPrecompileCustomOpModules(TestCase):
             # the entry calls, so they run once per form.
             if entry in ("fn", "step"):
                 phases += ["registered", "missing"]
-            if (tracer, backend, entry) == ("dynamo", "inductor", "fn"):
+            # Once for each driver that checks versions: standalone and installed.
+            if (tracer, backend, entry) in (
+                ("dynamo", "inductor", "fn"),
+                ("dynamo", "eager", "step"),
+            ):
                 phases.append("version")
             for phase in phases:
                 out = subprocess.run(
