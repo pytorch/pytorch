@@ -2757,8 +2757,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: frac_out
-    MPS: frac_out_mps
+    CPU, CUDA, MPS, XPU: frac_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: frac_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: frac_sparse_csr_out
   tags: pointwise
@@ -3061,7 +3060,8 @@
   precomputed:
   - dim -> int dim
   dispatch:
-    CPU, CUDA, XPU: index_copy_out
+    CPU, XPU: index_copy_out
+    CUDA: index_copy_cuda_out
     MPS: index_copy_out_mps
 
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
@@ -9723,8 +9723,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: signbit_out
-    MPS: signbit_out_mps
+    CPU, CUDA, MPS, XPU: signbit_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: signbit_sparse_csr_out
   tags: pointwise
@@ -15830,7 +15829,7 @@
 - func: special_legendre_polynomial_p.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA, XPU: special_legendre_polynomial_p_out
+    CPU, CUDA, MPS, XPU: special_legendre_polynomial_p_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
