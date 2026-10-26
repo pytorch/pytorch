@@ -181,9 +181,12 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
         # missed: a subset of ranks building a group hangs in the rendezvous, and worse,
         # advances _world.group_count only on those ranks, which is the salt every later
         # group name is derived from. Build it here instead, where every rank is. Skipped
-        # without gloo so such a build keeps failing where it did before, in the
-        # partitioner and only for the graphs it actually syncs.
-        if config._sync_decision_cross_ranks and dist.is_gloo_available():
+        # in a real world without gloo so such a build keeps failing where it did
+        # before, in the partitioner and only for the graphs it actually syncs; a fake
+        # world builds a fake group, which needs no gloo.
+        if config._sync_decision_cross_ranks and (
+            dist.is_gloo_available() or dist.get_backend() == dist.Backend.FAKE
+        ):
             get_compile_sync_pg()
         return local_hit
 
