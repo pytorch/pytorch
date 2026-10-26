@@ -4955,6 +4955,9 @@ class TestPrecompileDynamoCapture(TestCase):
         wrapper = torch._TorchCompileInductorWrapper(None, options, None)
         with self.assertRaisesRegex(ValueError, "not 'eager'"):
             PrecompileSession(single, backend="eager", inductor=wrapper)
+        for key in ("freezing", "force_disable_caches"):
+            with self.assertRaisesRegex(PrecompileError, f"'{key}'.*never files"):
+                self._capture(single, options={key: True})
         for key in ("size_asserts", "scalar_asserts"):
             with self.assertRaisesRegex(PrecompileError, "always compiles with"):
                 self._capture(single, tracer=make_fx, options={key: False})
@@ -4976,10 +4979,29 @@ class TestPrecompileDynamoCapture(TestCase):
         # A make_fx capture compiles one graph; step graph-breaks into two.
         fn = self.mod.single if tracer == "make_fx" else self.mod.step
         tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
-        with mock.patch.object(target, name, wraps=getattr(target, name)) as spy:
+        # compile_to_python first runs compile_fx for the passes before lowering
+        # (pre-grad, joint-graph, freezing), which must see the options too.
+        held = []
+        real_compile_fx = compile_fx.compile_fx
+
+        def outer_compile(*args, **kwargs):
+            config = torch._inductor.config.get_config_copy()
+            held.append(all(config[k] == v for k, v in expected.items()))
+            return real_compile_fx(*args, **kwargs)
+
+        first_step = contextlib.nullcontext()
+        if tracer == "make_fx":
+            first_step = mock.patch.object(compile_fx, "compile_fx", outer_compile)
+        with (
+            first_step,
+            mock.patch.object(target, name, wraps=getattr(target, name)) as spy,
+        ):
             with self._capture(fn, tracer=tracer_obj, **kwargs) as cap:
                 y = cap(self.model, self.x2)
                 graphs = cap.summary().backend_graphs if tracer == "dynamo" else 1
+        if tracer == "make_fx":
+            self.assertGreater(len(held), 0)
+            self.assertNotIn(False, held)
         # compile_fx re-enters itself without config_patches once it has applied
         # them, so each graph is one call that carries them.
         seen = [c.kwargs[kwarg] for c in spy.call_args_list if kwarg in c.kwargs]
