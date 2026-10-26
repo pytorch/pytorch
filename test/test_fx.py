@@ -8,6 +8,7 @@ import contextlib
 import copy
 import gc
 import functools
+import importlib
 import inspect
 import io
 import math
@@ -20,6 +21,7 @@ import traceback
 import types
 import typing
 import unittest
+import unittest.mock
 import weakref
 import warnings
 from math import sqrt
@@ -1666,6 +1668,108 @@ class TestFX(JitTestCase):
         # Test scriptability
         traced_scripted = torch.jit.script(traced)
         self.assertEqual(traced_scripted(torch.rand(4)), 2)
+
+    def test_autowrap_resolves_lazy_imports_with_patches_reverted(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        lazy = object()
+
+        def leaf(x):
+            return x
+
+        seen_while_resolving = []
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name == "sqrt" and dict.__getitem__(self, "sqrt") is lazy:
+                    seen_while_resolving.append(dict.__getitem__(self, "leaf"))
+                    dict.__setitem__(self, "sqrt", math.sqrt)
+                return super().__getitem__(name)
+
+        frame_dict = Globals(sqrt=lazy, leaf=leaf)
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is lazy,
+            create=True,
+        ):
+            with _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", lambda x: x)
+                _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
+                self.assertEqual(seen_while_resolving, [leaf])
+                self.assertIsNot(dict.__getitem__(frame_dict, "leaf"), leaf)
+                self.assertIsNot(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
+    def test_autowrap_restores_patches_when_resolving_a_lazy_import_fails(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        lazy = object()
+
+        def leaf(x):
+            return x
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name == "broken" and dict.__getitem__(self, name) is lazy:
+                    raise ImportError("module body failed")
+                return super().__getitem__(name)
+
+        frame_dict = Globals(broken=lazy, leaf=leaf)
+        patched = lambda x: x  # noqa: E731
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is lazy,
+            create=True,
+        ):
+            with _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", patched)
+                with self.assertRaisesRegex(ImportError, "module body failed"):
+                    _autowrap_check(patcher, frame_dict, set())
+                self.assertIs(dict.__getitem__(frame_dict, "leaf"), patched)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
+    def test_wrap_resolves_a_lazily_imported_name_with_patches_reverted(self):
+        from torch.fx._symbolic_trace import (
+            _Patcher,
+            _patch_wrapped_functions,
+            _wrapped_fns_to_patch,
+        )
+
+        lazy = object()
+
+        def leaf(x):
+            return x
+
+        seen_while_resolving = []
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name == "bar" and dict.__getitem__(self, "bar") is lazy:
+                    seen_while_resolving.append(dict.__getitem__(self, "leaf"))
+                    dict.__setitem__(self, "bar", math.sqrt)
+                return super().__getitem__(name)
+
+        frame_dict = Globals(bar=lazy, leaf=leaf)
+        key = (id(frame_dict), "bar")
+        _wrapped_fns_to_patch[key] = frame_dict
+        try:
+            with unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is lazy,
+                create=True,
+            ):
+                with _Patcher() as patcher:
+                    patcher.patch(frame_dict, "leaf", lambda x: x)
+                    _patch_wrapped_functions(patcher)
+                    self.assertEqual(seen_while_resolving, [leaf])
+                    self.assertIsNot(dict.__getitem__(frame_dict, "bar"), math.sqrt)
+            self.assertIs(dict.__getitem__(frame_dict, "bar"), math.sqrt)
+        finally:
+            del _wrapped_fns_to_patch[key]
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
