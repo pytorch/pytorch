@@ -18,15 +18,21 @@ dim = get_arg_value(split_node, 2, "dim")
 After AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except:
 
 - a `copy_` epilogue at the end of the graph that writes back mutated inputs, and
-- rare storage-mutating ops: `aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`.
+- rare input mutation ops: `aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`, plus `inductor.resize_storage_bytes_.default` and `fsdp.copy_.default` used by FSDP.
 
 Passes can assume the graph is otherwise functional.
 
-Passes do not have to support the storage-mutating ops; because they are rare, it is usually fine to exit early if either appears:
+Passes do not have to support the rare input mutation ops; because they are rare, it is usually fine to exit early if any appears:
 
 ```python
-storage_mutation_ops = (aten.set_.source_Tensor, aten.shallow_copy_data_.default)
-if any(graph.find_nodes(op="call_function", target=op, sort=False) for op in storage_mutation_ops):
+rare_mutation_ops = [
+    aten.set_.source_Tensor,
+    aten.shallow_copy_data_.default,
+    torch.ops.inductor.resize_storage_bytes_.default,
+]
+if hasattr(torch.ops.fsdp, "copy_"):
+    rare_mutation_ops.append(torch.ops.fsdp.copy_.default)
+if any(graph.find_nodes(op="call_function", target=op, sort=False) for op in rare_mutation_ops):
     return
 ```
 
@@ -74,12 +80,14 @@ compare the FakeTensor storage identities in `a.meta["val"]` and `c.meta["val"]`
 rather than inferring aliasing from the operator schema's alias annotations.
 
 - Equal non-`None` storage IDs mean the tensors alias.
-- Different storage IDs mean they do not alias.
+- Different non-`None` storage IDs mean they do not alias.
 - A `None` storage ID means aliasing is unknown and must not be used to establish
-  an alias relationship.
+  either aliasing or non-aliasing.
 
-The same check extends to graph inputs and outputs: they alias iff their sets of
-storages overlap. See `remove_noop_ops` for an example.
+The same check extends to graph inputs and outputs: overlapping sets of known,
+non-`None` storage IDs establish aliasing. Disjoint sets establish non-aliasing
+only when all relevant storage IDs are known. Otherwise, a pass must handle the
+unknown cases conservatively or use another analysis before rewriting.
 
 Only use another approach when there is a strong reason to; using storage
 identity everywhere keeps passes simple and consistent with each other.
