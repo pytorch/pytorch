@@ -646,22 +646,6 @@ class BatchLinearLHSFusion(BatchFusion):
         counters["inductor"]["batch_linear_lhs"] += 1
 
 
-# Poor person's check for if a node in the graph mutates its input.
-# (the graph is torch IR, so we will see torch fns and python operators)
-def _is_mutable_node(tgt):
-    if str(tgt).endswith("_"):
-        # e.g. torch.mul_, torch.Tensor.mul_
-        return True
-    if (
-        hasattr(tgt, "__module__")
-        and tgt.__module__ == "_operator"
-        and tgt.__name__.startswith("i")
-    ):
-        # e.g. operator.iand, operator.imul
-        return True
-    return False
-
-
 _OPERATOR_TO_ATEN = {
     operator.add: torch.ops.aten.add,
     operator.sub: torch.ops.aten.sub,
@@ -684,6 +668,37 @@ _OPERATOR_TO_ATEN = {
     operator.invert: torch.ops.aten.bitwise_not,
 }
 
+# Aliases that never merge source dimensions are traversable: their users are
+# still inspected. getitem covers tensor indexing (select/slice) for the same
+# reason. Merging views are not in this set.
+_NON_MERGING_ALIAS_OPS = OrderedSet(
+    [
+        "alias",
+        "chunk",
+        "detach",
+        "narrow",
+        "permute",
+        "select",
+        "slice",
+        "split",
+        "squeeze",
+        "t",
+        "transpose",
+        "unsqueeze",
+        "unbind",
+        "unflatten",
+        "expand",
+        "movedim",
+        "swapaxes",
+        "swapdims",
+        "split_with_sizes",
+        "tensor_split",
+    ]
+)
+
+# Views that are legal only when they split, not merge, source dimensions.
+_SPLIT_VIEW_OPS = OrderedSet(["view", "reshape", "_unsafe_view"])
+
 _STORAGE_SENSITIVE_OPS = OrderedSet(
     [
         "as_strided",
@@ -696,6 +711,7 @@ _STORAGE_SENSITIVE_OPS = OrderedSet(
     ]
 )
 
+
 _LAYOUT_SENSITIVE_OPS = _STORAGE_SENSITIVE_OPS | OrderedSet(
     [
         "view_as",
@@ -707,6 +723,29 @@ _LAYOUT_SENSITIVE_OPS = _STORAGE_SENSITIVE_OPS | OrderedSet(
         "sym_stride",
         "is_contiguous",
         "sym_is_contiguous",
+    ]
+)
+
+# Copy ops, as both aten overload names and Tensor method names.
+_COPY_OPS = OrderedSet(
+    [
+        "_to_copy",
+        "to",
+        "type",
+        "type_as",
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "long",
+        "int",
+        "short",
+        "char",
+        "byte",
+        "bool",
+        "cpu",
+        "cuda",
+        "xpu",
     ]
 )
 
@@ -862,62 +901,6 @@ def _compute_user_overload(user: torch.fx.Node):
     return _resolve_overload(packet, args, kwargs)
 
 
-def _is_contiguous_user(user: torch.fx.Node, op) -> bool:
-    if user.op == "call_method":
-        return user.target == "contiguous"
-    return op is not None and op.overloadpacket.__name__ == "contiguous"
-
-
-def _contiguous_aliases(user: torch.fx.Node) -> bool:
-    # Eager linears are contiguous, so default contiguous() returns self.
-    # On a fused slice it returns a copy, which hides mutations from the
-    # original consumers.
-    memory_format = user.kwargs.get("memory_format")
-    if memory_format is None and len(user.args) > 1:
-        memory_format = user.args[1]
-    return memory_format in (None, torch.contiguous_format)
-
-
-def _fused_copy_matches_eager(source, root) -> bool:
-    root_value = _node_value(root)
-    root_shape = getattr(root_value, "shape", ())
-    if not root_shape or not statically_known_true(root_shape[0] > 1):
-        return False
-    source_value = _node_value(source)
-    source_shape = getattr(source_value, "shape", ())
-    return bool(source_shape) and all(
-        statically_known_true(dim > 1) for dim in source_shape
-    )
-
-
-_NON_MERGING_ALIAS_OPS = OrderedSet(
-    [
-        "alias",
-        "chunk",
-        "detach",
-        "narrow",
-        "permute",
-        "select",
-        "slice",
-        "split",
-        "squeeze",
-        "t",
-        "transpose",
-        "unsqueeze",
-        "unbind",
-        "unflatten",
-        "expand",
-        "movedim",
-        "swapaxes",
-        "swapdims",
-        "split_with_sizes",
-        "tensor_split",
-    ]
-)
-
-_SPLIT_VIEW_OPS = OrderedSet(["view", "reshape", "_unsafe_view"])
-
-
 def _shape_value(value):
     if isinstance(value, torch.Tensor) and value.dim() > 0:
         return tuple(value.shape)
@@ -952,6 +935,26 @@ def _is_split_only_view(user: torch.fx.Node) -> bool:
             product = product * tgt[index]
             index += 1
     return index == len(tgt)
+
+
+def _is_conversion_user(user: torch.fx.Node, op) -> bool:
+    if op is not None:
+        return op.overloadpacket.__name__ in _COPY_OPS
+    return user.op == "call_method" and user.target in _COPY_OPS
+
+
+def _is_contiguous_user(user: torch.fx.Node, op) -> bool:
+    if user.op == "call_method":
+        return user.target == "contiguous"
+    return op is not None and op.overloadpacket.__name__ == "contiguous"
+
+
+def _contiguous_aliases(user: torch.fx.Node) -> bool:
+    # Eager linears are contiguous, so default contiguous() returns self.
+    # On a fused slice it returns a copy, which hides mutations from the
+    # original consumers.
+    memory_format = _memory_format_arg(user, None)
+    return memory_format in (None, torch.contiguous_format)
 
 
 def _allowed_alias(user: torch.fx.Node, op) -> bool:
@@ -1014,7 +1017,143 @@ def _is_aliasing_user(user: torch.fx.Node) -> bool:
     return any(_is_alias_of(source, result) for source in sources for result in results)
 
 
+# Poor person's check for if a node in the graph mutates its input.
+# (the graph is torch IR, so we will see torch fns and python operators)
+def _is_mutable_node(tgt):
+    if str(tgt).endswith("_"):
+        # e.g. torch.mul_, torch.Tensor.mul_
+        return True
+    if (
+        hasattr(tgt, "__module__")
+        and tgt.__module__ == "_operator"
+        and tgt.__name__.startswith("i")
+    ):
+        # e.g. operator.iand, operator.imul
+        return True
+    return False
+
+
+def _is_mutable_user(user: torch.fx.Node, op) -> bool:
+    if user.op == "output":
+        return False
+    if user.op == "call_module":
+        return True
+    if user.op not in ("call_method", "call_function"):
+        return True
+    if _allowed_alias(user, op):
+        return False
+    if op is not None:
+        return op._schema.is_mutable
+    if _is_conversion_user(user, op):
+        return False
+    if isinstance(user.target, torch._ops.OpOverload):
+        return user.target._schema.is_mutable
+    return True
+
+
+def _alias_user_facts(node: torch.fx.Node, cache) -> tuple[bool, bool, bool]:
+    """Collect mutation, storage and output facts over aliasing users."""
+    pending = list(node.users)
+    visited = OrderedSet()
+    mutable = False
+    storage_sensitive = False
+    output = False
+    while pending:
+        user = pending.pop()
+        if user in visited:
+            continue
+        visited.add(user)
+        if user.op == "output":
+            output = True
+            continue
+        if user.op == "call_module":
+            mutable = True
+            storage_sensitive = True
+            continue
+        if user.op not in ("call_method", "call_function"):
+            mutable = True
+            continue
+        op = _resolve_user_overload(user, cache)
+        if op is not None and op.overloadpacket.__name__ in _STORAGE_SENSITIVE_OPS:
+            storage_sensitive = True
+        if _is_mutable_user(user, op):
+            mutable = True
+        if _is_aliasing_user(user):
+            pending.extend(user.users)
+    return mutable, storage_sensitive, output
+
+
+def _count_contiguous_alias_users(node: torch.fx.Node, cache) -> int:
+    pending = [node]
+    visited = OrderedSet()
+    count = 0
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        for user in current.users:
+            if _is_contiguous_user(user, _resolve_user_overload(user, cache)):
+                count += 1
+                pending.append(user)
+            elif _is_aliasing_user(user):
+                pending.append(user)
+    return count
+
+
+def _fused_copy_matches_eager(source, root) -> bool:
+    root_value = _node_value(root)
+    root_shape = getattr(root_value, "shape", ())
+    if not root_shape or not statically_known_true(root_shape[0] > 1):
+        return False
+    source_value = _node_value(source)
+    source_shape = getattr(source_value, "shape", ())
+    return bool(source_shape) and all(
+        statically_known_true(dim > 1) for dim in source_shape
+    )
+
+
+def _memory_format_arg(user, op):
+    if "memory_format" in user.kwargs:
+        return user.kwargs["memory_format"]
+    if op is not None:
+        for index, argument in enumerate(op._schema.arguments):
+            if argument.name == "memory_format" and index < len(user.args):
+                return user.args[index]
+    return None
+
+
+def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
+    """Return True if fusing the producer would change this user's semantics.
+
+    Fusion replaces a contiguous ``[M, N_i]`` linear output with
+    ``getitem(split(mm(...), dim=1))``, which has row stride ``sum(N)``. A
+    user is sensitive when it can observe that layout or alias it: graph
+    outputs, mutations and ``out=`` calls, stride/storage/contiguity queries,
+    merging views, and unknown ops.
+    Pointwise and known layout-independent ops stay eligible.
+    """
+    if user.op == "output":
+        return True
+    if user.op not in ("call_method", "call_function"):
+        return True
+    name = op.overloadpacket.__name__ if op is not None else None
+    if op is None:
+        # Unresolved targets (custom and higher-order ops) may observe layout.
+        return True
+    if (
+        name in _LAYOUT_SENSITIVE_OPS
+        or op.is_view
+        or (torch.Tag.maybe_aliasing_or_mutating in op.tags)
+    ):
+        return True
+    return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
+
+
 def _layout_sensitive_after_alias(user: torch.fx.Node, op) -> bool:
+    if _is_conversion_user(user, op):
+        memory_format = _memory_format_arg(user, op)
+        return memory_format is not None and memory_format is not torch.preserve_format
     if op is None:
         return False
     if op.overloadpacket.__name__ not in (
@@ -1029,63 +1168,64 @@ def _layout_sensitive_after_alias(user: torch.fx.Node, op) -> bool:
     return isinstance(value, torch.Tensor) and value.dim() >= 4
 
 
-def _is_mutable_user(user: torch.fx.Node, op) -> bool:
-    if user.op == "output":
-        return False
-    if user.op == "call_module":
-        return True
-    if user.op not in ("call_method", "call_function"):
-        return True
-    if _allowed_alias(user, op):
-        return False
-    if op is not None:
-        return op._schema.is_mutable
-    return True
+def _contiguous_user_is_sensitive(user, root, cache, pending) -> bool:
+    """Return True if a contiguous() user observes the fused layout.
 
-
-def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
-    """Return True if fusing the producer would change this direct user.
-
-    Fusion replaces a contiguous ``[M, N_i]`` linear output with
-    ``getitem(split(mm(...), dim=1))``, which has row stride ``sum(N)``. A
-    direct user is sensitive when it can observe that layout or alias it:
-    graph outputs, mutations and ``out=`` calls, stride/storage/contiguity
-    queries, views, copies and unknown ops. Pointwise and known
-    layout-independent ops stay eligible. Alias and copy traversal arrive in
-    later splits.
+    Eager contiguous() on a linear output aliases it, while on a fused slice it
+    copies. So two eager contiguous() calls return the same tensor, while the
+    fused version returns two distinct copies: reject when a second contiguous()
+    is reachable. Otherwise the copy is safe unless a reachable user mutates it,
+    queries its storage, or exposes the original through the graph output with
+    strides that differ from eager.
     """
-    if user.op == "output":
+    if not _contiguous_aliases(user):
         return True
-    if user.op not in ("call_method", "call_function"):
+    source = get_arg_value(user, 0, "input")
+    matches_eager = _fused_copy_matches_eager(source, root)
+    mutable, storage_sensitive, output_alias = _alias_user_facts(user, cache)
+    if not matches_eager and output_alias:
         return True
-    if _is_contiguous_user(user, op):
-        if not _contiguous_aliases(user):
-            return True
-        source = get_arg_value(user, 0, "input")
-        return not _fused_copy_matches_eager(source, root)
-    # Tensor methods are views, aliases or conversions until a later split
-    # classifies them.
-    if user.op == "call_method":
+    if not _is_aliasing_user(user):
+        return False
+    if mutable or storage_sensitive:
         return True
-    if op is None:
+    if output_alias:
+        return not matches_eager or _count_contiguous_alias_users(root, cache) > 1
+    if not matches_eager:
+        pending.extend((next_user, True) for next_user in user.users)
+    return False
+
+
+def _is_copy_user(user: torch.fx.Node, op) -> bool:
+    name = op.overloadpacket.__name__ if op is not None else None
+    if name in ("pad", "constant_pad_nd", "clone"):
         return True
-    name = op.overloadpacket.__name__
-    if name in ("clone", "pad", "constant_pad_nd", "_to_copy", "to", "type_as"):
-        return True
-    if (
-        name in _LAYOUT_SENSITIVE_OPS
-        or op.is_view
-        or (torch.Tag.maybe_aliasing_or_mutating in op.tags)
+    return _is_conversion_user(user, op)
+
+
+def _queue_copy_consumers(user: torch.fx.Node, root, pending) -> None:
+    """Walk a copy's users when they can observe the fused layout.
+
+    A no-op conversion aliases its input, so its users see the original. When
+    the source has a size-1 dim, eager clones/pads/conversions return a
+    contiguous tensor while the fused copy keeps the fused row stride, so the
+    copy's users must be inspected too. When the copy matches eager, it is a
+    safe terminal.
+    """
+    if _is_aliasing_user(user) or not _fused_copy_matches_eager(
+        get_arg_value(user, 0, "input"), root
     ):
-        return True
-    return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
+        pending.extend((next_user, True) for next_user in user.users)
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
-    """Return True if a reachable consumer of ``node`` rejects the fusion.
+    """Return True if fusing ``node`` would change any consumer's behavior.
 
-    Direct users and non-merging aliases are inspected. Copies, conversions
-    and training dropout stay conservative until the next split.
+    Traverses getitem, split-only views and non-merging aliases. A consumer is
+    safe only if it cannot observe the fused slice's strides, aliasing or
+    mutations: pointwise ops and ``_LAYOUT_INDEPENDENT_OPS`` are accepted
+    terminals, while outputs, mutations, layout queries, merging views, custom
+    ops and higher-order ops reject the fusion.
     """
     cache: dict[torch.fx.Node, Any] = {}
     pending = [(user, False) for user in node.users]
@@ -1107,8 +1247,21 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
                 return True
             continue
         if user.target is torch.nn.functional.dropout:
-            log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
-            return True
+            if get_arg_value(user, 3, "inplace") not in (None, False):
+                log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
+                return True
+            training = get_arg_value(user, 2, "training")
+            if training is None:
+                training = True
+            if training is not False:
+                _queue_copy_consumers(user, node, pending)
+                continue
+            if _is_aliasing_user(user):
+                pending.extend((next_user, True) for next_user in user.users)
+            else:
+                log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
+                return True
+            continue
         if _is_mutable_user(user, op):
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
@@ -1116,9 +1269,12 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
         if _is_contiguous_user(user, op):
-            if _direct_layout_user_is_sensitive(user, op, node):
+            if _contiguous_user_is_sensitive(user, node, cache, pending):
                 log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
                 return True
+            continue
+        if _is_copy_user(user, op):
+            _queue_copy_consumers(user, node, pending)
             continue
         if _allowed_alias(user, op):
             pending.extend((next_user, True) for next_user in user.users)
