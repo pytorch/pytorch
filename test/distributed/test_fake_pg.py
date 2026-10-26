@@ -118,6 +118,18 @@ class TestFakePG(TestCase):
                         dynamo_distributed._compile_sync_backend(), backend
                     )
 
+    @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
+    def test_compile_sync_pg_over_a_fake_cpu_backend(self):
+        # The timeout is read from the CPU backend, a fake one built without options.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(
+            backend="cpu:fake,cuda:gloo", rank=0, world_size=1, store=dist.HashStore()
+        )
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.GLOO)
+
     def test_cache_sync_primes_the_fake_group_without_gloo(self):
         from torch._dynamo import distributed as dynamo_distributed
         from torch._functorch import config as functorch_config

@@ -14,16 +14,10 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
-from typing import TYPE_CHECKING
-
 import torch
 import torch.distributed as dist
 
 from . import config
-
-
-if TYPE_CHECKING:
-    from datetime import timedelta
 
 
 _COMPILE_PG: dist.ProcessGroup | None = None
@@ -107,26 +101,27 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _COMPILE_SYNC_PG
         if _COMPILE_SYNC_PG is None:
-            timeout: timedelta | None = None
             backend = _compile_sync_backend()
-            if backend != dist.Backend.FAKE:
-                if backend is None:
-                    # No fallback: per above, the accelerator backend would let a
-                    # compile time collective match a runtime one.
-                    raise RuntimeError(
-                        "Compile time cross rank synchronization requires the gloo "
-                        "backend, which this build of PyTorch does not have. Either "
-                        "build with gloo, or turn off "
-                        "torch._functorch.config._sync_decision_cross_ranks and "
-                        "torch._functorch.config._sync_cache_decision_cross_ranks."
-                    )
-                # Left to itself, _new_group_with_tag picks the global
-                # default_pg_timeout constant rather than the timeout
-                # init_process_group was configured with.
-                default_pg = dist.distributed_c10d._get_default_group()
-                coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
-                default_backend = default_pg._get_backend(torch.device(coll_device))
-                timeout = default_backend.options._timeout
+            if backend is None:
+                # No fallback: per above, the accelerator backend would let a
+                # compile time collective match a runtime one.
+                raise RuntimeError(
+                    "Compile time cross rank synchronization requires the gloo "
+                    "backend, which this build of PyTorch does not have. Either "
+                    "build with gloo, or turn off "
+                    "torch._functorch.config._sync_decision_cross_ranks and "
+                    "torch._functorch.config._sync_cache_decision_cross_ranks."
+                )
+            # Left to itself, _new_group_with_tag picks the global
+            # default_pg_timeout constant rather than the timeout
+            # init_process_group was configured with.
+            default_pg = dist.distributed_c10d._get_default_group()
+            coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
+            default_backend = default_pg._get_backend(torch.device(coll_device))
+            # A fake backend built without options has none, even when the group
+            # syncs over gloo (cpu:fake,cuda:nccl).
+            options = default_backend.options
+            timeout = options._timeout if options is not None else None
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend=backend, timeout=timeout, pg_tag="pt2_compile_sync_pg"
             )
