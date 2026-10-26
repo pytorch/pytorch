@@ -33,6 +33,7 @@
 #endif
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <array>
@@ -2423,7 +2424,7 @@ class DeviceCachingAllocator {
           "All streams in the same capture should agree on the graph");
 
       // Use current terminals as the free markers for the stream
-      for (size_t i = 0; i < info.num_terminals; ++i) {
+      for (const auto i : c10::irange(info.num_terminals)) {
         auto terminal = info.terminals[i];
         markers.insert(terminal);
       }
@@ -2492,7 +2493,7 @@ class DeviceCachingAllocator {
     // is a predecessor). A free marker is reusable if it is a predecessor of
     // all terminal nodes.
     std::deque<cudaGraphNode_t> dfs;
-    for (size_t i = 0; i < info.num_terminals; ++i) {
+    for (const auto i : c10::irange(info.num_terminals)) {
       dfs.push_back(info.terminals[i]);
     }
 
@@ -2932,7 +2933,7 @@ class DeviceCachingAllocator {
     };
 
     // allocate all blocks in the segment
-    for (size_t i = 0; i < segment_len; ++i) {
+    for (const auto i : c10::irange(segment_len)) {
       // Note [Last block when restoring checkpoint state]
       // The last block in expandable segment is one of the following cases:
       // - case 1: a unmapped tail containing the remaining amount of available

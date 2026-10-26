@@ -2,6 +2,7 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
+#include <c10/util/irange.h>
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
@@ -178,7 +179,7 @@ class VecMask {
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
-    for (int i = 0; i < count; i++) {
+    for (const auto i : c10::irange(count)) {
       mask[i] = value_to_mask(b[i]);
     }
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask, count));
