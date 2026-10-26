@@ -22,6 +22,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable& variable) {
     if (variable.defined()) {
       next_edges.emplace_back(impl::gradient_edge(variable));
+      impl::consume_single_use(variable);
     } else {
       next_edges.emplace_back();
     }

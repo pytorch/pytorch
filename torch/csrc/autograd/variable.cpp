@@ -13,6 +13,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/MemoryOverlap.h>
+#include <c10/core/AutogradState.h>
 #include <c10/util/Exception.h>
 
 #include <memory>
@@ -343,6 +344,9 @@ void set_gradient_edge(const Variable& self, Edge edge) {
   auto* meta = materialize_autograd_meta(self);
   meta->grad_fn_ = std::move(edge.function);
   meta->output_nr_ = edge.input_nr;
+  meta->single_use_ = c10::AutogradState::get_tls_state()
+                          .get_disallow_implicit_grad_accumulation();
+  meta->used_ = false;
   // For views, make sure this new grad_fn_ is not overwritten unless it is
   // necessary in the VariableHooks::grad_fn below. This logic is only relevant
   // for custom autograd Functions for which multiple operations can happen on a
@@ -352,6 +356,29 @@ void set_gradient_edge(const Variable& self, Edge edge) {
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     diff_view_meta->set_attr_version(self._version());
   }
+}
+
+void consume_single_use(const Variable& self) {
+  auto* meta = get_autograd_meta(self);
+  if (!meta || !meta->single_use_ ||
+      !c10::AutogradState::get_tls_state()
+           .get_disallow_implicit_grad_accumulation()) {
+    return;
+  }
+  TORCH_CHECK(
+      !meta->used_,
+      "Output ",
+      meta->output_nr_,
+      " of ",
+      meta->grad_fn_->name(),
+      " was created under "
+      "torch.autograd.graph.disallow_implicit_grad_accumulation() and has "
+      "already been used by another differentiable operation. Using it again "
+      "would make autograd sum the gradients of both uses in backward. To "
+      "combine them explicitly, split the tensor with a custom autograd "
+      "Function that returns one alias per use and combines their gradients "
+      "in backward.");
+  meta->used_ = true;
 }
 
 Node* grad_fn_unsafe(const Variable& self) {
@@ -726,6 +753,15 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       // TODO: Potentially the following logic can be replaced by special logic
       // in VariableType_x.cpp
       //       that would provide a way to recreate the grad_fn chain.
+      //
+      // Rebuilding the view's history is not a new use of the base, and the
+      // view now holds a new value.
+      auto* base_meta =
+          torch::autograd::impl::get_autograd_meta(view_info.base_);
+      const bool base_single_use = base_meta && base_meta->single_use_;
+      if (base_meta) {
+        base_meta->single_use_ = false;
+      }
       if (view_info.has_view_fn()) {
         auto& view_fn = view_info.view_fn();
         Tensor diff_view;
@@ -754,6 +790,10 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         torch::autograd::fire_node_creation_hooks(fn);
         diff_view_meta->grad_fn_ = std::move(fn);
       }
+      if (base_meta) {
+        base_meta->single_use_ = base_single_use;
+      }
+      diff_view_meta->used_ = false;
       diff_view_meta->set_attr_version(current_version);
 
       torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
