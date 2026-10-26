@@ -1669,6 +1669,17 @@ class TestCachingAutotunerLaunched(TestCase):
         self.assertIsNone(autotuner._cached_launcher)
         self.assertTrue(autotuner._launched)
 
+    def test_set_by_a_bandwidth_profiling_launch(self):
+        from torch._inductor.runtime.triton_heuristics import DebugAutotuner
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        args["configs"] = args["configs"][:1]
+        # Launches through bench(), not CachingAutotuner.run().
+        autotuner = DebugAutotuner(**args, with_bandwidth_info=True)
+        self._run(autotuner)
+        self.assertTrue(autotuner._launched)
+
     def test_not_set_by_a_failed_launch(self):
         autotuner = self._make_autotuner()
         with (

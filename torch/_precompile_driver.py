@@ -25,6 +25,7 @@ ordering VERBATIM; the two must stay in sync (see Note [precompile programming m
 
 from __future__ import annotations
 
+import importlib as _importlib
 from typing import TYPE_CHECKING
 
 import torch as _torch
@@ -868,3 +869,43 @@ def _build_installed_forward():
             ) from None
 
     return forward
+
+
+def _custom_op_registered(name: str) -> bool:
+    namespace, _, op = name.partition("::")
+    return hasattr(getattr(_torch.ops, namespace), op)
+
+
+def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
+    """Make the custom ops an artifact's graphs call resolvable before it runs.
+
+    A compiled graph calls ``torch.ops.<ns>.<op>`` directly, so nothing on the
+    serving path imports the module whose ``torch.library.custom_op`` registers it,
+    and under lazy imports the model's own import of that module may never resolve.
+    A module is imported only if one of its ops is not registered yet, so a process
+    that registers them some other way does not need the module by that name, and
+    an op its module did not register after all is refused here rather than on the
+    first call. An op with no module here (``__main__``, ``torch.library.Library``,
+    ``torch.ops.load_library``) is not checked: it only has to be registered by
+    the first call, as under ``torch.compile``.
+    """
+    for module, module_ops in modules.items():
+        if all(_custom_op_registered(op) for op in module_ops):
+            continue
+        try:
+            _importlib.import_module(module)
+        except Exception as e:
+            raise _torch.compiler.PrecompileError(
+                f"this artifact's compiled graphs call custom op(s) "
+                f"{', '.join(module_ops)}, registered by module {module!r}, which "
+                f"failed to import here ({type(e).__name__}: {e}). Make it "
+                "importable wherever the artifact is served, or register the ops "
+                "before loading it."
+            ) from e
+        missing = [op for op in module_ops if not _custom_op_registered(op)]
+        if missing:
+            raise _torch.compiler.PrecompileError(
+                f"this artifact's compiled graphs call custom op(s) "
+                f"{', '.join(missing)}, which importing module {module!r} did not "
+                "register. Register them before loading the artifact."
+            )

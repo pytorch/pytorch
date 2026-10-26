@@ -47,8 +47,9 @@ if TYPE_CHECKING:
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
-# Keyed like CppCodeCache: by source and the build command with the torch roots
-# and Inductor cache dir relocated (codecache._relocatable_command_line).
+# Keyed by source and the build command with the torch trees and Inductor cache dir
+# relocated (codecache._relocatable_command_line), unlike CppCodeCache, which keys
+# by this host's paths.
 _frozen_cpp_kernels: dict[str, bytes] = {}
 _frozen_cpp_kernels_lock = threading.Lock()
 
@@ -257,24 +258,15 @@ def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) ->
         owner.cpp_kernels[key] = (binary_path, load)
 
 
-def relocatable_cpp_keys() -> bool:
-    """Whether any C++ kernel may take its relocatable key: a capture is active, or
-    a replay installed frozen C++ kernels."""
-    if _active_capture() is not None:
-        return True
-    with _frozen_cpp_kernels_lock:
-        return bool(_frozen_cpp_kernels)
-
-
-def use_relocatable_cpp_key(key: str) -> bool:
-    """Whether a C++ kernel takes its relocatable ``key``: inside a capture, whose
-    frozen binaries a replay looks up by that key, or when a replay installed a
-    frozen binary under it. Every other compile keeps the key with the host's
-    paths, which also covers the C++ headers and libraries those paths hold."""
-    if _active_capture() is not None:
-        return True
-    with _frozen_cpp_kernels_lock:
-        return key in _frozen_cpp_kernels
+def relocatable_cpp_key(compute: Callable[[], str]) -> str | None:
+    """The key a C++ kernel's binary is frozen and found under, from ``compute``,
+    or None (without computing it) when neither a capture is active nor a replay
+    installed frozen C++ kernels."""
+    if _active_capture() is None:
+        with _frozen_cpp_kernels_lock:
+            if not _frozen_cpp_kernels:
+                return None
+    return compute()
 
 
 def has_frozen_cpp_kernel(key: str) -> bool:
@@ -494,7 +486,9 @@ def _pickle_frozen_triton_kernel(
 def _freeze_triton_kernel(
     key: str,
     instances: list[CachingAutotuner],
-    untuned: list[dict[str, object]] | None = None,
+    untuned: list[dict[str, object]],
+    *,
+    allow_untuned_backward: bool,
 ) -> bytes:
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
@@ -529,14 +523,17 @@ def _freeze_triton_kernel(
     # backward that no captured batch ran, for example one whose outputs went unused.
     # No instance of such a source ever launched, so none finished autotuning, and
     # serving under no_compilation() cannot finish it either. Its configs compute the
-    # same values up to floating-point reduction order, so unless the caller asked
-    # for every kernel tuned (untuned is None), freeze the first static one that
-    # loaded, with tuning turned off, and report it as untuned. A forward kernel no
-    # call ran is still refused: the capture missed a path serving may need.
-    if untuned is not None and not any(kernel._launched for kernel in instances):
+    # same values up to floating-point reduction order, so when the caller allows it,
+    # freeze the first static one that loaded, with tuning turned off, and report it
+    # in untuned. A source a forward instance shares is still refused: a forward no
+    # call ran means the capture missed a path serving may need.
+    if (
+        allow_untuned_backward
+        and instances
+        and all(kernel.is_backward for kernel in instances)
+        and not any(kernel._launched for kernel in instances)
+    ):
         for kernel in instances:
-            if not kernel.is_backward:
-                continue
             with kernel.lock:
                 # Only launchers: each loaded its binary, unlike a bare compile
                 # result, so replay cannot fail to load the one frozen here.
@@ -732,16 +729,21 @@ def capture_scope() -> Iterator[None]:
 
 
 def _freeze_triton_kernels(
-    kernels: dict[str, list[CachingAutotuner]], allow_untuned_backward: bool = True
+    kernels: dict[str, list[CachingAutotuner]], *, require_tuned_backward: bool
 ) -> bytes:
     from torch._logging import trace_structured
 
     static_kernels: dict[str, bytes] = {}
     rejected_sources: list[dict[str, object]] = []
-    untuned: list[dict[str, object]] | None = [] if allow_untuned_backward else None
+    untuned: list[dict[str, object]] = []
     for key, instances in kernels.items():
         try:
-            static_kernels[key] = _freeze_triton_kernel(key, instances, untuned)
+            static_kernels[key] = _freeze_triton_kernel(
+                key,
+                instances,
+                untuned,
+                allow_untuned_backward=not require_tuned_backward,
+            )
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
     if untuned:
@@ -782,7 +784,7 @@ def freeze_runtime_cache(
     snapshot: Callable[[], bytes | None],
     write: Callable[[bytes | None], None],
     *,
-    allow_untuned_backward: bool = True,
+    require_tuned_backward: bool,
 ) -> None:
     """Freeze the scope's static Triton kernels, C++ kernel binaries and Triton
     JIT cache into the cache artifact and pass it to ``write``.
@@ -790,9 +792,9 @@ def freeze_runtime_cache(
     Every recorded C++ kernel is built before ``snapshot`` renders the
     artifact; every graph compile already waited on its own Triton kernels. A
     kernel that cannot be frozen raises, since precompile.load could not serve
-    it without compiling. The exception, unless ``allow_untuned_backward`` is
-    False, is a backward kernel no instance ever launched: it is frozen untuned,
-    with its first loaded static config, and reported. The caller must stop compiling before calling this: a
+    it without compiling. The exception, unless ``require_tuned_backward``, is a
+    backward kernel no instance ever launched: it is frozen untuned, with its
+    first loaded static config, and reported. The caller must stop compiling before calling this: a
     kernel compiled on another thread meanwhile is neither waited on nor frozen.
     """
     owner = _active_capture()
@@ -828,7 +830,9 @@ def freeze_runtime_cache(
         with _capture_lock:
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
-        static_payload = _freeze_triton_kernels(kernels, allow_untuned_backward)
+        static_payload = _freeze_triton_kernels(
+            kernels, require_tuned_backward=require_tuned_backward
+        )
         cpp_payload = _freeze_cpp_kernels(cpp_kernels)
         if cache is not None:
             payload = cache.export_runtime_cache(context=_runtime_context())
