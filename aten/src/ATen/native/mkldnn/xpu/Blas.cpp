@@ -529,7 +529,6 @@ Tensor _weight_int4pack_mm_xpu(
       A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__,
       " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(), __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
@@ -565,11 +564,18 @@ Tensor _weight_int4pack_mm_xpu(
       N,
       "]");
 
+  // oneDNN consumes a row-major or column-major A directly via its strides.
+  // Any other layout (e.g. strided along K, expanded) is made row-major.
+  const bool a_row_major =
+      A.stride(1) == 1 && (M <= 1 || A.stride(0) >= A.size(1));
+  const bool a_col_major = A.stride(0) == 1 && M > 1 && A.stride(1) >= M;
+  const Tensor A_ = (a_row_major || a_col_major) ? A : A.contiguous();
+
   auto C = at::empty({M, N}, A.options());
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N]
-  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
+  at::native::onednn::woq_matmul_int4(C, A_, B, qScale, qZeros, qGroupSize);
 
   return C;
 }
