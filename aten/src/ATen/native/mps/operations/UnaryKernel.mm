@@ -62,19 +62,8 @@ static void signbit_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "signbit", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
-// exec_unary_kernel has no ILP flavor for kernels with a scalar argument, so
-// contiguous inputs go through exec_unary_kernel_with_params instead
 static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps) {
-  if (!iter.is_contiguous()) {
-    return lib.exec_unary_kernel(iter, "logit", eps);
-  }
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "logit_mps", [&]() {
-    lib.exec_unary_kernel_with_params(iter,
-                                      "logit",
-                                      eps.to<scalar_t>(),
-                                      mps::scalarToMetalTypeString(iter.common_dtype()),
-                                      /*ilp_threshold=*/1u << 18);
-  });
+  lib.exec_unary_kernel(iter, "logit", eps);
 }
 
 static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
