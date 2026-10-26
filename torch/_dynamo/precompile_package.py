@@ -85,10 +85,29 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
-# The Inductor settings _capture_config pins. The options of capture()'s
-# Inductor wrapper apply inside this patch, so capture() refuses any that
+# The Inductor settings _capture_config pins. The options of a session's
+# Inductor wrapper apply inside this patch, so the session refuses any that
 # override them.
 CAPTURE_INDUCTOR_PATCH = {"bundled_autotune_remote_cache": False}
+
+
+def _check_capture_options(options: Mapping[str, object]) -> None:
+    uncached = [
+        k for k in ("freezing", "force_disable_caches", "fx_wrapper") if options.get(k)
+    ]
+    if uncached:
+        raise PackageError(
+            f"a DynamoTracer capture cannot compile with {uncached} on: the "
+            "artifact ships each graph's compile from Inductor's caches, which "
+            "such a compile never files."
+        )
+    pinned = CAPTURE_INDUCTOR_PATCH.items()
+    overridden = {k: v for k, v in pinned if options.get(k, v) != v}
+    if overridden:
+        raise PackageError(
+            f"a DynamoTracer capture always compiles with {overridden}: an "
+            "eager backward lowering fails on a remote autotune cache miss."
+        )
 
 
 @contextlib.contextmanager
@@ -1770,6 +1789,8 @@ class PrecompileSession(Generic[_P, _R]):
         self._backend_name = (
             backend if isinstance(backend, str) else backend.compiler_name
         )
+        if not isinstance(backend, str):
+            _check_capture_options(backend.config)
         # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
         # graphs is decided again when it is post-compiled at load. The artifact
         # records the capture's choice, and the capture's calls compile under it.

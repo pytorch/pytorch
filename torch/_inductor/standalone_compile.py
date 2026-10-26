@@ -520,8 +520,9 @@ def _resolve_fake_mode(
         )
 
 
-# What compile_to_python pins over the caller's options (see there);
-# _standalone_context pins autotune_at_compile_time for every standalone compile.
+# What compile_to_python pins over the caller's options (see there). It is the
+# only pin of autotune_at_compile_time there: compile_to_python does not run
+# under _standalone_context.
 STANDALONE_PYTHON_PINS: dict[str, Any] = {
     "benchmark_harness": False,
     "cpp_wrapper": False,
@@ -753,10 +754,10 @@ def compile_to_python(
     overrides), the same shape as ``torch._inductor.compile``'s ``options``. The
     keys are inductor config names: they are merged into the ``config.patch``
     block this function already wraps the compile in, so they take effect as
-    config rather than being forwarded as ``compile_fx`` kwargs. The two
-    capture-critical pins below (``benchmark_harness``, ``cpp_wrapper``) always win
-    over a conflicting user option, since the source-capture contract depends on
-    them and a caller cannot be allowed to break the emitted module.
+    config rather than being forwarded as ``compile_fx`` kwargs. The
+    ``STANDALONE_PYTHON_PINS`` always win over a conflicting user option, since the
+    source-capture contract depends on them and a caller cannot be allowed to break
+    the emitted module.
 
     ``inner_python`` is self-contained: loading it (``load_from_python``, or importing it
     from a file) JIT-compiles the inlined kernels on first use, so it runs with no cache.
