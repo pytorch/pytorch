@@ -476,6 +476,8 @@ class NNModuleVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -576,13 +578,12 @@ class NNModuleVariable(VariableTracker):
                     source=source,
                 )
             elif istype(subobj, staticmethod):
-                return VariableTracker.build(
-                    tx, subobj.__get__(base), source=source, realize=True
+                # Preserve eager fallback for non-Python staticmethod callables.
+                return VariableBuilder.create_internal_user_function(
+                    subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
-                    from .builder import VariableBuilder
-
                     func_source = source and AttrSource(source, "__func__")
                     fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                         subobj, "_torchdynamo_inline", source=func_source
