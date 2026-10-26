@@ -3486,17 +3486,18 @@ def capture(
     eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. A
     :class:`DynamoTracer` capture refuses ``freezing`` and
     ``force_disable_caches``, whose compiles file no AOTAutograd cache entry
-    for the artifact to ship, and ``bundled_autotune_remote_cache`` on, which
-    the capture turns off (its eager backward lowering fails on a remote
-    autotune cache miss). A :class:`MakeFxTracer` capture refuses a ``mode``
-    or ``options`` that turns on ``triton.cudagraphs``, since its standalone
-    module runs outside Inductor's CUDA graph wrapper (it ignores the ambient
-    flag, as before), refuses ``freezing``, whose compiler hides the inner
-    compile its standalone module is built from, and refuses options that
-    module pins: ``size_asserts`` or ``scalar_asserts`` off (it compiles with
-    ``size_asserts`` and ``scalar_asserts`` on), ``cpp_wrapper`` or
-    ``benchmark_harness`` on, and ``triton.autotune_at_compile_time`` off.
-    Other options pass through unchecked, as under :func:`torch.compile`.
+    for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does not
+    cache, and ``bundled_autotune_remote_cache`` on, which the capture turns
+    off (its eager backward lowering fails on a remote autotune cache miss);
+    its ``cpp_wrapper`` graphs capture on CPU only. A :class:`MakeFxTracer`
+    capture refuses a ``mode`` or ``options`` that turns on
+    ``triton.cudagraphs``, since its standalone module runs outside Inductor's
+    CUDA graph wrapper (it ignores the ambient flag, as before), and options
+    that module pins: ``size_asserts`` or ``scalar_asserts`` off,
+    ``cpp_wrapper``, ``benchmark_harness`` or ``freezing`` on (freezing's
+    compiler would rewrite the graph the module is built from), and
+    ``triton.autotune_at_compile_time`` off. Other options pass through
+    unchecked, as under :func:`torch.compile`.
 
     .. note::
 
@@ -3563,24 +3564,19 @@ def capture(
         # option or a value of the wrong type raises here rather than mid-capture.
         dynamic = tracer.dynamic if isinstance(tracer, DynamoTracer) else None
         inductor = torch._TorchCompileInductorWrapper(mode, options, dynamic)
-        if inductor.config.get("freezing") and isinstance(tracer, MakeFxTracer):
-            raise PrecompileError(
-                "a MakeFxTracer capture cannot compile with freezing on: freezing's "
-                "compiler wraps the inner compile its standalone module is built from."
-            )
         if isinstance(tracer, DynamoTracer):
             from torch._dynamo.precompile_package import CAPTURE_INDUCTOR_PATCH
 
             uncached = [
                 k
-                for k in ("freezing", "force_disable_caches")
+                for k in ("freezing", "force_disable_caches", "fx_wrapper")
                 if inductor.config.get(k)
             ]
             if uncached:
                 raise PrecompileError(
                     f"a DynamoTracer capture cannot compile with {uncached} on: the "
-                    "artifact ships each graph's AOTAutograd cache entry, which such "
-                    "a compile never files."
+                    "artifact ships each graph's compile from Inductor's caches, which "
+                    "such a compile never files."
                 )
             pinned = CAPTURE_INDUCTOR_PATCH.items()
             overridden = {k: v for k, v in pinned if inductor.config.get(k, v) != v}
@@ -3601,7 +3597,8 @@ def capture(
                 "standalone module is a plain Python wrapper whose kernels are tuned "
                 "at compile time, and its size_asserts and scalar_asserts check at "
                 "load that a call's inputs have the layout and ranges its graph was "
-                "compiled for."
+                "compiled for. It compiles unfrozen: freezing's compiler would rewrite "
+                "the graph the module is built from."
             )
         return _MakeFxCapture(
             fn,
@@ -3714,7 +3711,8 @@ def load(
     ``triton.cudagraph_trees`` and ``graph_partition`` say; the rest of the
     CUDA graph config is the loading process's. A serve-time compile
     (``allow_serve_time_compiles``) takes the capture's ``mode`` or
-    ``options``, CUDA graph keys included, over the loading process's config.
+    ``options`` and ``CUDAGRAPH_CONFIG`` over the loading process's config, so
+    it compiles CUDA graphs exactly when the captured graphs do.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve

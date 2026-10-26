@@ -4957,14 +4957,12 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, tracer=make_fx, mode="reduce-overhead")
         with self.assertRaisesRegex(PrecompileError, f"{reason}.*or drop triton"):
             self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
-        for key in ("freezing", "force_disable_caches"):
+        for key in ("freezing", "force_disable_caches", "fx_wrapper"):
             with self.assertRaisesRegex(PrecompileError, f"'{key}'.*never files"):
                 self._capture(single, options={key: True})
         remote = {"bundled_autotune_remote_cache": True}
         with self.assertRaisesRegex(PrecompileError, "remote autotune cache miss"):
             self._capture(single, options=remote)
-        with self.assertRaisesRegex(PrecompileError, "cannot compile with freezing"):
-            self._capture(single, tracer=make_fx, options={"freezing": True})
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
             self._capture(single, options={"cudagraph_policy": None})
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
@@ -4974,6 +4972,7 @@ class TestPrecompileDynamoCapture(TestCase):
             "scalar_asserts": False,
             "cpp_wrapper": True,
             "benchmark-harness": True,
+            "freezing": True,
             "triton.autotune_at_compile_time": False,
         }
         for key, value in pinned.items():
@@ -6387,7 +6386,8 @@ def counting_capture_begin(self, *args, **kwargs):
 
 
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
-f = torch.compiler.precompile.load(artifact, cache)
+allow = saved["allow_serve_time_compiles"]
+f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 training = saved["expected_grad"] is not None
 with contextlib.nullcontext() if training else torch.no_grad():
     for _ in range(3):
@@ -6439,11 +6439,18 @@ class TestPrecompileCudagraphs(TestCase):
         with open(self.artifact) as f:
             return y, _parse_artifact_metadata(f.read())
 
-    def _serve_in_fresh_process(self, expected, env=None, expected_grad=None):
+    def _serve_in_fresh_process(
+        self, expected, env=None, expected_grad=None, x=None, serve_time=False
+    ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
         # by the loading process while serving the artifact.
         state = os.path.join(self.dir, "state.pt")
-        saved = {"x": self.x, "expected": expected, "expected_grad": expected_grad}
+        saved = {
+            "x": self.x if x is None else x,
+            "expected": expected,
+            "expected_grad": expected_grad,
+            "allow_serve_time_compiles": serve_time,
+        }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
         out = subprocess.run(
@@ -6482,6 +6489,23 @@ class TestPrecompileCudagraphs(TestCase):
             y, meta = self._capture_step(self.mod.step)
         self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
         recorded, _ = self._serve_in_fresh_process(y)
+        self.assertGreater(recorded, 0)
+
+    @parametrize("ambient", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_serve_time_compile_takes_the_capture_cudagraph_config(self, ambient):
+        fn = self.mod.calls_breaking_helper
+        if ambient:
+            with torch._inductor.config.patch({"triton.cudagraphs": True}):
+                self._capture_step(fn)
+        else:
+            self._capture_step(fn, mode="reduce-overhead")
+        # A shape no captured variant covers, so every graph serving it is
+        # compiled in the loading process, whose triton.cudagraphs is off.
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad():
+            expected = fn(self.model, miss)
+        recorded, _ = self._serve_in_fresh_process(expected, x=miss, serve_time=True)
         self.assertGreater(recorded, 0)
 
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
