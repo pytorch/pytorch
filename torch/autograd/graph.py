@@ -50,6 +50,7 @@ __all__ = [
     "region_activation_memory_budget",
     "set_warn_on_accumulate_grad_stream_mismatch",
     "set_override_stale_capture_stream",
+    "disallow_implicit_grad_accumulation",
 ]
 
 
@@ -649,6 +650,44 @@ def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
     of the node that produced the incoming gradient.
     """
     return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
+
+
+class disallow_implicit_grad_accumulation:
+    r"""Context manager that makes backward raise instead of summing gradients.
+
+    When a tensor is used more than once in forward, each use sends its own
+    gradient back during backward, and autograd sums them before passing the
+    result on. Under this context manager, that summation raises an error
+    naming the node whose input received more than one gradient. Enable anomaly
+    detection to also see the forward traceback of the use that produced the
+    second gradient.
+
+    To combine the gradients yourself, give each use its own tensor, for example
+    with a custom :class:`torch.autograd.Function` that returns aliases of its
+    input and combines their gradients in its backward.
+
+    The setting is read when gradients are passed between nodes, so it needs to
+    be active around the ``backward()`` or :func:`torch.autograd.grad` call. It
+    does not affect accumulation into ``.grad`` across backward calls, or
+    accumulation in graphs compiled by compiled autograd.
+
+    Example::
+
+        >>> a = torch.randn(3, requires_grad=True)
+        >>> x = a.sin()
+        >>> with torch.autograd.graph.disallow_implicit_grad_accumulation():
+        ...     (x * x).sum().backward()
+        Traceback (most recent call last):
+          ...
+        RuntimeError: SinBackward0 received more than one gradient for its input 0, ...
+    """
+
+    def __enter__(self) -> None:
+        self.prev = torch._C._get_disallow_implicit_grad_accumulation()
+        torch._C._set_disallow_implicit_grad_accumulation(True)
+
+    def __exit__(self, *args: object) -> None:
+        torch._C._set_disallow_implicit_grad_accumulation(self.prev)
 
 
 def set_override_stale_capture_stream(enabled: bool) -> None:

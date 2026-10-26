@@ -19225,6 +19225,62 @@ class TestAutogradCudaOnly(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
 
+class TestDisallowImplicitGradAccumulation(TestCase):
+    def test_intermediate_used_twice(self, device):
+        x = torch.randn(3, device=device, requires_grad=True).sin()
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            msg = "SinBackward0 received more than one gradient for its input 0"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                (x * x).sum().backward()
+
+    def test_leaf_used_twice(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            msg = "AccumulateGrad received more than one gradient"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.autograd.grad((a * 2 + a * 3).sum(), a)
+
+    def test_disabled_by_default_and_restored(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        with self.assertRaises(RuntimeError):
+            with torch.autograd.graph.disallow_implicit_grad_accumulation():
+                (a * 2 + a * 3).sum().backward()
+        self.assertFalse(torch._C._get_disallow_implicit_grad_accumulation())
+        (a * 2 + a * 3).sum().backward()
+        self.assertEqual(a.grad, torch.full_like(a, 5))
+
+    def test_single_defined_gradient(self, device):
+        class NoGrad(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return None
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            (a * 2 + NoGrad.apply(a)).sum().backward()
+        self.assertEqual(a.grad, torch.full_like(a, 2))
+
+    def test_explicit_dup(self, device):
+        class Dup(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.view_as(x), x.view_as(x)
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                return grad_a + grad_b
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            x, y = Dup.apply(a)
+            (x * 2 + y * 3).sum().backward()
+        self.assertEqual(a.grad, torch.full_like(a, 5))
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -19254,6 +19310,7 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)

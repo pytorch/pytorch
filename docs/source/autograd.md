@@ -462,6 +462,10 @@ to avoid a reference cycle when the saved tensor is a graph output; see
 .. autofunction:: torch.autograd.graph.set_override_stale_capture_stream
 ```
 
+```{eval-rst}
+.. autoclass:: torch.autograd.graph.disallow_implicit_grad_accumulation
+```
+
 % This module needs to be documented. Adding here in the meantime
 
 % for tracking purposes
