@@ -815,6 +815,161 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
+    def test_sub_parent_pack2_followup_after_reorder(self):
+        """Fuse a half-domain adjacent-lane pack after reorder fusion."""
+
+        B, D, G = 32, 4096, 32
+
+        def f(x):
+            grouped = x.view(B, D // G, G)
+            amax = grouped.abs().amax(dim=-1)
+            scale = (amax / 6.0).clamp(min=1e-6)
+            scale_full = scale.unsqueeze(-1).expand_as(grouped).reshape(B, D)
+            ones = torch.ones_like(x, dtype=torch.uint8)
+            zeros = torch.zeros_like(x, dtype=torch.uint8)
+            encoded = torch.where(scale_full > 0, ones, zeros)
+            encoded = torch.ops._inductor_test.realize(encoded)
+            flat = encoded.reshape(-1)
+            return flat[::2] | (flat[1::2] << 4)
+
+        x = torch.ones(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        actual, generated = run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, f(x))
+        generated_text = "\n\n".join(
+            str(part)
+            for part in (
+                generated if isinstance(generated, (tuple, list)) else [generated]
+            )
+        )
+        self.check_fusion()
+        self.assertEqual(generated_text.count(".run("), 1)
+        self.assertNotRegex(generated_text, r"empty_strided_xpu\(\(32,\s*4096\)")
+
+    def test_dynamic_sub_parent_pack2_epilogue_fuses(self):
+        """Dynamic-M grouped reduction fuses an interleaved pack2 epilogue to 1 kernel.
+
+        Regression guard for the symbolic-(dynamic)-M sub-parent pack2 fusion the
+        scheduler fix targets. A grouped reduction (``x.view(B, D//G, G).amax``)
+        produces a group-scale, the full-resolution per-element value is derived
+        from it (blockwise quantization style), and the epilogue packs adjacent
+        lanes (``flat[::2] | flat[1::2] << 4``, ``sub_parent_factor=2``) into the
+        half-domain ``[B, D/2]``. With a dynamic ``B``/``M`` the normalized pack
+        index is wrapped in ``ModularIndexing(base, 1, symbolic_extent)``; the
+        scheduler simplifier must unwrap it (a symbolic multiple of ``factor``)
+        so the lane stays concrete and the pack fuses into the reduction kernel.
+        Without the fix the pack split into a second kernel materializing a
+        full-resolution intermediate.
+
+        The pattern is intentionally NOT tied to any MXFP4/FP4 format: it is a
+        generic grouped reduction + adjacent-lane pack2 epilogue over an integer
+        exponent scale common to any block-scaled quantization or mask encode.
+        """
+
+        def _pack_uint2(u8):
+            shape = u8.shape
+            flat = u8.contiguous().view(-1)
+            return (flat[1::2] << 4 | flat[::2]).view(*shape[:-1], shape[-1] // 2)
+
+        def _integer_exp_quant(xb, G):
+            """Grouped max -> biased uint8 exponent -> power-of-two descale.
+
+            Generic block-quantize the (bf16) tensor via its group max, then
+            map to a uint8 code. There is no FP4/MX bit manipulation here; the
+            exponent/descale is exactly the integer scale any blockwise
+            quantization uses, and it keeps the packed epilogue derived from
+            the reduction output the way the scheduler sub-parent planner
+            expects.
+            """
+            batch, dim = xb.shape
+            grouped = xb.view(batch, dim // G, G)
+            ma = grouped.abs().amax(-1).unsqueeze(-1)  # [B, D//G, 1]
+            ma32 = ma.to(torch.float32)
+            descale = ma32 / 6.0
+            exponent = torch.where(
+                torch.isnan(descale),
+                0xFF,
+                (torch.clamp(torch.ceil(torch.log2(descale)), min=-127, max=127) + 127).to(
+                    torch.uint8
+                ),
+            )
+            dfp = torch.where(
+                exponent == 0, 1.0, torch.exp2(127 - exponent.to(torch.float32))
+            )
+            dl = torch.clamp(grouped.to(torch.float32) * dfp, min=-6.0, max=6.0)
+            code = ((dl + 6.0) / 12.0 * 15.0).round().to(torch.uint8)
+            return _pack_uint2(code).view(batch, dim // 2), exponent.squeeze(-1)
+
+        G = 32
+        shapes = [
+            torch.randn(batch, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+            for batch in (4, 32, 240)
+        ]
+        torch._dynamo.mark_dynamic(shapes[0], 0)
+        compiled = torch.compile(_integer_exp_quant)
+        # Capture generated code + kernel inventory first so metrics/generated
+        # count reflects exactly one compile (multiple dynamic shapes then
+        # reuse the same graph and must not inflate generated_kernel_count).
+        metrics.reset()
+        _, generated = run_and_get_code(compiled, shapes[0], G)
+        for x in shapes:
+            self.assertEqual(compiled(x, G), _integer_exp_quant(x, G))
+
+        generated_text = "\n\n".join(str(part) for part in generated)
+        self.check_fusion()
+        self.assertEqual(generated_text.count(".run("), 1)
+        # Sufficiency guard: the fused single kernel must not materialize a
+        # full-resolution intermediate. The 2-kernel path allocated a
+        # [M, K/32, 32] uint8 DRAM spill (shape ends ", 128, 32)"). The fused
+        # path keeps only the compressed scale (s,128,1) and the pack2 qdata
+        # (s,2048); assert the spill shape is gone and only the 2 real XPU
+        # result buffers are allocated.
+        self.assertNotIn("128, 32)", generated_text)
+        self.assertEqual(generated_text.count("= empty_strided_xpu(("), 2)
+
+    def test_dynamic_sub_parent_pack2_rejects_non_divisible(self):
+        """Dynamic-M reduction pack that cannot project onto a lane falls back.
+
+        Negative/soundness guard opposite to
+        test_dynamic_sub_parent_pack2_epilogue_fuses. That positive case packs
+        adjacent elements produced by a ``group=32`` reduction, which expresses
+        ``parent_r * 2 + lane``. Here the epilogue interleaves elements across
+        the reduction-group boundary (a 2-wide interleave out of a group of 4),
+        so the child index is not a constant lane w.r.t. the parent reduction
+        index. The sub-parent planner must reject (no sub-parent epilogue), for
+        which soundness demands a clean fallback to separate kernels rather
+        than an illegal unplanned-lane codegen.
+        """
+
+        def f(x):
+            # Deterministic integer transform of a grouped reduction so that the
+            # compiled result is bit-exact vs eager. The pack interleaves a
+            # 2-wide pair that spans the reduction-group boundary (group of 4),
+            # so the child index is not a constant lane of the parent reduction
+            # index -> the sub-parent planner must not fuse it.
+            B, D = x.shape
+            grouped = x.view(B, D // 4, 4)
+            amax = grouped.abs().amax(dim=-1)  # [B, D/4]
+            # Bit-level mask: even group -> 0x0F pattern, odd -> toggle.
+            sel = (amax > 0).to(torch.int8)  # deterministic 0/1 per group
+            expanded = sel.unsqueeze(-1).expand(B, D // 4, 4).reshape(B, D)
+            u8 = (expanded & 0x0F).to(torch.uint8).contiguous()
+            flat = u8.reshape(-1)
+            # 2-wide interleave across the full flattened buffer (group-1 size
+            # is 1 here, so pairs span group boundaries -> non-constant lane).
+            packed = flat[::2] | (flat[1::2] << 4)
+            return packed.reshape(B, D // 2)
+
+        x = torch.randn(16, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.mark_dynamic(x, 0)
+        metrics.reset()
+        _, generated = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(torch.compile(f)(x), f(x))
+        # Reject the non-lane-projection pack rather than fuse unsoundly: no
+        # sub-parent epilogue may be claimed. Guards the "unplanned lane" crash
+        # class exposed by the ablation study (Case C).
+        self.assertEqual(metrics.codegen_nested_reduction, 0)
+
     def test_grouped_reduction_with_weight_mul(self):
         """Grouped reduction input involves element-wise weight multiply."""
         B, D, G = 128, 4096, 32
