@@ -572,12 +572,13 @@ def checkpoint(
             :func:`torch.autograd.graph.save_on_cpu`). Such tensors are held
             outside the autograd graph, so historically these hooks did not see
             them; a future release will make checkpoint honor the hooks by
-            default. Until then the default (``None``) keeps the legacy behavior
-            and emits a ``FutureWarning`` when a user hook is in scope; pass
-            ``True`` to opt in or ``False`` to keep the legacy behavior without
-            the warning. Has no effect without SAC (plain checkpoint recomputes
-            rather than saves) or when ``use_reentrant=True``. This argument is
-            only supported if ``use_reentrant=False``.
+            default. Until then the default (``None``) raises an error when SAC
+            saves a tensor while a user hook is in scope, so the behavior must
+            be chosen explicitly: pass ``True`` to route these tensors through
+            the hooks or ``False`` to keep the legacy behavior. Has no effect
+            without SAC (plain checkpoint recomputes rather than saves) or when
+            ``use_reentrant=True``. This argument is only supported if
+            ``use_reentrant=False``.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`, or a decorator
@@ -1594,9 +1595,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.ac_graph_id = ac_graph_id
         # Tri-state opt-in for routing SAC-cached tensors through the
         # surrounding user saved_tensors_hooks, set by checkpoint() after this
-        # mode is constructed (like ac_graph_id). None: legacy behavior (hooks
-        # bypassed) plus a FutureWarning if user hooks are in scope; True/False:
-        # opt into the new/old behavior explicitly and silence the warning.
+        # mode is constructed (like ac_graph_id). None: error if user hooks are
+        # in scope, since the default is about to flip; True/False: opt into
+        # the new/old behavior explicitly.
         self.respect_saved_tensors_hooks: bool | None = None
         self.func_counter: Dict[Any, int] = defaultdict(int)
 
@@ -1655,24 +1656,27 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             # artifact rather than a real cache.
             #
             # Honoring the hooks is a BC break, so it is gated behind the
-            # respect_saved_tensors_hooks opt-in on checkpoint(), which defaults
-            # to the legacy behavior (hooks bypassed). When a user hook is
-            # actually in scope we warn, since the default will flip.
+            # respect_saved_tensors_hooks arg on checkpoint(). When a user hook
+            # is actually in scope and the arg was left unset, we error rather
+            # than silently pick a behavior, since the default will flip. There
+            # is intentionally no escape hatch other than passing the arg.
             user_hooks = None if is_compiling else _current_user_saved_tensors_hooks()
             if user_hooks is not None:
                 respects = self.respect_saved_tensors_hooks
                 if respects is None:
-                    warnings.warn(
+                    raise RuntimeError(
                         "A saved_tensors_hooks context (e.g. save_on_cpu) is "
-                        "active around a selective activation checkpoint region. "
-                        "Tensors that SAC saves currently bypass these hooks, but "
-                        "a future release will route them through the hooks like "
-                        "any other saved tensor. Silence this warning and choose "
-                        "the behavior explicitly by passing "
-                        "respect_saved_tensors_hooks=True|False to "
-                        "torch.utils.checkpoint.checkpoint.",
-                        FutureWarning,
-                        stacklevel=2,
+                        "active around a selective activation checkpoint (SAC) "
+                        "region. Tensors that SAC saves have historically bypassed "
+                        "these hooks, but a future release will route them through "
+                        "the hooks like any other saved tensor. Choose the behavior "
+                        "explicitly by passing respect_saved_tensors_hooks=True "
+                        "(route SAC-saved tensors through the hooks) or "
+                        "respect_saved_tensors_hooks=False (keep the legacy "
+                        "behavior) to torch.utils.checkpoint.checkpoint. If the "
+                        "checkpoint call is made by a library, ask its authors to "
+                        "set this argument. See "
+                        "https://github.com/pytorch/pytorch/issues/191236"
                     )
                 if not respects:
                     user_hooks = None
