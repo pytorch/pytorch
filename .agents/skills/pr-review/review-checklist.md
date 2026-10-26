@@ -223,7 +223,7 @@ When reviewing changes to workflows, build scripts, or CI configuration:
 - [ ] **No cache-dependent binaries in sensitive contexts** - sccache-backed builds are susceptible to cache corruption; these artifacts should not access sensitive info or be published for general use
 - [ ] **Protected branch rules respected** - Changes to merge rules, release workflows, or deployment environments require extra scrutiny
 - [ ] **Immutable artifact references** - Docker images use immutable tags; no overwriting of published artifacts
-- [ ] **Third-party code pinned by commit SHA** - Pin dependencies (submodules, script clones/checkouts, `pip install git+`, pin files, Actions `uses:`) by full commit SHA, never mutable tags, branches, or no ref at all (first-party `pytorch/*@main` refs are exempt). Use the commit an upstream release tag points to; note the tag name for readability
+- [ ] **Third-party code pinned by commit SHA** - Pin dependencies (submodules, script clones/checkouts, `pip install git+`, pin files, Actions `uses:`) by full commit SHA, never mutable tags, branches, or no ref at all (`uses:` refs into `pytorch/pytorch` and `pytorch/test-infra` are exempt). Use the commit an upstream release tag points to (the `^{}` commit for annotated tags) and note the tag name. Script dependencies read their SHA from `.github/ci_commit_pins/<repo>.txt` via `get_pinned_commit`; ones that should track a branch also get an `update-commit-hashes` entry in `.github/workflows/nightly.yml`
 
 ### PyTorch API Security
 
