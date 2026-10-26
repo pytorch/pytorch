@@ -4020,6 +4020,33 @@ def _resolve_needs_vec_isa(
     return any(marker in source for marker in _VEC_ISA_CPP_SOURCE_MARKERS)
 
 
+@functools.cache
+def _install_roots() -> tuple[str, ...]:
+    import sysconfig
+
+    roots = {
+        os.path.dirname(os.path.dirname(torch.__file__)),
+        sys.prefix,
+        sys.base_prefix,
+        *sysconfig.get_paths().values(),
+    }
+    # Longest first, so a root nested in another is replaced before its parent.
+    return tuple(sorted((r for r in roots if r and len(r) > 1), key=len, reverse=True))
+
+
+def _install_independent_command_line(command_line: str) -> str:
+    """Key a C++ build by what it compiles, not by where this process is installed.
+
+    A packaged job extracts to a fresh directory every launch, so its include and
+    library paths differ between two launches of the same build. Keying on them
+    keeps a precompiled artifact's frozen C++ kernels from ever matching in a
+    later launch. torch_key() still separates different builds.
+    """
+    for root in _install_roots():
+        command_line = command_line.replace(root, "<install>")
+    return f"{command_line} torch_key={torch_key().hex()}"
+
+
 @clear_on_fresh_cache
 class CppCodeCache:
     """Compiles and caches C++ libraries.  Users of this class supply the source code to
@@ -4139,9 +4166,11 @@ class CppCodeCache:
             """Writing the code to file will calculate a hash, which we need to vary if
             the command line flags change.  This implements a mostly-generic way of
             validating that."""
-            return CppBuilder(
-                name="o", sources="i", BuildOption=build_option
-            ).get_command_line()
+            return _install_independent_command_line(
+                CppBuilder(
+                    name="o", sources="i", BuildOption=build_option
+                ).get_command_line()
+            )
 
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
