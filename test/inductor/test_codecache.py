@@ -627,8 +627,8 @@ class TestCppPortableKey(TestCase):
         from torch._inductor import codecache
 
         stripped = codecache._strip_relocatable_roots(self._real_command_line())
-        pattern = codecache._root_pattern(codecache._relocatable_roots())
-        self.assertIsNone(pattern.search(stripped))
+        for root in codecache._relocatable_roots():
+            self.assertNotIn(root, stripped)
 
     def test_key_tracks_paths_outside_install(self):
         self.assertNotEqual(self._key("g++ -I/usr/a"), self._key("g++ -I/usr/b"))
@@ -658,6 +658,8 @@ class TestCppPortableKey(TestCase):
         # Every form a build command puts a root in is stripped.
         forms = (
             "-Wl,-rpath,{}:/other/lib",
+            "-isystem{}/include -B{}/bin",
+            "-include {}/include/header.h",
             "{},-flag",
             "-I{} -L{}/lib",
             "-I'{}/include dir'",
@@ -704,12 +706,20 @@ class TestCppPortableKey(TestCase):
     def test_system_prefixes_are_not_relocatable_roots(self):
         from torch._inductor import codecache
 
+        paths = {
+            "data": "/usr",
+            "purelib": "/usr/lib/python3/dist-packages",
+            # A toolchain can sit next to the interpreter.
+            "scripts": "/usr/local/bin",
+        }
         with (
             mock.patch.object(sys, "prefix", "/usr"),
             mock.patch.object(sys, "base_prefix", "/usr/local"),
+            mock.patch.object(sysconfig, "get_paths", return_value=paths),
         ):
             roots = codecache._relocatable_roots.__wrapped__()
-        self.assertFalse({"/", "/usr", "/usr/local"} & set(roots))
+        self.assertFalse({"/", "/usr", "/usr/local", "/usr/local/bin"} & set(roots))
+        self.assertIn("/usr/lib/python3/dist-packages", roots)
 
     def test_relocatable_roots_are_absolute_and_longest_first(self):
         from torch._inductor import codecache

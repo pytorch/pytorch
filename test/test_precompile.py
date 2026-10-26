@@ -7950,6 +7950,36 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertEqual(copies, [loaded._name])
                     self.assertIn("precompile_cpp", loaded._name)
 
+    def test_frozen_cpp_kernel_uninstalled_before_restore_is_built(self):
+        import ctypes
+        import hashlib
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        export = "__declspec(dllexport) " if IS_WINDOWS else ""
+        source = f'extern "C" {export}long uninstalled(long x) {{ return x + 3; }}'
+        with fresh_cache(), _runtime_cache.capture_scope():
+            lib = CppCodeCache.load(source)
+            portable_key = CppCodeCache._portable_keys[lib.key]
+            payload = pickle.dumps({portable_key: b"never served"})
+        artifact = _runtime_cache.InductorCppCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with (
+            mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}),
+            # The kernel is installed when load checks for it but gone by the
+            # time it is restored.
+            mock.patch.object(_runtime_cache, "restore_cpp_kernel", return_value=None),
+            fresh_cache(),
+        ):
+            artifact.populate_cache()
+            loaded = CppCodeCache.load(source)
+            self.assertNotIn("precompile_cpp", CppCodeCache._binary_paths[loaded.key])
+            loaded.uninstalled.restype = ctypes.c_long
+            self.assertEqual(loaded.uninstalled(ctypes.c_long(5)), 8)
+
     @parametrize("kind", ("ctypes", "pybinding"))
     def test_frozen_cpp_kernel_serves_a_relocated_install(self, kind):
         import ctypes

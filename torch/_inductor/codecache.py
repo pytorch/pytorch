@@ -4025,16 +4025,30 @@ def _resolve_needs_vec_isa(
 def _relocatable_roots() -> tuple[str, ...]:
     """The torch and Python install roots, which move when a packaged job does.
 
-    System prefixes such as ``/usr`` are not roots: they hold headers and
+    These are the torch root, the Python prefixes and the sysconfig paths that
+    belong to the Python installation, but not ``scripts``, where a toolchain can
+    live. System prefixes such as ``/usr`` are not roots: they hold headers and
     toolchains of their own that do not move with the package.
     """
+    paths = sysconfig.get_paths()
     roots = dict.fromkeys(
         normalize_path_separator(root)
         for root in (
             os.path.dirname(os.path.dirname(torch.__file__)),
             sys.prefix,
             sys.base_prefix,
-            *sysconfig.get_paths().values(),
+            *(
+                paths.get(name)
+                for name in (
+                    "purelib",
+                    "platlib",
+                    "include",
+                    "platinclude",
+                    "data",
+                    "stdlib",
+                    "platstdlib",
+                )
+            ),
         )
         # A relative root would match inside unrelated absolute paths.
         if root and os.path.isabs(root)
@@ -4051,9 +4065,9 @@ def _root_pattern(roots: tuple[str, ...]) -> re.Pattern[str] | None:
         return None
     alternatives = "|".join(re.escape(root) for root in roots)
     # Whole roots only: a root starts after the start, whitespace, a quote, ``=``,
-    # a list separator, ``-I`` or ``-L``, and ends at a path or list separator,
+    # a list separator, ``-I``, ``-L``, ``-isystem`` or ``-B``, and ends at a path or list separator,
     # quote, space or the end.
-    start = r"(?:^|(?<=[\s\"'=,:;])|(?<=-I)|(?<=-L))"
+    start = r"(?:^|(?<=[\s\"'=,:;])|(?<=-I)|(?<=-L)|(?<=-isystem)|(?<=-B))"
     return re.compile(start + f"(?:{alternatives})" + r"(?=[/\\\s\"',:;]|$)")
 
 
