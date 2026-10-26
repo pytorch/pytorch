@@ -9,6 +9,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/SparseTensorUtils.h>
 
+#include <c10/core/AutogradState.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
@@ -358,6 +359,20 @@ void InputBuffer::add(
   if (!var.defined()) {
     return;
   }
+  TORCH_CHECK(
+      !buffer[pos].defined() ||
+          !c10::AutogradState::get_tls_state()
+               .get_disallow_implicit_grad_accumulation(),
+      fn->name(),
+      " received more than one gradient for its input ",
+      pos,
+      ", which means the corresponding forward output was used more than "
+      "once, and autograd would sum the gradients. This was disallowed by "
+      "torch.autograd.graph.disallow_implicit_grad_accumulation(). To control "
+      "how the gradients are combined, give each use its own tensor, e.g. "
+      "with a custom autograd Function that returns aliases of its input and "
+      "combines their gradients in backward. Enable anomaly detection to see "
+      "the forward traceback of the operation that produced this gradient.");
   const auto device = var.device();
   const auto device_type = device.type();
   bool is_accelerator = at::accelerator::isAccelerator(device.type());
