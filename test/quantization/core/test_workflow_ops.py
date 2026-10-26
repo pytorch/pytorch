@@ -808,8 +808,12 @@ class TestFakeQuantizeOps(TestCase):
             zero_point = torch.full(zero_point.shape, -1 - quant_min).to(dtype=torch.int32, device=device)
 
             # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
-            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
-                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+            # Only CPU raises here: on accelerators the bound is enforced by a device-side assert
+            # inside the kernel, since the host-side form costs a device-to-host sync, and a
+            # device-side assert cannot be caught in-process.
+            if device == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+                    Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
 
             # For float zero_point, fakequant can be outside quant_min and quant_max.
             for zero_point_dtype in [torch.float32, torch.float16]:
@@ -818,6 +822,24 @@ class TestFakeQuantizeOps(TestCase):
                 Y_ref = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(),
                                                                     axis, quant_min, quant_max)
                 np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
+
+    def test_fake_quant_per_channel_qparam_range_empty_input(self):
+        # An empty input launches no kernel, so the device-side zero_point bound
+        # check in FakeQuantizeCore.cu cannot fire. The host-side check must
+        # still reject an out-of-range zero_point on every device.
+        quant_min, quant_max = 0, 255
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            X = torch.empty(0, 3, device=device)
+            scale = torch.ones(3, device=device)
+            zero_point = torch.full((3,), -1, dtype=torch.int32, device=device)
+
+            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+                torch.fake_quantize_per_channel_affine(X, scale, zero_point, 1, quant_min, quant_max)
+
+            # An in-range zero_point must still return an empty result, not raise.
+            zero_point.fill_(0)
+            Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, 1, quant_min, quant_max)
+            self.assertEqual(Y.shape, X.shape)
 
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
