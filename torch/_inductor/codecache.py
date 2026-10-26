@@ -4286,7 +4286,10 @@ def _host_independent_command_line(cmd: str) -> str:
     told torch builds apart, so torch_key() takes its place."""
     roots = (
         (cache_dir(), "<inductor_cache_dir>"),
-        (os.path.dirname(os.path.dirname(os.path.abspath(torch.__file__))), "<torch_root>"),
+        (
+            os.path.dirname(os.path.dirname(os.path.abspath(torch.__file__))),
+            "<torch_root>",
+        ),
     )
     for root, placeholder in sorted(roots, key=lambda r: -len(r[0])):
         if root and root != os.sep:

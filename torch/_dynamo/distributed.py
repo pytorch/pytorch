@@ -78,9 +78,14 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
         if _COMPILE_SYNC_PG is None and dist.get_backend() == "fake":
             # One real rank standing in for a larger world under a fake default
             # group has no peers to rendezvous with over gloo.
-            _COMPILE_SYNC_PG = dist.distributed_c10d._new_group_with_tag(
+            fake_pg = dist.distributed_c10d._new_group_with_tag(
                 backend="fake", pg_tag="pt2_compile_sync_pg"
             )
+            if not isinstance(fake_pg, dist.ProcessGroup):
+                raise AssertionError(
+                    "Compile sync process group must include all ranks"
+                )
+            _COMPILE_SYNC_PG = fake_pg
         if _COMPILE_SYNC_PG is None:
             if not dist.is_gloo_available():
                 # No fallback: per above, the accelerator backend would let a compile
