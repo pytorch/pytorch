@@ -28,12 +28,14 @@ if not DO_PERF_TEST:
 ORIGAMI_TOPK_VALUES = [5, 10]  # topk configs to test
 ORIGAMI_COMPILE_TOPK = 2  # topk for compilation tests
 PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
+BENCH_WARMUP = 100  # warmup iterations for perf benchmarks
+BENCH_REP = 500  # measurement iterations for perf benchmarks
+BENCH_ROUNDS = 5  # independent rounds; median is used to suppress outliers
 # NOTE: Do NOT hardcode device-specific values (device name, SM count, memory, etc).
 # Use torch.cuda.get_device_properties() to query actual device capabilities.
 
 IS_ROCM = torch.version.hip is not None
 
-ORIGAMI_ROCM_SUPPORTED = IS_ROCM
 
 try:
     import origami
@@ -63,10 +65,6 @@ def tearDownModule():
 
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
 @unittest.skipIf(not IS_ROCM, "Origami integration is ROCm-only")
-@unittest.skipIf(
-    not ORIGAMI_ROCM_SUPPORTED,
-    "This platform does not support ROCM Origami",
-)
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
 @unittest.skipIf(
     not (config.max_autotune and config.rocm.origami),
@@ -231,6 +229,22 @@ class TestOrigami(TestCase):
         not DO_PERF_TEST,
         "Perf test not enabled; set DO_PERF_TEST=1 to enable runtime perf benchmarks",
     )
+    def _benchmark_median(self, compiled, args):
+        """Run BENCH_ROUNDS independent benchmarks and return the median.
+
+        A single benchmark() call on a shared machine can vary by ±5-8%.
+        Taking the median of several rounds suppresses transient noise.
+        """
+        import statistics
+
+        samples = [
+            benchmarker.benchmark(
+                compiled, args, {}, warmup=BENCH_WARMUP, rep=BENCH_REP
+            )
+            for _ in range(BENCH_ROUNDS)
+        ]
+        return statistics.median(samples)
+
     def test_origami_runtime_matches_regular_max_autotune(self):
         for op_name in ("mm", "addmm", "bmm"):
             for size in (8192, 16384):
@@ -247,19 +261,13 @@ class TestOrigami(TestCase):
                             size=size,
                         )
 
-                        origami_runtime_ms = benchmarker.benchmark(
+                        origami_runtime_ms = self._benchmark_median(
                             origami_case["compiled"],
                             origami_case["args"],
-                            {},
-                            warmup=50,
-                            rep=200,
                         )
-                        max_autotune_runtime_ms = benchmarker.benchmark(
+                        max_autotune_runtime_ms = self._benchmark_median(
                             max_autotune_case["compiled"],
                             max_autotune_case["args"],
-                            {},
-                            warmup=50,
-                            rep=200,
                         )
 
                         runtime_ratio = (
