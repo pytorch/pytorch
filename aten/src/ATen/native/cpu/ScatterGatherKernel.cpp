@@ -696,8 +696,8 @@ void update_prefsum_and_offset_in_range(
     const int nthreads,
     const int64_t* const histogram,
     int64_t* const histogram_ps) {
-  for (int bins = bins_beg; bins < bins_end; ++bins) {
-    for (int t = 0; t < nthreads; ++t) {
+  for (const auto bins : c10::irange(bins_beg, bins_end)) {
+    for (const auto t : c10::irange(nthreads)) {
       histogram_ps[t * RDX_HIST_SIZE + bins] = offset;
       offset += histogram[t * RDX_HIST_SIZE + bins];
     }
@@ -750,7 +750,7 @@ void radix_sort_kernel(
   auto* const local_histogram = &histogram[RDX_HIST_SIZE * tid];
   auto* const local_histogram_ps = &histogram_ps[RDX_HIST_SIZE * tid];
   // Step 1: compute histogram
-  for (int i = 0; i < RDX_HIST_SIZE; i++) {
+  for (const auto i : c10::irange(RDX_HIST_SIZE)) {
     local_histogram[i] = 0;
   }
 
@@ -767,7 +767,7 @@ void radix_sort_kernel(
     local_histogram[(key_4 >> (pass * 8)) & 0xFF]++;
   }
   if (tid == (nthreads - 1)) {
-    for (int64_t i = elements_count_4; i < elements_count; ++i) {
+    for (const auto i : c10::irange(elements_count_4, elements_count)) {
       const auto key = input_keys[i];
       local_histogram[(key >> (pass * 8)) & 0xFF]++;
     }
@@ -813,7 +813,7 @@ void radix_sort_kernel(
     output_values[pos_4] = input_values[i + 3];
   }
   if (tid == (nthreads - 1)) {
-    for (int64_t i = elements_count_4; i < elements_count; ++i) {
+    for (const auto i : c10::irange(elements_count_4, elements_count)) {
       const auto key = input_keys[i];
       const auto pos = local_histogram_ps[(key >> (pass * 8)) & 0xFF]++;
       output_keys[pos] = key;

@@ -330,7 +330,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       // compute mean per input
       mean.zero_();
       at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
-        for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+        for (const auto tile_idx : c10::irange(tile_idx_begin, tile_idx_end)) {
           int64_t jj_begin = tile_idx * TILE_SIZE;
           int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
           scalar_t* mean_ptr = mean_data + jj_begin;
@@ -354,7 +354,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       // compute variance per input
       var_sum.zero_();
       at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
-        for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+        for (const auto tile_idx : c10::irange(tile_idx_begin, tile_idx_end)) {
           int64_t jj_begin = tile_idx * TILE_SIZE;
           int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
           scalar_t* var_sum_ptr = var_sum_data + jj_begin;
@@ -845,7 +845,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
     for (const auto c : c10::irange(begin, end)) {
       opmath_t sum_val = opmath_t(0);
       fVec sum_fvec = fVec(opmath_t(0));
-      for (int64_t n = 0; n < n_batch; n++) {
+      for (const auto n : c10::irange(n_batch)) {
         const scalar_t* input_ptr = input_data + n * n_channel * image_size + c * image_size;
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
@@ -866,7 +866,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
       opmath_t var_val = opmath_t(0);
       fVec var_fvec = fVec(opmath_t(0));
       fVec mean_fvec = fVec(mean_val);
-      for (int64_t n = 0; n < n_batch; n++) {
+      for (const auto n : c10::irange(n_batch)) {
         const scalar_t* input_ptr = input_data + n * n_channel * image_size + c * image_size;
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {

@@ -419,7 +419,7 @@ scalar_t row_sum(const char * C10_RESTRICT in_data,
   auto partial_sums = multi_row_sum<scalar_t, ilp_factor, LoadPolicy>(
       in_data, in_stride * ilp_factor, in_stride, size_ilp);
 
-  for (int64_t i = size_ilp * ilp_factor; i < size; ++i) {
+  for (const auto i : c10::irange(size_ilp * ilp_factor, size)) {
     partial_sums[0] += LoadPolicy::load(in_data, in_stride, i);
   }
 
@@ -461,24 +461,24 @@ void vectorized_inner_sum(
 
     int64_t i = size_ilp * ilp_factor;
     for (; (i + tail_ilp_factor) <= vec_size; i += tail_ilp_factor) {
-      for (int64_t h = 0; h < tail_ilp_factor; h += 1) {
+      for (const auto h : c10::irange(tail_ilp_factor)) {
         partial_sums[h] += VecLoadPolicy::load(row_in, vec_stride, i + h);
       }
     }
 
     for (int64_t k = tail_ilp_factor; k < ilp_factor; k += tail_ilp_factor) {
-      for (int64_t h = 0; h < tail_ilp_factor; h += 1) {
+      for (const auto h : c10::irange(tail_ilp_factor)) {
         partial_sums[h] += partial_sums[k + h];
       }
     }
 
     acc_t final_acc = 0;
-    for (int64_t k = i * vec_numel; k < size0; ++k) {
+    for (const auto k : c10::irange(i * vec_numel, size0)) {
       final_acc += ScalarLoadPolicy::load(row_in, scalar_stride, k);
     }
 
     alignas(64) std::array<acc_t, vacc_t::size() * tail_ilp_factor> partials{};
-    for (int64_t h = 0; h < tail_ilp_factor; h += 1) {
+    for (const auto h : c10::irange(tail_ilp_factor)) {
       partial_sums[h].store(partials.data() + vacc_t::size() * h);
     }
     for (const auto& partial : partials) {
