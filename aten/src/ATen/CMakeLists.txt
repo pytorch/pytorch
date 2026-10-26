@@ -965,26 +965,16 @@ if(USE_MPS)
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
-            # Shaders whose Metal 4.0 build differs from their 3.2 build: MPP kernels,
-            # simdgroup_barrier scope (Quantized).
-            # BundledShaderLibrary takes the kernels kernels_40 defines from it and the
-            # rest from kernels_basic, so a shader whose build starts to depend on the
-            # Metal version must be added here.
+            # Shaders built for Metal 4.0 as well. BundledShaderLibrary resolves a
+            # kernel to kernels_40 when it defines it and to kernels_basic otherwise,
+            # so every kernel in these shaders runs the 4.0 build on MPP devices and
+            # every other kernel runs the 3.2 build. A shader must be listed when it
+            # has C10_METAL_HAS_MPP kernels (checked at build time below).
             set(METAL_40_SHADERS Attention Cholesky Convolution GroupedMM LU Matmul Quantized ScaledMM TriangularSolve)
             set(SHADER_STEMS)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
                 list(APPEND SHADER_STEMS ${TGT_STEM})
-                file(STRINGS ${SHADER} SHADER_HEADERS REGEX "^#include <ATen/native/mps/kernels/.*>")
-                list(TRANSFORM SHADER_HEADERS REPLACE "^#include <(.*)>.*$" "${CMAKE_SOURCE_DIR}/aten/src/\\1")
-                set(MPP_LINES)
-                foreach(SRC ${SHADER} ${SHADER_HEADERS})
-                    file(STRINGS ${SRC} SRC_MPP_LINES REGEX "C10_METAL_HAS_MPP")
-                    list(APPEND MPP_LINES ${SRC_MPP_LINES})
-                endforeach()
-                if(MPP_LINES AND NOT TGT_STEM IN_LIST METAL_40_SHADERS)
-                    message(FATAL_ERROR "${SHADER} has kernels that only build with Metal 4.0, add ${TGT_STEM} to METAL_40_SHADERS")
-                endif()
                 if(NOT TGT_STEM IN_LIST METAL_40_SHADERS)
                     continue()
                 endif()
@@ -1000,6 +990,14 @@ if(USE_MPS)
                     message(FATAL_ERROR "METAL_40_SHADERS lists ${TGT_STEM}, but there is no ${TGT_STEM}.metal")
                 endif()
             endforeach()
+            set(METAL_40_CHECK ${CMAKE_SOURCE_DIR}/cmake/CheckMetal40Shaders.cmake)
+            add_custom_command(
+                COMMAND ${CMAKE_COMMAND} "-DSHADERS=${native_mps_metal};${native_mps_sparse_metal}" "-DMETAL_40_SHADERS=${METAL_40_SHADERS}" -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DSTAMP=${CMAKE_CURRENT_BINARY_DIR}/metal_40_shaders.stamp -P ${METAL_40_CHECK}
+                DEPENDS ${native_mps_metal} ${native_mps_sparse_metal} ${METAL_HEADER_DEPS} ${METAL_40_CHECK}
+                OUTPUT metal_40_shaders.stamp
+                COMMENT "Checking METAL_40_SHADERS"
+                VERBATIM)
+            list(APPEND METALLIB_DEPS metal_40_shaders.stamp)
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
         endif()

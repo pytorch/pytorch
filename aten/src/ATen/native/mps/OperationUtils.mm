@@ -945,7 +945,6 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   BundledShaderLibrary() : MetalShaderLibrary("") {}
 
   std::vector<std::string> getFunctionNames() override {
-    getLibrary();
     auto rc = MetalShaderLibrary::getFunctionNames();
     std::erase_if(rc, [&](const auto& name) { return variantLibraries.contains(name); });
     for (const auto& it : variantLibraries) {
@@ -961,7 +960,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
       const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
 #ifdef CAN_BUILD_METAL_4
           // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
-          // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
+          // cooperative-tensor ABI); every kernel it defines shadows the
+          // metal_basic one when has_mpp() holds.
           {"metal_40", has_mpp},
 #endif
       };

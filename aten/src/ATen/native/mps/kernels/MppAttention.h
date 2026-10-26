@@ -7,8 +7,6 @@
 
 #if C10_METAL_HAS_MPP
 
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
-
 #define MPP_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
 #define MPP_CONST static constant constexpr const
 
