@@ -7814,7 +7814,7 @@ class TestNNDeviceType(NNTestCase):
             return (result * weight).type_as(i)
 
         eps = 1e-5
-        for M, N in ((4, 256), (2048, 1024), (127, 768)):
+        for M, N in ((4, 256), (127, 768), (200, 512), (2048, 1024)):
             X = torch.randn(M, N, dtype=dtype, device=device, requires_grad=True)
             w = torch.randn(N, dtype=torch.float32, device=device, requires_grad=True)
 
@@ -17609,6 +17609,33 @@ if __name__ == '__main__':
         self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
         if dbeta_ref is not None:
             self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_rmsnorm_mixed_dtype_weight_huge_M(self, device, dtype):
+        # M > 64*1024 with small N takes the huge-M gamma backward path, whose fp32
+        # partials are cast back to the fp32 weight's dtype rather than the input's.
+        # (65537, 130) leaves the grid unaligned in both M and N.
+        eps = 1e-5
+        for M, N in ((131072, 128), (65537, 130)):
+            x = torch.randn(M, N, dtype=dtype)
+            weight = torch.randn(N, dtype=torch.float32)
+            grad_out = torch.randn(M, N, dtype=dtype)
+
+            grads = []
+            for dev, x_dt, w_dt in ((device, dtype, torch.float32), ("cpu", torch.float64, torch.float64)):
+                x_ = x.to(dev, x_dt).requires_grad_(True)
+                w_ = weight.to(dev, w_dt).requires_grad_(True)
+                out = torch.nn.functional.rms_norm(x_, [N], w_, eps)
+                out.backward(grad_out.to(dev, x_dt))
+                grads.append((x_.grad, w_.grad))
+            (dx, dw), (dx_ref, dw_ref) = grads
+
+            msg = f"M={M} N={N}"
+            self.assertEqual(dx.dtype, dtype, msg)
+            self.assertEqual(dw.dtype, torch.float32, msg)
+            self.assertEqual(dx.cpu().double(), dx_ref, msg, atol=1e-2, rtol=1e-2)
+            self.assertEqual(dw.cpu().double(), dw_ref, msg, atol=1e-3, rtol=1e-3)
 
 
 class TestFunctionalPickle(TestCase):
