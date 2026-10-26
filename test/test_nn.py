@@ -3687,6 +3687,32 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
         self.assertTrue(torch.isfinite(out2).all().item())
 
+    @parametrize_test("use_pos_weight", [False, True])
+    def test_bce_with_logits_numerical_stability(self, use_pos_weight):
+        dtype = torch.float64
+        values = [37.42994775023705, -37.42994775023705]
+        labels = [1.0, 0.0]
+
+        x = torch.tensor(values, dtype=dtype, requires_grad=True)
+        target = torch.tensor(labels, dtype=dtype)
+        pos_weight = (
+            torch.ones(2, dtype=dtype) if use_pos_weight else None
+        )
+
+        loss = F.binary_cross_entropy_with_logits(
+            x, target, pos_weight=pos_weight, reduction="sum"
+        )
+        loss.backward()
+
+        expected_grad = torch.sigmoid(
+            torch.tensor([-37.42994775023705, -37.42994775023705],
+                         dtype=dtype)
+        ) * torch.tensor([-1.0, 1.0], dtype=dtype)
+
+        self.assertEqual(
+            x.grad, expected_grad, atol=0, rtol=1e-12
+        )
+
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
         target = torch.rand(16, 4)
