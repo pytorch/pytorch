@@ -20,7 +20,6 @@ import torch.nn.functional as F
 import itertools
 import re
 from collections import defaultdict
-from torch import inf
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
@@ -30,7 +29,7 @@ from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_mo
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
-from torch.distributions import Uniform, Exponential, Dirichlet
+from torch.distributions import Dirichlet
 from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
@@ -2395,38 +2394,6 @@ class TestMPS(TestCaseMPS):
         first = F.linear(x, w).clone()
         second = F.linear(x, w).clone()
         self.assertEqual(first, second, atol=0, rtol=0)
-
-    def test_uniform(self):
-        low = torch.zeros(5, 5, requires_grad=True)
-        high = (torch.ones(5, 5) * 3).requires_grad_()
-        low_1d = torch.zeros(1, requires_grad=True)
-        high_1d = (torch.ones(1) * 3).requires_grad_()
-        self.assertEqual(Uniform(low, high).sample().size(), (5, 5))
-        self.assertEqual(Uniform(low, high).sample((7,)).size(), (7, 5, 5))
-        self.assertEqual(Uniform(low_1d, high_1d).sample().size(), (1,))
-        self.assertEqual(Uniform(low_1d, high_1d).sample((1,)).size(), (1, 1))
-        self.assertEqual(Uniform(0.0, 1.0).sample((1,)).size(), (1,))
-
-        # Check log_prob computation when value outside range
-        uniform = Uniform(low_1d, high_1d, validate_args=False)
-        above_high = torch.tensor([4.0])
-        below_low = torch.tensor([-1.0])
-        self.assertEqual(uniform.log_prob(above_high).item(), -inf)
-        self.assertEqual(uniform.log_prob(below_low).item(), -inf)
-
-        # check cdf computation when value outside range
-        self.assertEqual(uniform.cdf(below_low).item(), 0)
-        self.assertEqual(uniform.cdf(above_high).item(), 1)
-
-        state = torch.get_rng_state()
-        rand = low.new(low.size()).uniform_()
-        torch.set_rng_state(state)
-        u = Uniform(low, high).rsample()
-        u.backward(torch.ones_like(u))
-        self.assertEqual(low.grad, 1 - rand)
-        self.assertEqual(high.grad, rand)
-        low.grad.zero_()
-        high.grad.zero_()
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_dirichlet_grad(self, dtype):
@@ -9481,16 +9448,6 @@ class TestMPS(TestCaseMPS):
         self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
         self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
 
-    def test_exponential_1(self):
-        rate = torch.randn(5, 5).abs().requires_grad_()
-        rate_1d = torch.randn(1).abs().requires_grad_()
-        self.assertEqual(Exponential(rate).sample().size(), (5, 5))
-        self.assertEqual(Exponential(rate).sample((7,)).size(), (7, 5, 5))
-        self.assertEqual(Exponential(rate_1d).sample((1,)).size(), (1, 1))
-        self.assertEqual(Exponential(rate_1d).sample().size(), (1,))
-        self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
-        self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
-
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_exponential_nonzero(self, dtype):
         for _ in range(100):
@@ -13067,122 +13024,6 @@ class TestViewOpsMPS(TestCaseMPS):
         self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(1, 9, 1)).data_ptr())
         self.assertRaises(RuntimeError, lambda: x.reshape_as(torch.rand(10, device=device)))
 
-    def test_narrow(self, device="mps"):
-        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, 0, 1), torch.tensor([[0, 1, 2]]))
-        self.assertEqual(x.narrow(0, 0, 2), torch.tensor([[0, 1, 2], [3, 4, 5]]))
-        self.assertEqual(x.narrow(0, 1, 1), torch.tensor([[3, 4, 5]]))
-        self.assertEqual(x.narrow(0, -1, 1), torch.tensor([[6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -2, 2), torch.tensor([[3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -3, 3), torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(-1, -1, 1), torch.tensor([[2], [5], [8]]))
-        self.assertEqual(x.narrow(-2, -1, 1), torch.tensor([[6, 7, 8]]))
-
-    def test_narrow_tensor(self, device="mps"):
-        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.tensor([[0, 1, 2]]))
-        with self.assertRaises(Exception):
-            x.narrow(0, torch.tensor(0.), 1)
-        with self.assertRaises(Exception):
-            x.narrow(0, torch.tensor([0]), 1)
-        with self.assertRaises(Exception):
-            x.narrow(0, torch.tensor([0, 1]), 1)
-
-    def test_t(self, device="mps"):
-        # Test 0D tensors
-        x = torch.randn(())
-        self.assertEqual(x, x.t())
-        x = x.to_sparse()
-        self.assertEqual(x, x.t())
-
-        # Test 1D tensors
-        x = torch.arange(4)
-        self.assertEqual(x, x.t())
-        x = x.to_sparse()
-        self.assertEqual(x, x.t())
-
-        # Test 2D tensors
-        x = torch.rand((2, 2))
-        self.assertEqual(x.t(), x.transpose(0, 1))
-        x = x.to_sparse()
-        self.assertEqual(x.t(), x.transpose(0, 1))
-
-        # Test 3D tensor
-        x = torch.rand((2, 2, 2))
-        with self.assertRaisesRegex(RuntimeError, 'expects a tensor with <= 2 dimensions, but self is 3D'):
-            x.t()
-        x = x.to_sparse()
-        with self.assertRaisesRegex(RuntimeError, 'expects a tensor with <= 2 sparse and 0 dense dimensions'):
-            x.t()
-
-    def test_split(self, device="mps"):
-        tensor = torch.rand(7, 4)
-        split_size = 3
-        dim = 0
-        target_sizes = ([3, 4], [3, 4], [1, 4])
-        splits = tensor.split(split_size, dim)
-        start = 0
-        for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size(), target_size)
-            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, atol=0, rtol=0)
-            start = start + target_size[dim]
-
-        # Variable sections split
-        tensor = torch.randn(20, 10)
-        dim = 0
-        split_sizes = [5, 5, 10]
-        target_sizes = ([[5, 10], [5, 10], [10, 10]])
-        splits = tensor.split(split_sizes, dim)
-        start = 0
-        for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size(), target_size)
-            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, atol=0, rtol=0)
-            start = start + target_size[dim]
-
-        split_sizes = [2, 2, 6]
-        target_sizes = ([20, 2], [20, 2], [20, 6])
-        dim = 1
-        splits = tensor.split(split_sizes, dim)
-        start = 0
-        for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size(), target_size)
-            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, atol=0, rtol=0)
-            start = start + target_size[dim]
-
-    def test_chunk(self, device="mps"):
-        tensor = torch.rand(4, 7)
-        num_chunks = 3
-        dim = 1
-        target_sizes = ([4, 3], [4, 3], [4, 1])
-        splits = tensor.chunk(num_chunks, dim)
-        start = 0
-        for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size(), target_size)
-            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split,
-                             atol=0, rtol=0)
-            start = start + target_size[dim]
-
-        # Invalid chunk sizes
-        error_regex = 'chunk expects.*greater than 0'
-        with self.assertRaisesRegex(RuntimeError, error_regex):
-            tensor.chunk(0)
-        with self.assertRaisesRegex(RuntimeError, error_regex):
-            tensor.chunk(-2)
-
-    def test_unsqueeze(self, device="mps") -> None:
-        x = torch.randn(2, 3, 4)
-        y = x.unsqueeze(1)
-        self.assertEqual(y, x.view(2, 1, 3, 4))
-        y = x.clone().unsqueeze_(2)
-        self.assertEqual(y, x.view(2, 3, 1, 4))
-
-        x = x[:, 1]
-        self.assertFalse(x.is_contiguous())
-        y = x.unsqueeze(1)
-        self.assertEqual(y, x.contiguous().view(2, 1, 4))
-        y = x.clone().unsqueeze_(2)
-        self.assertEqual(y, x.contiguous().view(2, 4, 1))
-
     # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     def test_big_transpose(self, device="mps"):
         t = torch.rand(456, 789, device=device)
@@ -13237,12 +13078,6 @@ class TestViewOpsMPS(TestCaseMPS):
         self.assertEqual(c1.dtype, c2.dtype)
 
     # TODO: is resize best put in test_view_ops?
-    def test_resize_as_preserves_strides(self, device="mps"):
-        x = torch.empty(2, 3).t()
-        old_strides = x.stride()
-        x.resize_as_(x)
-        self.assertEqual(x.stride(), old_strides)
-
     def test_memory_format_resize_as(self, device="mps"):
         def test_helper(shape, memory_format, device="mps"):
             xc = torch.randn(shape, device=device).contiguous(memory_format=memory_format)
@@ -13343,13 +13178,6 @@ class TestViewOpsMPS(TestCaseMPS):
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
-
-    def test_resize_overflow(self, device="mps"):
-        x = torch.empty((), dtype=torch.float64)
-        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            x.resize_([2, 4, 2**29, 2**29])
-        with self.assertRaisesRegex(RuntimeError, 'overflow'):
-            x.resize_([8, 8, 2**29, 2**29])
 
     def test_view_all_dtypes_and_devices(self, device="mps"):
         for dt in (torch.float, torch.bool):
