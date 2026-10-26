@@ -68,7 +68,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: lf,amd-dpx
+      check_experiments: lf,amd-dpx,wincanarylf
 
   linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100 ') }}
@@ -331,22 +331,22 @@ jobs:
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      runner: windows.4xlarge.nonephemeral
+      runner: ${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 4, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 5, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 6, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 7, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 8, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 9, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 10, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 11, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 12, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 4, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 5, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 6, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 7, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 8, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 9, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 10, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 11, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 12, num_shards: 12, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
@@ -377,7 +377,7 @@ jobs:
     with:
       build-environment: win-vs2022-cuda13.2-py3
       cuda-version: "13.2"
-      runner: windows.4xlarge.nonephemeral
+      runner: ${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral
     secrets: inherit
 
   linux-noble-rocm-py3_11-build:
