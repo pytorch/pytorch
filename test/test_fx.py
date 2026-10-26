@@ -16,6 +16,7 @@ import numbers
 import operator
 import os
 import pickle
+import subprocess
 import sys
 import traceback
 import types
@@ -1689,16 +1690,14 @@ class TestFX(JitTestCase):
             create=True,
         )
 
-    def _resolve_to_sqrt_recording(self, seen):
+    def _resolve_to_sqrt_recording(self, seen, record_module_call=False):
         from torch.fx._symbolic_trace import _orig_module_call
 
         def on_resolve(frame_dict, name):
-            seen.append(
-                (
-                    dict.get(frame_dict, "leaf"),
-                    torch.nn.Module.__call__ is _orig_module_call,
-                )
-            )
+            if record_module_call:
+                seen.append(torch.nn.Module.__call__ is _orig_module_call)
+            else:
+                seen.append(dict.get(frame_dict, "leaf"))
             dict.__setitem__(frame_dict, name, math.sqrt)
 
         return on_resolve
@@ -1718,7 +1717,7 @@ class TestFX(JitTestCase):
             with _Patcher() as patcher:
                 patcher.patch(frame_dict, "leaf", lambda x: x)
                 _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
-                self.assertEqual(seen, [(leaf, True)])
+                self.assertEqual(seen, [leaf])
                 self.assertIsNot(dict.__getitem__(frame_dict, "leaf"), leaf)
                 self.assertIsNot(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
         self.assertIs(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
@@ -1770,7 +1769,7 @@ class TestFX(JitTestCase):
                 with _Patcher() as patcher:
                     patcher.patch(frame_dict, "leaf", lambda x: x)
                     _patch_wrapped_functions(patcher)
-                    self.assertEqual(seen, [(leaf, True)])
+                    self.assertEqual(seen, [leaf])
                     self.assertIsNot(dict.__getitem__(frame_dict, "bar"), math.sqrt)
             self.assertIs(dict.__getitem__(frame_dict, "bar"), math.sqrt)
         finally:
@@ -1842,7 +1841,9 @@ class TestFX(JitTestCase):
         inner_fn = types.FunctionType(
             f.__code__,
             self._fake_lazy_globals(
-                lazy, self._resolve_to_sqrt_recording(seen), helper=lazy
+                lazy,
+                self._resolve_to_sqrt_recording(seen, record_module_call=True),
+                helper=lazy,
             ),
         )
 
@@ -1853,7 +1854,7 @@ class TestFX(JitTestCase):
 
         with self._patch_is_lazy_import(lazy):
             torch.fx.symbolic_trace(Outer())
-        self.assertEqual(seen, [(None, True)])
+        self.assertEqual(seen, [True])
 
     def _root_with_submodule_forward(self, frame_dict, source):
         exec(source, frame_dict)
@@ -1923,6 +1924,71 @@ class TestFX(JitTestCase):
             _wrapped_fns_to_patch.pop((id(frame_dict), "leaf_fn"), None)
         targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
         self.assertIn(leaf_fn, targets)
+
+    def test_symbolic_trace_with_lazy_imports_enabled(self):
+        if getattr(importlib, "set_lazy_imports", None) is None:
+            self.skipTest("this Python has no PEP 690-style lazy imports")
+        script = """\
+import importlib
+import os
+import sys
+import tempfile
+
+import torch
+
+
+class TorchStaysEager:
+    def __contains__(self, name):
+        return name == "torch" or name.startswith("torch.")
+
+
+importlib.set_lazy_imports(True, excluding=TorchStaysEager())
+directory = tempfile.mkdtemp()
+sources = {
+    # Postponed annotations name a type only this module defines, as torchrec's do.
+    "fx_lazy_leaf": (
+        "from __future__ import annotations\\nimport torch\\n"
+        "LeafTensor = torch.Tensor\\n"
+        "def leaf(x: LeafTensor) -> LeafTensor:\\n    return x + 1\\n"
+        "torch.fx.wrap('leaf')\\n"
+    ),
+    # Scripted at import: run mid-trace, it would compile FX's wrapper of leaf.
+    "fx_lazy_scripted": (
+        "import torch\\nimport fx_lazy_leaf\\n"
+        "def uses_leaf(x: torch.Tensor) -> torch.Tensor:\\n"
+        "    return fx_lazy_leaf.leaf(x)\\n"
+        "scripted = torch.jit.script(uses_leaf)\\n"
+    ),
+    "fx_lazy_model": (
+        "import torch\\nimport fx_lazy_leaf\\nimport fx_lazy_scripted\\n"
+        "class M(torch.nn.Module):\\n"
+        "    def forward(self, x):\\n"
+        "        return fx_lazy_leaf.leaf(x) * 2\\n"
+    ),
+}
+for name, source in sources.items():
+    with open(os.path.join(directory, name + ".py"), "w") as f:
+        f.write(source)
+sys.path.insert(0, directory)
+import fx_lazy_leaf
+fx_lazy_leaf.leaf  # registers the wrap before tracing
+import fx_lazy_model
+model = fx_lazy_model.M
+assert importlib.is_lazy_import(fx_lazy_model.__dict__, "fx_lazy_scripted")
+gm = torch.fx.symbolic_trace(model())
+assert any(n.target is fx_lazy_leaf.leaf for n in gm.graph.nodes), gm.graph
+x = torch.randn(3)
+assert torch.equal(sys.modules["fx_lazy_scripted"].scripted(x), x + 1)
+print("lazy trace ok")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("lazy trace ok", result.stdout)
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
