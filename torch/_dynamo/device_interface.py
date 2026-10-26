@@ -82,6 +82,12 @@ class DeviceInterface:
                 "Stream should be inherited from torch.Stream, otherwise, it couldn't be captured by dynamo."
             )
 
+    class StreamContext:
+        def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+            raise NotImplementedError(
+                "StreamContext should be the class returned by stream(), otherwise Dynamo cannot recognize a pre-created context."
+            )
+
     class Worker:
         """
         Worker API to query device properties that will work in multi processing
@@ -136,6 +142,10 @@ class DeviceInterface:
 
     @staticmethod
     def set_stream(stream: torch.Stream) -> None:
+        raise NotImplementedError
+
+    @staticmethod
+    def default_stream(device: torch.types.Device = None) -> torch.Stream:
         raise NotImplementedError
 
     @staticmethod
@@ -361,6 +371,7 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+    StreamContext = torch.cuda.StreamContext  # type: ignore[assignment]
 
     @staticmethod
     def is_gpu() -> bool:
@@ -513,6 +524,7 @@ class MtiaInterface(DeviceInterface):
     device = torch.mtia.device  # type: ignore[assignment]
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
+    StreamContext = torch.mtia.StreamContext  # type: ignore[assignment]
 
     @staticmethod
     def is_gpu() -> bool:
@@ -624,6 +636,7 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+    StreamContext = torch.xpu.StreamContext  # type: ignore[assignment]
 
     @staticmethod
     def is_gpu() -> bool:
@@ -873,8 +886,47 @@ class TpuInterface(DeviceInterface):
             return 0
 
 
+class _UnspecifiedStreamContext:
+    pass
+
+
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
+
+
+def _real_stream_context_cls(device_interface: type[DeviceInterface]) -> type | None:
+    ctx_cls = getattr(device_interface, "StreamContext", None)
+    if isinstance(ctx_cls, type) and ctx_cls is not DeviceInterface.StreamContext:
+        return ctx_cls
+    return None
+
+
+def _validate_stream_context(
+    device: str, device_interface: type[DeviceInterface]
+) -> None:
+    """Reject two real context classes for one stream function.
+
+    A backend may override stream and leave StreamContext unset. Registration
+    still succeeds. Pre-created contexts stay unrecognized until the class is set.
+    """
+    stream_fn = getattr(device_interface, "stream", None)
+    if stream_fn is None or stream_fn is DeviceInterface.stream:
+        return
+    context_cls = _real_stream_context_cls(device_interface)
+    if context_cls is None:
+        return
+
+    for existing_device, existing_interface in device_interfaces.items():
+        if existing_device == device:
+            continue
+        if getattr(existing_interface, "stream", None) is not stream_fn:
+            continue
+        existing_context_cls = _real_stream_context_cls(existing_interface)
+        if existing_context_cls is not None and existing_context_cls is not context_cls:
+            raise ValueError(
+                f"DeviceInterface.stream {stream_fn} is already registered with a "
+                f"different StreamContext: {existing_context_cls} != {context_cls}"
+            )
 
 
 def register_interface_for_device(
@@ -894,10 +946,14 @@ def register_interface_for_device(
     """
     if isinstance(device, torch.device):
         device = device.type
+    _validate_stream_context(device, device_interface)
     device_interfaces[device] = device_interface
     from .variables.user_defined import UserDefinedClassVariable
 
     UserDefinedClassVariable._in_graph_classes.cache_clear()
+    from .device_trace_rules import register_device_trace_rules
+
+    register_device_trace_rules(device_interface)
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
@@ -914,6 +970,28 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
+
+
+def get_device_type_for_current_stream(current_stream_fn: Any) -> str | None:
+    for device, interface in device_interfaces.items():
+        if getattr(interface, "current_stream", None) is current_stream_fn:
+            return device.split(":")[0]
+    return None
+
+
+def registered_stream_context_cls(stream_fn: object) -> type | None:
+    """Return the StreamContext class for the interface that owns stream_fn.
+
+    Indexed keys such as ``npu:0`` are included. The base placeholder class is
+    not a real context.
+    """
+    for _, interface in get_registered_device_interfaces():
+        if getattr(interface, "stream", None) is not stream_fn:
+            continue
+        ctx_cls = getattr(interface, "StreamContext", None)
+        if isinstance(ctx_cls, type) and ctx_cls is not DeviceInterface.StreamContext:
+            return ctx_cls
+    return None
 
 
 def init_device_reg() -> None:

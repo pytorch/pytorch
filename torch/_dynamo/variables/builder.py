@@ -922,6 +922,29 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
+def _is_device_stream_context(value: object) -> bool:
+    """Match a pre-created stream() context from CUDA or a registered interface.
+
+    ``with device.stream(s)`` is a call and does not get here. A backend names
+    its context class on ``DeviceInterface.StreamContext``. Indexed keys such
+    as ``npu:0`` are included.
+    """
+    if isinstance(value, torch.cuda.StreamContext):
+        return True
+
+    from ..device_interface import DeviceInterface, get_registered_device_interfaces
+
+    for _, interface in get_registered_device_interfaces():
+        ctx_cls = getattr(interface, "StreamContext", None)
+        if (
+            isinstance(ctx_cls, type)
+            and ctx_cls is not DeviceInterface.StreamContext
+            and isinstance(value, ctx_cls)
+        ):
+            return True
+    return False
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1720,12 +1743,14 @@ class VariableBuilder:
                 )
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
-        elif isinstance(value, torch.cuda.StreamContext):
+        elif _is_device_stream_context(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_source = AttrSource(self.source, "stream")
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             # type: ignore[arg-type]
-            return StreamContextVariable.create(self.tx, stream_var)
+            return StreamContextVariable.create(
+                self.tx, stream_var, context_cls=type(value)
+            )
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if isinstance(self.source, CurrentStreamSource):
