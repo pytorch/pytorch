@@ -294,6 +294,29 @@ macro(torch_hip_get_arch_list store_var)
 endmacro()
 
 ##############################################################################
+# composable_kernel supports CK GEMM only on these gfx archs. Keep this list in
+# sync with at::Context::ckGemmSupported() (aten/src/ATen/Context.cpp) and the
+# runtime dispatch in aten/src/ATen/native/hip/ck_gemm_{half,bfloat16}.hip.
+# Returns the subset of PYTORCH_ROCM_ARCH that CK GEMM supports, matching on the
+# base arch so feature-suffixed targets (e.g. gfx942:xnack+) are kept, mirroring
+# the substring match in at::cuda::detail::CUDAHooks::isGPUArch.
+# Usage:
+#   torch_filter_ck_gemm_arches(variable_to_store_arches)
+#
+function(torch_filter_ck_gemm_arches out_var)
+  set(_supported "gfx90a;gfx942;gfx950")
+  set(_filtered "")
+  foreach(_arch IN LISTS PYTORCH_ROCM_ARCH)
+    string(REGEX REPLACE ":.*$" "" _base "${_arch}")
+    list(FIND _supported "${_base}" _idx)
+    if(NOT _idx EQUAL -1)
+      list(APPEND _filtered "${_arch}")
+    endif()
+  endforeach()
+  set(${out_var} "${_filtered}" PARENT_SCOPE)
+endfunction()
+
+##############################################################################
 # Get the XPU arch flags specified by TORCH_XPU_ARCH_LIST.
 # Usage:
 #   torch_xpu_get_arch_list(variable_to_store_flags)
@@ -629,6 +652,9 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
       VERBATIM
     )
+
     add_dependencies(bolt_profile_quality_summary ${tgt})
+    set_property(TARGET bolt_profile_quality_summary APPEND PROPERTY
+        SCRIPT_ARGS "--profile" "${_bolt_profile}" "${_logfile}")
   endif()
 endfunction()
