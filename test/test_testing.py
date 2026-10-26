@@ -833,6 +833,13 @@ class TestRerunCodeSkip(TestCase):
         self.assertIsNone(rerun_code_skip_reason(marked, cpu_cls))
         self.assertIsNone(rerun_code_skip_reason(marked, None))
 
+    def test_condition_is_checked_when_read(self):
+        failing = False
+        marked = mark_rerun_code_skip(_returns_ran, "known failure", condition=lambda: failing)
+        self.assertIsNone(rerun_code_skip_reason(marked, None))
+        failing = True
+        self.assertEqual(rerun_code_skip_reason(marked, None), "known failure")
+
     def test_class_reason(self):
         class TestFoo(TestCase):
             def test_a(self):
@@ -865,9 +872,9 @@ class TestRerunCodeSkip(TestCase):
                     known_bug(None)
             with self.assertRaises(unittest.SkipTest):
                 missing_api(None)
-        reason = "skipIfRocm: https://github.com/pytorch/pytorch/issues/1" if rerun else None
-        self.assertEqual(rerun_code_skip_reason(known_bug, None), reason)
-        self.assertIsNone(rerun_code_skip_reason(missing_api, None))
+            reason = "skipIfRocm: https://github.com/pytorch/pytorch/issues/1" if rerun else None
+            self.assertEqual(rerun_code_skip_reason(known_bug, None), reason)
+            self.assertIsNone(rerun_code_skip_reason(missing_api, None))
 
     def test_skip_cuda_if_rocm_marks_only_cuda(self):
         with _rerun_code_skips_on_rocm(True):
@@ -907,11 +914,16 @@ class TestRerunCodeSkipCollection(TestCase):
                 f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider",
             ]
             env = dict(_JUNIT_CHILD_ENV)
+            # CPU-only shards of GPU builds set this, which would drop the fixture's CPU device class.
+            for key in (PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY):
+                env.pop(key, None)
             if rerun:
+                issue = "https://github.com/pytorch/pytorch/issues/1"
                 disabled = Path(tmp) / "disabled.json"
-                disabled.write_text(json.dumps(
-                    {"test_listed (__main__.TestRerunCodeSkip)": ["https://github.com/pytorch/pytorch/issues/1", []]}
-                ))
+                disabled.write_text(json.dumps({
+                    "test_listed (__main__.TestCodeSkipSuite)": [issue, []],
+                    "test_code_skip_disabled_elsewhere (__main__.TestCodeSkipSuite)": [issue, ["win"]],
+                }))
                 args += ["--rerun-disabled-tests", f"--import-disabled-tests={disabled}", "--flake-finder", "--flake-runs=2"]
                 env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
             proc = subprocess.run(
@@ -929,6 +941,8 @@ class TestRerunCodeSkipCollection(TestCase):
             "test_code_skip_passes": [("passed", "known failure")] * 2,
             "test_code_skip_fails": [("failed", "known failure")] * 2,
             "test_code_skip_capability_skip": [("skipped", "known failure")] * 2,
+            "test_code_skip_disabled_elsewhere": [("skipped", None)] * 2,
+            "test_known_failure_here": [("passed", "known failure here")] * 2,
             "test_listed": [("passed", None)] * 2,
             "test_cpu_known_failure_cpu": [("passed", "cpu failure")] * 2,
         })
@@ -938,6 +952,9 @@ class TestRerunCodeSkipCollection(TestCase):
             "test_code_skip_passes": [("skipped", None)],
             "test_code_skip_fails": [("skipped", None)],
             "test_code_skip_capability_skip": [("skipped", None)],
+            "test_code_skip_disabled_elsewhere": [("skipped", None)],
+            "test_known_failure_here": [("skipped", None)],
+            "test_known_failure_elsewhere": [("passed", None)],
             "test_listed": [("passed", None)],
             "test_not_listed": [("passed", None)],
             "test_cpu_known_failure_cpu": [("passed", None)],

@@ -68,7 +68,9 @@ class TestCheckDisabledTests(unittest.TestCase):
         )
 
     @mock.patch("tools.stats.check_disabled_tests.upload_workflow_stats_to_s3")
-    def test_save_results_uploads_code_skips_separately(self, upload) -> None:
+    def test_save_results_uploads_code_skips_separately(
+        self, upload: mock.MagicMock
+    ) -> None:
         tests = {"test_disabled;TestFoo;test_foo.py": {"num_green": 50, "num_red": 0}}
         code_skips = {
             "test_known;TestFoo;test_foo.py": {
@@ -120,7 +122,7 @@ class TestCheckDisabledTests(unittest.TestCase):
         )
 
     @mock.patch("tools.stats.check_disabled_tests.upload_workflow_stats_to_s3")
-    def test_save_results_without_code_skips(self, upload) -> None:
+    def test_save_results_without_code_skips(self, upload: mock.MagicMock) -> None:
         save_results(1, 2, {}, {})
         self.assertEqual(
             upload.call_args_list, [mock.call(1, 2, "rerun_disabled_tests", [])]

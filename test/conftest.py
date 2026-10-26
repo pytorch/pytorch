@@ -325,7 +325,7 @@ def pytest_report_teststatus(report, config):
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_collection_modifyitems(items: list[Any]) -> None:
+def pytest_collection_modifyitems(config: Config, items: list[Any]) -> None:
     """
     This hook is used when rerunning disabled tests to get rid of all skipped tests
     instead of running and skipping them N times. This avoids flooding the console
@@ -354,7 +354,10 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     from torch.testing._internal.rerun_code_skip import rerun_code_skip_reason
 
     # When rerunning disabled test, ignore all test cases that are not disabled,
-    # except known-failure code skips, which are kept and report their reason
+    # except known-failure code skips, which are kept and report their reason.
+    # Runs that stop at the first failure (-x, e.g. distributed tests) drop them
+    # too, since a known failure would end the run before the disabled tests.
+    keep_code_skips = not config.option.maxfail
     filtered_items = []
 
     for item in items:
@@ -366,9 +369,10 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
             test_class not in disabled_tests
             or test_name not in disabled_tests[test_class]
         ):
-            code_skip = rerun_code_skip_reason(
-                getattr(item, "obj", None), getattr(item, "cls", None)
-            )
+            if keep_code_skips:
+                code_skip = rerun_code_skip_reason(
+                    getattr(item, "obj", None), getattr(item, "cls", None)
+                )
             if code_skip is None:
                 continue
 

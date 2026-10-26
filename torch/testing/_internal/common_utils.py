@@ -94,7 +94,6 @@ from torch.testing._comparison import (
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.rerun_code_skip import (
     mark_rerun_code_skip,
-    rerun_code_skip,
     rerun_code_skip_reason,
     rocm_message_is_known_bug,
     RUN_CODE_SKIPS,
@@ -2062,14 +2061,10 @@ def lazy_skip_if(condition_fn, reason):
     return decorator
 
 def known_failure_skip_if(condition_fn, reason):
-    """lazy_skip_if for a known failure, which rerun-disabled-tests runs instead.
-
-    Under rerun-disabled-tests ``condition_fn`` is evaluated at decoration time,
-    since collection has to know which tests to keep.
-    """
+    """lazy_skip_if for a known failure, which rerun-disabled-tests runs instead."""
     if not RUN_CODE_SKIPS:
         return lazy_skip_if(condition_fn, reason)
-    return rerun_code_skip(reason) if condition_fn() else lambda fn: fn
+    return partial(mark_rerun_code_skip, reason=reason, condition=condition_fn)
 
 requires_accelerator = lazy_skip_if(
     lambda: not torch.accelerator.is_available(),

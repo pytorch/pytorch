@@ -14,7 +14,7 @@ import unittest
 
 RUN_CODE_SKIPS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 
-# Maps a device type, or None for every device, to the skip reason.
+# Maps a device type, or None for every device, to (reason, condition).
 # functools.wraps copies it onto outer wrappers such as instantiate_test.
 _REASONS_ATTR = "__pt_rerun_code_skip_reasons__"
 
@@ -38,12 +38,17 @@ def _forwarding_wrapper(fn):
     return wrapper
 
 
-def mark_rerun_code_skip(fn, reason, device_type=None):
-    """Mark ``fn`` so rerun-disabled-tests runs it, on ``device_type`` only if given."""
+def mark_rerun_code_skip(fn, reason, device_type=None, condition=None):
+    """Mark ``fn`` so rerun-disabled-tests runs it.
+
+    ``device_type`` limits the mark to that device of device-generic tests.
+    ``condition`` is checked when the mark is read, not at import, since some
+    conditions (e.g. the ROCm arch) initialize the GPU.
+    """
     # Decorators are often applied to a function shared by several tests
     # (OpInfo variants, device classes), so mark a fresh wrapper instead.
     marked = fn if isinstance(fn, type) else _forwarding_wrapper(fn)
-    reasons = {**getattr(fn, _REASONS_ATTR, {}), device_type: reason}
+    reasons = {**getattr(fn, _REASONS_ATTR, {}), device_type: (reason, condition)}
     setattr(marked, _REASONS_ATTR, reasons)
     return marked
 
@@ -60,8 +65,11 @@ def rerun_code_skip_reason(fn, cls):
     device_type = getattr(cls, "device_type", None)
     for obj in (fn, cls):
         reasons = getattr(obj, _REASONS_ATTR, {})
-        reason = reasons.get(device_type, reasons.get(None))
-        if reason is not None:
+        entry = reasons.get(device_type, reasons.get(None))
+        if entry is None:
+            continue
+        reason, condition = entry
+        if condition is None or condition():
             return reason
     return None
 
