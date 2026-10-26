@@ -582,6 +582,29 @@ def _custom_empty(*args: object, **kwargs: object) -> None:
 _custom_empty.__name__ = "empty"
 
 
+class TestCppCodeCacheKey(TestCase):
+    def test_command_line_key_ignores_install_location(self):
+        from torch._inductor import codecache
+
+        def key_for(root: str) -> str:
+            command = f"g++ -I{root}/torch/include -L{root}/torch/lib -o o i"
+            with mock.patch.object(codecache, "_install_roots", return_value=(root,)):
+                return codecache._install_independent_command_line(command)
+
+        first = key_for("/dev/shm/seed-a")
+        self.assertEqual(first, key_for("/dev/shm/seed-b"))
+        self.assertNotIn("seed-a", first)
+        self.assertIn(codecache.torch_key().hex(), first)
+
+    def test_command_line_key_tracks_paths_outside_install(self):
+        from torch._inductor import codecache
+
+        with mock.patch.object(codecache, "_install_roots", return_value=("/opt/t",)):
+            first = codecache._install_independent_command_line("g++ -I/usr/a")
+            second = codecache._install_independent_command_line("g++ -I/usr/b")
+        self.assertNotEqual(first, second)
+
+
 class TestPyCodeCache(TestCase):
     def test_linemaps_empty(self):
         src = """import torch"""
