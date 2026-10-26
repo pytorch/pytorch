@@ -7810,27 +7810,25 @@ class TestPrecompileRuntimeCache(TestCase):
         )
         self.assertIn("XBLOCK: 128", rejected[2]["config"])
 
-    def test_capture_scope_takes_the_first_stated_freeze_flag(self):
+    def test_capture_scope_rejects_a_conflicting_freeze_flag(self):
         from torch.compiler._runtime_cache import _active_capture, capture_scope
 
-        with capture_scope():
-            self.assertIsNone(_active_capture().freeze_never_run_backward)
-            # The first block that states a preference sets it for the scope.
-            with capture_scope(freeze_never_run_backward=True):
-                with capture_scope():
-                    self.assertTrue(_active_capture().freeze_never_run_backward)
-                with self.assertRaisesRegex(RuntimeError, "disagree"):
-                    with capture_scope(freeze_never_run_backward=False):
-                        pass
-            self.assertTrue(_active_capture().freeze_never_run_backward)
+        with capture_scope(freeze_never_run_backward=True):
+            # A block that has no say joins the open scope.
+            with capture_scope():
+                self.assertTrue(_active_capture().freeze_never_run_backward)
+            with self.assertRaisesRegex(RuntimeError, "disagree"):
+                with capture_scope(freeze_never_run_backward=False):
+                    pass
         self.assertIsNone(_active_capture())
 
-    def test_dynamo_tracer_opts_its_capture_into_the_fallback(self):
-        from torch.compiler._runtime_cache import _active_capture
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_only_the_capture_that_opts_in_freezes_never_run_kernels(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler import _runtime_cache
 
-        for enabled in (False, True):
-            seen = []
-            _capture_files(
+        def capture_with(enabled):
+            return _capture_files(
                 self,
                 _no_compilation_single_graph,
                 [(torch.ones(4),)],
@@ -7838,9 +7836,21 @@ class TestPrecompileRuntimeCache(TestCase):
                 tracer=DynamoTracer(
                     require_no_risky_drops=False, freeze_never_run_backward=enabled
                 ),
-                then=lambda: seen.append(_active_capture().freeze_never_run_backward),
             )
-            self.assertEqual(seen, [True if enabled else None])
+
+        # Two captures in one scope, as the in-job path runs them: the opt-in of
+        # the first does not carry over to the second.
+        with (
+            _runtime_cache.capture_scope(),
+            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+        ):
+            never_run = _never_run_kernel("ambiguous")
+            _runtime_cache.record_triton_kernel("never_run", never_run)
+            with self.assertLogs(_runtime_cache.log, "WARNING") as logs:
+                capture_with(True)
+            self.assertIn("froze never-run backward", logs.output[0])
+            with self.assertRaisesRegex(PrecompileError, "could not freeze"):
+                capture_with(False)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_failure_leaves_live_kernel(self):
@@ -8148,6 +8158,26 @@ class TestPrecompileRuntimeCache(TestCase):
             artifact.populate_cache()
             with fresh_cache():
                 self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
+
+    def test_frozen_cpp_kernels_sharing_a_key_restore_to_their_own_paths(self):
+        from torch.compiler import _runtime_cache
+
+        # Builds that only the install path told apart share a portable key.
+        restored = []
+        with tempfile.TemporaryDirectory() as directory:
+            for binary in (b"first build", b"second build"):
+                with mock.patch.object(
+                    _runtime_cache, "_frozen_cpp_kernels", {"key": binary}
+                ):
+                    path = _runtime_cache.frozen_cpp_kernel_path(
+                        "key", directory, ".so"
+                    )
+                    _runtime_cache.restore_cpp_kernel("key", path)
+                with open(path, "rb") as f:
+                    restored.append((os.path.basename(path), f.read()))
+        self.assertNotEqual(restored[0][0], restored[1][0])
+        self.assertEqual([b for _, b in restored], [b"first build", b"second build"])
+        self.assertTrue(all(name.startswith("key-") for name, _ in restored))
 
     def test_restore_cpp_kernel_keeps_an_existing_binary(self):
         import hashlib
@@ -8864,6 +8894,10 @@ class TestPrecompileRuntimeCache(TestCase):
         def fn(x):
             return x.sin().softmax(dim=-1)
 
+        tracer = DynamoTracer(
+            require_no_risky_drops=False, freeze_never_run_backward=enabled
+        )
+
         # Rows too long for a persistent reduction, so the backward reduction
         # keeps several configs until it first runs.
         x = torch.randn(64, 32768, device="cuda", requires_grad=True)
@@ -8879,7 +8913,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 with (
                     mock.patch.dict(os.environ, producer),
                     eager_backward,
-                    _runtime_cache.capture_scope(freeze_never_run_backward=enabled),
+                    _runtime_cache.capture_scope(),
                 ):
                     out = torch.compile(fn, backend="inductor")(x)
                     recorded = _runtime_cache._capture.triton_kernels
@@ -8911,12 +8945,20 @@ class TestPrecompileRuntimeCache(TestCase):
                             PrecompileError, "could not freeze"
                         ):
                             _capture_files(
-                                self, fn, [(x.detach(),)], backend="inductor"
+                                self,
+                                fn,
+                                [(x.detach(),)],
+                                backend="inductor",
+                                tracer=tracer,
                             )
                         return
                     with self.assertLogs(_runtime_cache.log, "WARNING") as logs:
                         _, cache = _capture_files(
-                            self, fn, [(x.detach(),)], backend="inductor"
+                            self,
+                            fn,
+                            [(x.detach(),)],
+                            backend="inductor",
+                            tracer=tracer,
                         )
                     self.assertIn("froze never-run backward", logs.output[0])
                 # Freezing left the live kernels as the capture did, and the

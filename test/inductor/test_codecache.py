@@ -586,7 +586,7 @@ _custom_empty.__name__ = "empty"
 class TestCppPortableKey(TestCase):
     """Precompile freezes C++ kernels under a key that survives relocation."""
 
-    def _key(self, *parts, roots=("/opt/t",), ext_suffix=".so", version="cc 1"):
+    def _key(self, *parts, roots=("/opt/t",), ext_suffix=".so"):
         from torch._inductor import codecache
 
         real_config_var = sysconfig.get_config_var
@@ -599,11 +599,8 @@ class TestCppPortableKey(TestCase):
                 if name == "EXT_SUFFIX"
                 else real_config_var(name),
             ),
-            mock.patch.object(
-                codecache, "_compiler_version_first_line", return_value=version
-            ),
         ):
-            return codecache._portable_cpp_key("g++", *parts)
+            return codecache._portable_cpp_key(*parts)
 
     def _real_command_line(self):
         from torch._inductor.cpp_builder import CppBuilder, CppTorchDeviceOptions
@@ -648,6 +645,8 @@ class TestCppPortableKey(TestCase):
         )
         # Every form a build command puts a root in is stripped.
         forms = (
+            "-Wl,-rpath,{}:/other/lib",
+            "{},-flag",
             "-I{} -L{}/lib",
             "-I'{}/include dir'",
             '/I "{}" /LIBPATH:"{}/libs"',
@@ -681,13 +680,12 @@ class TestCppPortableKey(TestCase):
             portable.assert_called_once()
             self.assertIn(lib.key, codecache.CppCodeCache._portable_keys)
 
-    def test_key_tracks_torch_source_python_abi_and_compiler(self):
+    def test_key_tracks_torch_source_and_python_abi(self):
         from torch._inductor import codecache
 
         base = self._key("src", "cmd")
         self.assertNotEqual(base, self._key("other src", "cmd"))
         self.assertNotEqual(base, self._key("src", "cmd", ext_suffix=".abi3.so"))
-        self.assertNotEqual(base, self._key("src", "cmd", version="cc 2"))
         with mock.patch.object(codecache, "torch_key", return_value=b"other torch"):
             self.assertNotEqual(base, self._key("src", "cmd"))
 

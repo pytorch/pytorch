@@ -73,7 +73,6 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
-    _compiler_version_first_line,
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
@@ -4052,10 +4051,10 @@ def _root_pattern(roots: tuple[str, ...]) -> re.Pattern[str] | None:
         return None
     alternatives = "|".join(re.escape(root) for root in roots)
     # Whole roots only: a root starts after the start, whitespace, a quote, ``=``,
-    # a list separator, ``-I`` or ``-L``, and ends at a separator, quote, space or
-    # the end.
+    # a list separator, ``-I`` or ``-L``, and ends at a path or list separator,
+    # quote, space or the end.
     start = r"(?:^|(?<=[\s\"'=,:;])|(?<=-I)|(?<=-L))"
-    return re.compile(start + f"(?:{alternatives})" + r"(?=[/\\\s\"']|$)")
+    return re.compile(start + f"(?:{alternatives})" + r"(?=[/\\\s\"',:;]|$)")
 
 
 def _strip_relocatable_roots(text: str) -> str:
@@ -4064,7 +4063,7 @@ def _strip_relocatable_roots(text: str) -> str:
     return text if pattern is None else pattern.sub("<install>", text)
 
 
-def _portable_cpp_key(compiler: str, *parts: str) -> str:
+def _portable_cpp_key(*parts: str) -> str:
     """Name a C++ build by what it compiles, not by where torch is installed.
 
     The cache key hashes command lines full of install paths, and a packaged job
@@ -4073,15 +4072,13 @@ def _portable_cpp_key(compiler: str, *parts: str) -> str:
     finds them. It is not used for the shared on-disk cache, where the install
     path still separates builds that torch_key() cannot tell apart.
 
-    The compiler can itself live under a stripped root (a conda or packaged
-    toolchain), so it is named by its first version line instead of its path. A
-    compiler upgrade therefore rebuilds the kernels; a compiler that prints no
-    version contributes an empty line.
+    The compiler is named by its path in the command line, as in the cache key;
+    the serving host's toolchain is not consulted, since it builds nothing a
+    frozen binary covers.
     """
     identity = (
         torch_key().hex(),
         f"{sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",
-        _compiler_version_first_line(compiler),
     )
     hasher = hashlib.sha256()
     for part in (*identity, *(_strip_relocatable_roots(part) for part in parts)):
@@ -4231,13 +4228,10 @@ class CppCodeCache:
             # Unused, but makes type checkers happy.
             optimized_path = os.devnull
 
-        compiler = main_build_option.get_compiler()
-
         def portable_key() -> str:
             # Only precompile reads it, so it is computed on demand.
             if key not in cls._portable_keys:
                 cls._portable_keys[key] = _portable_cpp_key(
-                    compiler,
                     main_code,
                     optimized_code or "",
                     main_cmd_line,
@@ -4246,6 +4240,7 @@ class CppCodeCache:
             return cls._portable_keys[key]
 
         from torch.compiler._runtime_cache import (
+            frozen_cpp_kernel_path,
             has_frozen_cpp_kernel,
             has_frozen_cpp_kernels,
             is_capturing,
@@ -4313,7 +4308,7 @@ class CppCodeCache:
                     output_dir=output_dir,
                 )
 
-                worker_fn = functools.partial(
+                worker_fn: Callable[[], None] = functools.partial(
                     _worker_compile_cpp,
                     lock_path,
                     (main_builder, optimized_builder, linker),
@@ -4330,16 +4325,15 @@ class CppCodeCache:
             if frozen:
                 # Served from a directory of its own, so the frozen binary never
                 # stands in for this build in the shared cache.
-                # Named by the portable key, so relocated launches reuse one copy.
                 binary_path = normalize_path_separator(
-                    os.path.join(
-                        cache_dir(),
-                        "precompile_cpp",
-                        portable_key() + os.path.splitext(binary_path)[1],
+                    frozen_cpp_kernel_path(
+                        portable_key(),
+                        os.path.join(cache_dir(), "precompile_cpp"),
+                        os.path.splitext(binary_path)[1],
                     )
                 )
                 restore_cpp_kernel(portable_key(), binary_path)
-                worker_fn = functools.partial(_frozen_cpp_binary_ready)
+                worker_fn = _frozen_cpp_binary_ready
             cls._binary_paths[key] = binary_path
 
             def load_fn() -> Any:

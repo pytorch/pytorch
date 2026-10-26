@@ -756,13 +756,7 @@ class _DynamoCapture(Capture[_P, _R]):
         # Captures open at once share that scope, so each also freezes the
         # kernels the others compiled.
         try:
-            # Only an opt-in is stated, so a capture never conflicts with a
-            # scope that opted in around it.
-            self._block.enter_context(
-                capture_scope(
-                    freeze_never_run_backward=self._freeze_never_run_backward or None
-                )
-            )
+            self._block.enter_context(capture_scope())
             self._block.enter_context(CacheArtifactManager.with_fresh_cache())
             self._call = self._map(self._session.__enter__)
         except BaseException:
@@ -822,7 +816,11 @@ class _DynamoCapture(Capture[_P, _R]):
                 ) from e
 
         try:
-            freeze_runtime_cache(snapshot, write)
+            freeze_runtime_cache(
+                snapshot,
+                write,
+                freeze_never_run_backward=self._freeze_never_run_backward,
+            )
         except PrecompileError:
             raise
         except Exception as e:
@@ -3557,14 +3555,13 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by ``torch_key()``, the Python ABI tag, the
-    first line of the compiler's ``--version`` output, and the source and build
-    command with the PyTorch and Python install roots removed, so they still
-    serve after the same build is installed or extracted somewhere else. A
-    kernel whose key differs is rebuilt: for example, when this host's compiler
-    reports a different version, or the build command names a toolchain or CUDA
-    path outside those roots that differs here. A rebuild needs a C++ compiler
-    on this host: :func:`no_compilation` does not gate C++ builds.
+    Frozen C++ kernels are keyed by ``torch_key()``, the Python ABI tag, and the
+    source and build command with the PyTorch and Python install roots removed,
+    so they still serve after the same build is installed or extracted somewhere
+    else, with no compiler on this host. A kernel whose key differs is rebuilt:
+    for example, when the build command names a toolchain or CUDA path outside
+    those roots that differs here. A rebuild needs a C++ compiler on this host:
+    :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
