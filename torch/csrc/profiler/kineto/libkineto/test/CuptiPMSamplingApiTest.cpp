@@ -26,10 +26,7 @@
 #include <cupti_profiler_target.h>
 #include <cupti_target.h>
 
-#include "include/Config.h"
 #include "src/CuptiPMSamplingApi.h"
-#include "src/CuptiPMSamplingProfiler.h"
-#include "src/CuptiTimestamp.h"
 #include "src/Logger.h"
 #include "src/LoggerCollector.h"
 
@@ -375,15 +372,12 @@ TEST_F(CuptiPMSamplingApiTest, KeepsAtLeastOneSample) {
 TEST_F(CuptiPMSamplingApiTest, SizesGa100CapacityFromPeakClock) {
   fakeCupti().major = 8;
   fakeCupti().minor = 0;
-  Config config;
-  ASSERT_TRUE(
-      config.parse("PERFORMANCE_METRICS_DEVICE_ID=2\n"
-                   "PERFORMANCE_METRICS=sm__cycles_active.avg\n"
-                   "PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS=2000"));
-  configureCuptiTimestampSource(false);
-  CuptiPMSamplingProfiler profiler;
-  auto session = profiler.configure({ActivityType::HARDWARE_COUNTERS}, config);
-  ASSERT_NE(session, nullptr);
+  CuptiPMSamplingApi api;
+  api.configure(makeConfig(
+      std::nullopt,
+      /*deviceId=*/2,
+      {"sm__cycles_active.avg"},
+      2s));
 
   EXPECT_EQ(fakeCupti().clockRateDevice, 2);
   EXPECT_EQ(
@@ -392,6 +386,7 @@ TEST_F(CuptiPMSamplingApiTest, SizesGa100CapacityFromPeakClock) {
   EXPECT_EQ(fakeCupti().samplingInterval, 1'000'000);
   // At the fake 1.5 GHz maximum clock, 1M cycles yields 3K samples in 2s.
   EXPECT_EQ(fakeCupti().maxSamples, 3'000);
+  api.disable();
 }
 
 TEST_F(CuptiPMSamplingApiTest, IgnoresExplicitTimeIntervalsOnGa100) {
@@ -411,23 +406,16 @@ TEST_F(CuptiPMSamplingApiTest, IgnoresExplicitTimeIntervalsOnGa100) {
 TEST_F(CuptiPMSamplingApiTest, WarnsAndContinuesWithExplicitGa100Interval) {
   fakeCupti().major = 8;
   fakeCupti().minor = 0;
-  Config config;
-  ASSERT_TRUE(
-      config.parse("PERFORMANCE_METRICS_DEVICE_ID=0\n"
-                   "PERFORMANCE_METRICS=sm__cycles_active.avg\n"
-                   "PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS=1"));
-  configureCuptiTimestampSource(false);
-  CuptiPMSamplingProfiler profiler;
+  CuptiPMSamplingApi api;
   LoggerCollector collector;
   const int previousSeverity = Logger::severityLevel();
   Logger::setSeverityLevel(LoggerOutputType::WARNING);
   Logger::addLoggerObserver(&collector);
 
-  auto session = profiler.configure({ActivityType::HARDWARE_COUNTERS}, config);
+  EXPECT_NO_THROW(api.configure(makeConfig(1ms)));
 
   Logger::removeLoggerObserver(&collector);
   Logger::setSeverityLevel(previousSeverity);
-  EXPECT_NE(session, nullptr);
   auto messages = collector.extractCollectorMetadata();
   EXPECT_TRUE(messages[LoggerOutputType::ERROR].empty());
   const auto& warnings = messages[LoggerOutputType::WARNING];
@@ -440,6 +428,7 @@ TEST_F(CuptiPMSamplingApiTest, WarnsAndContinuesWithExplicitGa100Interval) {
   EXPECT_EQ(fakeCupti().clockRateDevice, 0);
   EXPECT_EQ(fakeCupti().samplingInterval, 1'000'000);
   EXPECT_EQ(fakeCupti().maxSamples, 1'500);
+  api.disable();
 }
 #endif
 
