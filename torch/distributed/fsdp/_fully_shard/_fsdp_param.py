@@ -1593,14 +1593,29 @@ def _get_all_gather_output_layouts(
             layout = _get_all_gather_output_layout(size, dim, shard_world_size)
         else:
             if require_padded_size and size != padded_sharded_size:
-                # NOTE: Inputs with the unpadded local shard's size pass on ranks
-                # whose shard needs no padding, which then hang in the collective
-                raise ValueError(
-                    f"{param_name} is unevenly sharded, so its Tensor all-gather "
-                    "inputs must have the padded sharded size "
-                    f"{tuple(padded_sharded_size)}, but input {i} has size "
-                    f"{tuple(size)}. Return other payloads as AllGatherInput records."
+                # A multi-tensor payload (e.g. a quantized weight's qdata plus
+                # its block scales) cannot match the parameter's padded size
+                # per tensor, since the scales are block-reduced along their
+                # other dims. Such a tensor only has to carry the padded size
+                # along the shard dim, which is all the collective requires.
+                # Restrict this to Shard(0), where a plain tensor's layout does
+                # not read it as rows of the parameter; other shard dims can
+                # return AllGatherInput records to declare the gathered dim.
+                multi_input_padded = (
+                    len(inputs) > 1
+                    and shard_dim == 0
+                    and size[0] == padded_sharded_size[0]
                 )
+                if not multi_input_padded:
+                    # NOTE: Inputs with the unpadded local shard's size pass on
+                    # ranks whose shard needs no padding, which then hang in
+                    # the collective
+                    raise ValueError(
+                        f"{param_name} is unevenly sharded, so its Tensor all-gather "
+                        "inputs must have the padded sharded size "
+                        f"{tuple(padded_sharded_size)}, but input {i} has size "
+                        f"{tuple(size)}. Return other payloads as AllGatherInput records."
+                    )
             if (
                 reassembled
                 and size.numel()
