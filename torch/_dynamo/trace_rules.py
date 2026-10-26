@@ -36,6 +36,7 @@ import sys
 import types
 import typing
 import unittest
+import weakref
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -4050,6 +4051,11 @@ def check_verbose(
     # break. Skip it at the top level to avoid installing unnecessary guards.
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
+
+    # Guard construction adds finalizers and invalidates any registry snapshot
+    # traced by detach before the first guard check.
+    if fi.code is not None and fi.code is weakref.finalize.detach.__code__:
+        return SkipResult(True, "weakref.finalize.detach uses the finalizer registry")
 
     # Consult the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
