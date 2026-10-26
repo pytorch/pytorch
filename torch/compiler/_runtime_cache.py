@@ -584,6 +584,22 @@ def _freeze_triton_kernel(
                 "direction": "backward",
                 "static_config_count": len(static),
             }
+
+    def cubin_retained(result: StaticTritonCompileResult) -> bool:
+        saved_result = copy.copy(result)
+        saved_result.kernel = copy.copy(result.kernel)
+        try:
+            _retain_cubin(saved_result)
+        except (OSError, RuntimeError):
+            return False
+        return True
+
+    # Whether DynamoTracer(require_tuned_backward=False) would freeze it.
+    eligible = (
+        require_tuned_backward
+        and never_run_backward
+        and any(static and cubin_retained(static[0]) for static in static_by_instance)
+    )
     kernel_name = instances[0].inductor_meta.get("kernel_name") if instances else None
     raise _UnresolvedTritonExport(
         [
@@ -592,10 +608,7 @@ def _freeze_triton_kernel(
                 "kernel_name": kernel_name,
                 "instance_count": len(instances),
                 "instances": rejected,
-                # Whether DynamoTracer(require_tuned_backward=False) would freeze it.
-                "untuned_backward_eligible": require_tuned_backward
-                and never_run_backward
-                and any(static_by_instance),
+                "untuned_backward_eligible": eligible,
             }
         ]
     )

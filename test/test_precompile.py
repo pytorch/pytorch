@@ -7862,6 +7862,23 @@ class TestPrecompileRuntimeCache(TestCase):
         # The opt-in was already on, so the error does not suggest it.
         self.assertFalse(source["untuned_backward_eligible"])
         self.assertNotIn("require_tuned_backward", str(failure.exception))
+        # Under the strict policy, a kernel the opt-in could not carry either is
+        # not offered it.
+        ambiguous = _never_run(_static_runtime_kernel(64))
+        ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
+        for launcher in ambiguous.launchers:
+            launcher._compile_result.kernel.cubin_raw = None
+        with (
+            mock.patch.object(
+                StaticTritonCompileResult,
+                "reload_cubin_path",
+                side_effect=RuntimeError("missing binary"),
+            ),
+            self.assertRaises(_UnresolvedTritonExport) as failure,
+        ):
+            _freeze_triton_kernel("source", [ambiguous], require_tuned_backward=True)
+        self.assertFalse(failure.exception.sources[0]["untuned_backward_eligible"])
+        self.assertNotIn("require_tuned_backward", str(failure.exception))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_untuned_triton_kernels_are_traced(self):
