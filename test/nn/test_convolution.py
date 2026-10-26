@@ -4113,6 +4113,7 @@ class TestConvolutionNNCUDA(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
     @parametrize_test("transpose", [False, True])
     @parametrize_test("rank", [0, 1, 2])
     def test_cudnn_convolution_invalid_rank(self, device, transpose, rank):
@@ -4127,6 +4128,7 @@ class TestConvolutionNNCUDA(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
     @parametrize_test("transpose", [False, True])
     @parametrize_test("weight_rank", [0, 1, 2, 3, 5])
     def test_cudnn_convolution_mismatched_rank(self, device, transpose, weight_rank):
