@@ -4967,6 +4967,13 @@ class TestPrecompileDynamoCapture(TestCase):
         remote = {"bundled_autotune_remote_cache": True}
         with self.assertRaisesRegex(PrecompileError, "remote autotune cache miss"):
             self._capture(single, options=remote)
+        # The session itself refuses, so a direct caller passing a wrapper does too.
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.precompile_package import precompile_capture
+
+        wrapper = torch._TorchCompileInductorWrapper(None, remote, None)
+        with self.assertRaisesRegex(PackageError, "remote autotune cache miss"):
+            precompile_capture(single, backend=wrapper)
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
