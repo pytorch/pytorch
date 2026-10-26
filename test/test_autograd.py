@@ -19225,6 +19225,98 @@ class TestAutogradCudaOnly(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
 
+class TestDisallowImplicitGradAccumulation(TestCase):
+    msg = "Output 0 of SinBackward0 was created under"
+
+    def test_second_use_errors(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            x = a.sin()
+            x * 2
+            with self.assertRaisesRegex(RuntimeError, self.msg):
+                x * 3
+            y = a.sin()
+            with self.assertRaisesRegex(RuntimeError, self.msg):
+                y * y
+
+    def test_unchecked_uses(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        x_outside = a.sin()
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            # Leaves and tensors created outside are not single-use.
+            (a * 2 + a * 3 + x_outside * 2 + x_outside * 3).sum().backward()
+            x = a.sin()
+            with torch.no_grad():
+                x * 2
+            x.detach() * 2
+            (x * 2).sum().backward()
+        # Uses outside the context manager are not checked.
+        x * 3
+        self.assertFalse(torch._C._get_disallow_implicit_grad_accumulation())
+
+    def test_custom_function(self, device):
+        class Double(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            x = a.sin()
+            Double.apply(x)
+            with self.assertRaisesRegex(RuntimeError, self.msg):
+                Double.apply(x)
+            out = Double.apply(a)
+            out * 2
+            with self.assertRaisesRegex(RuntimeError, "Output 0 of DoubleBackward"):
+                out * 3
+
+    def test_explicit_dup(self, device):
+        class Dup(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.view_as(x), x.view_as(x)
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                return grad_a + grad_b
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            x1, x2 = Dup.apply(a.sin())
+            (x1 * 2 + x2 * 3).sum().backward()
+        self.assertEqual(a.grad, a.cos() * 5)
+
+    def test_inplace(self, device):
+        a = torch.randn(3, 3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            x = a.sin()
+            x.mul_(2)
+            x.exp()
+            with self.assertRaisesRegex(RuntimeError, "Output 0 of MulBackward0"):
+                x.exp()
+            # Writing through a view is a use of the view, not a second use of
+            # the base.
+            out = a.sin()
+            out[0].mul_(2)
+            out.sum().backward()
+        expected = a.cos()
+        expected[0] *= 2
+        self.assertEqual(a.grad, expected)
+
+    def test_checkpoint_recompute(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        with torch.autograd.graph.disallow_implicit_grad_accumulation():
+            x = a.sin()
+            out = checkpoint(lambda t: t.cos(), x, use_reentrant=False)
+            out.sum().backward()
+        self.assertEqual(a.grad, -a.sin().sin() * a.cos())
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -19254,6 +19346,7 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)

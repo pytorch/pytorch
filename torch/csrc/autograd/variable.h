@@ -154,6 +154,10 @@ TORCH_API Edge gradient_edge(const Variable& /*self*/);
 /// `Variable`.
 TORCH_API void set_gradient_edge(const Variable& /*self*/, Edge edge);
 
+/// Called when `self` becomes a differentiable input of a new node. Errors if
+/// `self` is single-use and was already used while the check is enabled.
+TORCH_API void consume_single_use(const Variable& /*self*/);
+
 // Autograd Graph Interaction
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -272,6 +276,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   bool retains_grad_{false};
 
   bool is_view_{false};
+
+  // Set on tensors created under disallow_implicit_grad_accumulation(). Such a
+  // tensor may be used as a differentiable input only once; used_ records it.
+  bool single_use_{false};
+  bool used_{false};
 
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.

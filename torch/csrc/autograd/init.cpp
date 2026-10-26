@@ -1397,6 +1397,33 @@ static PyObject* is_grad_layout_enforcement_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_disallow_implicit_grad_accumulation(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "_set_disallow_implicit_grad_accumulation expects a bool, but got ",
+      Py_TYPE(arg)->tp_name);
+  c10::AutogradState::get_tls_state().set_disallow_implicit_grad_accumulation(
+      arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_disallow_implicit_grad_accumulation(
+    PyObject* self,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state()
+          .get_disallow_implicit_grad_accumulation()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
   if (Py_IsNone(obj)) {
@@ -1812,6 +1839,14 @@ static PyMethodDef methods[] = {
     {"_set_grad_layout_enforcement_enabled",
      castPyCFunctionWithKeywords(set_grad_layout_enforcement_enabled),
      METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_set_disallow_implicit_grad_accumulation",
+     set_disallow_implicit_grad_accumulation,
+     METH_O,
+     nullptr},
+    {"_get_disallow_implicit_grad_accumulation",
+     get_disallow_implicit_grad_accumulation,
+     METH_NOARGS,
      nullptr},
     {"_set_graph_exec_group", set_graph_exec_group, METH_O, nullptr},
     {"_get_graph_exec_group", get_graph_exec_group, METH_NOARGS, nullptr},

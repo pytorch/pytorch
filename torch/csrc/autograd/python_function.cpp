@@ -1048,6 +1048,7 @@ edge_list collect_next_edges(at::ArrayRef<const Variable*> input_vars) {
   next_edges.reserve(input_vars.size());
   for (const auto* input_var : input_vars) {
     next_edges.emplace_back(torch::autograd::impl::gradient_edge(*input_var));
+    torch::autograd::impl::consume_single_use(*input_var);
   }
   return next_edges;
 }
