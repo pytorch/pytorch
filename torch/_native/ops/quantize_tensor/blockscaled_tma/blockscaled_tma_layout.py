@@ -39,7 +39,6 @@ class _BlockscaledTmaSpec(NamedTuple):
     quant_orientation_id: int
     do_dim_k: bool
     do_dim_m: bool
-    input_transposed: bool
     is_square_scaling: bool
     is_scale_swizzled: bool
     s_num_row_blk_k: int | None
@@ -48,56 +47,29 @@ class _BlockscaledTmaSpec(NamedTuple):
     s_num_col_blk_m: int | None
 
 
-def _validate_and_normalize_blockscaled_tma(
+def _build_blockscaled_tma_spec(
     input: torch.Tensor,
     *,
     dim: _QuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaSpec:
-    """Validate public arguments and return their canonical host-side form."""
+    r"""Build a launch spec and check kernel limits for canonical 2D/4D input."""
 
     ndim = input.dim()
-    if ndim not in (2, 4):
-        raise ValueError(
-            f"blockscaled TMA requires a 2D or normalized 4D input; got {ndim} dimensions"
-        )
-    if not isinstance(dim, tuple) or len(dim) != 2:
-        raise ValueError(f"unsupported quantization dim: {dim}")
-    quant_dims: tuple[object, ...] = dim if isinstance(dim[0], tuple) else (dim,)
-    normalized_dims: list[tuple[int, int]] = []
-    matrix_axes = (1, 3) if ndim == 4 else (-2, -1, ndim - 2, ndim - 1)
-    for axes in quant_dims:
-        if not isinstance(axes, tuple) or len(axes) != 2:
-            raise ValueError(f"unsupported quantization dim: {dim}")
-        first, last = axes
-        if type(first) is not int or type(last) is not int:
-            raise ValueError(f"unsupported quantization dim: {dim}")
-        if first not in matrix_axes or last not in matrix_axes:
-            raise ValueError(f"unsupported quantization dim: {dim}")
-        if ndim == 4:
-            normalized = (0 if first == 1 else 1, 0 if last == 1 else 1)
-        else:
-            normalized = (first % ndim - (ndim - 2), last % ndim - (ndim - 2))
-        if normalized not in ((0, 1), (1, 0)):
-            raise ValueError(f"expected two distinct quantization axes, got {dim}")
-        normalized_dims.append(normalized)
-    if normalized_dims not in ([(0, 1)], [(1, 0)], [(0, 1), (1, 0)]):
-        raise ValueError(f"unsupported quantization dim order: {dim}")
-    # The TMA input is row-major; swap the matrix axes for transpose-contiguous views.
-    input_transposed = not input.is_contiguous()
-    if input_transposed:
-        if not input.transpose(-2, -1).is_contiguous():
-            raise ValueError(
-                "blockscaled TMA requires a contiguous or transpose-contiguous input"
-            )
-        normalized_dims = [(1 - first, 1 - last) for first, last in normalized_dims]
-    do_dim_k = (0, 1) in normalized_dims
-    do_dim_m = (1, 0) in normalized_dims
+    is_batched = ndim == 4
+    dim_k = (1, 3) if is_batched else (-2, -1)
+    is_dual = isinstance(dim[0], tuple)
+    do_dim_k = is_dual or dim == dim_k
+    do_dim_m = is_dual or dim == dim_k[::-1]
+    row_axis, col_axis = (1, 3) if is_batched else (0, 1)
 
     if not is_scale_swizzled:
         if do_dim_m:
-            raise ValueError("compact scales currently support only dim-k output")
+            raise ValueError(
+                f"compact scales require quantization along contiguous input axis {col_axis}; "
+                f"got dim={dim}"
+            )
         if is_square_scaling:
             raise ValueError("compact scales do not support square scaling")
 
@@ -106,21 +78,31 @@ def _validate_and_normalize_blockscaled_tma(
 
     if is_square_scaling:
         if do_dim_m:
-            raise ValueError("square scaling currently supports only dim-k output")
-    tma_input = input.transpose(-2, -1) if input_transposed else input
-    M, K = (input.shape[1], input.shape[3]) if ndim == 4 else tma_input.shape[-2:]
-    B_product = input.shape[0] * input.shape[2] if ndim == 4 else 1
+            raise ValueError(
+                f"square scaling requires quantization along contiguous input axis {col_axis}; "
+                f"got dim={dim}"
+            )
+    M, K = (input.shape[1], input.shape[3]) if is_batched else input.shape[-2:]
+    B_product = input.shape[0] * input.shape[2] if is_batched else 1
     if is_square_scaling and M % 32 != 0:
-        raise ValueError("32x32 requires M % 32 == 0")
+        raise ValueError(
+            f"32x32 scaling requires input axis {row_axis} to be divisible by 32; "
+            f"got size {M}"
+        )
     if do_dim_m:
         if M % 32 != 0:
-            raise ValueError("dim-M requires M % 32 == 0")
+            raise ValueError(
+                f"quantized axis {row_axis} must be divisible by 32; got size {M}"
+            )
         if K % 16 != 0:
-            raise ValueError("dim-M requires K % 16 == 0")
-        if do_dim_k and K % 32 != 0:
-            raise ValueError("dim-K requires K % 32 == 0")
-    elif K % 32 != 0:
-        raise ValueError("requires K % 32 == 0")
+            raise ValueError(
+                f"input axis {col_axis} must be divisible by 16 when quantizing "
+                f"axis {row_axis}; got size {K}"
+            )
+    if do_dim_k and K % 32 != 0:
+        raise ValueError(
+            f"quantized axis {col_axis} must be divisible by 32; got size {K}"
+        )
 
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
@@ -143,11 +125,10 @@ def _validate_and_normalize_blockscaled_tma(
         M=M,
         K=K,
         B_product=B_product,
-        is_batched=ndim == 4,
+        is_batched=is_batched,
         quant_orientation_id=quant_orientation_id,
         do_dim_k=do_dim_k,
         do_dim_m=do_dim_m,
-        input_transposed=input_transposed,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
         s_num_row_blk_k=s_num_row_blk_k,
@@ -192,7 +173,6 @@ def _checked_blockscaled_tma_plan(
             f"maximum=({_CUDA_GRID_X_MAX}, {_CUDA_GRID_Y_MAX}, {_CUDA_GRID_Z_MAX})"
         )
     return plan
-
 
 
 def normalize_quantize_dim(dim: object, ndim: int) -> _SingleQuantDim:
@@ -358,7 +338,7 @@ def infer_blockscaled_tma_outputs(
     canonical = _canonicalize_matrix_input(
         input, kernel_dim, is_square_scaling, is_scale_swizzled
     )
-    spec = _validate_and_normalize_blockscaled_tma(
+    spec = _build_blockscaled_tma_spec(
         canonical.input,
         dim=canonical.dim,
         is_square_scaling=is_square_scaling,
@@ -394,15 +374,10 @@ def infer_blockscaled_tma_outputs(
             dtype=torch.float8_e8m0fnu,
         ).transpose(-2, -1)
         result_m = (qdata_m, scale_m)
-    if spec.input_transposed:
-        if result_k is not None:
-            result_k = (result_k[0].transpose(-2, -1), result_k[1].transpose(-2, -1))
-        if result_m is not None:
-            result_m = (result_m[0].transpose(-2, -1), result_m[1].transpose(-2, -1))
     if dual:
         if result_k is None or result_m is None:
             raise AssertionError("dual quantization requires both axis outputs")
-        outputs = (*result_m, *result_k) if spec.input_transposed else (*result_k, *result_m)
+        outputs = (*result_k, *result_m)
     else:
         outputs = result_k if result_k is not None else result_m
         if outputs is None:

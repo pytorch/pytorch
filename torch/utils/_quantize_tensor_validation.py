@@ -36,8 +36,8 @@ def _validate_mxfp8_inputs(
     dual: bool,
 ) -> tuple[int, int]:
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        _build_blockscaled_tma_spec,
         _canonicalize_matrix_input,
-        _validate_and_normalize_blockscaled_tma,
         normalize_quantize_dim,
     )
     from torch.nn.functional import SwizzleType
@@ -65,7 +65,7 @@ def _validate_mxfp8_inputs(
         )
         kernel_dim = axes
     canonical = _canonicalize_matrix_input(input, kernel_dim, square, swizzled)
-    _validate_and_normalize_blockscaled_tma(
+    _build_blockscaled_tma_spec(
         canonical.input,
         dim=canonical.dim,
         is_square_scaling=square,
