@@ -403,8 +403,10 @@ PyObject* dynamo__custom_eval_frame(
 
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
-  PyCodeObject* cached_code = nullptr; // borrowed
-  const char* trace_annotation = "";
+  PyCodeObject* cached_code = nullptr; // borrowed from cache_hit
+  // Owns the code eval_custom runs and its annotation, since a concurrent
+  // torch._dynamo.reset() can free the cache entry they came from.
+  CacheLookupResult cache_hit;
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
@@ -473,7 +475,11 @@ PyObject* dynamo__custom_eval_frame(
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
+        tstate,
+        frame,
+        cached_code,
+        cache_hit.trace_annotation.c_str(),
+        throw_flag);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -530,15 +536,13 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           code,
           backend,
           isolate_recompiles_id,
-          &maybe_cached_code,
-          &trace_annotation,
-          get_skip_guard_eval_unsafe())) {
+          get_skip_guard_eval_unsafe(),
+          &cache_hit)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
         _pytorch_record_function_enter(cache_lookup_profiler_str);
@@ -547,9 +551,8 @@ PyObject* dynamo__custom_eval_frame(
         locals.get(),
         backend,
         isolate_recompiles_id,
-        &maybe_cached_code,
-        &trace_annotation,
-        get_skip_guard_eval_unsafe());
+        get_skip_guard_eval_unsafe(),
+        &cache_hit);
     _pytorch_record_function_exit(rf);
   }
 
@@ -561,7 +564,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (maybe_cached_code == nullptr) {
+  if (!cache_hit.code) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
@@ -576,14 +579,14 @@ PyObject* dynamo__custom_eval_frame(
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
+    py::object res = guard_complete_hook_handle(!cache_hit.code.is_none());
     if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None; // NB: non-owning
+      cache_hit.code = py::none();
     }
   }
 
-  if (!Py_IsNone(maybe_cached_code)) {
-    cached_code = (PyCodeObject*)maybe_cached_code;
+  if (!cache_hit.code.is_none()) {
+    cached_code = (PyCodeObject*)cache_hit.code.ptr();
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -668,18 +671,17 @@ PyObject* dynamo__custom_eval_frame(
 
   // The callback ran arbitrary Python, which may have reset this code object's
   // cache; the strategy and the new entry go on whatever state it has now.
-  CacheEntry* new_cache_entry = record_compile_result(
+  cache_hit = record_compile_result(
       code,
       isolate_recompiles_id,
       apply_to_code,
       new_strategy,
       guarded_code,
       backend);
-  if (new_cache_entry != nullptr) {
+  if (!cache_hit.code.is_none()) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
     // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry);
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+    cached_code = (PyCodeObject*)cache_hit.code.ptr();
     eval_custom();
   } else {
     eval_default();
