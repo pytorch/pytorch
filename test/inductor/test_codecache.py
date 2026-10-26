@@ -634,7 +634,8 @@ class TestCppPortableKey(TestCase):
         self.assertNotEqual(self._key("g++ -I/usr/a"), self._key("g++ -I/usr/b"))
         # A sibling that merely shares the root's prefix is outside the install.
         self.assertNotEqual(
-            self._key("-I/opt/t-cuda/include"), self._key("-I/opt/u-cuda/include")
+            self._key("-I/opt/t-cuda/include", roots=("/opt/t",)),
+            self._key("-I/opt/u-cuda/include", roots=("/opt/u",)),
         )
 
     def test_key_strips_only_whole_roots(self):

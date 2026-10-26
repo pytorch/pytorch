@@ -8169,10 +8169,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 with mock.patch.object(
                     _runtime_cache, "_frozen_cpp_kernels", {"key": binary}
                 ):
-                    path = _runtime_cache.frozen_cpp_kernel_path(
-                        "key", directory, ".so"
-                    )
-                    _runtime_cache.restore_cpp_kernel("key", path)
+                    path = _runtime_cache.restore_cpp_kernel("key", directory, ".so")
                 with open(path, "rb") as f:
                     restored.append((os.path.basename(path), f.read()))
         self.assertNotEqual(restored[0][0], restored[1][0])
@@ -8189,21 +8186,21 @@ class TestPrecompileRuntimeCache(TestCase):
             tempfile.TemporaryDirectory() as directory,
             mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}),
         ):
+            target = os.path.join(directory, "nested")
+            self.assertIsNone(_runtime_cache.restore_cpp_kernel("key", target, ".so"))
             _runtime_cache.InductorCppCacheArtifact(
                 hashlib.sha256(payload).hexdigest(), payload
             ).populate_cache()
-            existing = os.path.join(directory, "existing.so")
-            with open(existing, "wb") as f:
-                f.write(b"local")
-            _runtime_cache.restore_cpp_kernel("key", existing)
-            missing = os.path.join(directory, "nested", "missing.so")
-            _runtime_cache.restore_cpp_kernel("key", missing)
-            with open(existing, "rb") as f:
-                self.assertEqual(f.read(), b"local")
-            with open(missing, "rb") as f:
+            path = _runtime_cache.restore_cpp_kernel("key", target, ".so")
+            with open(path, "rb") as f:
                 self.assertEqual(f.read(), b"frozen")
-            self.assertEqual(sorted(os.listdir(directory)), ["existing.so", "nested"])
-            self.assertEqual(os.listdir(os.path.dirname(missing)), ["missing.so"])
+            # A file already at the content-named path is left alone.
+            os.utime(path, (0, 0))
+            self.assertEqual(
+                _runtime_cache.restore_cpp_kernel("key", target, ".so"), path
+            )
+            self.assertEqual(os.stat(path).st_mtime, 0)
+            self.assertEqual(os.listdir(target), [os.path.basename(path)])
 
     @parametrize("damage", ("sha", "type"))
     def test_cpp_artifact_rejects_damaged_records(self, damage):

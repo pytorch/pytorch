@@ -271,25 +271,23 @@ def has_frozen_cpp_kernel(key: str) -> bool:
         return key in _frozen_cpp_kernels
 
 
-def frozen_cpp_kernel_path(key: str, directory: str, suffix: str) -> str:
-    """Where a frozen binary is restored, named by its key and content.
+def restore_cpp_kernel(key: str, directory: str, suffix: str) -> str | None:
+    """Write the frozen C++ kernel binary for ``key`` into ``directory`` and
+    return its path, or None if no binary is frozen under ``key``.
 
-    Different builds can share a key, so a file already at this path is kept
-    only because it holds the same bytes.
+    The file is named by the key and a digest of the bytes written to it, read
+    once under the lock. Different builds can share a key, so a file already at
+    that path is kept only because it holds the same bytes.
     """
     with _frozen_cpp_kernels_lock:
-        payload = _frozen_cpp_kernels[key]
-    digest = hashlib.sha256(payload).hexdigest()[:16]
-    return os.path.join(directory, f"{key}-{digest}{suffix}")
-
-
-def restore_cpp_kernel(key: str, binary_path: str) -> None:
-    """Materialize a frozen C++ kernel binary at this host's cache path."""
-    with _frozen_cpp_kernels_lock:
         payload = _frozen_cpp_kernels.get(key)
-    if payload is None or os.path.exists(binary_path):
-        return
-    os.makedirs(os.path.dirname(binary_path), exist_ok=True)
+    if payload is None:
+        return None
+    digest = hashlib.sha256(payload).hexdigest()[:16]
+    binary_path = os.path.join(directory, f"{key}-{digest}{suffix}")
+    if os.path.exists(binary_path):
+        return binary_path
+    os.makedirs(directory, exist_ok=True)
     temporary = f"{binary_path}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         with open(temporary, "wb") as output:
@@ -298,6 +296,7 @@ def restore_cpp_kernel(key: str, binary_path: str) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+    return binary_path
 
 
 def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:

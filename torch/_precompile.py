@@ -3557,11 +3557,14 @@ def load(
 
     Frozen C++ kernels are keyed by ``torch_key()``, the Python ABI tag, and the
     source and build command with the PyTorch and Python install roots removed,
-    so they still serve after the same build is installed or extracted somewhere
-    else, with no compiler on this host. A kernel whose key differs is rebuilt:
-    for example, when the build command names a toolchain or CUDA path outside
-    those roots that differs here. A rebuild needs a C++ compiler on this host:
-    :func:`no_compilation` does not gate C++ builds.
+    so they still serve without being rebuilt after the same build is installed
+    or extracted somewhere else. Loading one still resolves the C++ compiler and
+    the CPU's vector ISA to form that build command, which outside fbcode needs
+    a compiler on this host. A kernel whose key differs is rebuilt: for example,
+    when this host resolves a different vector ISA, or the build command names a
+    toolchain or CUDA path outside those roots that differs here. A rebuild needs
+    a C++ compiler on this host: :func:`no_compilation` does not gate C++
+    builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's

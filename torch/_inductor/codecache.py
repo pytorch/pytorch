@@ -4072,9 +4072,10 @@ def _portable_cpp_key(*parts: str) -> str:
     finds them. It is not used for the shared on-disk cache, where the install
     path still separates builds that torch_key() cannot tell apart.
 
-    The compiler is named by its path in the command line, as in the cache key;
-    the serving host's toolchain is not consulted, since it builds nothing a
-    frozen binary covers.
+    The compiler is named by its path in the command line, as in the cache key,
+    not by the serving host's compiler version. The command line still carries
+    the vector ISA flags the host resolves, so a host with a different ISA gets a
+    different key and rebuilds.
     """
     identity = (
         torch_key().hex(),
@@ -4240,7 +4241,6 @@ class CppCodeCache:
             return cls._portable_keys[key]
 
         from torch.compiler._runtime_cache import (
-            frozen_cpp_kernel_path,
             has_frozen_cpp_kernel,
             has_frozen_cpp_kernels,
             is_capturing,
@@ -4322,17 +4322,20 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
-            if frozen:
-                # Served from a directory of its own, so the frozen binary never
-                # stands in for this build in the shared cache.
-                binary_path = normalize_path_separator(
-                    frozen_cpp_kernel_path(
-                        portable_key(),
-                        os.path.join(cache_dir(), "precompile_cpp"),
-                        os.path.splitext(binary_path)[1],
-                    )
+            # Served from a directory of its own, so the frozen binary never
+            # stands in for this build in the shared cache. A binary uninstalled
+            # since the check above is built as usual.
+            restored = (
+                restore_cpp_kernel(
+                    portable_key(),
+                    os.path.join(cache_dir(), "precompile_cpp"),
+                    os.path.splitext(binary_path)[1],
                 )
-                restore_cpp_kernel(portable_key(), binary_path)
+                if frozen
+                else None
+            )
+            if restored is not None:
+                binary_path = normalize_path_separator(restored)
                 worker_fn = _frozen_cpp_binary_ready
             cls._binary_paths[key] = binary_path
 
