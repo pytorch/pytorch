@@ -202,7 +202,7 @@ static BoundSet convertBounds(
   BoundSet ret;
   for (auto& TABI : bounds) {
     if (filter == kMutate || TABI.kind == filter) {
-      for (size_t i = 0; i < TABI.start.size(); ++i) {
+      for (const auto i : c10::irange(TABI.start.size())) {
         ret.insert(Bound(TABI.start[i], TABI.stop[i]));
       }
     }
@@ -279,7 +279,7 @@ static IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   if (tabi.start.empty()) {
     return ret;
   }
-  for (size_t i = 0; i < tabi.start.size(); ++i) {
+  for (const auto i : c10::irange(tabi.start.size())) {
     ret[i] = Bound(tabi.start[i], tabi.stop[i]);
   }
   return ret;
@@ -321,8 +321,8 @@ static bool hasConflictingOverlap(
     auto bIndexBounds = bIndexBoundsInfo[bIt->first];
     auto aTABIs = aBound.second;
     auto bTABIs = bIt->second;
-    for (size_t i = 0; i < aTABIs.size(); ++i) {
-      for (size_t j = 0; j < bTABIs.size(); ++j) {
+    for (const auto i : c10::irange(aTABIs.size())) {
+      for (const auto j : c10::irange(bTABIs.size())) {
         auto aTABI = aTABIs[i];
         auto bTABI = bTABIs[j];
         if (aTABI.kind == kLoad && bTABI.kind == kLoad) {

@@ -1539,7 +1539,7 @@ InsertObserversHelper::insertObserversFor(
 
           // We'll insert output observer for each subblock, and in the end
           // we will check if output of subblocks are quantized consistently
-          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+          for (const auto i : c10::irange(subblock->outputs().size())) {
             Value* output = subblock->outputs()[i];
             if (output_observers[i] && !inputs_outputs.contains(output) &&
                 !isObserved(output, block_observed_values)) {
@@ -1554,7 +1554,7 @@ InsertObserversHelper::insertObserversFor(
             block_observed_values.insert(subblock->outputs()[idx]);
           }
           std::vector<bool> subblock_output_observe_state;
-          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+          for (const auto i : c10::irange(subblock->outputs().size())) {
             Value* output = subblock->outputs()[i];
             subblock_output_observe_state.push_back(
                 isObserved(output, block_observed_values));
@@ -1571,7 +1571,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
         // mark the output of if as observed
-        for (size_t i = 0; i < n->outputs().size(); ++i) {
+        for (const auto i : c10::irange(n->outputs().size())) {
           if (aggregated_output_observe_state[i]) {
             block_observed_values.insert(n->output(i));
           }

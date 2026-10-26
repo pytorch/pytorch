@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
@@ -480,7 +481,7 @@ bool Buf::is_contiguous(at::MemoryFormat memory_format) const {
       TORCH_CHECK(strides_.empty());
       return true; // Align with the isContiguous logic in the kernel.cpp
     }
-    for (size_t i = 0; i < ndims; i++) {
+    for (const auto i : c10::irange(ndims)) {
       dim_order[i] = ndims - i - 1; // Reverse
     }
   }
@@ -489,7 +490,7 @@ bool Buf::is_contiguous(at::MemoryFormat memory_format) const {
   if (!res)
     return false;
 
-  for (size_t i = 1; i < ndims; i++) {
+  for (const auto i : c10::irange(1, ndims)) {
     auto cur_dim = dim_order[i];
     auto pre_dim = dim_order[i - 1];
     res &= is_cont_with(cur_dim, pre_dim);

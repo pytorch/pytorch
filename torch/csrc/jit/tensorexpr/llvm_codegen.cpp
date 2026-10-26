@@ -1384,7 +1384,7 @@ void LLVMCodeGenImpl::visit(const RampPtr& v) {
           llvm::dyn_cast<llvm::ConstantInt>(stride)) {
     std::vector<llvm::Constant*> vals = {
         llvm::ConstantInt::get(base->getType(), 0)};
-    for (int i = 1; i < lanes; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(1, lanes)) {
       vals.push_back(llvm::ConstantExpr::getAdd(vals.back(), const_stride));
     }
 
@@ -1417,7 +1417,7 @@ void LLVMCodeGenImpl::visit(const RampPtr& v) {
   }
 
   value_ = llvm::UndefValue::get(vecType);
-  for (int i = 0; i < lanes; ++i) {
+  for (const auto i : c10::irange(lanes)) {
     value_ = irb_.CreateInsertElement(value_, base, i);
     base = irb_.CreateAdd(base, stride);
   }
@@ -2308,7 +2308,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
   } else if (call_simd_lanes == 1) {
     llvm::Type* vecType = params[0]->getType();
     value_ = llvm::UndefValue::get(vecType);
-    for (int i = 0; i < lanes; ++i) {
+    for (const auto i : c10::irange(lanes)) {
       std::vector<llvm::Value*> call_operands;
       for (auto p : params) {
         call_operands.push_back(irb_.CreateExtractElement(p, i));

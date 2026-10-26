@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch::jit::tensorexpr {
@@ -81,7 +82,7 @@ void IRVerifier::visit(const LoadPtr& v) {
 
   Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
-    for (size_t i = 1; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(1, indices.size())) {
       TORCH_CHECK(
           indices.at(i)->dtype() == index_dtype,
           "MALFORMED IR: dtype mismatch in Load indices");
@@ -133,7 +134,7 @@ void IRVerifier::visit(const StorePtr& v) {
 
   Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
-    for (size_t i = 1; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(1, indices.size())) {
       TORCH_CHECK(
           indices.at(i)->dtype() == index_dtype,
           "MALFORMED IR: dtype mismatch in Store indices");

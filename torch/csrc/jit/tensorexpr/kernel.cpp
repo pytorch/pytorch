@@ -1196,7 +1196,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
-            for (size_t i = 0; i < axes.size(); i++) {
+            for (const auto i : c10::irange(axes.size())) {
               idx = idx + axes[i] * inputTensorStrides[i];
             }
             return inBuffer.load(idx);
@@ -1286,7 +1286,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       "output_1", sizes, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
-        for (size_t i = 0; i < axes.size(); ++i) {
+        for (const auto i : c10::irange(axes.size())) {
           ExprHandle stride(default_strides[i]);
           absolute_position = absolute_position + (stride * axes[i]);
         }
@@ -1398,7 +1398,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
       "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
-        for (size_t i = 0; i < axes.size(); ++i) {
+        for (const auto i : c10::irange(axes.size())) {
           absolute_position = absolute_position +
               (ExprHandle(immLike(axes[i], default_strides[i])) * axes[i]);
         }

@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <c10/util/FbcodeMaps.h>
+#include <c10/util/irange.h>
 #include <c10/util/safe_numerics.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -861,7 +862,7 @@ void Unpickler::readGlobal(
     }
 
     std::optional<at::QScheme> qscheme;
-    for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+    for (const auto i : c10::irange(at::COMPILE_TIME_NUM_QSCHEMES)) {
       if (class_name == toString(static_cast<at::QScheme>(i))) {
         qscheme = static_cast<at::QScheme>(i);
       }

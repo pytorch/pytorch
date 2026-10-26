@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -43,7 +44,7 @@ static std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
     return all_nested_loops;
   }
   nested_loops.push_back(loops[0]);
-  for (size_t i = 1; i < loops.size(); i++) {
+  for (const auto i : c10::irange(1, loops.size())) {
     auto last_loop = nested_loops.back();
     auto next_loop = loops[i];
     if (last_loop->body()->nstmts() == 1 &&
@@ -75,7 +76,7 @@ static std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
     return std::make_tuple(
         std::move(selected_objects), std::move(selected_indices));
   }
-  for (int i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     int index = indices[i];
     selected_indices.push_back(index);
     selected_objects.push_back(objects[index]);
@@ -213,7 +214,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   };
   bool can_inline = true;
   try {
-    for (int n_transform = 0; n_transform < n_transforms; n_transform++) {
+    for (const auto n_transform : c10::irange(n_transforms)) {
       int transform = std::rand() % MAX_TRANSFORM;
       switch (transform) {
         case SIMPLIFY: {

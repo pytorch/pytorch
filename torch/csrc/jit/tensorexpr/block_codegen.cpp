@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/block_codegen.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 
 namespace torch::jit::tensorexpr {
@@ -151,7 +152,7 @@ void BlockPrinter::PrintTensorInfo(const std::unordered_set<BufPtr>& bufs) {
     auto num_dims = block_analysis_->getMultiDimBuf(buf)->dims().size();
     os() << block_analysis_->getInputName(buf) << " = ";
     os() << '{';
-    for (unsigned long d = 0; d < num_dims; d++) {
+    for (const auto d : c10::irange(num_dims)) {
       os() << '{' << dim_names[d] << "};";
     }
     os() << " elem : " << blockDtypeCppString(buf->dtype());
@@ -180,7 +181,7 @@ void BlockPrinter::PrintArguments(const std::unordered_set<BufPtr>& bufs) {
     auto num_dims = multidimbuf->dims().size();
 
     // The dims for the multi-dim tensors
-    for (unsigned long d = 0; d < num_dims; d++) {
+    for (const auto d : c10::irange(num_dims)) {
       auto dim_val = *intValue(multidimbuf->dim(d));
       this->dim_values_map.emplace(this->dim_names[d], dim_val);
     }

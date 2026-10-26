@@ -369,7 +369,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         "Expecting FP aten::embedding_bag operator to have 9 inputs");
     // input 0 is the output of prepack op.
     // Last input is added after we account for extra input in 4-bit case.
-    for (unsigned long i = 1; i < inputs_size - 2; ++i) {
+    for (const auto i : c10::irange(1, inputs_size - 2)) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
     // The sparse field in the float operator denotes sparse gradients.
@@ -932,7 +932,7 @@ void SubGraphCloneHelper::cloneNodeInGraph(
   };
 
   auto new_node = block->appendNode(g->createClone(node, value_fn));
-  for (size_t i = 0; i < node->outputs().size(); ++i) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     auto oo = node->outputs()[i];
     auto no = new_node->outputs()[i];
     remap_old_to_new[oo] = no;

@@ -20,6 +20,7 @@
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -884,7 +885,7 @@ mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
   }
 
   std::vector<std::string> type_name_list;
-  for (uint32_t i = 0; i < mobile_ivalue_size; i++) {
+  for (const auto i : c10::irange(mobile_ivalue_size)) {
     const auto* ival = ff_module->ivalues()->Get(i);
     if (const auto* func = ival->val_as_Function()) {
       minfo.function_names.insert(func->qn()->str());

@@ -351,7 +351,7 @@ struct SymbolicShapeOpAnalyzer {
 
       TypePtr element_type =
           graph_in_var->type()->cast<ListType>()->getElementType();
-      for (size_t j = op_in_index; j < op_in_index + li_length; ++j) {
+      for (const auto j : c10::irange(op_in_index, op_in_index + li_length)) {
         auto new_inp = shape_compute_graph_->insertInput(op_in_index + j);
         new_inp->setType(element_type);
         li_inputs.push_back(new_inp);
@@ -666,7 +666,7 @@ std::vector<SSArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
           n->input(node_index)->node()->kind() == prim::ListConstruct &&
           !db.hasWriters(n->input(node_index))) {
         auto li_construct_node = n->input(node_index)->node();
-        for (size_t j = 0; j < li_construct_node->inputs().size(); ++j) {
+        for (const auto j : c10::irange(li_construct_node->inputs().size())) {
           input_shapes.push_back(tensorShapeArg(li_construct_node->input(j)));
         }
       } else {
@@ -875,8 +875,8 @@ struct SymbolicShapeGraphAnalyzer {
     std::unordered_map<Value*, int64_t> graph_output_to_symbolic_shape_dim;
     std::vector<size_t> erase_indices;
 
-    for (size_t i = 0; i < stitched_shape_compute_graph->outputs().size();
-         ++i) {
+    for (const auto i :
+         c10::irange(stitched_shape_compute_graph->outputs().size())) {
       Value* output = stitched_shape_compute_graph->outputs().at(i);
       // this Value is already contained, so the symbolic shape for i must be
       // equal to the symbolic shape at the existing index
@@ -915,7 +915,7 @@ struct SymbolicShapeGraphAnalyzer {
       std::unordered_map<int64_t, int64_t>& sym_shape_equalities) {
     for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
       auto curr = *it;
-      for (size_t i = 0; i < curr->outputs().size(); ++i) {
+      for (const auto i : c10::irange(curr->outputs().size())) {
         auto output = curr->output(i);
         auto tt = output->type()->cast<TensorType>();
         if (!tt || !tt->symbolic_sizes().rank()) {
@@ -986,7 +986,7 @@ struct SymbolicShapeGraphAnalyzer {
       }
       node_inputs.push_back(curr->namedInput("dim"));
     } else {
-      for (size_t i = 0; i < partial_eval_graph->inputs().size(); ++i) {
+      for (const auto i : c10::irange(partial_eval_graph->inputs().size())) {
         node_inputs.push_back(curr->input(i));
       }
     }
@@ -1014,7 +1014,7 @@ struct SymbolicShapeGraphAnalyzer {
           continue;
         }
         auto rank = *tt->symbolic_sizes().rank();
-        for (size_t j = 0; j < rank; ++j) {
+        for (const auto j : c10::irange(rank)) {
           auto shape = tt->symbolic_sizes()[j];
           if (shape.is_static() ||
               symbolic_shape_value_to_graph_output_.contains(shape.value())) {
@@ -1162,7 +1162,7 @@ calculateSymbolicShapesOnOp(
     if (lower_bound_res.has_value() && upper_bound_res.has_value()) {
       TORCH_INTERNAL_ASSERT(lower_bound_res->size() == upper_bound_res->size());
       auto merged_res = std::vector<c10::SymbolicShape>();
-      for (size_t i = 0; i < lower_bound_res->size(); i++) {
+      for (const auto i : c10::irange(lower_bound_res->size())) {
         merged_res.push_back(
             combine_bounds(lower_bound_res->at(i), upper_bound_res->at(i)));
       }

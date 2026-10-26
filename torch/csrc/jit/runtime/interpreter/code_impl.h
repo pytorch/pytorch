@@ -371,7 +371,7 @@ struct CodeImpl {
   }
 
   void emitLoadInputs(at::ArrayRef<Value*> inputs, size_t start, size_t end) {
-    for (size_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       emitUse(inputs[i], false);
     }
   }

@@ -730,7 +730,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     subgraph_node->replaceInput(i, to_mkldnn->output());
   }
 
-  for (size_t i = 0; i < subgraph_node->outputs().size(); ++i) {
+  for (const auto i : c10::irange(subgraph_node->outputs().size())) {
     Value* v = subgraph_node->outputs().at(i);
     if (!v->type()->cast<TensorType>()) {
       continue;

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -1041,7 +1042,7 @@ void RemoveImmutableInputDictLookups(
         graph->create(static_runtime_dict_unpack_symbol, getitems.size());
     graph->insertNode(dict_unpack);
     dict_unpack->addInput(getitems[0]->input(0));
-    for (size_t i = 0; i < getitems.size(); ++i) {
+    for (const auto i : c10::irange(getitems.size())) {
       Node* getitem_node = getitems[i];
       DCHECK(getitem_node->input(0) == dict);
       dict_unpack->addInput(getitem_node->input(1));
