@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import math
 import numbers
 import operator
 import sys
@@ -239,6 +240,30 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
+
+
+@register_decomposition(aten.softshrink_backward)
+@out_wrapper("grad_input")
+def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
+    # Like the ATen kernel, compute in the common dtype. The comparisons round
+    # lambd to it, as the kernel's lambd.to<scalar_t>() does.
+    dtype = torch.result_type(grad_output, self)
+    grad_output, self = grad_output.to(dtype), self.to(dtype)
+    # lambd.to<scalar_t>() also rejects finite values out of range
+    limit = torch.finfo(dtype).max
+    message = lambda: f"value cannot be converted to type {dtype} without overflow"  # noqa: E731
+    if isinstance(lambd, (torch.SymInt, torch.SymFloat)):
+        # math.isfinite would specialize lambd. Dynamo specializes inf and nan,
+        # so bounds suffice, except that an unbacked non-finite lambd (e.g.
+        # from .item()) can be rejected.
+        torch._check(lambd >= -limit, message)
+        torch._check(lambd <= limit, message)
+    else:
+        torch._check(not (math.isfinite(lambd) and abs(lambd) > limit), message)
+    if self.device.type == "cpu":
+        # Like the CPU vectorized path (but not the scalar path), NaN gets 0
+        return torch.where((self < -lambd) | (self > lambd), grad_output, 0)
+    return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -660,11 +685,18 @@ def binary_cross_entropy(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    # We cannot currently model this without introducing data-dependent control flow
-    # TORCH_CHECK(
-    #     (input_val >= 0) && (input_val <= 1),
-    #     "all elements of input should be between 0 and 1"
-    # )
+    # The ATen kernels check the [0, 1] domain per element; a pointwise
+    # decomposition has to assert on the whole tensor instead. Without this the
+    # log terms below clamp to -100 and an out-of-domain value silently returns
+    # a finite loss. _assert_async is side-effectful and won't be DCE'd.
+    aten._assert_async.msg(
+        torch.all((self >= 0) & (self <= 1)),
+        "all elements of input should be between 0 and 1",
+    )
+    aten._assert_async.msg(
+        torch.all((target >= 0) & (target <= 1)),
+        "all elements of target should be between 0 and 1",
+    )
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
