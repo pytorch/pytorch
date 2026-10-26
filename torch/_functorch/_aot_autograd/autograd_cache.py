@@ -173,7 +173,7 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
     if dist.get_world_size() < 2:
         return local_hit
 
-    from torch._dynamo.distributed import get_compile_sync_pg
+    from torch._dynamo.distributed import _is_fake_world, get_compile_sync_pg
 
     if not config._sync_cache_decision_cross_ranks:
         # Nothing to decide, but _sync_decision_cross_ranks builds this same group lazily
@@ -185,7 +185,7 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
         # before, in the partitioner and only for the graphs it actually syncs; a fake
         # world builds a fake group, which needs no gloo.
         if config._sync_decision_cross_ranks and (
-            dist.is_gloo_available() or dist.get_backend() == dist.Backend.FAKE
+            dist.is_gloo_available() or _is_fake_world()
         ):
             get_compile_sync_pg()
         return local_hit

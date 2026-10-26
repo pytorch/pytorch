@@ -481,6 +481,10 @@ def _pickle_frozen_triton_kernel(
     )
 
 
+def _launched(kernel: CachingAutotuner) -> bool:
+    return getattr(kernel, "_launched", False) or kernel._cached_launcher is not None
+
+
 def _freeze_triton_kernel(
     key: str,
     instances: list[CachingAutotuner],
@@ -501,7 +505,7 @@ def _freeze_triton_kernel(
             rejected.append(diagnostic)
 
     # Rendering can create an unexecuted instance of an already warmed source.
-    for kernel in sorted(instances, key=lambda k: k._cached_launcher is None):
+    for kernel in sorted(instances, key=lambda k: not _launched(k)):
         with kernel.lock:
             reason = _triton_export_rejection(kernel)
             if reason is not None:
@@ -521,7 +525,7 @@ def _freeze_triton_kernel(
     # serving under no_compilation() cannot finish it either. Its configs compute the
     # same values up to floating-point reduction order, so freeze the first static
     # one with tuning turned off, and report it as untuned.
-    if not any(kernel._cached_launcher is not None for kernel in instances):
+    if not any(_launched(kernel) for kernel in instances):
         for kernel in instances:
             with kernel.lock:
                 candidates = [
