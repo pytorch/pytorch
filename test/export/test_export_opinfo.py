@@ -176,7 +176,13 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 def _get_env_by_device(device):
     device_type = torch.device(device).type
     if device_type == "cuda":
-        return {"CUDA_VISIBLE_DEVICES": ""}
+        # Keep the parent environment so LD_LIBRARY_PATH still points at
+        # libpython. On ROCm, HIP_VISIBLE_DEVICES overrides
+        # CUDA_VISIBLE_DEVICES, so hide devices there too.
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        env["HIP_VISIBLE_DEVICES"] = ""
+        return env
     elif device_type == "xpu":
         return {**os.environ, "ONEAPI_DEVICE_SELECTOR": "*:cpu", "ZE_AFFINITY_MASK": ""}
     raise AssertionError(
