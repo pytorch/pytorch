@@ -9730,14 +9730,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             A[4].zero_()  # info = 1
             compare_with_cpu(A)
 
-        # The smallest shapes, and shapes around the widths of the panels. A panel
-        # takes nb / 2 to nb + nb / 2 columns (see ldl::aligned_panel_width), where nb
-        # depends on the dtype, the GPU and n (see ldl::panel_width and
+        # The smallest shapes, and shapes around the panel boundaries. Panels end on
+        # multiples of nb and so take 2 to nb + 1 columns (see ldl_factor_panels), where
+        # nb depends on the dtype, the GPU and n (see ldl::panel_width and
         # test_linalg_ldl_factor_panel_widths).
         panel_widths = (16, 24, 32, 48, 64, 96, 128)
         ns = {1, 2, 3}
         for nb in panel_widths:
-            ns |= {w + i for w in (nb, nb + nb // 2) for i in (-1, 0, 1)}
+            ns |= {nb + i for i in (-1, 0, 1, 2)}
         for n in sorted(ns):
             self._check_ldl_factor_random(n, device, dtype)
 
@@ -9745,7 +9745,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipIfRocm
     @skipIfNoLapack
     @onlyCUDA
-    # nb grows with n (see ldl::panel_width). The first n with nb = 64, 96, 128 on H100.
+    # nb grows with n (see ldl::panel_width). On H100, 4097, 8193 and 16385 are the first
+    # n with nb = 64, 96 and 128; float stops at 64, so only 4097 is new for it.
     # On GB200, 16385 reaches the widest nb of every dtype but complex128, which needs 20481.
     @parametrize("n", (4097, 8193, 16385, 20481))
     # A, LD and one temporary on the device
