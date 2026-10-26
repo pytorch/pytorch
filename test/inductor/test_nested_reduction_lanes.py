@@ -14,6 +14,7 @@ from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.triton import TritonCSE, TritonCSEVariable, TritonKernel
 from torch._inductor.utils import (
     IndentedBuffer,
+    is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
     TRITON_FLOAT8_DTYPES,
@@ -32,7 +33,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_inline_asm_concat import combine_inputs_asm, xor_words
+from higher_order_ops.test_inline_asm_elementwise import combine_inputs_asm, xor_words
 
 
 class _SplitCodegen:
@@ -80,6 +81,8 @@ class TestRecursiveLaneSplit(TestCase):
         ],
     )
     def test_storage_bits(self, device, rank, factor, dtype, persistent):
+        if not is_triton_fp8_dtype_supported(dtype, device):
+            self.skipTest(f"Triton does not support {dtype} on this device")
         prefix = (4,) if rank == 2 else (2, 2)
         shape = (*prefix, factor)
         count = 4 * factor

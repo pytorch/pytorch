@@ -605,12 +605,18 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         scheduling,
         template_node,
         epilogue_nodes,
-        prologue_nodes,
         buf_name_to_prologue_group,
+        store_output_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
+
+        ``epilogue_nodes`` contains the nodes ordered after the template in the
+        fused scheduler group. ``buf_name_to_prologue_group`` contains producer
+        groups emitted in load-input prologues.
+        ``store_output_input_producer_groups`` contains producer groups emitted in
+        store-output epilogues.
 
         Subclasses override this to implement custom code generation.
         The default implementation raises NotImplementedError — the actual
@@ -2275,7 +2281,7 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         value: CSEVariable,
     ) -> CSEVariable:
         """Reshape the parent-full tile and reduce over the local reduction."""
-        from .triton import upcast_acc_dtype
+        from .triton import triton_type, upcast_acc_dtype, upcast_compute_type
 
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
@@ -2285,17 +2291,37 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         self._family.ensure_headers(k)
         if value.dtype is None:
             raise AssertionError("value must have a known dtype")
+        # Like TritonKernel.reduction, [b]float16 always reduces in float32, even
+        # when codegen_upcast_to_fp32 leaves the loaded tile in half precision.
+        acc_dtype = upcast_acc_dtype(src_dtype)
+        if value.dtype in (torch.float16, torch.bfloat16):
+            value = k.cse.generate(
+                k.compute,
+                f"{value}.to(tl.float32)",
+                dtype=torch.float32,
+                shape=value.shape,
+            )
+            acc_dtype = torch.float32
         reshaped = k.emit_reshape(value, self._layout.reshape_shape, value.dtype)
         k.num_reduction += 1
-        # Like TritonKernel.reduction, the result has the accumulation type:
-        # [b]float16 reduces in float32, small signed integers in int32.
-        return k.emit_reduce(
+        result = k.emit_reduce(
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            upcast_acc_dtype(src_dtype),
+            acc_dtype,
             self._layout.output_shape,
         )
+        # As in TritonKernel.reduction, hand the result back in the compute type
+        # of its dtype (half precision when codegen_upcast_to_fp32 is off).
+        compute_dtype = upcast_compute_type(dtype)
+        if dtype in (torch.float16, torch.bfloat16) and result.dtype != compute_dtype:
+            result = k.cse.generate(
+                k.compute,
+                f"{result}.to({triton_type(compute_dtype)})",
+                dtype=compute_dtype,
+                shape=result.shape,
+            )
+        return result
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         remapped_index = self._family.remap_index(index)
@@ -4524,32 +4550,54 @@ class SIMDScheduling(BaseScheduling):
         *,
         only_gen_src_code=False,
     ):
-        """
-        Helper method to codegen a single template kernel variant
+        """Codegen a single template kernel variant.
+
+        ``prologue_nodes`` are upstream of the template node. Their producer groups
+        are routed to either the template's load-input or store-output region.
+
+        Template fusion has three codegen placements:
+
+        1. Load-input prologue fusion: producers of named template inputs such as
+           A/B are generated in LOAD_INPUT_A / LOAD_INPUT_B. Their values
+           participate in the main accumulator loop.
+        2. Store-output input-producer fusion: producers of inputs consumed by
+           STORE_OUTPUT are generated before the manual epilogue. Currently, only
+           prefix inputs are supported.
+        3. Output epilogue fusion: consumers of the template result, such as relu
+           or multiply, are generated after epilogue_fn and before the final store.
         """
         buf_name_to_prologue_group = {}
+        store_output_input_producer_groups = {}
         template_reads = template_node.used_buffer_names()
-        prologue_group = []
-        for prologue in prologue_nodes:
-            names = prologue.get_buffer_names()
-            prologue_group.append(prologue)
-            # this must be the end of a prologue group
+        producer_group = []
+        for producer in prologue_nodes:
+            names = producer.get_buffer_names()
+            producer_group.append(producer)
+            # Scheduler ordering keeps the nodes for each template input
+            # contiguous. Accumulate nodes until one produces a buffer read
+            # directly by the template, which completes the producer group.
             if names & template_reads:
                 if len(names) != 1:
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
-                buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.prologue_fused_inputs.add(next(iter(names)))
-                prologue_group = []
+                input_name = next(iter(names))
+                if input_name in kernel.store_output_fusion_allowed_inputs:
+                    store_output_input_producer_groups[input_name] = producer_group
+                    kernel.store_output_fused_inputs.add(input_name)
+                if input_name in kernel.load_input_fusion_allowed_inputs:
+                    buf_name_to_prologue_group[input_name] = producer_group
+                    kernel.load_input_fused_inputs.add(input_name)
+                producer_group = []
 
-        # all prologue groups should have finalized with use in template
-        if len(prologue_group) != 0:
+        # All producer groups should have finalized with use in the template.
+        if len(producer_group) != 0:
             raise AssertionError(
-                f"expected empty prologue_group, got {len(prologue_group)}"
+                f"expected empty producer_group, got {len(producer_group)}"
             )
 
-        # Remove prologue-fused inputs from input_buffers so that
+        # Remove producer-fused inputs from input_buffers so that
         # remove_kernel_local_buffers can remove them.
-        for buf_name in kernel.prologue_fused_inputs:
+        fused_inputs = kernel.load_input_fused_inputs | kernel.store_output_fused_inputs
+        for buf_name in fused_inputs:
             kernel.args.input_buffers.pop(buf_name, None)
 
         # Dispatch to the kernel for source generation.  TritonTemplateKernel
@@ -4559,8 +4607,8 @@ class SIMDScheduling(BaseScheduling):
             self,
             template_node,
             epilogue_nodes,
-            prologue_nodes,
             buf_name_to_prologue_group,
+            store_output_input_producer_groups,
             prologue_preserves_zero_mask,
             render,
         )
@@ -4652,7 +4700,10 @@ class SIMDScheduling(BaseScheduling):
         hint_override: int | None = None,
     ) -> str | None:
         """
-        Codegen a triton template with multi-kernel dispatch support
+        Codegen a triton template with multi-kernel dispatch support.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         If `only_gen_src_code=True` the src code will be returned instead of being
         codegenned into the wrapper
