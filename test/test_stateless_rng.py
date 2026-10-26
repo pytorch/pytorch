@@ -630,7 +630,6 @@ class TestStatelessRNGDistribution(TestCase):
 
         expected = gen(low=-3.0, high=5.5)
         high = torch.full((8, 1), 5.5, device=device)
-        # Both bounds as tensors, and mixed with a scalar.
         for low in (torch.full((8, 1), -3.0, device=device), -3.0):
             self.assertEqual(gen(low=low, high=high), expected, atol=0, rtol=0)
 
@@ -667,8 +666,7 @@ class TestStatelessRNGDistribution(TestCase):
 
     @dtypes(*all_floating_dtypes)
     def test_uniform_tensor_bounds_noncontig(self, device, dtype):
-        # The same bound values must give the same result regardless of how the
-        # bounds or the output are laid out in memory.
+        # Results must not depend on the memory layout of the bounds or output.
         shape = (3, 37)
         key = random.key(42, device=device)
         low = torch.tensor([[-1000.0], [-3.0], [2.5]], device=device)
@@ -683,8 +681,7 @@ class TestStatelessRNGDistribution(TestCase):
 
         opts = {"dtype": dtype, "device": device}
         noncontiguous = torch.empty(37, 3, **opts).t()
-        # Starts one element into its buffer, so it isn't aligned for the CUDA
-        # kernel's vector stores and takes its copy-through-a-temporary path.
+        # Misaligned for the CUDA kernel's vector stores.
         unaligned = torch.empty(3 * 37 + 1, **opts)[1:].view(shape)
         for out in (noncontiguous, unaligned):
             actual = random.uniform_(key, out, low=low, high=high)
@@ -716,7 +713,6 @@ class TestStatelessRNGDistribution(TestCase):
 
     @dtypes(*all_floating_dtypes)
     def test_uniform_tensor_bounds_dtype(self, device, dtype):
-        # Bounds of any floating dtype are cast to the output dtype without changing it.
         key = random.key(42, device=device)
         low = torch.zeros(4, 1, dtype=dtype, device=device)
         high = torch.ones(4, 1, dtype=dtype, device=device)
@@ -725,7 +721,6 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertEqual(actual, random.uniform(key, (4, 3)), atol=0, rtol=0)
 
     def test_uniform_tensor_bounds_errors(self, device):
-        # The kernels and, under FakeTensorMode, the meta registration must agree.
         for mode in (contextlib.nullcontext(), FakeTensorMode()):
             with mode:
                 key = random.key(42, device=device)
@@ -928,8 +923,7 @@ class TestStatelessRNGCompile(TestCase):
             "randint": {"low": 0, "high": 100},
         }[op]
         if tensor_bounds:
-            # Small broadcast bounds, so a missed reinplace is the only way to
-            # allocate another full-size buffer.
+            # Broadcast bounds, so only a missed reinplace allocates a full-size buffer.
             def to_tensor(v):
                 return torch.full((shape[0], 1), v, device=device)
 
@@ -1011,8 +1005,6 @@ class TestStatelessRNGCompile(TestCase):
             self.assertEqual(compiled(key), f(key))
 
     def test_uniform_tensor_bounds_backward(self, device):
-        # The gradient formula regenerates the standard sample, which the compiled
-        # backward must trace; broadcast bounds also exercise its sum_to.
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
 
@@ -1032,7 +1024,6 @@ class TestStatelessRNGCompile(TestCase):
 
     @dtypes(*all_floating_dtypes)
     def test_uniform_tensor_bounds_match_scalar(self, device, dtype):
-        # Exercises the functionalized .Tensor overload and its reinplacing.
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
 
