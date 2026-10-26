@@ -776,6 +776,9 @@ class CachingAutotuner(KernelInterface):
         # Compile-time info included in runtime logginging
         self.compile_id: CompileId | None = None
         self.is_backward = False
+        # Whether any compile used this kernel in a forward: is_backward holds only
+        # the latest compile's direction, and a kernel object can serve both.
+        self._forward_use = False
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
@@ -863,6 +866,7 @@ class CachingAutotuner(KernelInterface):
                 self.compile_results = [self._precompile_config(best_config)]
 
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
+        self._forward_use = self._forward_use or not is_backward
         self.compile_id = compile_id
         self.is_backward = is_backward
 

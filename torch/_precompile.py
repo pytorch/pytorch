@@ -1714,8 +1714,8 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
-#   0. CUSTOM_OP_MODULES: before anything else runs, the modules of custom ops not
-#      yet registered are imported.
+#   0. Custom op modules (CUSTOM_OP_MODULES): before anything else runs, the
+#      modules of custom ops not yet registered are imported.
 #   1. The composed graph module from aot_autograd.compile_to_python: the inlined
 #      Inductor kernels (JIT-compiled from the embedded source on first use -- no
 #      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
@@ -1898,8 +1898,9 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         }
     # Parsed when present but never required, so older artifacts load unchanged:
     # TRACER and SERVING_MODE already selected the required set above, and
-    # the guard-audit sections come back as data. CUSTOM_OP_MODULES is listed only
-    # so it is not logged as unrecognized; the artifact consumes it when it runs.
+    # the guard-audit sections come back as data. CUSTOM_OP_MODULES is parsed only
+    # to check it is a literal and keep it from being logged as unrecognized; the
+    # artifact consumes it when it runs.
     optional = {
         "TRACER",
         "SERVING_MODE",
@@ -1959,7 +1960,8 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
             # argument rather than as its target.
             for target in (node.target, *node.args):
                 if isinstance(target, torch._ops.OpOverload):
-                    names.add(target._schema.name)
+                    ns, _, op = target._schema.name.partition("::")
+                    names.add(_op_name(ns, op, target._schema.overload_name))
                 elif isinstance(target, torch._ops.OpOverloadPacket):
                     names.add(target._qualified_op_name)
     return {name for name in names if _is_custom_op(name)}
@@ -1968,9 +1970,18 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
 # Python wrapper code calls an op it does not lower as torch.ops.<ns>.<op>; the C++
 # wrapper (cpp_wrapper) names it as a "<ns>::<op>" string to the dispatcher.
 _OP_REFERENCE = re.compile(
-    r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)"
-    r"|\b(?:aoti_torch_call_dispatcher|findSchemaOrThrow)\(\s*\"(\w+)::(\w+)"
+    r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?"
+    r"|\b(?:aoti_torch_call_dispatcher|findSchemaOrThrow)\("
+    r"\s*\"(\w+)::(\w+)\"(?:\s*,\s*\"(\w*)\")?"
 )
+
+
+def _op_name(ns: str, op: str, overload: str | None) -> str:
+    """``ns::op``, with ``.overload`` for an op registered under an overload name
+    (``custom_op("ns::op.overload")``)."""
+    if overload and overload != "default":
+        return f"{ns}::{op}.{overload}"
+    return f"{ns}::{op}"
 
 
 def _custom_op_names_in_source(source: str) -> set[str]:
@@ -1986,8 +1997,8 @@ def _custom_op_names_in_source(source: str) -> set[str]:
     for line in source.splitlines():
         code = line.split("#", 1)[0].split("//", 1)[0]
         for match in _OP_REFERENCE.finditer(code):
-            ns, op = match.group(1, 2) if match.group(1) else match.group(3, 4)
-            names.add(f"{ns}::{op}")
+            groups = match.group(1, 2, 3) if match.group(1) else match.group(4, 5, 6)
+            names.add(_op_name(*groups))
     return {name for name in names if _is_custom_op(name)}
 
 
@@ -2060,15 +2071,21 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
         return name == "torch._library" or name.startswith("torch._library.")
 
     modules: dict[str, list[str]] = {}
-    for op_name in sorted(op_names):
-        opdef = OPDEFS.get(op_name)
-        if opdef is None:
-            continue
-        defined_in = [
-            name
-            for fn in (opdef._init_fn, getattr(opdef, "_abstract_fn", None))
-            if isinstance(name := getattr(fn, "__module__", None), str)
-        ]
+    # An op custom_op registered under an overload name (ns::op.overload) is keyed
+    # that way, while a graph can call it through its packet, ns::op.
+    by_packet: dict[str, list[str]] = {}
+    for qualname in OPDEFS:
+        if "." in qualname:
+            by_packet.setdefault(qualname.partition(".")[0], []).append(qualname)
+    qualnames = sorted(
+        {q for n in op_names for q in ([n] if n in OPDEFS else by_packet.get(n, []))}
+    )
+    for op_name in qualnames:
+        opdef = OPDEFS[op_name]
+        defined_in = [getattr(opdef._init_fn, "__module__", "?")]
+        if torch_wrapper(defined_in[0]):
+            # triton_op: the user's function is the fake; torch wrapped it.
+            defined_in.append(getattr(opdef._abstract_fn, "__module__", "?"))
 
         def unusable(name: str) -> str | None:
             if name == "__main__":
@@ -2094,7 +2111,40 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
             )
             continue
         modules.setdefault(name, []).append(op_name)
+        others = {
+            n
+            for fn in (
+                *map(_registered_fn, opdef._backend_fns.values()),
+                *opdef._torch_dispatch_fns.values(),
+                opdef._backward_fn,
+                opdef._setup_context_fn,
+            )
+            if isinstance(n := getattr(fn, "__module__", None), str)
+            and n != name
+            and not in_torch(n)
+        }
+        if others:
+            log.warning(
+                "precompile: custom op %s has device kernels or autograd registered "
+                "from %s, which the artifact does not import; serving needs them "
+                "imported by its first call, or it runs the op's other kernels",
+                op_name,
+                ", ".join(sorted(others)),
+            )
     return {module: tuple(ops) for module, ops in sorted(modules.items())}
+
+
+def _registered_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """The user's function behind CustomOpDef.register_kernel's wrapper, which
+    closes over it as ``fn``."""
+    fn = inspect.unwrap(fn)
+    code = getattr(fn, "__code__", None)
+    closure = getattr(fn, "__closure__", None)
+    if code is not None and closure and "fn" in code.co_freevars:
+        inner = closure[code.co_freevars.index("fn")].cell_contents
+        if callable(inner):
+            return inner
+    return fn
 
 
 def _importable_by_name(name: str) -> bool:
@@ -2119,12 +2169,20 @@ def _importable_by_name(name: str) -> bool:
     return False
 
 
-def _write_custom_op_imports(buf: PySourceBuilder, op_names: set[str]) -> None:
+def _write_custom_op_imports(
+    buf: PySourceBuilder, op_names: set[str], *, call: bool = True
+) -> None:
     """Emit CUSTOM_OP_MODULES and, when it names any module, the driver code that
-    imports them, inlined as text like the rest of the driver (invariant 7)."""
+    imports them, inlined as text like the rest of the driver (invariant 7). Without
+    ``call``, the driver's builder imports them, after its version checks."""
     from torch import _precompile_driver as driver
 
     modules = _custom_op_modules(op_names)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
+        "# 0. Custom op modules: imported if their ops are not registered yet"
+    )
+    buf.writeline("# " + "=" * 70)
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     if modules:
         buf.writeline("import importlib as _importlib")
@@ -2134,9 +2192,10 @@ def _write_custom_op_imports(buf: PySourceBuilder, op_names: set[str]) -> None:
             buf.writeline("")
             for line in inspect.getsource(fn).rstrip().splitlines():
                 buf.writeline(line)
-        buf.writeline("")
-        buf.writeline("")
-        buf.writeline("_import_custom_op_modules(CUSTOM_OP_MODULES)")
+        if call:
+            buf.writeline("")
+            buf.writeline("")
+            buf.writeline("_import_custom_op_modules(CUSTOM_OP_MODULES)")
     buf.writeline("")
 
 
@@ -2533,7 +2592,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, _backend_custom_op_names(backends))
+    _write_custom_op_imports(buf, _backend_custom_op_names(backends), call=False)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -3642,10 +3701,13 @@ def capture(
     ``__main__`` or in a module the import system cannot find again by name, or
     registered through ``torch.library.Library`` or ``torch.ops.load_library``,
     has no such module: capture logs a warning for the first kind, and the
-    serving process must register all of them before the first call. So must it
-    any op the recorded code does not show: one a tensor subclass's
+    serving process must register all of them before the first call. The same
+    holds for any op the recorded code does not show (one a tensor subclass's
     ``__torch_dispatch__`` calls under the eager backend, or one called from a
-    frame served eagerly (``PrecompileSummary.eager_fallbacks``).
+    frame served eagerly, ``PrecompileSummary.eager_fallbacks``), and for an
+    op's device kernels or autograd registered from another module than the one
+    recorded: importing the op's module registers the op, but not those, and
+    capture logs a warning for them.
 
     ``backend`` selects how the captured graph is realized: ``"inductor"``
     (default) lowers through AOTAutograd + Inductor into one self-contained
@@ -3814,14 +3876,14 @@ def load(
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
-    captures -- if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture), or if a module in the
+    captures -- or if an installed artifact cannot install onto the serving process
+    (for example, a captured source changed since capture), or if a module in the
     artifact's ``CUSTOM_OP_MODULES`` cannot be imported or, imported, leaves one of
-    its ops unregistered. ``load`` imports such a module, user code, only when one
+    its ops unregistered. ``load`` imports such a module (user code) only when one
     of the custom ops it registers is not registered yet, so an op with a recorded
-    module must be registered, or that module importable by its name, by
-    ``load``. The recorded module is the one defining the op's function, which is
-    not always the one calling ``torch.library.custom_op`` on it. A cache whose
+    module must be registered, or that module importable by its name, by the time
+    ``load`` is called. The recorded module is the one defining the op's function,
+    which is not always the one calling ``torch.library.custom_op`` on it. A cache whose
     ``format``/``version`` does not match (a foreign or different-build envelope)
     is NOT fatal: the cache is acceleration only, so ``load`` degrades to JIT'ing
     from ``python_code`` rather than crashing.

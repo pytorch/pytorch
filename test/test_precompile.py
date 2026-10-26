@@ -728,6 +728,7 @@ class TestPrecompile(TestCase):
             "_ENTRY_BINDING": _b64(binding),
             "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
             "TORCH_VERSION": torch.__version__,
+            "CUSTOM_OP_MODULES": {},
         }
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         return ns["_build_multigraph_forward"]
@@ -7298,6 +7299,7 @@ def _static_runtime_kernel(block):
     kernel._cached_launcher = kernel.launchers[0]
     kernel._launched = True
     kernel.is_backward = False
+    kernel._forward_use = True
     kernel.benchmark_failure_reasons = {}
     kernel._plugins = []
     kernel._reload_kernel = None
@@ -7308,6 +7310,7 @@ def _never_run(kernel, backward=True):
     kernel._cached_launcher = None
     kernel._launched = False
     kernel.is_backward = backward
+    kernel._forward_use = not backward
     return kernel
 
 
@@ -7456,7 +7459,10 @@ import os
 import sys
 
 phase, directory, module = sys.argv[1:4]
-os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
+# "warm" captures again over the cache "capture" filled, so its graphs load from
+# Inductor's caches instead of compiling.
+cache_phase = "capture" if phase == "warm" else phase
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, cache_phase, "inductor")
 os.environ.pop("TRITON_CACHE_DIR", None)
 os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
 if phase == "replay":
@@ -7465,8 +7471,10 @@ if phase == "replay":
 import torch
 
 pc = torch.compiler.precompile
-artifact = os.path.join(directory, "artifact.py")
-cache = os.path.join(directory, "artifact.cache")
+# The warm capture only checks detection on cache hits; replay serves the cold one.
+name = "warm_artifact" if phase == "warm" else "artifact"
+artifact = os.path.join(directory, name + ".py")
+cache = os.path.join(directory, name + ".cache")
 torch._inductor.config.use_static_cuda_launcher = True
 torch._inductor.config.coordinate_descent_tuning = True
 sys.path.insert(0, directory)
@@ -7489,7 +7497,7 @@ if phase == "strict":
         assert "no fully resolved static launcher" in str(e), e
     else:
         raise AssertionError("a strict capture froze a never-run backward kernel")
-elif phase == "capture":
+elif phase in ("capture", "warm"):
     untuned = []
 
     class Untuned(logging.Handler):
@@ -7758,10 +7766,21 @@ class TestPrecompileRuntimeCache(TestCase):
             _freeze_triton_kernel("source", [ambiguous()], require_tuned_backward=True)
         self.assertTrue(failure.exception.sources[0]["untuned_backward_eligible"])
         # Only compile results, which never loaded: replay could fail to load them.
+        # Not eligible for the opt-in either, so no hint.
         unloaded = _never_run(_static_runtime_kernel(32))
         unloaded.launchers = []
+        for require_tuned_backward in (True, False):
+            with self.assertRaises(_UnresolvedTritonExport) as failure:
+                _freeze_triton_kernel(
+                    "source", [unloaded], require_tuned_backward=require_tuned_backward
+                )
+            self.assertFalse(failure.exception.sources[0]["untuned_backward_eligible"])
+            self.assertNotIn("require_tuned_backward", str(failure.exception))
+        # A launcher Triton built itself, not statically, has no _compile_result.
+        dynamic = _never_run(_static_runtime_kernel(32))
+        dynamic.launchers = [types.SimpleNamespace(config=None)]
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [unloaded], require_tuned_backward=False)
+            _freeze_triton_kernel("source", [dynamic], require_tuned_backward=False)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_kernel_with_one_config(self):
@@ -7792,6 +7811,7 @@ class TestPrecompileRuntimeCache(TestCase):
 
         ran = _static_runtime_kernel(64)
         ran.is_backward = True
+        ran._forward_use = False
         ran.launchers[0]._compile_result = object()
         unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
@@ -7836,6 +7856,9 @@ class TestPrecompileRuntimeCache(TestCase):
             [(r["reason"], r["error"]) for r in source["instances"]],
             [("cubin_unavailable", "missing binary")],
         )
+        # The opt-in was already on, so the error does not suggest it.
+        self.assertFalse(source["untuned_backward_eligible"])
+        self.assertNotIn("require_tuned_backward", str(failure.exception))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_untuned_triton_kernels_are_traced(self):
@@ -9421,7 +9444,7 @@ class TestPrecompileRuntimeCache(TestCase):
             module = f"precompile_never_run_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:
                 f.write(_NEVER_RUN_BACKWARD_MODULE)
-            for phase in ("strict", "capture", "replay"):
+            for phase in ("strict", "capture", "replay", "warm"):
                 out = subprocess.run(
                     [
                         sys.executable,
@@ -9581,7 +9604,7 @@ if backend == "inductor-cpp-wrapper":
 # The entry module is always importable; the ops' module is not where the phase
 # tests serving without it.
 sys.path.insert(0, os.path.join(directory, "entry"))
-if phase not in ("missing", "registered"):
+if phase not in ("missing", "registered", "version"):
     sys.path.insert(0, os.path.join(directory, "ops"))
 pc = torch.compiler.precompile
 artifact = os.path.join(directory, "artifact.py")
@@ -9632,6 +9655,25 @@ elif phase == "registered":
     loaded = pc.load(artifact, cache)
     torch.testing.assert_close(run(loaded), torch.load(expected_path))
     assert module not in sys.modules, "the artifact imported an op it did not need"
+elif phase == "version":
+    # A torch-version-locked artifact reports the lock before importing user
+    # modules, even when the custom op module is missing.
+    import re
+    import runpy
+
+    with open(artifact) as f:
+        source = re.sub(
+            r"^TORCH_VERSION = .*$", 'TORCH_VERSION = "0.0.0"', f.read(), flags=re.M
+        )
+    mismatched = os.path.join(directory, "mismatched.py")
+    with open(mismatched, "w") as f:
+        f.write(source)
+    try:
+        runpy.run_path(mismatched)
+    except torch.compiler.PrecompileError as e:
+        assert "cannot load on torch" in str(e), e
+    else:
+        raise AssertionError("ran an artifact produced by another torch")
 else:
     try:
         pc.load(artifact, cache)
@@ -9676,7 +9718,10 @@ class TestPrecompileCustomOpModules(TestCase):
                 os.makedirs(os.path.join(directory, subdir), exist_ok=True)
                 with open(os.path.join(directory, subdir, name + ".py"), "w") as f:
                     f.write(source.replace("{ns}", ns))
-            for phase in ("capture", "replay", "registered", "missing"):
+            phases = ["capture", "replay", "registered", "missing"]
+            if tracer == "dynamo":
+                phases.append("version")
+            for phase in phases:
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
                     + [module, entry_module, unused, tracer, backend, entry],
@@ -9782,6 +9827,64 @@ class TestPrecompileCustomOpModules(TestCase):
             {"torch.nn.functional": (f"{ns}::torch_submodule",)},
         )
 
+    def test_custom_op_modules_ignore_the_fake_of_an_ordinary_op(self):
+        from torch._precompile import _custom_op_modules
+
+        # The fake is torch.empty_like, from module "torch", which never registers
+        # the op: only a triton_op's fake names the user's module.
+        ns = f"precompile_builtin_fake_{uuid.uuid4().hex}"
+        op = self._define_op(ns, "scripted", module="__main__", fake=False)
+        op.register_fake(torch.empty_like)
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self.assertEqual(_custom_op_modules({f"{ns}::scripted"}), {})
+        self.assertIn("'__main__': __main__", logs.output[0])
+
+    def test_custom_op_modules_warn_for_registrations_from_other_modules(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = f"precompile_kernels_{uuid.uuid4().hex}"
+        op = self._define_op(ns, "split", module="unittest")
+
+        def cpu_kernel(x):
+            return x.clone()
+
+        cpu_kernel.__module__ = "json"
+        op.register_kernel("cpu")(cpu_kernel)
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self.assertEqual(
+                _custom_op_modules({f"{ns}::split"}), {"unittest": (f"{ns}::split",)}
+            )
+        self.assertIn("json", logs.output[0])
+
+    def test_custom_ops_registered_under_an_overload_name(self):
+        from torch._precompile import (
+            _custom_op_modules,
+            _custom_op_names,
+            _custom_op_names_in_source,
+        )
+        from torch._precompile_driver import _custom_op_registered
+
+        ns = f"precompile_overload_{uuid.uuid4().hex}"
+        op = self._define_op(ns, "op.v2", module="unittest")
+        name = f"{ns}::op.v2"
+        modules = {"unittest": (name,)}
+        # By its overload, or through its packet.
+        self.assertEqual(_custom_op_modules({name}), modules)
+        self.assertEqual(_custom_op_modules({f"{ns}::op"}), modules)
+        self.assertTrue(_custom_op_registered(name))
+        self.assertFalse(_custom_op_registered(f"{ns}::op.v3"))
+        graph = torch.fx.Graph()
+        graph.output(graph.call_function(op._opoverload, (graph.placeholder("x"),)))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(_custom_op_names(gm), {name})
+        self.assertEqual(
+            _custom_op_names_in_source(
+                f"buf0 = torch.ops.{ns}.op.v2(x)\n"
+                f'aoti_torch_call_dispatcher("{ns}::op", "v2", args);\n'
+            ),
+            {name},
+        )
+
     def test_custom_op_modules_follow_a_triton_op_to_its_user_function(self):
         from torch._precompile import _custom_op_modules
 
@@ -9845,7 +9948,10 @@ class TestPrecompileCustomOpModules(TestCase):
 
         buf = PySourceBuilder()
         _write_custom_op_imports(buf, set())
-        self.assertEqual(buf.getvalue().strip(), "CUSTOM_OP_MODULES = {}")
+        source = buf.getvalue()
+        self.assertIn("CUSTOM_OP_MODULES = {}", source.splitlines())
+        self.assertNotIn("_import_custom_op_modules", source)
+        self.assertNotIn("import importlib", source)
 
     def test_custom_op_names_in_source(self):
         from torch._precompile import _custom_op_names_in_source

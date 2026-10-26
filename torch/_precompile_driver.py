@@ -4,7 +4,7 @@ Nothing here is imported or run by torch at runtime, and the generated artifacts
 import this module. Instead torch._precompile emits these function bodies VERBATIM (via
 inspect.getsource, on the to_python_code / emit path only) into the self-contained
 python_code string, after the calling-convention metadata and the compiled/captured
-graph. Authoring the driver as real code -- instead of a hand-written string literal --
+graph; the custom-op import functions at the end come first, before both. Authoring the driver as real code -- instead of a hand-written string literal --
 lets pyrefly / ruff / IDEs type-check and navigate the load-bearing driver logic that
 would otherwise be invisible inside a string (and drops the wall of ``# noqa: F821``).
 
@@ -14,7 +14,8 @@ import it, so there is no torch-version skew. The emit path runs getsource in-pr
 where torch source is present; load() never touches this module.
 
 The names the emitted bodies read from the artifact's own namespace -- the metadata
-constants, the ``_torch`` / ``_pytree`` import aliases, and the graph's ``call`` -- are
+constants, the ``_torch`` / ``_pytree`` / ``_importlib`` import aliases, and the graph's
+``call`` -- are
 declared under TYPE_CHECKING below so the bodies type-check here; at emit time they
 resolve against the metadata + graph sections that precede the driver in python_code.
 
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     # ahead of the driver. Bound here with placeholder values (not bare annotations) so
     # static tools treat them as real names in the bodies below; this block is not emitted.
     MODULE_POSITIONS: list[int] = []
+    CUSTOM_OP_MODULES: dict[str, tuple[str, ...]] = {}
     # Multi-graph artifact state. _FRAMES is one record per Dynamo frame (its
     # code, its variants' guard state and transformed bytecode, the globals it
     # reads), _BACKENDS the compiled subgraphs, _ENTRY_BINDING the entry's
@@ -474,6 +476,10 @@ def _build_multigraph_forward():
     # After the version checks: a torch without it fails them cleanly first.
     from torch._dynamo.eval_frame import _warn_eager_fallback_miss
 
+    if CUSTOM_OP_MODULES:
+        # Also after them: these modules are user code.
+        _import_custom_op_modules(CUSTOM_OP_MODULES)
+
     def _import(module_name):
         if module_name == "__main__":
             # import_module("__main__") succeeds in every process and hands back
@@ -785,6 +791,9 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
+    if CUSTOM_OP_MODULES:
+        # After the version checks: these modules are user code.
+        _import_custom_op_modules(CUSTOM_OP_MODULES)
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
@@ -873,7 +882,9 @@ def _build_installed_forward():
 
 def _custom_op_registered(name: str) -> bool:
     namespace, _, op = name.partition("::")
-    return hasattr(getattr(_torch.ops, namespace), op)
+    op, _, overload = op.partition(".")
+    packet = getattr(getattr(_torch.ops, namespace), op, None)
+    return packet is not None and (not overload or hasattr(packet, overload))
 
 
 def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
@@ -895,7 +906,7 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
         try:
             _importlib.import_module(module)
         except Exception as e:
-            # Imported lazily, as in _fail.
+            # Imported lazily, only to raise it.
             from torch._precompile import PrecompileError as _PrecompileError
 
             raise _PrecompileError(
