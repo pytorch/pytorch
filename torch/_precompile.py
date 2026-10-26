@@ -428,8 +428,9 @@ class DynamoTracer:
     reached: by default it is refused like any other kernel that cannot be
     frozen. With ``require_tuned_backward=False`` it is frozen with its first
     config, tuning off, and reported with a warning and a
-    ``precompile_triton_untuned_kernels`` artifact; serving under
-    ``no_compilation()`` could not tune it anyway.
+    ``precompile_triton_untuned_kernels`` artifact. Every serving process then
+    runs it with that config, without ``no_compilation()`` too, which can cost
+    performance.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -2077,11 +2078,19 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
     for qualname in OPDEFS:
         if "." in qualname:
             by_packet.setdefault(qualname.partition(".")[0], []).append(qualname)
-    qualnames = sorted(
-        {q for n in op_names for q in ([n] if n in OPDEFS else by_packet.get(n, []))}
-    )
-    for op_name in qualnames:
-        opdef = OPDEFS[op_name]
+    # Each name to record, with the op whose definition locates it.
+    defining: dict[str, str] = {}
+    for name in op_names:
+        if name in OPDEFS:
+            defining[name] = name
+        elif name in by_packet:
+            defining.update((q, q) for q in by_packet[name])
+        elif (packet := name.partition(".")[0]) in OPDEFS:
+            # An overload defined next to the op, such as the Tag.out variant
+            # Inductor lowers a functional op to: the load checks that overload.
+            defining[name] = packet
+    for op_name, qualname in sorted(defining.items()):
+        opdef = OPDEFS[qualname]
         defined_in = [getattr(opdef._init_fn, "__module__", "?")]
         if torch_wrapper(defined_in[0]):
             # triton_op: the user's function is the fake; torch wrapped it.
@@ -2186,6 +2195,7 @@ def _write_custom_op_imports(
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     if modules:
         buf.writeline("import importlib as _importlib")
+        buf.writeline("import warnings as _warnings")
         buf.writeline("import torch as _torch")
         for fn in (driver._custom_op_registered, driver._import_custom_op_modules):
             buf.writeline("")
@@ -3696,8 +3706,9 @@ def capture(
 
     The artifact records the importable module defining each
     ``torch.library.custom_op`` its compiled code calls and imports it when it
-    loads, if the op is not registered yet; such an op must then be registered,
-    or its module importable by that name, by ``load``. An op defined in
+    loads, if the op is not registered yet. That import is best effort: if it
+    fails, or leaves the op unregistered, ``load`` warns and the op must be
+    registered by its first call, as before. An op defined in
     ``__main__`` or in a module the import system cannot find again by name, or
     registered through ``torch.library.Library`` or ``torch.ops.load_library``,
     has no such module: capture logs a warning for the first kind, and the
@@ -3850,7 +3861,7 @@ def load(
     up to a graph break whose continuation fell back, still ran compiled.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
-    and the Inductor cache's include paths taken out, so they serve a host that
+    taken out, so they serve a host that
     installed the same PyTorch build elsewhere. The Python, compiler, CUDA and
     other SDK paths must still match the producer's, and a kernel that links a
     library from the Inductor cache (the Halide runtime, CUTLASS or CK kernels)
@@ -3877,13 +3888,13 @@ def load(
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process
-    (for example, a captured source changed since capture), or if a module in the
-    artifact's ``CUSTOM_OP_MODULES`` cannot be imported or, imported, leaves one of
-    its ops unregistered. ``load`` imports such a module (user code) only when one
-    of the custom ops it registers is not registered yet, so an op with a recorded
-    module must be registered, or that module importable by its name, by the time
-    ``load`` is called. The recorded module is the one defining the op's function,
-    which is not always the one calling ``torch.library.custom_op`` on it. A cache whose
+    (for example, a captured source changed since capture). ``load`` imports a
+    module in the artifact's ``CUSTOM_OP_MODULES`` (user code) only when one of the
+    custom ops it registers is not registered yet. If the module cannot be imported
+    or, imported, leaves one of its ops unregistered, ``load`` warns, and the op
+    must be registered by its first call. The recorded module is the one defining
+    the op's function, which is not always the one calling
+    ``torch.library.custom_op`` on it. A cache whose
     ``format``/``version`` does not match (a foreign or different-build envelope)
     is NOT fatal: the cache is acceleration only, so ``load`` degrades to JIT'ing
     from ``python_code`` rather than crashing.

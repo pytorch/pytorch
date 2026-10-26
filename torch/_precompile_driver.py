@@ -4,7 +4,8 @@ Nothing here is imported or run by torch at runtime, and the generated artifacts
 import this module. Instead torch._precompile emits these function bodies VERBATIM (via
 inspect.getsource, on the to_python_code / emit path only) into the self-contained
 python_code string, after the calling-convention metadata and the compiled/captured
-graph; the custom-op import functions at the end come first, before both. Authoring the driver as real code -- instead of a hand-written string literal --
+graph; the custom-op import functions at the end come first, before both. Authoring
+the driver as real code -- instead of a hand-written string literal --
 lets pyrefly / ruff / IDEs type-check and navigate the load-bearing driver logic that
 would otherwise be invisible inside a string (and drops the wall of ``# noqa: F821``).
 
@@ -14,10 +15,10 @@ import it, so there is no torch-version skew. The emit path runs getsource in-pr
 where torch source is present; load() never touches this module.
 
 The names the emitted bodies read from the artifact's own namespace -- the metadata
-constants, the ``_torch`` / ``_pytree`` / ``_importlib`` import aliases, and the graph's
-``call`` -- are
-declared under TYPE_CHECKING below so the bodies type-check here; at emit time they
-resolve against the metadata + graph sections that precede the driver in python_code.
+constants, the ``_torch`` / ``_pytree`` / ``_importlib`` / ``_warnings`` import
+aliases, and the graph's ``call`` -- are declared under TYPE_CHECKING below so the
+bodies type-check here; at emit time they resolve against the metadata + graph
+sections that precede the driver in python_code.
 
 INVARIANT: ``_extract_param_buffers`` reproduces
 ``torch._precompile._intern_param_buffers``'s params-then-buffers, intern-by-identity
@@ -27,6 +28,7 @@ ordering VERBATIM; the two must stay in sync (see Note [precompile programming m
 from __future__ import annotations
 
 import importlib as _importlib
+import warnings as _warnings
 from typing import TYPE_CHECKING
 
 import torch as _torch
@@ -888,17 +890,17 @@ def _custom_op_registered(name: str) -> bool:
 
 
 def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
-    """Make the custom ops an artifact's graphs call resolvable before it runs.
+    """Import the modules that register the custom ops an artifact's graphs call.
 
     A compiled graph calls ``torch.ops.<ns>.<op>`` directly, so nothing on the
     serving path imports the module whose ``torch.library.custom_op`` registers it,
     and under lazy imports the model's own import of that module may never resolve.
     A module is imported only if one of its ops is not registered yet, so a process
-    that registers them some other way does not need the module by that name, and
-    an op its module did not register after all is refused here rather than on the
-    first call. An op with no module here (``__main__``, ``torch.library.Library``,
-    ``torch.ops.load_library``) is not checked: it only has to be registered by
-    the first call, as under ``torch.compile``.
+    that registers them some other way does not need the module by that name. The
+    import is best effort: an op still not registered after it only has to be
+    registered by its first call, as under ``torch.compile`` and as an op with no
+    module here (``__main__``, ``torch.library.Library``,
+    ``torch.ops.load_library``) does, so this warns rather than raises.
     """
     for module, module_ops in modules.items():
         if all(_custom_op_registered(op) for op in module_ops):
@@ -906,22 +908,19 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
         try:
             _importlib.import_module(module)
         except Exception as e:
-            # Imported lazily, only to raise it.
-            from torch._precompile import PrecompileError as _PrecompileError
-
-            raise _PrecompileError(
-                f"this artifact's compiled graphs call custom op(s) "
-                f"{', '.join(module_ops)}, registered by module {module!r}, which "
-                f"failed to import here ({type(e).__name__}: {e}). Make it "
-                "importable wherever the artifact is served, or register the ops "
-                "before loading it."
-            ) from e
+            _warnings.warn(
+                f"precompile: module {module!r}, which registers custom op(s) "
+                f"{', '.join(module_ops)} this artifact's compiled graphs call, failed "
+                f"to import ({type(e).__name__}: {e}); they must be registered by "
+                "their first call",
+                stacklevel=2,
+            )
+            continue
         missing = [op for op in module_ops if not _custom_op_registered(op)]
         if missing:
-            from torch._precompile import PrecompileError as _PrecompileError
-
-            raise _PrecompileError(
-                f"this artifact's compiled graphs call custom op(s) "
-                f"{', '.join(missing)}, which importing module {module!r} did not "
-                "register. Register them before loading the artifact."
+            _warnings.warn(
+                f"precompile: importing module {module!r} did not register custom "
+                f"op(s) {', '.join(missing)}, which this artifact's compiled graphs "
+                "call; they must be registered by their first call",
+                stacklevel=2,
             )

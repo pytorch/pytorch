@@ -7495,6 +7495,7 @@ if phase == "strict":
             cap(*inputs())
     except torch.compiler.PrecompileError as e:
         assert "no fully resolved static launcher" in str(e), e
+        assert "DynamoTracer(require_tuned_backward=False)" in str(e), e
     else:
         raise AssertionError("a strict capture froze a never-run backward kernel")
 elif phase in ("capture", "warm"):
@@ -7948,17 +7949,15 @@ class TestPrecompileRuntimeCache(TestCase):
 
         from torch._inductor.codecache import CppCodeCache
         from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
         from torch.compiler._cache import CacheArtifactManager
 
+        code = 'extern "C" long captured_cpp_kernel(long x) { return x; }'
         with fresh_cache():
             loaded = []
 
             def load():
-                loaded.append(
-                    CppCodeCache.load(
-                        'extern "C" long captured_cpp_kernel(long x) { return x; }'
-                    )
-                )
+                loaded.append(CppCodeCache.load(code))
 
             source, cache = _capture_files(
                 self,
@@ -7973,7 +7972,11 @@ class TestPrecompileRuntimeCache(TestCase):
                 torch.load(cache, weights_only=True)["artifact"]
             )
             (frozen,) = artifacts["inductor_cpp"]
-            self.assertEqual(list(pickle.loads(frozen.content).values()), [binary])
+            # The key a replay looks the kernel up by.
+            with _runtime_cache.capture_scope():
+                CppCodeCache.load(code)
+                (key,) = _runtime_cache._capture.cpp_kernels
+            self.assertEqual(pickle.loads(frozen.content), {key: binary})
 
     def test_cpp_kernel_is_recorded_on_every_load(self):
         from torch._inductor.codecache import CppCodeCache
@@ -9507,6 +9510,29 @@ from torch._inductor.lowering import lowerings, register_lowering
 @register_lowering(torch.ops.{ns}.lowered.default)
 def _(x):
     return lowerings[torch.ops.aten.mul.Tensor](x, 2)
+
+
+@torch.library.custom_op("{ns}::doubled", mutates_args=())
+def doubled(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@doubled.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+# Inductor serves doubled through this out variant, an overload of the same op.
+torch.library.define(
+    "{ns}::doubled.out",
+    "(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+    tags=(torch.Tag.out,),
+)
+
+
+@torch.library.impl("{ns}::doubled.out", "CompositeExplicitAutograd")
+def _(x, *, out):
+    return torch.mul(x, 2, out=out)
 """
 
 
@@ -9523,6 +9549,10 @@ def fn(x):
 
 def grad_fn(x):
     return torch.ops.{ns}.triple.default(x.neg()) + 1
+
+
+def out_fn(x):
+    return torch.ops.{ns}.doubled.default(x.neg()) + 1
 
 
 class Child(torch.nn.Module):
@@ -9675,12 +9705,18 @@ elif phase == "version":
     else:
         raise AssertionError("ran an artifact produced by another torch")
 else:
-    try:
-        pc.load(artifact, cache)
-    except torch.compiler.PrecompileError as e:
-        assert repr(module) in str(e), e
-    else:
-        raise AssertionError("load ran an artifact whose custom op module is missing")
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            run(pc.load(artifact, cache))
+        except Exception:
+            pass
+        else:
+            raise AssertionError("ran a custom op that nothing registered")
+    messages = [str(w.message) for w in caught]
+    assert any(repr(module) in m for m in messages), messages
 print("custom op phase ok:", phase)
 """
 
@@ -9699,6 +9735,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "subclass_fn", "standalone"),
             ("dynamo", "inductor", "grad_fn", "standalone"),
+            ("dynamo", "inductor", "out_fn", "standalone"),
             ("dynamo", "inductor-cpp-wrapper", "fn", "standalone"),
         ],
     )
@@ -9736,6 +9773,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ops = {
                 "fn": ("lowered", "triple") if backend == "eager" else ("triple",),
                 "grad_fn": ("grad_triple", "triple"),
+                "out_fn": ("doubled.out",),
             }.get(entry, ("triple",))
             modules = {module: tuple(f"{ns}::{op}" for op in ops)}
             self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", python_code.splitlines())
@@ -9873,6 +9911,18 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertEqual(_custom_op_modules({f"{ns}::op"}), modules)
         self.assertTrue(_custom_op_registered(name))
         self.assertFalse(_custom_op_registered(f"{ns}::op.v3"))
+        # An overload defined next to a custom_op is found through the op.
+        self._define_op(ns, "base", module="unittest")
+        torch.library.define(
+            f"{ns}::base.out",
+            "(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=(torch.Tag.out,),
+        )
+        self.assertEqual(
+            _custom_op_modules({f"{ns}::base.out"}), {"unittest": (f"{ns}::base.out",)}
+        )
+        self.assertTrue(_custom_op_registered(f"{ns}::base.out"))
+        self.assertFalse(_custom_op_registered(f"{ns}::base.v2"))
         graph = torch.fx.Graph()
         graph.output(graph.call_function(op._opoverload, (graph.placeholder("x"),)))
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
@@ -9931,15 +9981,16 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertIn(module, sys.modules)
             # The module imports but does not register the op.
             module = write("")
-            with self.assertRaisesRegex(
-                PrecompileError, f"{ns}::absent, which importing module {module!r}"
+            with self.assertWarnsRegex(
+                UserWarning,
+                f"{module!r} did not register custom op\\(s\\) {ns}::absent",
             ):
                 _import_custom_op_modules({module: (f"{ns}::absent",)})
             # The module raises something other than ImportError.
             module = write("raise RuntimeError('duplicate registration')")
-            with self.assertRaisesRegex(PrecompileError, "duplicate registration"):
+            with self.assertWarnsRegex(UserWarning, "duplicate registration"):
                 _import_custom_op_modules({module: (f"{ns}::absent",)})
-        with self.assertRaisesRegex(PrecompileError, repr(missing_module)):
+        with self.assertWarnsRegex(UserWarning, repr(missing_module)):
             _import_custom_op_modules({missing_module: (f"{ns}::absent",)})
 
     def test_no_custom_op_modules_import_nothing(self):
