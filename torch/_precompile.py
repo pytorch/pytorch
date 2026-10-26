@@ -755,13 +755,7 @@ class _DynamoCapture(Capture[_P, _R]):
         # Captures open at once share that scope, so each also freezes the
         # kernels the others compiled.
         try:
-            # Only an opt-in is stated, so a capture never conflicts with a
-            # scope that opted in around it.
-            self._block.enter_context(
-                capture_scope(
-                    freeze_never_run_backward=self._freeze_never_run_backward or None
-                )
-            )
+            self._block.enter_context(capture_scope())
             self._block.enter_context(CacheArtifactManager.with_fresh_cache())
             self._call = self._map(self._session.__enter__)
         except BaseException:
@@ -821,7 +815,11 @@ class _DynamoCapture(Capture[_P, _R]):
                 ) from e
 
         try:
-            freeze_runtime_cache(snapshot, write)
+            freeze_runtime_cache(
+                snapshot,
+                write,
+                freeze_never_run_backward=self._freeze_never_run_backward,
+            )
         except PrecompileError:
             raise
         except Exception as e:
