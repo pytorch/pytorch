@@ -28,6 +28,7 @@ from torch._functorch._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.flydsl_portable_call import flydsl_portable_mutation
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
@@ -9301,6 +9302,26 @@ from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 
 make_fallback(auto_functionalized)
+
+
+@register_lowering(flydsl_portable_mutation)
+def flydsl_portable_wrap_(
+    *,
+    program_json: str,
+    call_spec_json: str,
+    args: tuple[Any, ...],
+    mutated_arg_indices: tuple[int, ...],
+) -> None:
+    from torch._inductor.codegen.flydsl.user_defined_kernel import (
+        lower_portable_flydsl,
+    )
+
+    lower_portable_flydsl(
+        program_json=program_json,
+        call_spec_json=call_spec_json,
+        args=args,
+        mutated_arg_indices=mutated_arg_indices,
+    )
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
