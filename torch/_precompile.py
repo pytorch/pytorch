@@ -1950,13 +1950,15 @@ def _custom_op_modules(op_names: Iterable[str]) -> tuple[str, ...]:
     """
     from torch._library.custom_ops import OPDEFS
 
-    modules = set()
+    modules: set[str] = set()
     for op_name in op_names:
         opdef = OPDEFS.get(op_name)
         if opdef is None:
             continue
         name = getattr(opdef._init_fn, "__module__", None)
-        module = sys.modules.get(name) if name and name != "__main__" else None
+        if not isinstance(name, str) or name == "__main__":
+            continue
+        module = sys.modules.get(name)
         if module is not None and getattr(module, "__spec__", None) is not None:
             modules.add(name)
     return tuple(sorted(modules))

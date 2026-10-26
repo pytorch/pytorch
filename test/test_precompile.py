@@ -7587,6 +7587,7 @@ class TestPrecompileRuntimeCache(TestCase):
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [])
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_kernel(self):
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
@@ -9266,7 +9267,10 @@ class TestPrecompileCustomOpModules(TestCase):
             tag = uuid.uuid4().hex
             module, unused = f"precompile_op_module_{tag}", f"precompile_unused_{tag}"
             ns = f"precompile_op_test_{tag}"
-            for name, source in ((module, _CUSTOM_OP_MODULE), (unused, _UNUSED_OP_MODULE)):
+            for name, source in (
+                (module, _CUSTOM_OP_MODULE),
+                (unused, _UNUSED_OP_MODULE),
+            ):
                 with open(os.path.join(directory, name + ".py"), "w") as f:
                     f.write(source.replace("{ns}", ns))
             for phase in ("capture", "replay", "missing"):

@@ -455,6 +455,7 @@ def _pickle_frozen_triton_kernel(
 
     saved.prepare_for_pickle()
     saved.compile_results = [saved_result]
+    # pyrefly: ignore [bad-assignment]
     saved._reload_kernel = None
     try:
         _retain_cubin(saved_result)
