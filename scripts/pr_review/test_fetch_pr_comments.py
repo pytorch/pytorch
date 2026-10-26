@@ -51,15 +51,20 @@ class FakeApi:
             f"repos/{REPO}/issues/{PR}/comments": list(issue),
             f"repos/{REPO}/pulls/{PR}/reviews": list(reviews),
             f"repos/{REPO}/pulls/{PR}/comments": list(inline),
-            **{f"repos/{REPO}/{k}/reactions": v for k, v in (reactions or {}).items()},
         }
+        # Keyed like the REST routes: "issues/comments/20", "pulls/comments/10",
+        # "reviews/50". `deleted` takes the same keys as full reaction routes.
+        self.reactions = dict(reactions or {})
+        self.graphql_ids = []
         self.maintainers = set(maintainers)
         self.unknown = set(unknown)
         self.deleted = set()
         self.calls = []
 
-    def __call__(self, endpoint):
+    def __call__(self, endpoint, body=None):
         self.calls.append(endpoint)
+        if endpoint == "graphql":
+            return self.graphql(body)
         if endpoint == f"repos/{REPO}/pulls/{PR}":
             return self.pull
         base, _, query = endpoint.partition("?")
@@ -68,13 +73,66 @@ class FakeApi:
         if base in self.pages:
             page = int(query.split("&page=", 1)[1]) if "&page=" in query else 1
             items = self.pages[base]
-            return items[(page - 1) * fpc.PER_PAGE : page * fpc.PER_PAGE]
+            prefix = NODE_PREFIX[base]
+            return [
+                {"node_id": f"{prefix}{o.get('id')}", **o}
+                for o in items[(page - 1) * fpc.PER_PAGE : page * fpc.PER_PAGE]
+            ]
         login = base.split("/collaborators/", 1)[1].split("/", 1)[0]
         if login in self.unknown:
             raise fpc.NotFound(endpoint)
         perms = {p: False for p in ("admin", "maintain", "push", "triage", "pull")}
         perms["triage"] = login in self.maintainers
         return {"user": {"permissions": perms}}
+
+    def graphql(self, body):
+        self.assertions(body)
+        ids = body["variables"]["ids"]
+        self.graphql_ids.append(list(ids))
+        nodes = []
+        for nid in ids:
+            prefix, _, num = nid.partition("_")
+            key = f"{NODE_ROUTE[prefix + '_']}/{num}"
+            if f"repos/{REPO}/{key}/reactions" in self.deleted:
+                nodes.append(None)
+                continue
+            rs = self.reactions.get(key, [])
+            nodes.append(
+                {
+                    "id": nid,
+                    "reactions": {
+                        "totalCount": len(rs),
+                        "nodes": [
+                            {
+                                "content": GRAPHQL_CONTENT[r["content"]],
+                                "user": {"login": r["user"]["login"]},
+                            }
+                            for r in rs[:100]
+                        ],
+                    },
+                }
+            )
+        errors = [
+            {"type": "NOT_FOUND", "message": "not found", "path": ["nodes", n]}
+            for n, node in enumerate(nodes)
+            if node is None
+        ]
+        return {"data": {"nodes": nodes}, **({"errors": errors} if errors else {})}
+
+    @staticmethod
+    def assertions(body):
+        assert body["query"] == fpc.REACTIONS_QUERY
+        assert 0 < len(body["variables"]["ids"]) <= 100
+
+
+# REST listing -> node id prefix, and node id prefix -> REST route.
+NODE_PREFIX = {
+    f"repos/{REPO}/issues/{PR}/comments": "IC_",
+    f"repos/{REPO}/pulls/{PR}/comments": "PRRC_",
+    f"repos/{REPO}/pulls/{PR}/reviews": "PRR_",
+}
+NODE_ROUTE = {"IC_": "issues/comments", "PRRC_": "pulls/comments", "PRR_": "reviews"}
+GRAPHQL_CONTENT = {v: k for k, v in fpc.CONTENT.items()}
 
 
 def comment(
@@ -561,7 +619,8 @@ class TestReactions(unittest.TestCase):
             maintainers={"maint"},
         )
         out = fpc.collect(api, REPO, PR)
-        self.assertFalse([c for c in api.calls if "/reactions" in c])
+        # Only the latest review's body, whose REST listing has no count.
+        self.assertEqual(api.graphql_ids, [["PRR_50"]])
         self.assertFalse([i for i in out["items"] if "reactions" in i])
 
     def test_a_failed_lookup_keeps_the_comment_with_unknown_reactions(self):
@@ -585,19 +644,65 @@ class TestReactions(unittest.TestCase):
         )
         real = api.__call__
 
-        def throttled(endpoint):
-            if "/reactions" in endpoint:
+        def throttled(endpoint, body=None):
+            if endpoint == "graphql":
                 raise RuntimeError("gh api failed: HTTP 403 secondary rate limit")
-            return real(endpoint)
+            return real(endpoint, body)
 
-        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+        with (
+            mock.patch("sys.stderr", new_callable=io.StringIO) as err,
+            mock.patch.object(fpc.time, "sleep") as sleep,
+        ):
             out = fpc.collect(throttled, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"]], [20])
         self.assertTrue(out["reactions_truncated"])
-        self.assertIn(
-            "::warning::could not read the reactions of issue_comment 20:",
-            err.getvalue(),
+        self.assertEqual(err.getvalue().count("::warning::could not read reactions"), 3)
+        self.assertEqual([c.args for c in sleep.call_args_list], [(1,), (2,)])
+
+    def test_a_failed_reactions_call_is_retried(self):
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint"},
+            reactions={"issues/comments/20": [reaction("author", "+1")]},
         )
+        failures = [RuntimeError("gh api graphql failed: HTTP 502")]
+
+        def flaky(endpoint, body=None):
+            if endpoint == "graphql" and failures:
+                raise failures.pop()
+            return api(endpoint, body)
+
+        with mock.patch("sys.stderr"), mock.patch.object(fpc.time, "sleep"):
+            out = fpc.collect(flaky, REPO, PR)
+        self.assertEqual(out["items"][0]["reactions"][0]["content"], "+1")
+        self.assertFalse(out["reactions_truncated"])
+
+    def test_the_latest_review_bodys_reactions_are_read(self):
+        api = FakeApi(
+            reviews=[ours(rid=40), ours(rid=50)],
+            maintainers={"maint"},
+            reactions={
+                "reviews/40": [reaction("author", "+1")],
+                "reviews/50": [reaction("maint", "-1"), reaction("drive-by", "+1")],
+            },
+        )
+        (item,) = fpc.collect(api, REPO, PR)["items"]
+        self.assertEqual(item["id"], 50)
+        self.assertEqual(
+            item["reactions"],
+            [{"author": "maint", "role": "maintainer", "content": "-1"}],
+        )
+        self.assertEqual(api.graphql_ids, [["PRR_50"]])
+
+    def test_app_reactions_are_not_people(self):
+        api = FakeApi(
+            issue=[comment("maint", id=20, reactions={"total_count": 1})],
+            maintainers={"maint", "some-app[bot]"},
+            reactions={"issues/comments/20": [reaction("some-app[bot]", "-1", "Bot")]},
+        )
+        out = fpc.collect(api, REPO, PR)
+        self.assertNotIn("reactions", out["items"][0])
+        self.assertFalse([c for c in api.calls if "some-app" in c])
 
     def test_a_failed_reactor_permission_check_keeps_the_comment(self):
         api = FakeApi(
@@ -607,12 +712,13 @@ class TestReactions(unittest.TestCase):
         )
         real = api.__call__
 
-        def flaky(endpoint):
+        def flaky(endpoint, body=None):
             if "/collaborators/stranger/" in endpoint:
                 raise RuntimeError("gh api failed: HTTP 502")
-            return real(endpoint)
+            return real(endpoint, body)
 
-        out = fpc.collect(flaky, REPO, PR)
+        with mock.patch("sys.stderr"):
+            out = fpc.collect(flaky, REPO, PR)
         (item,) = out["items"]
         self.assertNotIn("reactions", item)
         self.assertTrue(out["reactions_truncated"])
@@ -653,9 +759,11 @@ class TestReactions(unittest.TestCase):
             maintainers={"maint"},
             reactions=reactions,
         )
-        with mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2):
+        # The finding and the latest review's body, then the newest comment.
+        with mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 3):
             out = fpc.collect(api, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"] if "reactions" in i], [10, 23])
+        self.assertEqual(api.graphql_ids, [["PRRC_10", "PRR_50", "IC_23"]])
 
     def test_only_the_newest_reacted_comments_are_looked_up(self):
         issue = [
@@ -671,7 +779,7 @@ class TestReactions(unittest.TestCase):
         with mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2):
             out = fpc.collect(api, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"] if "reactions" in i], [22, 23])
-        self.assertEqual(len([c for c in api.calls if "/reactions" in c]), 2)
+        self.assertEqual(api.graphql_ids, [["IC_23", "IC_22"]])
         self.assertTrue(out["reactions_truncated"])
 
     def test_permission_checks_for_new_reactors_are_bounded(self):
@@ -709,10 +817,9 @@ class TestReactions(unittest.TestCase):
         self.assertNotIn("reactions", out["items"][0])
         self.assertFalse(out["reactions_truncated"])
 
-    def test_a_full_first_page_is_reported_missing(self):
-        # The listing's count can be stale: a full page is what says more may exist.
+    def test_reactions_past_the_first_100_are_reported_missing(self):
         page = [reaction("author", "-1")] + [
-            reaction(f"bot{n}", "+1", "Bot") for n in range(fpc.PER_PAGE - 1)
+            reaction(f"bot{n}", "+1", "Bot") for n in range(100)
         ]
         api = FakeApi(
             issue=[comment("maint", id=20, reactions={"total_count": 1})],
@@ -761,14 +868,7 @@ class TestReactions(unittest.TestCase):
         ):
             out = fpc.collect(api, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"]], [50, 20])
-        lookups = [c.split("?")[0] for c in api.calls if "/reactions" in c]
-        self.assertEqual(
-            lookups,
-            [
-                f"repos/{REPO}/pulls/comments/10/reactions",
-                f"repos/{REPO}/issues/comments/20/reactions",
-            ],
-        )
+        self.assertEqual(api.graphql_ids, [["PRRC_10", "PRR_50", "IC_20"]])
         self.assertFalse(out["reactions_truncated"])
 
     def test_a_partial_comment_left_out_is_not_reported(self):
@@ -780,15 +880,20 @@ class TestReactions(unittest.TestCase):
         self.assertEqual([i["id"] for i in out["items"]], [22, 23])
         self.assertFalse(out["reactions_truncated"])
 
-    def test_a_comment_left_out_costs_no_lookup(self):
-        with mock.patch.object(fpc, "MAX_ITEMS", 1):
-            api = self.reacted_comments(3)
-            out = fpc.collect(api, REPO, PR)
-        self.assertEqual([i["id"] for i in out["items"]], [23])
-        self.assertEqual(
-            [c for c in api.calls if "/reactions" in c],
-            [f"repos/{REPO}/issues/comments/23/reactions?per_page={fpc.PER_PAGE}"],
-        )
+    def test_reactions_are_read_100_comments_per_call(self):
+        issue = [
+            comment(
+                "maint",
+                id=1000 + k,
+                when=f"2026-01-01T{k:05d}",
+                reactions={"total_count": 1},
+            )
+            for k in range(150)
+        ]
+        api = FakeApi(issue=issue, maintainers={"maint"})
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual([len(ids) for ids in api.graphql_ids], [100, 50])
+        self.assertFalse(out["reactions_truncated"])
 
     def test_a_finding_with_only_drive_by_reactions_is_selected_again(self):
         # Kept at first as possibly answered, the newer finding turns out to
@@ -865,10 +970,85 @@ class TestReactions(unittest.TestCase):
         self.assertEqual([i["id"] for i in out["items"]], [11, 12, 30])
         self.assertIn("reactions", out["items"][1])
 
+    def test_omitted_findings_spend_no_reactor_checks(self):
+        # People's comments overflow, so the finding is never a candidate and
+        # its reactor is not checked; the one check left goes to the kept
+        # comment's reactor.
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[finding(reactions={"total_count": 1})],
+            issue=[
+                comment("maint", id=20, when="2026-01-04"),
+                comment(
+                    "maint", id=21, when="2026-01-05", reactions={"total_count": 1}
+                ),
+            ],
+            maintainers={"maint", "x1", "m2"},
+            reactions={
+                "pulls/comments/10": [reaction("x1", "+1")],
+                "issues/comments/21": [reaction("m2", "-1")],
+            },
+        )
+        with (
+            mock.patch.object(fpc, "MAX_REACTOR_CHECKS", 1),
+            mock.patch.object(fpc, "MAX_ITEMS", 1),
+        ):
+            out = fpc.collect(api, REPO, PR)
+        (item,) = out["items"]
+        self.assertEqual(item["id"], 21)
+        self.assertEqual([r["author"] for r in item["reactions"]], ["m2"])
+        self.assertFalse(out["reactions_truncated"])
+        self.assertFalse(any(c.endswith("/x1/permission") for c in api.calls))
+
+    def with_errors(self, api, errors, null_reaction=False):
+        graphql = api.graphql
+
+        def broken(body):
+            resp = graphql(body)
+            if null_reaction:
+                resp["data"]["nodes"][0]["reactions"]["nodes"].append(None)
+            return resp | {"errors": errors}
+
+        api.graphql = broken
+        return api
+
+    def test_an_error_inside_a_node_marks_its_comment(self):
+        api = self.with_errors(
+            self.reacted_comments(2),
+            [{"path": ["nodes", 0, "reactions", "nodes", 1, "user"]}],
+            null_reaction=True,
+        )
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([len(i["reactions"]) for i in out["items"]], [1, 1])
+        self.assertTrue(out["reactions_truncated"])
+
+    def test_an_error_in_an_omitted_comment_is_not_reported(self):
+        # Node 1 is the older comment, which the item cap leaves out.
+        api = self.with_errors(
+            self.reacted_comments(2), [{"path": ["nodes", 1, "reactions"]}]
+        )
+        with (
+            mock.patch.object(sys, "stderr", io.StringIO()),
+            mock.patch.object(fpc, "MAX_ITEMS", 1),
+        ):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [22])
+        self.assertFalse(out["reactions_truncated"])
+
+    def test_an_error_tied_to_no_node_marks_every_comment(self):
+        api = self.with_errors(self.reacted_comments(2), [{"message": "partial"}])
+        with (
+            mock.patch.object(sys, "stderr", io.StringIO()),
+            mock.patch.object(fpc, "MAX_ITEMS", 1),
+        ):
+            out = fpc.collect(api, REPO, PR)
+        self.assertTrue(out["reactions_truncated"])
+
 
 class TestFailsClosed(unittest.TestCase):
     def test_an_api_error_fails_the_run(self):
-        def broken(endpoint):
+        def broken(endpoint, body=None):
             raise RuntimeError("gh api failed: HTTP 502")
 
         with (
@@ -885,8 +1065,8 @@ class TestFailsClosed(unittest.TestCase):
         api = FakeApi(issue=[comment("maint")])
         real = api.__call__
 
-        def no_perms(endpoint):
-            return {} if "/collaborators/" in endpoint else real(endpoint)
+        def no_perms(endpoint, body=None):
+            return {} if "/collaborators/" in endpoint else real(endpoint, body)
 
         with self.assertRaises(ValueError):
             fpc.collect(no_perms, REPO, PR)
@@ -933,6 +1113,34 @@ class TestFailsClosed(unittest.TestCase):
                 with self.assertRaises(RuntimeError) as cm:
                     fpc.gh_api("repos/o/r/collaborators/x/permission")
                 self.assertNotIsInstance(cm.exception, fpc.NotFound)
+
+    def fake_gh(self, td, script):
+        gh = Path(td) / "gh"
+        gh.write_text("#!/bin/bash\n" + script)
+        gh.chmod(0o755)
+        return {"PATH": f"{td}{os.pathsep}{os.environ['PATH']}"}
+
+    def test_a_graphql_call_sends_its_body_on_stdin(self):
+        with tempfile.TemporaryDirectory() as td:
+            env = self.fake_gh(td, 'echo "$@" > "$(dirname "$0")/args"; cat\n')
+            with mock.patch.dict(os.environ, env):
+                out = fpc.gh_api("graphql", {"query": "q", "variables": {"ids": ["a"]}})
+            self.assertEqual(out, {"query": "q", "variables": {"ids": ["a"]}})
+            self.assertEqual(
+                (Path(td) / "args").read_text().split(),
+                ["api", "graphql", "--method", "POST", "--input", "-"],
+            )
+
+    def test_graphql_data_beside_errors_is_returned(self):
+        partial = '{"data":{"nodes":[null]},"errors":[{"message":"gone"}]}'
+        with tempfile.TemporaryDirectory() as td:
+            env = self.fake_gh(td, f"echo '{partial}'; echo 'gh: gone' >&2; exit 1\n")
+            with mock.patch.dict(os.environ, env):
+                out = fpc.gh_api("graphql", {"query": "q", "variables": {}})
+            self.assertEqual(out["data"], {"nodes": [None]})
+            env = self.fake_gh(td, "echo 'gh: HTTP 502' >&2; exit 1\n")
+            with mock.patch.dict(os.environ, env), self.assertRaises(RuntimeError):
+                fpc.gh_api("graphql", {"query": "q", "variables": {}})
 
 
 if __name__ == "__main__":

@@ -15,28 +15,28 @@ reacted to, so those are normally not shown. Each inline comment's
 ``original_commit_id`` is the commit it was written against, and ``head_sha``,
 passed in by the caller, is the commit under review. Other bots and other users
 are dropped. A comment's ``reactions`` are the emoji reactions of the author
-and maintainers. They are read only for reacted comments the selection below
-keeps, so a comment left out costs no API call, and for at most
+and maintainers. They are read with GraphQL, one call per 100 comments, for
+reacted comments and the latest automated review's body, up to
 ``MAX_REACTION_LOOKUPS`` of them, earlier findings first and newest first
-within each (reactions to a review body have no REST endpoint and are not
-read). ``reactions_truncated`` is set when a limit or a failed lookup may have
-left some out of a kept comment. Bodies are capped. If the conversation is too
-long, ``truncated`` is set and items are selected in two phases. First,
-people's comments alone, newest first; the first that does not fit ends
-selection, and older comments and every finding are left out. Then, only if
-all of them fit, earlier findings are considered in this order, each kept if
-it fits and skipped if not: those a kept reply answers (in the order of the
-replies), then those with a reaction seen (or not yet looked up while lookups
-remain) and the latest review body, then the rest, each group newest first.
-One comment is looked up at a time and selection is repeated after each, since
-reactions change what fits and what counts as answered. Kept items are written in time order.
+within each; the reactors' permission checks are spent only on items
+selection considers. ``reactions_truncated`` is set when a limit or a failed lookup
+may have left some out of a kept item. Bodies are capped; the latest review's
+body at ``MAX_REVIEW_BODY``. If the conversation is too long, ``truncated`` is
+set and items are selected in two phases. First, people's comments alone,
+newest first; the first that does not fit ends selection, and older comments
+and every finding are left out. Then, only if all of them fit, earlier
+findings are considered in this order, each kept if it fits and skipped if
+not: those a kept reply answers (in the order of the replies), then those with
+a reaction seen and the latest review body, then the rest, each group newest
+first. Kept items are written in time order.
 
 Every failure is fatal except a 404 on a permission check (that user is not a
 maintainer) and any failure while reading a comment's reactions, including the
 reactors' permission checks: the comment is kept with ``reactions_truncated``
 set. Reactions are context, while a review that silently saw no comments would
-approve a PR whose maintainer feedback it was never shown.
-Each failed lookup is logged as a workflow warning.
+approve a PR whose maintainer feedback it was never shown. A reactions call is
+tried ``REACTION_ATTEMPTS`` times, and each failure is logged as a workflow
+warning.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
@@ -55,7 +56,7 @@ PER_PAGE = 100
 MAX_PAGES = 30
 MAX_BODY = 4000
 # Of the latest automated review's body, which lists its non-inline findings.
-MAX_REVIEW_BODY = 12_000
+MAX_REVIEW_BODY = 40_000
 # Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
 MAX_PR_BODY_BYTES = 40_000
 MAX_HUNK = 1500
@@ -74,15 +75,36 @@ NON_HUMAN_LOGINS = frozenset(
 REVIEW_AUTHOR = "github-actions[bot]"
 MARKER = "<!-- hardened-pr-review -->"
 AUTOMATED = "automated_review"
-REACTIONS = {"issue_comment": "issues/comments", "review_comment": "pulls/comments"}
-# Reactions are read for a bounded number of kept, reacted comments, one page each:
-# every lookup is an API call on a token the repository's other workflows share.
-MAX_REACTION_LOOKUPS = 50
+# REST listings carry a reaction count for these kinds only; a review's does not.
+COUNTED = ("issue_comment", "review_comment")
+# Items whose reactions are read, at most 100 per GraphQL call. Every call is
+# on a token the repository's other workflows share.
+MAX_REACTION_LOOKUPS = 300
+REACTION_ATTEMPTS = 3
+# GraphQL's ReactionContent, as REST spells it.
+CONTENT = {
+    "THUMBS_UP": "+1",
+    "THUMBS_DOWN": "-1",
+    "LAUGH": "laugh",
+    "HOORAY": "hooray",
+    "CONFUSED": "confused",
+    "HEART": "heart",
+    "ROCKET": "rocket",
+    "EYES": "eyes",
+}
+_REACTIONS = "reactions(first: 100) { totalCount nodes { content user { login } } }"
+REACTIONS_QUERY = (
+    "query($ids: [ID!]!) { nodes(ids: $ids) { "
+    f"... on IssueComment {{ id {_REACTIONS} }} "
+    f"... on PullRequestReviewComment {{ id {_REACTIONS} }} "
+    f"... on PullRequestReview {{ id {_REACTIONS} }} }} }}"
+)
 # Permission checks for reactors not already known from the conversation; a
 # reactor beyond them is left out.
 MAX_REACTOR_CHECKS = 30
 
-Api = Callable[[str], Any]
+# api(endpoint) is a REST GET; api("graphql", body) is a GraphQL call.
+Api = Callable[..., Any]
 
 
 class NotFound(RuntimeError):
@@ -93,12 +115,27 @@ def dumps(obj: Any) -> str:
     return json.dumps(obj, separators=(",", ":"))
 
 
-def gh_api(endpoint: str) -> Any:
+def gh_api(endpoint: str, body: dict[str, Any] | None = None) -> Any:
+    args = ["gh", "api", endpoint]
+    if body is not None:
+        args += ["--method", "POST", "--input", "-"]
     proc = subprocess.run(
-        ["gh", "api", endpoint], capture_output=True, text=True, check=False
+        args,
+        input=None if body is None else dumps(body),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode != 0:
         err = proc.stderr.strip()
+        if body is not None:
+            # GraphQL reports per-node errors next to the data that resolved.
+            try:
+                out = json.loads(proc.stdout)
+            except ValueError:
+                out = None
+            if isinstance(out, dict) and isinstance(out.get("data"), dict):
+                return out
         if "(HTTP 404)" in err:
             raise NotFound(f"{endpoint}: {err}")
         raise RuntimeError(f"gh api {endpoint} failed: {err}")
@@ -149,27 +186,47 @@ def cap_encoded(text: str | None, limit: int) -> str:
     return text if keep == len(text) else text[:keep] + " [truncated]"
 
 
-def reacted(kind: str, obj: dict[str, Any]) -> bool:
-    return kind in REACTIONS and bool((obj.get("reactions") or {}).get("total_count"))
+def warn(message: str) -> None:
+    print(f"::warning::{message}", file=sys.stderr)
 
 
-def reactions_of(
-    api: Api, repo: str, kind: str, obj: dict[str, Any], role_of
-) -> tuple[list[dict[str, Any]], bool]:
-    """The author's and maintainers' reactions to a comment, from its first
-    page of reactions, and whether that page was full, so more may exist."""
-    page = api(
-        f"repos/{repo}/{REACTIONS[kind]}/{obj.get('id')}/reactions?per_page={PER_PAGE}"
-    )
-    if not isinstance(page, list):
-        raise ValueError(f"reactions of {kind} {obj.get('id')} are not a list")
-    out = []
-    for r in page:
-        login = human_login(r)
-        role = role_of(login) if login else None
-        if role:
-            out.append({"author": login, "role": role, "content": r.get("content")})
-    return out, len(page) >= PER_PAGE
+def read_reactions(
+    api: Api, node_ids: list[str]
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """Each node's reaction connection, by node id, from one GraphQL call per
+    100 ids, and the ids of nodes an error in the response may have left
+    incomplete. A node whose call or lookup failed is absent."""
+    out: dict[str, dict[str, Any]] = {}
+    flawed: set[str] = set()
+    for i in range(0, len(node_ids), 100):
+        ids = node_ids[i : i + 100]
+        for attempt in range(REACTION_ATTEMPTS):
+            try:
+                resp = api(
+                    "graphql", {"query": REACTIONS_QUERY, "variables": {"ids": ids}}
+                )
+                nodes = ((resp or {}).get("data") or {}).get("nodes")
+                if not isinstance(nodes, list):
+                    raise ValueError("no nodes in the reactions response")
+            except (RuntimeError, ValueError) as e:
+                warn(f"could not read reactions (attempt {attempt + 1}): {e}")
+                if attempt + 1 < REACTION_ATTEMPTS:
+                    time.sleep(2**attempt)
+                continue
+            for err in resp.get("errors") or []:
+                path = (err or {}).get("path") if isinstance(err, dict) else None
+                n = path[1] if isinstance(path, list) and len(path) > 1 else None
+                if path and path[0] == "nodes" and isinstance(n, int) and n < len(ids):
+                    flawed.add(ids[n])
+                else:  # an error not tied to one node may touch any of them
+                    flawed.update(ids)
+            if resp.get("errors"):
+                warn(f"reactions response had errors: {dumps(resp['errors'])[:500]}")
+            for n in nodes:
+                if isinstance(n, dict) and isinstance(n.get("reactions"), dict):
+                    out[n.get("id")] = n["reactions"]
+            break
+    return out, flawed
 
 
 def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
@@ -221,7 +278,7 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         return role_of(login)
 
     items = []
-    lookups: dict[int, tuple[str, dict[str, Any]]] = {}
+    lookups: dict[int, str | None] = {}
     for kind, raw in sources.items():
         for obj in raw:
             limit = MAX_BODY
@@ -271,12 +328,70 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
                     "original_commit_id": obj.get("original_commit_id"),
                     "diff_hunk": cap(obj.get("diff_hunk"), MAX_HUNK),
                 }
-            if reacted(kind, obj):
-                lookups[id(item)] = (kind, obj)
+            reacted = (obj.get("reactions") or {}).get("total_count")
+            if obj is latest or (kind in COUNTED and reacted):
+                lookups[id(item)] = obj.get("node_id")
             items.append(item)
 
     items.sort(key=lambda i: i["created_at"])
-    replied = {i.get("in_reply_to_id") for i in items if i["role"] != AUTOMATED}
+    # Earlier findings first, so a reaction to one is never crowded out by
+    # people's comments; newest first within each.
+    wanted = sorted(
+        (i for i in reversed(items) if id(i) in lookups),
+        key=lambda i: i["role"] != AUTOMATED,
+    )
+    # Items whose reactions some limit or failure may have left out.
+    partial = {id(i) for i in wanted[MAX_REACTION_LOOKUPS:]}
+    wanted = wanted[:MAX_REACTION_LOOKUPS]
+    found, flawed = read_reactions(
+        api, [lookups[id(i)] for i in wanted if lookups[id(i)]]
+    )
+    resolved = {id(i) for i in items} - {id(i) for i in wanted}
+
+    def resolve(item: dict[str, Any]) -> None:
+        """Set the reactions of the author and maintainers on `item`. Called only
+        once the item is a candidate for keeping, so the reactors' permission
+        checks are not spent on items selection would leave out anyway."""
+        nonlocal unchecked
+        if id(item) in resolved:
+            return
+        resolved.add(id(item))
+        node_id = lookups[id(item)]
+        conn = found.get(node_id)
+        if conn is None or node_id in flawed:
+            partial.add(id(item))
+        if conn is None:
+            return
+        nodes = conn.get("nodes") or []
+        unchecked = False
+        reactions = []
+        try:
+            for r in nodes:
+                if not isinstance(r, dict):
+                    partial.add(id(item))
+                    continue
+                login = (r.get("user") or {}).get("login")
+                if not login or login in NON_HUMAN_LOGINS or login.endswith("[bot]"):
+                    continue
+                role = reactor_role(login)
+                if role:
+                    content = r.get("content")
+                    reactions.append(
+                        {
+                            "author": login,
+                            "role": role,
+                            "content": CONTENT.get(content, str(content).lower()),
+                        }
+                    )
+        except (RuntimeError, ValueError) as e:
+            warn(f"could not check who reacted to {item['kind']} {item['id']}: {e}")
+            partial.add(id(item))
+            return
+        if unchecked or (conn.get("totalCount") or 0) > len(nodes):
+            partial.add(id(item))
+        if reactions:
+            item["reactions"] = reactions
+
     findings = {
         i["id"]: n
         for n, i in enumerate(items)
@@ -290,49 +405,41 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "omitted_items": len(items),
         "items": [],
     }
-    base = len(dumps(envelope))
-    # Serialized sizes, recomputed only when an item gains reactions.
-    sizes = {id(i): len(dumps(i)) for i in items}
-    newest_first = list(reversed(range(len(items))))
-    looked: set[int] = set()
-    # Items whose reactions some limit or failure may have left out.
-    partial: set[int] = set()
+    size = len(dumps(envelope))
+    kept: list[int] = []
 
-    def select(optimistic: bool) -> list[int]:
-        # Answered: a finding with reactions or a reply people wrote, and the
-        # latest review's body, whose findings are not inline and so cannot be
-        # answered. A reacted finding not yet looked up counts as answered while
-        # lookups remain, so that it is kept and then looked up.
+    def take(n: int) -> bool:
+        nonlocal size
+        if n in kept:
+            return True
+        resolve(items[n])
+        grow = len(dumps(items[n])) + 1
+        if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
+            return False
+        size += grow
+        kept.append(n)
+        return True
+
+    newest_first = list(reversed(range(len(items))))
+    # People's comments alone, cut strictly oldest first: the first that does not
+    # fit ends selection, so a finding never takes a person's place.
+    for n in newest_first:
+        if items[n]["role"] != AUTOMATED and not take(n):
+            break
+    else:
+        # Findings are candidates only now that every person's comment fit.
+        for n in newest_first:
+            if items[n]["role"] == AUTOMATED:
+                resolve(items[n])
+        # Answered: a finding with reactions or a reply people wrote, and the latest
+        # review's body, whose findings are not inline and so cannot be replied to.
+        replied = {i.get("in_reply_to_id") for i in items if i["role"] != AUTOMATED}
         answered = {
             id(i)
             for i in items
             if i["role"] == AUTOMATED
-            and (
-                i.get("reactions")
-                or i["id"] in replied
-                or i["kind"] == "review"
-                or (optimistic and id(i) in lookups and id(i) not in looked)
-            )
+            and (i.get("reactions") or i["id"] in replied or i["kind"] == "review")
         }
-        kept: list[int] = []
-        size = base
-
-        def take(n: int) -> bool:
-            nonlocal size
-            if n in kept:
-                return True
-            grow = sizes[id(items[n])] + 1
-            if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
-                return False
-            size += grow
-            kept.append(n)
-            return True
-
-        # People's comments alone, cut strictly oldest first: the first that
-        # does not fit ends selection, so a finding never takes a person's place.
-        for n in newest_first:
-            if items[n]["role"] != AUTOMATED and not take(n):
-                return kept
         # Then earlier findings: first those a kept reply answers, then the
         # answered, then the rest, each newest first. One that does not fit is
         # skipped so that smaller ones can still be kept.
@@ -344,44 +451,6 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         for n in newest_first:
             if items[n]["role"] == AUTOMATED:
                 take(n)
-        return kept
-
-    # Reactions are read only for comments selection keeps, so a comment left
-    # out costs no API call. Reactions change what fits and what counts as
-    # answered, so one comment is looked up at a time and selection is repeated
-    # after each; this ends once no kept comment is pending or the lookups run
-    # out. Earlier findings are looked up before people's comments, so a
-    # reaction to one is never crowded out; newest first within each.
-    budget = MAX_REACTION_LOOKUPS
-    while True:
-        kept = select(optimistic=budget > 0)
-        pending = [
-            n for n in kept if id(items[n]) in lookups and id(items[n]) not in looked
-        ]
-        if not pending or not budget:
-            break
-        item = items[max(pending, key=lambda n: (items[n]["role"] == AUTOMATED, n))]
-        kind, obj = lookups[id(item)]
-        looked.add(id(item))
-        budget -= 1
-        unchecked = False
-        try:
-            reactions, full = reactions_of(api, repo, kind, obj, reactor_role)
-        except (RuntimeError, ValueError) as e:
-            # Deleted since it was listed, rate-limited, or any other failure:
-            # keep the comment and report its reactions as unknown.
-            print(
-                f"::warning::could not read the reactions of {kind} "
-                f"{obj.get('id')}: {e}",
-                file=sys.stderr,
-            )
-            reactions, full = [], True
-        if full or unchecked:
-            partial.add(id(item))
-        if reactions:
-            item["reactions"] = reactions
-            sizes[id(item)] = len(dumps(item))
-    partial |= {id(items[n]) for n in kept if id(items[n]) in lookups} - looked
     omitted = len(items) - len(kept)
     return {
         **head,
