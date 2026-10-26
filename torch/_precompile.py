@@ -422,12 +422,16 @@ class DynamoTracer:
 
     ``require_tuned_backward`` covers a backward Triton kernel the capture compiled
     but no call ran, e.g. in a graph variant whose backward no captured step
-    reached: by default it is refused like any other kernel that cannot be
-    frozen. With ``require_tuned_backward=False`` it is frozen with its first
-    config, tuning off, and reported with a warning and a
+    reached, and that still needed autotuning: several configs, or coordinate
+    descent or combo tuning not done yet. (One with a single config and nothing
+    left to tune is frozen either way.) By default it is refused like any other
+    kernel that cannot be frozen. With ``require_tuned_backward=False`` it is
+    frozen with its first config, tuning off, and reported with a warning and a
     ``precompile_triton_untuned_kernels`` artifact. Every serving process then
     runs it with that config, without ``no_compilation()`` too, which can cost
-    performance.
+    performance. The opt-in still refuses such a kernel if its source also
+    serves a forward, if none of its instances has a launcher with a static
+    compile result to freeze, or if its cubin cannot be carried.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -3373,8 +3377,8 @@ def capture(
     differ from the one picked before the block. Compiled JIT kernel
     specializations and autotuning decisions the block does not produce again
     are kept afterwards. A :class:`DynamoTracer` capture with
-    ``require_tuned_backward=False`` freezes an Inductor backward kernel no call
-    ran untuned instead of raising for it.
+    ``require_tuned_backward=False`` can freeze an Inductor backward kernel no
+    call ran untuned; :class:`DynamoTracer` lists when.
     Triton does not cache the decision of an autotuner with ``pre_hook``
     configs, so one that does not prune its configs keeps its earlier decision
     in the block and is benchmarked again on first use in the serving process.
@@ -3558,11 +3562,10 @@ def load(
     up to a graph break whose continuation fell back, still ran compiled.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
-    taken out, so they serve a host that
-    installed the same PyTorch build elsewhere. The Python, compiler, CUDA and
-    other SDK paths must still match the producer's, and a kernel that links a
-    library from the Inductor cache (the Halide runtime, CUTLASS or CK kernels)
-    is rebuilt. Rebuilding needs a C++ compiler on the serving host:
+    taken out, so they serve a host that installed the same PyTorch build
+    elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
+    producer's, and a kernel that links a library from the Inductor cache (the
+    Halide runtime, CUTLASS or CK kernels) is rebuilt. Rebuilding needs a C++ compiler on the serving host:
     :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
