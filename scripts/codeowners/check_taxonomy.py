@@ -227,13 +227,15 @@ def find_ownership_errors(
             ):
                 invalid_handles.append(f"{location} {line}")
 
+    # GitHub handles are case-insensitive and owner order carries no meaning.
     owner_lists = defaultdict(set)
     for pattern in patterns:
         if pattern.labels and pattern.owners is not None:
-            owner_lists[pattern.labels].add(pattern.owners)
+            owners = frozenset(owner.casefold() for owner in pattern.owners)
+            owner_lists[pattern.labels].add(owners)
     conflicting_lists = [
         f"{', '.join(labels)}: "
-        + " | ".join(" ".join(owners) or "none" for owners in sorted(lists))
+        + " | ".join(" ".join(owners) or "none" for owners in sorted(map(sorted, lists)))
         for labels, lists in owner_lists.items()
         if len(lists) > 1
     ]

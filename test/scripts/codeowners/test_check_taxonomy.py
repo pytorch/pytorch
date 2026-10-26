@@ -40,7 +40,7 @@ class TestFindOwnershipErrors(TestCase):
 #
 # [core_tests]
 # label: module: dynamo
-# owner: @alice @bob
+# owner: @Bob @alice
 /test/dynamo/ @bob
 """
         self.assertEqual(ownership_errors(codeowners), {})
