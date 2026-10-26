@@ -1,10 +1,12 @@
 import collections
+import logging
 from collections.abc import Callable
 from typing import Any, Optional
 
 import torch
 from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.lists import TupleVariable
+from torch._logging import warning_once
 from torch.fx import has_side_effect, Proxy
 
 from .. import graph_break_hints
@@ -32,6 +34,8 @@ if TYPE_CHECKING:
 
 from torch._library.custom_ops import custom_op
 
+
+log = logging.getLogger(__name__)
 
 Tensor = torch.Tensor
 
@@ -326,7 +330,7 @@ class SymbolicStreamState:
 
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
-    """This represents torch.cuda.StreamContext"""
+    """Represents a device StreamContext (e.g. torch.cuda.StreamContext)."""
 
     # Re-entering only the stream annotation would not restore the stream.
     _reenter_after_graph_break = False
@@ -335,15 +339,21 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> "StreamContextVariable":
         return StreamContextVariable(
             stream_to_enter,
             **kwargs,
         )
 
-    def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
+    def __init__(
+        self,
+        stream: Optional["StreamVariable"],
+        stream_context_type: type | None = None,
+        **kwargs: Any,
+    ) -> None:
         self.stream = stream
+        self.stream_context_type = stream_context_type
         super().__init__(
             annotation={"stream": self.get_stream().user_object_index},
             initial_values=None,
@@ -367,6 +377,28 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return super().exit(tx, *args)
 
     def python_type(self) -> type:
+        if self.stream_context_type is not None:
+            return self.stream_context_type
+        # Fallback for backends that registered a DeviceInterface without
+        # filling the StreamContext slot: derive from torch.<device type>.
+        stream = self.get_stream()
+        device_type = getattr(getattr(stream, "device", None), "type", None)
+        if device_type is None:
+            # Defensive: a missing stream (e.g. torch.cuda.stream(None)) fails
+            # earlier in __init__; keep python_type self-contained regardless.
+            return torch.cuda.StreamContext
+        mod = getattr(torch, device_type, None)
+        ctx = getattr(mod, "StreamContext", None)
+        if ctx is not None:
+            return ctx
+        warning_once(
+            log,
+            "No StreamContext type for device '%s'; falling back to "
+            "torch.cuda.StreamContext. Set StreamContext = torch.%s.StreamContext "
+            "on the device's DeviceInterface to fix this.",
+            device_type,
+            device_type,
+        )
         return torch.cuda.StreamContext
 
     def supports_graph_breaks(self) -> bool:
