@@ -705,12 +705,11 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
-def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
-    """Whether a forward-AD tangent can reach an `apply` on `value`.
+def _forward_ad_active(value: Any) -> bool:
+    """Whether a forward-AD tangent reaches an `apply` on `value`.
 
-    A dual level live at frame entry means a graph input may be dual on this or
-    a later call, and the DUAL_LEVEL guard pins that level. Otherwise a tangent
-    can only come from a dual made inside the frame (`dual_level()`,
+    A dual graph input already broke when it was wrapped, so a tangent here
+    comes from a dual made inside the frame (`dual_level()`,
     `enter_dual_level()`, `torch.func.jvp`), which shows on the fake value. The
     global `_current_level` is no use for that: Dynamo inlines
     `enter_dual_level()`, so the global stays -1 while tracing, and a live level
@@ -724,8 +723,6 @@ def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
     )
     from torch.autograd.forward_ad import unpack_dual
 
-    if tx.output.dual_level >= 0:
-        return True
     has_dual = False
 
     def visit(vt: VariableTracker) -> None:
@@ -924,7 +921,7 @@ class AutogradFunctionVariable(VariableTracker):
         # forward-AD rules of the primitives it decomposes into.
         jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
         if jvp_fn is not torch.autograd.Function.jvp:
-            forward_ad = _forward_ad_active(tx, (args, kwargs))
+            forward_ad = _forward_ad_active((args, kwargs))
             if (requires_grad and torch.is_grad_enabled()) or forward_ad:
                 unimplemented(
                     gb_type="Unsupported custom jvp",
@@ -937,12 +934,16 @@ class AutogradFunctionVariable(VariableTracker):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            # Not breaking was a decision about the ambient dual level, which
-            # nothing guards by default. Pin it so entering a level later
-            # recompiles instead of reusing a graph that inlined forward() and
-            # dropped the jvp. The level is always -1 here, since a level live at
-            # frame entry takes the break above.
+            # Not breaking relied on no graph input carrying a tangent, which
+            # nothing guards by default. Pin the dual level, and if one is
+            # already live, that every input is still not dual, so a later dual
+            # input recompiles instead of reusing a graph that inlined forward()
+            # and dropped the jvp.
             install_guard(GlobalStateSource().make_guard(GuardBuilder.DUAL_LEVEL))
+            if tx.output.dual_level >= 0:
+                for source, var in tx.output.input_source_to_var.items():
+                    if var.is_tensor():
+                        install_guard(source.make_guard(GuardBuilder.NO_TANGENT_MATCH))
 
         if requires_grad and torch.is_grad_enabled():
             source = self.fn_cls_source

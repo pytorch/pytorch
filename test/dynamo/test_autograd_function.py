@@ -3904,6 +3904,33 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, torch.zeros(4))
         self.assertEqual(actual, expected)
 
+    def test_custom_jvp_plain_input_under_dual_level_does_not_graph_break(self):
+        """A dual level live at frame entry must not break when no input is dual."""
+
+        def fn(x):
+            return SinWithZeroJvp.apply(x) * 2
+
+        x = torch.ones(4)
+        with fwAD.dual_level():
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+
+    def test_custom_jvp_recompiles_when_input_becomes_dual(self):
+        """A graph traced with a plain input under a live level must not be
+        reused for a dual input at that same level."""
+
+        def fn(x):
+            return SinWithZeroJvp.apply(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        x, dx = torch.randn(4), torch.randn(4)
+
+        with fwAD.dual_level():
+            opt_fn(x)
+            actual = fwAD.unpack_dual(opt_fn(fwAD.make_dual(x, dx))).tangent
+
+        self.assertEqual(actual, torch.zeros(4))
+
     def test_enter_dual_level_custom_jvp_matches_eager(self):
         """Dynamo inlines enter_dual_level(), so the global level stays -1."""
 

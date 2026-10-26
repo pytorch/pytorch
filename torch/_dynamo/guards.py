@@ -344,6 +344,13 @@ def _cow_tensor_matches(value: object, expected: object) -> bool:
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
 
 
+def _has_no_tangent(value: object) -> bool:
+    try:
+        return torch.autograd.forward_ad.unpack_dual(value).tangent is None
+    except RuntimeError:
+        return False
+
+
 dunder_attrs_assumed_constants = (
     "__defaults__",
     "__kwdefaults__",
@@ -963,6 +970,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
+            "___has_no_tangent": _has_no_tangent,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -2817,6 +2825,17 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: _has_no_tangent(value),
+    )
+    def NO_TANGENT_MATCH(self, guard: Guard) -> None:
+        code = f"___has_no_tangent({self.arg_ref(guard)})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            _has_no_tangent, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     @register_guard_check_spec(
