@@ -378,107 +378,6 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   return {std::move(final_out), std::move(intermediate)};
 }
 
-// Implementation 3: Full attention mode
-static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
-                                                          const Tensor& k_,
-                                                          const Tensor& v_,
-                                                          const std::optional<Tensor>& mask_,
-                                                          double dropout_p,
-                                                          bool is_causal,
-                                                          const std::optional<Tensor>& dropout_mask,
-                                                          std::optional<double> scale,
-                                                          const Tensor& orig_query,
-                                                          bool unsqueezed) {
-  using namespace mps;
-
-  int64_t batchSize = q_.size(0);
-  int64_t num_heads = q_.size(1);
-  int64_t qL = q_.size(2);
-  int64_t kL = k_.size(2);
-  int64_t headSize = q_.size(3);
-
-  auto q_batch_stride = q_.stride(0);
-  auto q_head_stride = q_.stride(1);
-  auto q_seq_stride = q_.stride(2);
-
-  auto k_batch_stride = k_.stride(0);
-  auto k_head_stride = k_.stride(1);
-  auto k_seq_stride = k_.stride(2);
-
-  auto v_batch_stride = v_.stride(0);
-  auto v_head_stride = v_.stride(1);
-  auto v_seq_stride = v_.stride(2);
-
-  int mask_batch_stride = 0;
-  int mask_head_stride = 0;
-  int mask_q_seq_stride = 0;
-  int mask_kv_seq_stride = 0;
-  Tensor mask_tensor;
-  bool has_mask = mask_.has_value();
-  if (has_mask) {
-    mask_tensor = mask_.value();
-    mask_batch_stride = mask_tensor.stride(0);
-    mask_head_stride = mask_tensor.stride(1);
-    mask_q_seq_stride = mask_tensor.stride(2);
-    mask_kv_seq_stride = mask_tensor.stride(3);
-  }
-
-  float scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
-  auto out = at::empty_like(q_);
-
-  constexpr uint wm = 4;
-  constexpr uint wn = 1;
-  constexpr uint bq = 32;
-  auto bd = headSize;
-  auto bk = (bd < 128 ? 32 : 16);
-  auto gqa_factor = static_cast<int>(q_.size(1) / k_.size(1));
-
-  const auto NQ = (qL + bq - 1) / bq;
-  const auto NK = (kL + bk - 1) / bk;
-
-  std::string kname =
-      fmt::format("attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}", scalarToMetalTypeString(q_), bq, bk, bd, wm, wn);
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^{
-    @autoreleasepool {
-      auto computeEncoder = mpsStream->commandEncoder();
-      auto attentionPSO = lib.getPipelineStateForFunc(kname);
-      [computeEncoder setComputePipelineState:attentionPSO];
-      mtl_setArgs(computeEncoder,
-                  q_,
-                  k_,
-                  v_,
-                  out,
-                  static_cast<int>(qL),
-                  static_cast<int>(kL),
-                  gqa_factor,
-                  scale_factor,
-                  NK,
-                  std::array<uint32_t, 3>{static_cast<uint32_t>(q_batch_stride),
-                                          static_cast<uint32_t>(q_head_stride),
-                                          static_cast<uint32_t>(q_seq_stride)},
-                  std::array<uint32_t, 3>{static_cast<uint32_t>(k_batch_stride),
-                                          static_cast<uint32_t>(k_head_stride),
-                                          static_cast<uint32_t>(k_seq_stride)},
-                  std::array<uint32_t, 3>{static_cast<uint32_t>(v_batch_stride),
-                                          static_cast<uint32_t>(v_head_stride),
-                                          static_cast<uint32_t>(v_seq_stride)},
-                  std::array<uint32_t, 3>{static_cast<uint32_t>(out.stride(0)),
-                                          static_cast<uint32_t>(out.stride(1)),
-                                          static_cast<uint32_t>(out.stride(2))});
-
-      MTLSize group_dims = MTLSizeMake(NQ, num_heads, batchSize);
-      MTLSize threadsPerGroup = MTLSizeMake(SIMD_SIZE, wm, wn);
-      [computeEncoder dispatchThreadgroups:group_dims threadsPerThreadgroup:threadsPerGroup];
-    }
-  });
-
-  auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  return {std::move(final_out), std::move(final_out)};
-}
-
 // Flash-attention prefill (kernels in Attention.metal). Picks block sizes
 // per head dim and dispatches one threadgroup per (Q-block, head, batch).
 namespace {
@@ -492,7 +391,6 @@ struct PrefillAttnParamsHost {
   int kL;
   int gqa_factor;
   float scale;
-  float softcapping;
   int64_t Q_strides[3];
   int64_t K_strides[3];
   int64_t V_strides[3];
@@ -616,7 +514,6 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   params.kL = static_cast<int>(kL);
   params.gqa_factor = gqa_factor;
   params.scale = sdp::calculate_scale(broadcast_query, scale).expect_float();
-  params.softcapping = 1.0f;
   params.Q_strides[0] = q_.stride(0);
   params.Q_strides[1] = q_.stride(1);
   params.Q_strides[2] = q_.stride(2);
@@ -758,9 +655,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                               "scaled_dot_product_attention for MPS does not support dtype ",
                               value_.scalar_type());
   TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0f, "scaled_dot_product_attention for MPS does not support dropout.");
-  const auto any_nested = query.is_nested() || key_.is_nested() || value_.is_nested();
-  const auto all_contiguous =
-      query.is_contiguous_or_false() && key_.is_contiguous_or_false() && value_.is_contiguous_or_false();
   // The kernel paths (vector fast / 2pass / prefill) all broadcast K/V across
   // GQA groups internally via their gqa_factor parameter, so we leave K/V at
   // their original [B, H_kv, L, D] shape here. sdpa_general_mps expands K/V
