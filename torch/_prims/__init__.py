@@ -2856,6 +2856,12 @@ def _uniform_meta(
     stride: ShapeType,
     generator: torch.Generator | None = None,
 ) -> TensorLikeType:
+    # The native kernel skips bounds validation for empty complex tensors.
+    if not utils.is_complex_dtype(dtype) or utils.prod(shape) != 0:
+        torch._check(
+            low <= high,
+            lambda: f"uniform_ expects to return a [from, to) range, but found from={low} > to={high}",
+        )
     return TensorMeta(shape=shape, strides=stride, dtype=dtype, device=device)
 
 
