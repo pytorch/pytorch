@@ -2090,6 +2090,8 @@ def _custom_op_modules(
     eager_op_names = set(eager_op_names)
 
     def module_of(fn: object) -> str | None:
+        while isinstance(fn, functools.partial):
+            fn = fn.func
         name = getattr(fn, "__module__", None)
         return name if isinstance(name, str) else None
 
@@ -2161,12 +2163,16 @@ def _custom_op_modules(
             if isinstance(n := module_of(fn), str) and n != name and not in_torch(n)
         }
         if others:
+            # Where a function is defined, not where it was registered: the recorded
+            # module may register a kernel it imports from elsewhere.
             log.warning(
-                "precompile: custom op %s has kernels, rules or a fake registered "
-                "from %s, which the artifact does not import; serving needs them "
-                "imported by its first call, or it runs the op's other kernels",
+                "precompile: custom op %s has kernels, rules or a fake defined in %s, "
+                "not in %s, which the artifact imports; if that module registers "
+                "them, serving needs it imported by the op's first call, or it runs "
+                "the op's other kernels",
                 op_name,
                 ", ".join(sorted(others)),
+                name,
             )
     return {module: tuple(ops) for module, ops in sorted(modules.items())}
 
@@ -3747,9 +3753,10 @@ def capture(
     holds for any op the recorded code does not show (one a tensor subclass's
     ``__torch_dispatch__`` calls under the eager backend, or one called from a
     frame served eagerly, ``PrecompileSummary.eager_fallbacks``), and for an
-    op's device kernels or autograd registered from another module than the one
-    recorded: importing the op's module registers the op, but not those, and
-    capture logs a warning for them.
+    op's device kernels or autograd registered by another module than the one
+    recorded: importing the op's module registers the op, but not those. Capture
+    warns when they are defined in another module, though the recorded module
+    may be the one registering them.
 
     ``backend`` selects how the captured graph is realized: ``"inductor"``
     (default) lowers through AOTAutograd + Inductor into one self-contained

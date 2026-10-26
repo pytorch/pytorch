@@ -9907,7 +9907,7 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertEqual(_custom_op_modules({f"{ns}::scripted"}), {})
         self.assertIn("'__main__': __main__", logs.output[0])
 
-    def test_custom_op_modules_warn_for_registrations_from_other_modules(self):
+    def test_custom_op_modules_warn_for_functions_defined_in_other_modules(self):
         from torch._precompile import _custom_op_modules
         from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -9939,7 +9939,8 @@ class TestPrecompileCustomOpModules(TestCase):
             pass
 
         ops = {name: self._define_op(ns, name, module="unittest") for name in "abcd"}
-        ops["a"].register_kernel("cpu")(elsewhere(kernel, "json"))
+        # Through a partial, the module is the wrapped function's.
+        ops["a"].register_kernel("cpu")(functools.partial(elsewhere(kernel, "json")))
         ops["b"].register_torch_dispatch(Mode, elsewhere(dispatch, "csv"))
         ops["c"].register_autograd(
             elsewhere(backward, "base64"),
@@ -9964,7 +9965,7 @@ class TestPrecompileCustomOpModules(TestCase):
                     self.assertEqual(_custom_op_modules({op_name}), expected)
             with self.assertLogs("torch._precompile", "WARNING") as logs:
                 self.assertEqual(_custom_op_modules({op_name}, **reached_by), expected)
-            self.assertIn(module, logs.output[0])
+            self.assertIn(f"defined in {module}, not in unittest", logs.output[0])
 
     def test_custom_op_modules_warn_for_a_function_with_no_module(self):
         from torch._precompile import _custom_op_modules
@@ -10063,6 +10064,7 @@ class TestPrecompileCustomOpModules(TestCase):
 
             # Not registered: the module is imported, and registers it.
             module = write(_UNUSED_OP_MODULE.replace("{ns}", ns))
+            self.addCleanup(_undefine_custom_op, f"{ns}::unused")
             _import_custom_op_modules({module: (f"{ns}::unused",)})
             self.assertIn(module, sys.modules)
             # The module imports but does not register the op.
