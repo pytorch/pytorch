@@ -608,10 +608,10 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         if op in (min, max) and len({type(v) for v in values}) > 1:
             return None
         if op in (operator.truediv, operator.floordiv, operator.mod):
-            # int/float mixes and int truediv can overflow
-            kinds = {{bool: int, int: int, float: float}.get(type(v)) for v in values}
-            if kinds not in ({int}, {float}) or (
-                op is operator.truediv and kinds != {float}
+            # an int dividend can overflow when converted to float
+            kinds = [{bool: int, int: int, float: float}.get(type(v)) for v in values]
+            if None in kinds or (
+                kinds[0] is int and (kinds[1] is float or op is operator.truediv)
             ):
                 return None
             # an unguarded divisor could become zero on a later call
