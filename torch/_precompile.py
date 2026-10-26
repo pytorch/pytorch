@@ -266,6 +266,7 @@ import logging
 import operator
 import os
 import pickle
+import re
 import stat
 import sys
 import threading
@@ -1943,82 +1944,166 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
     return names
 
 
-def _backward_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
-    """The ops the compiled backward graphs among ``artifacts`` call.
+_OP_REFERENCE = re.compile(
+    r"torch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)"
+)
 
-    A Dynamo capture sees only the forward graph; AOTAutograd entries carry the
-    backward they compiled, which can call ops the forward never does (a custom op's
-    registered backward, say).
+
+def _custom_op_names_in_source(source: str | None) -> set[tuple[str, str]]:
+    """The non-builtin operators generated code or a printed graph calls."""
+    return {
+        (f"{namespace}::{name}", "" if overload == "default" else overload)
+        for namespace, name, overload in _OP_REFERENCE.findall(source or "")
+        if namespace not in ("aten", "prim", "prims")
+    }
+
+
+def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
+    """The ops the graphs AOTAutograd compiled for ``artifacts`` call.
+
+    A Dynamo capture sees only its own forward graph. AOTAutograd lowers a dense
+    forward (desugaring tensor subclasses, applying decompositions) and a backward,
+    either of which can call ops that graph never does.
     """
     names: set[tuple[str, str]] = set()
     for artifact in artifacts:
         content = getattr(artifact, "content", None)
+        names |= _custom_op_names_in_source(
+            getattr(content, "aot_forward_graph_str", None)
+        )
         serialized = getattr(content, "serialized_bw_module", None)
         if serialized is not None:
             names |= _custom_op_names(serialized.deserialize())
     return names
 
 
-def _custom_op_module(op_name: str, overload: str) -> str | None:
-    """The importable module that registers ``op_name``, if one is known.
+# Where an operator's schema was registered: torch's own C++ registrations live in
+# its C++ sources; a Python torch.library registration names the file that made it.
+_REGISTERED_AT = re.compile(r"registered at (.*):\d+$")
+_TORCH_CPP_SOURCES = ("/torch/csrc/", "/aten/", "/c10/", "caffe2/")
 
-    A Python custom op registers in the module whose import ran its
-    ``torch.library.custom_op`` call; a C++ op names its module through
-    ``m.set_python_module``.
-    """
-    from torch._library.custom_ops import OPDEFS
 
-    opdef = OPDEFS.get(op_name)
-    if opdef is not None:
-        name = opdef._registering_module
-    else:
-        pystub = torch._C._dispatch_pystub(op_name, overload)
-        name = pystub[0] if pystub is not None else None
+def _module_of_file(path: str) -> str | None:
+    """The imported module loaded from ``path``, if any."""
+    path = os.path.realpath(path)
+    for name, module in list(sys.modules.items()):
+        file = getattr(module, "__file__", None)
+        if file is not None and os.path.realpath(file) == path:
+            return name
+    return None
+
+
+def _importable(name: str | None) -> str | None:
     module = sys.modules.get(name) if name and name != "__main__" else None
     if name and module is not None and getattr(module, "__spec__", None) is not None:
         return name
     return None
 
 
-def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The importable modules registering the ops among ``op_names``, warning once
-    about the ops the artifact cannot import."""
-    modules: set[str] = set()
+_TORCH_BUILTIN = "torch builtin"
+
+
+def _custom_op_module(op_name: str, overload: str) -> str | None:
+    """The importable module that registers ``op_name``, ``_TORCH_BUILTIN`` for an
+    op torch's own C++ registers, or None when neither is known.
+
+    A ``torch.library.custom_op`` registers in the module whose import ran the call
+    (recorded by ``custom_op``); a C++ op can name its module with
+    ``m.set_python_module``; any other Python registration is traced to its file.
+    """
+    from torch._library.custom_ops import OPDEFS
+
+    opdef = OPDEFS.get(op_name)
+    if opdef is not None:
+        return _importable(opdef._registering_module)
+    pystub = torch._C._dispatch_pystub(op_name, overload)
+    if pystub is not None:
+        return _importable(pystub[0])
+    try:
+        debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    except RuntimeError:
+        return None
+    match = _REGISTERED_AT.search(debug)
+    path = match.group(1) if match else ""
+    if path.endswith(".py"):
+        return _importable(_module_of_file(path))
+    if any(source in path for source in _TORCH_CPP_SOURCES):
+        return _TORCH_BUILTIN
+    return None
+
+
+def _custom_op_modules(
+    op_names: Iterable[tuple[str, str]],
+) -> dict[str, tuple[str, ...]]:
+    """Each importable module registering ops among ``op_names``, with those ops,
+    warning once about the ops no importable module is known to register."""
+    modules: dict[str, set[str]] = {}
     unrecorded: set[str] = set()
     for op_name, overload in op_names:
         module = _custom_op_module(op_name, overload)
+        if module == _TORCH_BUILTIN:
+            continue
         if module is None:
             unrecorded.add(op_name)
         else:
-            modules.add(module)
+            modules.setdefault(module, set()).add(op_name)
     if unrecorded:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
-            "importable module is known to register (a custom_op called outside "
-            "module level or in __main__, an op defined through torch.library.Library, "
-            "or a C++ op without set_python_module); the artifact serves only where "
-            "something else registers them first",
+            "importable module is known to register (a custom_op or "
+            "torch.library.Library registration run from __main__, or a C++ op "
+            "without set_python_module); the artifact serves only where something "
+            "else registers them first",
             ", ".join(sorted(unrecorded)),
         )
-    return tuple(sorted(modules))
+    return {module: tuple(sorted(ops)) for module, ops in sorted(modules.items())}
 
 
-def _write_custom_op_imports(buf: Any, modules: tuple[str, ...]) -> None:
+def _custom_op_registered(op_name: str) -> bool:
+    namespace, name = op_name.split("::")
+    return hasattr(getattr(torch.ops, namespace), name)
+
+
+def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose torch.library.custom_op registers it; under lazy
-    # imports the model's own import of that module may never resolve either.
+    # path imports the module whose registration defines it; under lazy imports the
+    # model's own import of that module may never resolve either. A module whose ops
+    # are already registered (by another import path, say) is not needed.
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     buf.writeline("import importlib as _importlib")
-    buf.writeline("for _module in CUSTOM_OP_MODULES:")
-    buf.writeline("    _importlib.import_module(_module)")
+    buf.writeline("import torch as _torch")
+    buf.writeline("")
+    buf.writeline("")
+    buf.writeline("def _custom_op_registered(op_name):")
+    buf.writeline('    namespace, name = op_name.split("::")')
+    buf.writeline("    return hasattr(getattr(_torch.ops, namespace), name)")
+    buf.writeline("")
+    buf.writeline("")
+    buf.writeline("for _module, _ops in CUSTOM_OP_MODULES.items():")
+    buf.writeline("    if not all(_custom_op_registered(_op) for _op in _ops):")
+    buf.writeline("        _importlib.import_module(_module)")
     buf.writeline("")
 
 
-def _check_custom_op_modules(modules: tuple[str, ...]) -> None:
-    """Refuse, before running the artifact, one whose custom-op modules are missing."""
+def _check_custom_op_modules(modules: object) -> None:
+    """Refuse, before running the artifact, one whose custom ops are neither
+    registered nor importable."""
     import importlib.util
 
-    for module in modules:
+    if not isinstance(modules, dict) or not all(
+        isinstance(module, str)
+        and isinstance(ops, (tuple, list))
+        and all(isinstance(op, str) and "::" in op for op in ops)
+        for module, ops in modules.items()
+    ):
+        raise PrecompileError(
+            "python_code's CUSTOM_OP_MODULES must map module names to tuples of "
+            "'namespace::op' names; it does not look like a torch.compiler.precompile "
+            "artifact."
+        )
+    for module, ops in modules.items():
+        if all(_custom_op_registered(op) for op in ops):
+            continue
         # Only the top-level package: finding a submodule imports its parents, and
         # load must not run code the artifact names before it warns about exec.
         try:
@@ -2027,9 +2112,10 @@ def _check_custom_op_modules(modules: tuple[str, ...]) -> None:
             found = False
         if not found:
             raise PrecompileError(
-                f"this artifact's compiled graphs call a custom op registered by "
-                f"module {module!r}, which cannot be imported here. Make it "
-                "importable wherever the artifact is served."
+                f"this artifact's compiled graphs call {', '.join(ops)}, registered "
+                f"by module {module!r}, which is neither registered nor importable "
+                "here. Make the module importable, or register the ops, wherever "
+                "the artifact is served."
             )
 
 
@@ -2044,7 +2130,12 @@ def _build_python_source(
     buf.writeline("")
     if compiled._gm is None:
         raise PrecompileError("internal: graph missing before _compile()")
-    _write_custom_op_imports(buf, _custom_op_modules(_custom_op_names(compiled._gm)))
+    _write_custom_op_imports(
+        buf,
+        _custom_op_modules(
+            _custom_op_names(compiled._gm) | _custom_op_names_in_source(graph_python)
+        ),
+    )
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2409,7 +2500,7 @@ def _build_multigraph_python_source(
     entry_binding: dict[str, Any] | None,
     mode: str,
     unreachable: list[str],
-    custom_op_modules: tuple[str, ...] = (),
+    custom_op_modules: dict[str, tuple[str, ...]] | None = None,
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2427,7 +2518,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, custom_op_modules)
+    _write_custom_op_imports(buf, custom_op_modules or {})
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -2588,7 +2679,7 @@ def _build_multigraph_artifact(
         mode,
         unreachable,
         _custom_op_modules(
-            {*custom_op_names, *_backward_custom_op_names(backends.values())}
+            {*custom_op_names, *_aot_custom_op_names(backends.values())}
         ),
     )
     inductor_bundle = None
@@ -3396,7 +3487,7 @@ def _runnable_from_pair(
         code_hash=hashlib.sha256(python_code.encode()).hexdigest(),
         strict=strict,
     )
-    _check_custom_op_modules(cast(tuple[str, ...], meta.get("CUSTOM_OP_MODULES", ())))
+    _check_custom_op_modules(meta.get("CUSTOM_OP_MODULES", {}))
     artifact = blob.get("artifact") if blob is not None else None
     # Only inductor's python_code JITs kernels at load, so other backends run without
     # the artifact. An inductor capture of an uncacheable graph saves no artifact and

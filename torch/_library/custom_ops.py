@@ -273,20 +273,18 @@ def custom_op(
 
 
 def _registering_module(frame: Any) -> str | None:
-    """The module whose import runs a ``custom_op`` call made from ``frame``.
-
-    That is the first caller outside torch.library, if it runs at module level; a
-    call inside a function (a factory, say) runs only when the function is called,
-    so importing no module registers the op.
+    """The module whose import runs a ``custom_op`` call made from ``frame``: the
+    nearest module-level frame on the stack, so a registration made through a helper
+    or a factory that the module calls at import time counts too. ``__main__`` cannot
+    be imported again, so it records nothing.
     """
     frame = frame.f_back if frame is not None else None
-    while frame is not None and frame.f_globals.get("__name__", "").startswith(
-        ("torch._library", "torch.library")
-    ):
+    while frame is not None and frame.f_code.co_name != "<module>":
         frame = frame.f_back
-    if frame is None or frame.f_code.co_name != "<module>":
+    if frame is None:
         return None
-    return frame.f_globals.get("__name__")
+    name = frame.f_globals.get("__name__")
+    return None if name == "__main__" else name
 
 
 class CustomOpDef:

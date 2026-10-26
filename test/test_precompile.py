@@ -9140,7 +9140,9 @@ def _setup_context(ctx, inputs, output):
 
 
 def _backward(ctx, grad):
-    return torch.ops.{bwns}.scale.default(grad)
+    out = torch.empty_like(grad)
+    torch.ops.{bwns}.scale_into.default(grad, out)
+    return out
 
 
 triple.register_autograd(_backward, setup_context=_setup_context)
@@ -9184,14 +9186,14 @@ _BACKWARD_OP_MODULE = """
 import torch
 
 
-@torch.library.custom_op("{bwns}::scale", mutates_args=())
-def scale(x: torch.Tensor) -> torch.Tensor:
-    return x * 3
+@torch.library.custom_op("{bwns}::scale_into", mutates_args=("out",))
+def scale_into(x: torch.Tensor, out: torch.Tensor) -> None:
+    out.copy_(x * 3)
 
 
-@scale.register_fake
-def _(x):
-    return torch.empty_like(x)
+@scale_into.register_fake
+def _(x, out):
+    return None
 """
 
 
@@ -9236,6 +9238,16 @@ if phase == "capture":
         backend=backend,
     ) as cap:
         torch.save(cap(x), expected_path)
+elif phase == "preregistered":
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "renamed_op_module", os.path.join(directory, module + ".py")
+    )
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    sys.path.remove(directory)
+    loaded = pc.load(artifact, cache)
+    torch.testing.assert_close(loaded(x), torch.load(expected_path))
 elif phase == "replay":
     assert module not in sys.modules, module
     loaded = pc.load(artifact, cache)
@@ -9288,7 +9300,12 @@ class TestPrecompileCustomOpModules(TestCase):
                         .replace("{bwns}", bwns)
                         .replace("{bwmod}", bwmod)
                     )
-            for phase in ("capture", "replay", "missing"):
+            # A Dynamo artifact re-imports the captured function's own module, so only
+            # a make_fx one can serve without the op module being importable.
+            phases = ["capture", "replay", "missing"]
+            if tracer == "make_fx":
+                phases.append("preregistered")
+            for phase in phases:
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
                     + [module, unused, tracer, backend, entry, bwmod],
@@ -9305,10 +9322,12 @@ class TestPrecompileCustomOpModules(TestCase):
                 for line in python_code.splitlines()
                 if line.startswith("CUSTOM_OP_MODULES = ")
             ]
-            # Only a training step compiles a backward, whose op lives in bwmod.
-            expected = (
-                tuple(sorted((module, bwmod))) if entry == "train_fn" else (module,)
-            )
+            # Only a training step compiles a backward, whose mutating op (reached
+            # as an auto_functionalized argument) lives in bwmod.
+            expected = {module: (f"{ns}::triple",)}
+            if entry == "train_fn":
+                expected[bwmod] = (f"{bwns}::scale_into",)
+            expected = dict(sorted(expected.items()))
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {expected!r}")
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
@@ -9324,47 +9343,63 @@ class TestPrecompileCustomOpRecording(TestCase):
 
         return op, f"{ns}::{name}"
 
-    def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
+    def _import_module_from_source(self, source):
+        name = f"precompile_recording_mod_{uuid.uuid4().hex}"
+        directory = tempfile.mkdtemp()
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(source)
+        sys.path.insert(0, directory)
+        self.addCleanup(sys.path.remove, directory)
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.import_module(name)
+        return name
+
+    def test_an_op_no_importable_module_registers_is_reported_at_capture(self):
         from torch._precompile import _custom_op_modules
 
-        # Defined inside a function, so importing no module registers it.
-        _, factory_name = self._op("from_factory")
-        ns = f"precompile_library_{uuid.uuid4().hex}"
-        with torch.library._scoped_library(ns, "DEF") as lib:
-            lib.define("f(Tensor x) -> Tensor")
-            lib.impl("f", lambda x: x.clone(), "CompositeExplicitAutograd")
-            with self.assertLogs("torch._precompile", level="WARNING") as logs:
-                self.assertEqual(
-                    _custom_op_modules([(factory_name, "default"), (f"{ns}::f", "")]),
-                    (),
-                )
-        self.assertIn(factory_name, "\n".join(logs.output))
+        ns = f"precompile_main_{uuid.uuid4().hex}"
+        exec(
+            f"@torch.library.custom_op('{ns}::f', mutates_args=())\n"
+            "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n",
+            {"__name__": "__main__", "torch": torch},
+        )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules([(f"{ns}::f", "")]), {})
         self.assertIn(f"{ns}::f", "\n".join(logs.output))
 
-    def test_an_op_is_recorded_under_the_module_that_calls_custom_op(self):
-        from torch._precompile import _custom_op_module
+    def test_an_op_is_recorded_under_the_module_whose_import_registers_it(self):
+        from torch._precompile import _custom_op_modules
 
-        tag = uuid.uuid4().hex
-        impl, ops, ns = f"precompile_impl_{tag}", f"precompile_ops_{tag}", f"rec_{tag}"
-        with tempfile.TemporaryDirectory() as directory:
-            with open(os.path.join(directory, impl + ".py"), "w") as f:
-                f.write(
-                    "import torch\n\n\n"
-                    "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n"
-                )
-            with open(os.path.join(directory, ops + ".py"), "w") as f:
-                f.write(
-                    f"import torch\nimport {impl}\n\n"
-                    f'op = torch.library.custom_op("{ns}::f", {impl}.f, mutates_args=())\n'
-                )
-            sys.path.insert(0, directory)
-            try:
-                importlib.import_module(ops)
-                self.assertEqual(_custom_op_module(f"{ns}::f", "default"), ops)
-            finally:
-                sys.path.remove(directory)
-                sys.modules.pop(ops, None)
-                sys.modules.pop(impl, None)
+        impl_ns, wrapped_ns, lib_ns = (
+            f"rec_{kind}_{uuid.uuid4().hex}" for kind in ("impl", "wrapped", "lib")
+        )
+        impl = self._import_module_from_source(
+            "import torch\n\n\ndef f(x: torch.Tensor) -> torch.Tensor:\n"
+            "    return x.clone()\n"
+        )
+        ops = self._import_module_from_source(
+            f"import torch\nimport {impl}\n\n\n"
+            "def register(name):\n"
+            "    return torch.library.custom_op(name, mutates_args=())\n\n\n"
+            f"op = torch.library.custom_op('{impl_ns}::f', {impl}.f, mutates_args=())\n"
+            f"wrapped = register('{wrapped_ns}::g')({impl}.f)\n"
+            f"lib = torch.library.Library('{lib_ns}', 'DEF')\n"
+            "lib.define('h(Tensor x) -> Tensor')\n"
+        )
+        self.assertEqual(
+            _custom_op_modules(
+                [(f"{impl_ns}::f", ""), (f"{wrapped_ns}::g", ""), (f"{lib_ns}::h", "")]
+            ),
+            {ops: tuple(sorted((f"{impl_ns}::f", f"{wrapped_ns}::g", f"{lib_ns}::h")))},
+        )
+
+    def test_an_op_torch_registers_in_cpp_needs_no_module(self):
+        from torch._precompile import _custom_op_modules
+
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            self.assertEqual(
+                _custom_op_modules([("_c10d_functional::all_reduce", "")]), {}
+            )
 
     def test_a_cpp_op_is_recorded_under_its_python_module(self):
         from torch._precompile import _custom_op_module
