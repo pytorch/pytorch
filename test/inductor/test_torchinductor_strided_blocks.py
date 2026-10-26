@@ -16,7 +16,7 @@ from torch._dynamo.debug_utils import InputReader
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
-from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -58,7 +58,9 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 
 def _get_no_split_threshold() -> int:
     if torch.cuda.is_available():
-        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        props = DeviceProperties.create(
+            torch.device("cuda", torch.cuda.current_device())
+        )
         # These tests reduce the whole view to one output, so xnumel is 1.
         return V.choices._inner_reduction_no_split_threshold(
             props, xnumel=1, num_sm=props.multi_processor_count
