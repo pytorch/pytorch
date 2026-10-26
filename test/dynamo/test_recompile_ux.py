@@ -324,14 +324,17 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 self.assertIn(line, filter_reasons())
 
     @parametrize(
-        "first, second, expected",
+        "first, consumed, second, remaining",
         [
-            ((1, 2, 3), (1, 2), "3 items"),
-            ((1, 2, 3), [1, 2, 3], "3 items"),
-            ((1,), (), "1 item"),
+            ((1, 2, 3), 0, (1, 2), 3),
+            ((1, 2, 3), 0, [1, 2, 3], 3),
+            ((1,), 0, (), 1),
+            ((1, 2, 3, 4), 1, (1, 2), 3),
         ],
     )
-    def test_tuple_iterator_length_recompile_hint(self, first, second, expected):
+    def test_tuple_iterator_length_recompile_hint(
+        self, first, consumed, second, remaining
+    ):
         reasons = []
 
         def fn(t, x):
@@ -343,11 +346,15 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
         )(fn)
         x = torch.randn(3)
-        compiled(iter(first), x)
+        first_iter = iter(first)
+        for _ in range(consumed):
+            next(first_iter)
+        compiled(first_iter, x)
         compiled(iter(second), x)
 
         self.assertEqual(len(reasons), 1)
-        self.assertIn(f"___tuple_iterator_len(t) == {len(first)}", reasons[0])
+        self.assertIn(f"___tuple_iterator_len(t) == {remaining}", reasons[0])
+        expected = f"{remaining} {'item' if remaining == 1 else 'items'}"
         expected_hint = f"(HINT: Expected t to be a tuple iterator with {expected} left; this compiled version assumes that iterator type and remaining count.)"
         self.assertIn(expected_hint, reasons[0])
 
