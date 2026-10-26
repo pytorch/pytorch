@@ -4146,19 +4146,20 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
-        from torch.compiler._runtime_cache import (
-            relocatable_cpp_keys,
-            use_relocatable_cpp_key,
-        )
+        from torch.compiler._runtime_cache import relocatable_cpp_key
 
-        extra = f"{optimized_code} {main_cmd_line}"
-        if relocatable_cpp_keys():
-            relocatable_extra = (
-                f"{optimized_code} {_relocatable_command_line(main_cmd_line)}"
+        key, main_path = write(
+            main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
+        )
+        # The key a capture freezes this kernel's binary under, and a replay finds it
+        # by, on a host that may put torch and the Inductor cache elsewhere. The
+        # binary itself stays under key, which this host's paths tell apart.
+        frozen_key = relocatable_cpp_key(
+            lambda: get_hash(
+                main_code.strip(),
+                f"{optimized_code} {_relocatable_command_line(main_cmd_line)}",
             )
-            if use_relocatable_cpp_key(get_hash(main_code.strip(), relocatable_extra)):
-                extra = relocatable_extra
-        key, main_path = write(main_code, "main.cpp", extra=extra)
+        )
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
@@ -4185,7 +4186,7 @@ class CppCodeCache:
             if (
                 config.cpp_cache_precompile_headers
                 and not _IS_WINDOWS
-                and not has_frozen_cpp_kernel(key)
+                and not (frozen_key is not None and has_frozen_cpp_kernel(frozen_key))
             ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
@@ -4251,7 +4252,8 @@ class CppCodeCache:
                 )
 
             cls._binary_paths[key] = binary_path
-            restore_cpp_kernel(key, binary_path)
+            if frozen_key is not None:
+                restore_cpp_kernel(frozen_key, binary_path)
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -4277,9 +4279,10 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
-        from torch.compiler._runtime_cache import record_cpp_kernel
+        if frozen_key is not None:
+            from torch.compiler._runtime_cache import record_cpp_kernel
 
-        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
+            record_cpp_kernel(frozen_key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
@@ -4291,27 +4294,27 @@ def _relocatable_command_line(cmd: str) -> str:
     """Key a C++ build by what it compiles, not by where this host put torch and
     the Inductor cache.
 
-    A precompile replay looks a frozen binary up by its key on a host that may
-    extract both somewhere else. The torch roots are the parents of the trees the
-    -I and -L flags point into: cpp_extension's, which follows torch_parent, and
-    cpp_builder's, which follows this package, when they differ. A root is only
+    A precompile replay looks a frozen binary up by this key on a host that may
+    extract both somewhere else. The torch trees are the ones torch's own -I and -L
+    flags point into: cpp_extension's, which follows torch_parent, and
+    cpp_builder's, which follows this package, when they differ. A tree is only
     replaced as whole path components. The install path also told torch builds
     apart, so torch_key() stands in for it. torch_key() hashes the version and the
-    Python sources but not the C++ headers or libraries, which is why only a
-    kernel a capture builds, or one a replay installed a frozen binary for, takes
-    this key (see use_relocatable_cpp_key); every other compile in the process
-    keeps the key with this host's paths.
+    Python sources but not the C++ headers or libraries, which is why this key only
+    names a frozen binary: the binary is built and stored under the key with this
+    host's paths, so no other build ever loads it from the cache dir.
 
-    Only these two roots move: the Python, compiler, CUDA and other SDK paths stay
-    in the key, so the hosts must keep those at the same paths, as a packaged job
-    whose torch is extracted per launch next to a fixed interpreter does.
+    Only these trees move: the Python, compiler, CUDA and other SDK paths stay in
+    the key, even when they sit next to torch, so the hosts must keep those at the
+    same paths, as a packaged job whose torch is extracted per launch next to a
+    fixed interpreter does.
     """
     from torch._inductor import cpp_builder
     from torch.utils import cpp_extension
 
     # get_command_line() normalizes the separators, so normalize the roots the same.
     roots = {
-        normalize_path_separator(os.path.dirname(path)): "<torch_root>"
+        normalize_path_separator(path): "<torch>"
         for path in (cpp_extension._TORCH_PATH, cpp_builder._TORCH_PATH)
     }
     roots[normalize_path_separator(cache_dir())] = "<inductor_cache_dir>"

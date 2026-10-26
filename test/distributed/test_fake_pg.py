@@ -90,6 +90,34 @@ class TestFakePG(TestCase):
             pg = dynamo_distributed.get_compile_sync_pg()
             self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
 
+    def test_compile_sync_backend_needs_every_device_backend_fake(self):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        fake, gloo = dist.Backend.FAKE, dist.Backend.GLOO
+        # The backend with gloo available, then without it.
+        cases = {
+            "fake": (fake, fake),
+            "cuda:fake": (fake, fake),
+            "cpu:fake,cuda:fake": (fake, fake),
+            # One real device backend means real peers: sync over gloo.
+            "cpu:gloo,cuda:fake": (gloo, None),
+            "cpu:fake,cuda:nccl": (gloo, None),
+        }
+        for config, expected in cases.items():
+            for gloo_available, backend in zip((True, False), expected):
+                with (
+                    self.subTest(config=config, gloo=gloo_available),
+                    unittest.mock.patch.object(
+                        dist, "get_backend_config", return_value=config
+                    ),
+                    unittest.mock.patch.object(
+                        dist, "is_gloo_available", return_value=gloo_available
+                    ),
+                ):
+                    self.assertEqual(
+                        dynamo_distributed._compile_sync_backend(), backend
+                    )
+
     def test_cache_sync_primes_the_fake_group_without_gloo(self):
         from torch._dynamo import distributed as dynamo_distributed
         from torch._functorch import config as functorch_config
