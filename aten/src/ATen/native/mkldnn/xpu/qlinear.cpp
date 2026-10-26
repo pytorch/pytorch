@@ -319,6 +319,13 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
   int64_t N = mat_b.size(0);
   int64_t K = mat_a.size(1);
   TORCH_CHECK(
+      mat_b.size(1) == K / 8,
+      __func__,
+      " : expect mat_b.size(1) (",
+      mat_b.size(1),
+      ") to equal mat_a.size(1) / 8 (",
+      K / 8);
+  TORCH_CHECK(
       group_size > 1 && group_size % 32 == 0,
       __func__,
       " : expect group_size to be multiple of 32 and greater than 1, got ",
@@ -414,7 +421,7 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
 
   Tensor qout = at::empty({M, N}, mat_a.options().dtype(dst_dtype));
 
-  matmul_int4_impl(
+  matmul_int4_impl_cache(
       qout,
       mat_a.contiguous(),
       mat_b.contiguous(),
