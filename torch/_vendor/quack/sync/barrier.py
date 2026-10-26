@@ -56,7 +56,13 @@ def wait_eq(
     ``if val != 0`` for protocols where 0 means "no predecessor" — note the
     acquire load is skipped too, so there is no ordering edge in that case.
     """
-    if const_expr(not skip_zero) or val != 0:
+    if const_expr(not skip_zero):
+        _wait_eq_spin(lock_ptr + flag_offset, thread_idx, val)
+        if const_expr(sync == "warp"):
+            cute.arch.sync_warp()
+        elif const_expr(sync == "cta"):
+            cute.arch.sync_threads()
+    elif val != 0:
         _wait_eq_spin(lock_ptr + flag_offset, thread_idx, val)
         if const_expr(sync == "warp"):
             cute.arch.sync_warp()

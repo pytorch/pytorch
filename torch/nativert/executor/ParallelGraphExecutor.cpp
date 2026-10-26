@@ -2,6 +2,16 @@
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/ParallelGraphExecutor.h>
 
+namespace {
+
+#define WITH_LOCK(m, block)               \
+  {                                       \
+    std::unique_lock<decltype(m)> lk_(m); \
+    block                                 \
+  }
+
+} // namespace
+
 namespace torch::nativert {
 
 ThreadPoolExecutor::ThreadPoolExecutor()
@@ -88,7 +98,8 @@ void ThreadPoolExecutor::add(
       return;
     }
     case 1: {
-      return add(session, *begin);
+      add(session, *begin);
+      return;
     }
   }
 
@@ -168,7 +179,8 @@ void WorkUnit::run(ThreadPoolExecutor* executor, SessionState* session) {
 
     switch (newWorkUnits.size()) {
       case 0: {
-        return session->removeWork();
+        session->removeWork();
+        return;
       }
       case 1: {
         break;

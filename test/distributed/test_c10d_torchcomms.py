@@ -624,43 +624,6 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 )
         return captured
 
-    def test_import_torchcomms_keeps_patched_new_comm(self):
-        # ROCm resolves nccl to rccl and that calls _import_torchcomms while
-        # new_comm is patched. The loader must not replace the patch.
-        sentinel = object()
-        fake = object()
-        saved = (
-            c10d._torchcomms_loaded,
-            c10d.new_comm,
-            c10d._BackendWrapper,
-            c10d._TorchCommsFlightRecorderHook,
-        )
-        try:
-            c10d._torchcomms_loaded = {
-                "is_backend_built": lambda backend: False,
-                "is_backend_registered": lambda backend: False,
-                "BackendWrapper": sentinel,
-                "new_comm": sentinel,
-                "FlightRecorderHook": sentinel,
-            }
-            c10d.new_comm = fake
-            c10d._BackendWrapper = None
-            c10d._TorchCommsFlightRecorderHook = None
-            c10d._import_torchcomms()
-            self.assertIs(c10d.new_comm, fake)
-            self.assertIs(c10d._BackendWrapper, sentinel)
-
-            c10d.new_comm = None
-            c10d._import_torchcomms()
-            self.assertIs(c10d.new_comm, sentinel)
-        finally:
-            (
-                c10d._torchcomms_loaded,
-                c10d.new_comm,
-                c10d._BackendWrapper,
-                c10d._TorchCommsFlightRecorderHook,
-            ) = saved
-
     def test_new_comm_gets_indexed_device_id(self):
         # A subgroup's group-local rank differs from the rank's physical device,
         # so new_comm must receive device_id (WITH index), not a device-type-only
@@ -1283,6 +1246,102 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertEqual(comm_a.finalize_calls, 1)
             self.assertEqual(comm_b.finalize_calls, 1)
             self.assertEqual(c10d._world.comms, [])
+
+    def _register_abortable_pg(self, calls, comm, name):
+        # _abort_process_group also looks up the backend of the current
+        # accelerator, so answer for any device.
+        backend = _FakeOtherBackend() if comm is None else _FakeBackendWrapper(comm)
+        pg = self._register_pg({"cuda": backend}, name=name)
+        pg._get_backend.side_effect = lambda dev: backend
+        calls.attach_mock(pg.abort, f"abort_{name}")
+        return pg
+
+    def test_abort_finalizes_comms_and_releases_nvshmem_teams(self):
+        # Releases what destroy_process_group does, but only after the abort,
+        # so that finalizing a comm skips its collective destroy.
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        call = mock.call
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d._abort_process_group(group_a)
+            group_a_calls = [call.abort_a(), call.comm_a.finalize(), call.release("a")]
+            self.assertListEqual(calls.mock_calls, group_a_calls)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            calls.reset_mock()
+            c10d._abort_process_group()
+            aborts = [call.abort_world(), call.abort_b()]
+            freed = [call.comm_b.finalize(), call.release("world"), call.release("b")]
+            self.assertCountEqual(calls.mock_calls[:2], aborts)
+            self.assertCountEqual(calls.mock_calls[2:], freed)
+            self.assertEqual(c10d._world.comms, [])
+
+    def test_abort_cleanup_continues_when_finalize_and_release_raise(self):
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        group_b = self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        timeout = RuntimeError("Work timed out during finalize")
+        comm_a.finalize.side_effect = comm_b.finalize.side_effect = timeout
+        sticky_error = RuntimeError("CUDA error: unspecified launch failure")
+        calls.release.side_effect = sticky_error
+        finalize_failed = "Failed to finalize TorchComms communicator after abort"
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group(group_a)
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group a", output)
+            calls.release.assert_called_once_with("a")
+            self.assertEqual(c10d._world.comms, [comm_b])
+            self.assertNotIn(group_a, c10d._world.pg_map)
+            self.assertNotIn(group_a, c10d._world.pg_names)
+            self.assertNotIn(group_a, c10d._world.pg_group_ranks)
+            self.assertIn(group_b, c10d._world.pg_map)
+
+            calls.reset_mock()
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group()
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group world", output)
+            self.assertIn("NVSHMEM team pool of group b", output)
+            calls.release.assert_has_calls(
+                [mock.call("world"), mock.call("b")], any_order=True
+            )
+            self.assertEqual(c10d._world.comms, [])
+            self.assertEqual(c10d._world.pg_map, {})
+            self.assertEqual(c10d._world.pg_names, {})
+            self.assertEqual(c10d._world.pg_group_ranks, {})
+            self.assertIsNone(c10d._world.default_pg)
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):

@@ -57,6 +57,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     get_full_params,
     SkipModel,
     TransformerWithSharedParams,
@@ -179,7 +180,7 @@ _skip_unsupported_config = decorateIf(
 )
 
 
-class TestFSDPStateDict(FSDPTest):
+class TestFSDPStateDict(FSDPTestContinuous):
     @property
     def world_size(self):
         return min(torch.accelerator.device_count(), 2)

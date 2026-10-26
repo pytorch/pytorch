@@ -38,7 +38,6 @@ __global__ void populate_cublas_grouped_args_kernel(
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
     CublasGroupedScaleLayout scale_layout_a,
     CublasGroupedScaleLayout scale_layout_b,
-    int64_t scale_inner, int64_t scale_a_outer, int64_t scale_b_outer,
     int64_t* __restrict__ scalePtrA_out, int64_t* __restrict__ scalePtrB_out) {
   int i = threadIdx.x;
 
@@ -84,15 +83,18 @@ __global__ void populate_cublas_grouped_args_kernel(
     group_start = static_cast<int64_t>(start_val);
   }
 
-  m_out[i] = m_is_delta ? static_cast<IndexType>(delta) : cublas_m;
-  n_out[i] = n_is_delta ? static_cast<IndexType>(delta) : cublas_n;
-  k_out[i] = k_is_delta ? static_cast<IndexType>(delta) : cublas_k;
+  const int64_t group_m = m_is_delta ? delta : cublas_m;
+  const int64_t group_n = n_is_delta ? delta : cublas_n;
+  const int64_t group_k = k_is_delta ? delta : cublas_k;
+  m_out[i] = static_cast<IndexType>(group_m);
+  n_out[i] = static_cast<IndexType>(group_n);
+  k_out[i] = static_cast<IndexType>(group_k);
   CUDA_KERNEL_ASSERT(
       !cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_a) ||
-      m_out[i] % 4 == 0);
+      group_m % 4 == 0);
   CUDA_KERNEL_ASSERT(
       !cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_b) ||
-      n_out[i] % 4 == 0);
+      group_n % 4 == 0);
 
   lda_out[i] = lda_val;
   ldb_out[i] = ldb_val;
@@ -108,22 +110,20 @@ __global__ void populate_cublas_grouped_args_kernel(
   betaPtr_out[i] = reinterpret_cast<int64_t>(beta_ptr);
 
   // Variable-size scale offsets: exclusive prefix-sum over per-group scale
-  // sizes via parallel scan. A 0 value in scale_inner or scale_*_outer
-  // means "use delta (per-group extent) from offs".
+  // sizes via parallel scan.
+  // cuBLAS-A scale: getScaleTensorSize(inner=K, outer=M)
+  // cuBLAS-B scale: getScaleTensorSize(inner=K, outer=N)
   const bool scan_a = (scalePtrA_out != nullptr) && (scale_a_stride_bytes == 0);
   const bool scan_b = (scalePtrB_out != nullptr) && (scale_b_stride_bytes == 0);
   if (scan_a || scan_b) {
     extern __shared__ int64_t scale_scan[];
     int64_t* s_a = scale_scan;
     int64_t* s_b = scale_scan + blockDim.x;
-    const int64_t inner = scale_inner ? scale_inner : delta;
-    const int64_t outer_a = scale_a_outer ? scale_a_outer : delta;
-    const int64_t outer_b = scale_b_outer ? scale_b_outer : delta;
     const int64_t size_a = scan_a
-        ? cublas_grouped_scale_size_bytes(scale_layout_a, inner, outer_a)
+        ? cublas_grouped_scale_size_bytes(scale_layout_a, group_k, group_m)
         : 0;
     const int64_t size_b = scan_b
-        ? cublas_grouped_scale_size_bytes(scale_layout_b, inner, outer_b)
+        ? cublas_grouped_scale_size_bytes(scale_layout_b, group_k, group_n)
         : 0;
     s_a[i] = size_a;
     s_b[i] = size_b;
@@ -187,7 +187,6 @@ void launch_populate_cublas_grouped_args(
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
     CublasGroupedScaleLayout scale_layout_a,
     CublasGroupedScaleLayout scale_layout_b,
-    int64_t scale_inner, int64_t scale_a_outer, int64_t scale_b_outer,
     int64_t* scalePtrA_out, int64_t* scalePtrB_out,
     cudaStream_t stream) {
   IndexType* m_arr   = reinterpret_cast<IndexType*>(args.buf.data_ptr());
@@ -233,7 +232,6 @@ void launch_populate_cublas_grouped_args(
       scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
       scale_layout_a, scale_layout_b,
-      scale_inner, scale_a_outer, scale_b_outer,
       scalePtrA_out, scalePtrB_out);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -384,15 +382,6 @@ cublasGroupedArgs::cublasGroupedArgs(
       ? scale_b->stride(0) * scale_b->element_size()
       : 0;
 
-  // For variable-size block scales, pass inner/outer dims for per-group
-  // scale size computation. A value of 0 means "substitute the jagged
-  // dimension (delta from offsets) at runtime".
-  // cuBLAS-A scale: getScaleTensorSize(inner=K, outer=M)
-  // cuBLAS-B scale: getScaleTensorSize(inner=K, outer=N)
-  const int64_t scale_inner = k_is_delta ? 0 : cublas_k;
-  const int64_t scale_a_outer = m_is_delta ? 0 : cublas_m;
-  const int64_t scale_b_outer = n_is_delta ? 0 : cublas_n;
-
   // For per-group scales, point to the device-side pointer arrays
   // instead of the raw data pointer
   if (mata_needs_ptr) {
@@ -428,7 +417,6 @@ cublasGroupedArgs::cublasGroupedArgs(
       scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
       mata_layout, matb_layout,
-      scale_inner, scale_a_outer, scale_b_outer,
       scaleAPtrArray, scaleBPtrArray,
       stream);
 }
