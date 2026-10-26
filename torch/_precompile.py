@@ -3433,8 +3433,11 @@ def capture(
     :class:`MakeFxTracer` capture's standalone module runs outside Inductor's
     CUDA graph wrapper. A :class:`DynamoTracer` capture refuses ``freezing``
     and ``force_disable_caches``, whose compiles file no AOTAutograd cache
-    entry for the artifact to ship. A :class:`MakeFxTracer` capture refuses
-    options its standalone module pins: ``size_asserts`` or
+    entry for the artifact to ship, and ``bundled_autotune_remote_cache`` on,
+    which the capture turns off (its eager backward lowering fails on a remote
+    autotune cache miss). A :class:`MakeFxTracer` capture refuses ``freezing``,
+    whose compiler hides the inner compile its standalone module is built
+    from, and options that module pins: ``size_asserts`` or
     ``scalar_asserts`` off (it compiles with ``size_asserts`` on, and with
     ``scalar_asserts`` on for a dynamic capture), ``cpp_wrapper``,
     ``benchmark_harness`` and ``triton.autotune_at_compile_time`` off.
@@ -3493,7 +3496,14 @@ def capture(
         # option or a value of the wrong type raises here rather than mid-capture.
         dynamic = tracer.dynamic if isinstance(tracer, DynamoTracer) else None
         inductor = torch._TorchCompileInductorWrapper(mode, options, dynamic)
+        if inductor.config.get("freezing") and isinstance(tracer, MakeFxTracer):
+            raise PrecompileError(
+                "a MakeFxTracer capture cannot compile with freezing on: freezing's "
+                "compiler wraps the inner compile its standalone module is built from."
+            )
         if isinstance(tracer, DynamoTracer):
+            from torch._dynamo.precompile_package import CAPTURE_INDUCTOR_PATCH
+
             uncached = [
                 k
                 for k in ("freezing", "force_disable_caches")
@@ -3504,6 +3514,13 @@ def capture(
                     f"a DynamoTracer capture cannot compile with {uncached} on: the "
                     "artifact ships each graph's AOTAutograd cache entry, which such "
                     "a compile never files."
+                )
+            pinned = CAPTURE_INDUCTOR_PATCH.items()
+            overridden = {k: v for k, v in pinned if inductor.config.get(k, v) != v}
+            if overridden:
+                raise PrecompileError(
+                    f"a DynamoTracer capture always compiles with {overridden}: an "
+                    "eager backward lowering fails on a remote autotune cache miss."
                 )
     if isinstance(tracer, MakeFxTracer):
         inductor_options = inductor.config if inductor is not None else {}
@@ -3549,11 +3566,10 @@ def capture(
     try:
         session = precompile_capture(
             fn,
-            backend=backend,
+            backend=inductor or backend,
             guard_filter_fn=tracer.guard_filter_fn,
             recompile_limit=tracer.recompile_limit,
             dynamic=tracer.dynamic,
-            inductor=inductor,
         )
     except PackageError as e:
         raise PrecompileError(str(e)) from e

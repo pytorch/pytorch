@@ -4929,8 +4929,6 @@ class TestPrecompileDynamoCapture(TestCase):
         )
 
     def test_mode_and_options_are_checked_like_torch_compile(self):
-        from torch._dynamo.precompile_package import PrecompileSession
-
         single = self.mod.single
         options = {"size_asserts": True}
         with self.assertRaisesRegex(RuntimeError, "Either mode or options"):
@@ -4952,12 +4950,14 @@ class TestPrecompileDynamoCapture(TestCase):
             cudagraphs = {"triton.cudagraphs": True}
             with self.assertRaisesRegex(PrecompileError, f"{reason}.*Drop triton"):
                 self._capture(single, tracer=tracer, options=cudagraphs)
-        wrapper = torch._TorchCompileInductorWrapper(None, options, None)
-        with self.assertRaisesRegex(ValueError, "not 'eager'"):
-            PrecompileSession(single, backend="eager", inductor=wrapper)
         for key in ("freezing", "force_disable_caches"):
             with self.assertRaisesRegex(PrecompileError, f"'{key}'.*never files"):
                 self._capture(single, options={key: True})
+        remote = {"bundled_autotune_remote_cache": True}
+        with self.assertRaisesRegex(PrecompileError, "remote autotune cache miss"):
+            self._capture(single, options=remote)
+        with self.assertRaisesRegex(PrecompileError, "cannot compile with freezing"):
+            self._capture(single, tracer=make_fx, options={"freezing": True})
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
@@ -4987,7 +4987,7 @@ class TestPrecompileDynamoCapture(TestCase):
         fn = self.mod.single if tracer == "make_fx" else self.mod.step
         tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
         # compile_to_python first runs compile_fx for the passes before lowering
-        # (pre-grad, joint-graph, freezing), which must see the options too.
+        # (pre-grad, joint-graph), which must see the options too.
         held = []
         real_compile_fx = compile_fx.compile_fx
 
