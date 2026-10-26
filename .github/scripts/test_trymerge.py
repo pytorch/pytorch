@@ -21,7 +21,7 @@ from itertools import pairwise
 from types import MethodType
 from typing import Any, TYPE_CHECKING
 from unittest import main, mock, skip, TestCase
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from github_utils import gh_graphql, GHGraphQLError, GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
@@ -4383,6 +4383,60 @@ def _drci_http_error(code: int, body: bytes) -> HTTPError:
 @mock.patch("trymerge.time.sleep")
 @mock.patch("trymerge.gh_fetch_url")
 class TestDrciRetries(TestCase):
+    def setUp(self) -> None:
+        patcher = mock.patch("trymerge._drci_unavailable", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_no_pause_when_hud_did_not_answer(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [URLError(OSError("no route")), {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_not_called()
+
+    def test_only_the_previous_failure_decides_the_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b""),
+            URLError(OSError("no route")),
+            {},
+        ]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
+    def test_no_pause_on_auth_failure(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        mock_fetch.side_effect = [_drci_http_error(401, b""), {}]
+        with mock.patch("builtins.print"):
+            get_drci_classifications(1)
+        mock_sleep.assert_not_called()
+
+    def test_outage_pauses_once_per_process_until_a_success(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        attempts = len(DRCI_RETRY_DELAYS_SECONDS) + 1
+
+        def unavailable(*args: Any, **kwargs: Any) -> Any:
+            raise _drci_http_error(503, b"")
+
+        mock_fetch.side_effect = unavailable
+        with mock.patch("builtins.print"):
+            self.assertIsNone(get_drci_classifications(1))
+            self.assertEqual(mock_sleep.call_count, attempts - 1)
+            self.assertIsNone(get_drci_classifications(1))
+            self.assertEqual(mock_sleep.call_count, attempts - 1)
+            self.assertEqual(mock_fetch.call_count, 2 * attempts)
+
+            mock_fetch.side_effect = None
+            mock_fetch.return_value = {}
+            get_drci_classifications(1)
+            mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
+            get_drci_classifications(1)
+        self.assertEqual(mock_sleep.call_count, attempts)
+
     def test_retries_after_a_failure_with_a_pause(
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:

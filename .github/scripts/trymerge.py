@@ -498,6 +498,10 @@ IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 # same second and fail together, as on #199675 and #201134, whose merges were then
 # blocked by failures the AI CI Advisor had cleared.
 DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
+# Set when a Dr.CI call has used up every attempt, cleared by the next success.
+# While set, retries do not pause: one merge calls Dr.CI many times, so during an
+# outage the pauses are paid once per process rather than once per call.
+_drci_unavailable = False
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -2619,8 +2623,10 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
+    global _drci_unavailable
+    pause = False
     for attempt, delay in enumerate((0, *DRCI_RETRY_DELAYS_SECONDS)):
-        if delay:
+        if pause and not _drci_unavailable:
             time.sleep(delay)
         try:
             failures = gh_fetch_url(
@@ -2634,6 +2640,7 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 method="POST",
                 reader=json.load,
             )
+            _drci_unavailable = False
             return failures.get(str(pr_num), {}) if failures else {}
         except HTTPError as err:
             # Dr.CI answers 400 for any exception it hits while recomputing and
@@ -2642,8 +2649,13 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 f"Attempt {attempt} to call Dr.CI failed with HTTP {err.code}: "
                 f"{_http_error_body(err)}"
             )
+            pause = err.code in (400, 429) or err.code >= 500
         except Exception as e:
+            # No HTTP status (e.g. no route to HUD, as on internal runners, or
+            # a body that is not JSON), which waiting is not expected to fix.
             print(f'Attempt {attempt} to call Dr.CI failed with "{e}"')
+            pause = False
+    _drci_unavailable = True
     return None
 
 
