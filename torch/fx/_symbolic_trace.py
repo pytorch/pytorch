@@ -1314,6 +1314,8 @@ def _resolve_lazy_imports(
     body runs is patched by the outermost applied trace, so from then on it applies
     to that trace and every trace nested in it, as it would had the module been
     imported eagerly, and it outlives the exit of the trace that scanned the scope.
+    A trace suspended at the time (one Dynamo is compiling inside, say) does not get
+    it.
 
     Only the scopes FX itself scans get this: a lazy name first read inside some
     other function the trace calls still resolves with the patches applied.
