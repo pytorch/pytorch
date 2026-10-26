@@ -24,6 +24,13 @@ class _FakeProcess:
         self.result = 1.0
         self.raises = None
         self.shutdown_calls = 0
+        self.wait_calls = 0
+        self.kill_calls = 0
+        self.close_calls = 0
+        # Mirrors TuningProcess.alive(): False short-circuits the bounded wait,
+        # which is what a fake with no real child should report.
+        self._alive = False
+        self.process = None
 
     def put(self, job):
         self.sent.append(job)
@@ -35,6 +42,21 @@ class _FakeProcess:
 
     def shutdown(self, wait=True):
         self.shutdown_calls += 1
+
+    # The teardown surface _shutdown_locked drives. Without these the fake
+    # raised AttributeError, which the except Exception there swallowed, so the
+    # restart tests passed whether or not the old worker was ever shut down.
+    def alive(self):
+        return self._alive
+
+    def wait(self):
+        self.wait_calls += 1
+
+    def kill(self):
+        self.kill_calls += 1
+
+    def close(self):
+        self.close_calls += 1
 
 
 class TunableOpWorkerTest(TestCase):
@@ -91,7 +113,10 @@ class TunableOpWorkerTest(TestCase):
         first = self.created[0]
         self._submit(device=1)
         self.assertEqual(len(self.created), 2)
+        # Graceful on a key change: sentinel, then reap. Never SIGKILL.
         self.assertEqual(first.shutdown_calls, 1)
+        self.assertEqual(first.close_calls, 1)
+        self.assertEqual(first.kill_calls, 0)
 
     def test_worker_restarts_when_the_results_file_changes(self):
         # The worker reads the results file once at startup, so a second compile
@@ -101,6 +126,8 @@ class TunableOpWorkerTest(TestCase):
         self._submit(filename="b.csv")
         self.assertEqual(len(self.created), 2)
         self.assertEqual(first.shutdown_calls, 1)
+        self.assertEqual(first.close_calls, 1)
+        self.assertEqual(first.kill_calls, 0)
 
     def test_worker_is_reused_when_device_and_file_are_unchanged(self):
         self._submit(device=2, filename="a.csv")
@@ -147,10 +174,15 @@ class TunableOpWorkerTest(TestCase):
             mock.patch("torch.cuda.current_device", return_value=0),
             mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
         ):
-            tunableop.get_worker((0, "t.csv")).raises = RuntimeError("boom")
+            worker = tunableop.get_worker((0, "t.csv"))
+            worker.raises = RuntimeError("boom")
             outcome = tunableop.submit(job)
             self.assertEqual(outcome.status, "error")
             self.assertIsNone(tunableop._worker)
+            # Killed, not asked: a child wedged in device teardown would never
+            # act on the sentinel, and the handle is gone after this.
+            self.assertEqual(worker.kill_calls, 1)
+            self.assertEqual(worker.shutdown_calls, 0)
 
     def test_setup_failure_does_not_restart_worker(self):
         # A failure before the worker is involved (no device) must not kill a
@@ -456,7 +488,7 @@ class TunableOpRocmWorkerTest(TestCase):
     set_filename so resolve_filename takes the parent's file.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
     def test_rotating_buffer_size_round_trips_through_snapshot(self):
