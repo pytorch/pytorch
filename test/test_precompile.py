@@ -4944,9 +4944,9 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, mode="no-such-mode")
         make_fx = MakeFxTracer()
         reason = "outside Inductor's CUDA graph wrapper"
-        with self.assertRaisesRegex(PrecompileError, reason):
+        with self.assertRaisesRegex(PrecompileError, f"{reason}.*or use mode="):
             self._capture(single, tracer=make_fx, mode="reduce-overhead")
-        with self.assertRaisesRegex(PrecompileError, reason):
+        with self.assertRaisesRegex(PrecompileError, f"{reason}.*or drop triton"):
             self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
         wrapper = torch._TorchCompileInductorWrapper(None, options, None)
         with self.assertRaisesRegex(ValueError, "not 'eager'"):
@@ -4958,9 +4958,16 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, options={"cudagraph_policy": None})
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
             self._capture(single, options={"cudagraph-policy": None})
-        for key in ("size_asserts", "scalar_asserts"):
+        pinned = {
+            "size_asserts": False,
+            "scalar_asserts": False,
+            "cpp_wrapper": True,
+            "benchmark-harness": True,
+            "triton.autotune_at_compile_time": False,
+        }
+        for key, value in pinned.items():
             with self.assertRaisesRegex(PrecompileError, "always compiles with"):
-                self._capture(single, tracer=make_fx, options={key: False})
+                self._capture(single, tracer=make_fx, options={key: value})
 
     @parametrize("how", ["options", "mode"])
     @parametrize("tracer", ["make_fx", "dynamo"])

@@ -3471,9 +3471,11 @@ def capture(
     for the artifact to ship. A :class:`MakeFxTracer` capture refuses a
     ``mode`` or ``options`` that turns on ``triton.cudagraphs``, since its
     standalone module runs outside Inductor's CUDA graph wrapper (it ignores
-    the ambient flag, as before), and
-    refuses ``size_asserts`` or ``scalar_asserts`` off: it compiles with
-    ``size_asserts`` on, and with ``scalar_asserts`` on for a dynamic capture.
+    the ambient flag, as before), and refuses options its standalone module
+    pins: ``size_asserts`` or ``scalar_asserts`` off (it compiles with
+    ``size_asserts`` on, and with ``scalar_asserts`` on for a dynamic
+    capture), ``cpp_wrapper``, ``benchmark_harness`` and
+    ``triton.autotune_at_compile_time`` off.
 
     .. note::
 
@@ -3521,10 +3523,15 @@ def capture(
 
             requested = list_mode_options(mode) if mode is not None else options or {}
             if requested.get("triton.cudagraphs") is True:
+                remedy = (
+                    "use mode='max-autotune-no-cudagraphs'"
+                    if mode is not None
+                    else "drop triton.cudagraphs from options"
+                )
                 raise PrecompileError(
                     "a MakeFxTracer capture cannot serve CUDA graphs: its standalone "
                     "module runs outside Inductor's CUDA graph wrapper. Capture with "
-                    "tracer=DynamoTracer(), or use mode='max-autotune-no-cudagraphs'."
+                    f"tracer=DynamoTracer(), or {remedy}."
                 )
         # torch.compile's own parsing: mode expands to its options, and an unknown
         # option or a value of the wrong type raises here rather than mid-capture.
@@ -3544,12 +3551,22 @@ def capture(
                 )
     if isinstance(tracer, MakeFxTracer):
         inductor_options = inductor.config if inductor is not None else {}
-        asserts = (inductor_options.get(k) for k in ("size_asserts", "scalar_asserts"))
-        if False in asserts:
+        # compile_to_python pins these whatever the options say.
+        pins = {
+            "size_asserts": True,
+            "scalar_asserts": True,
+            "cpp_wrapper": False,
+            "benchmark_harness": False,
+            "triton.autotune_at_compile_time": True,
+        }
+        overridden = {k: v for k, v in pins.items() if inductor_options.get(k, v) != v}
+        if overridden:
             raise PrecompileError(
-                "a MakeFxTracer capture always compiles with size_asserts (and, for "
-                "a dynamic capture, scalar_asserts) on: they check at load that a "
-                "call's inputs have the layout and ranges its graph was compiled for."
+                f"a MakeFxTracer capture always compiles with {overridden}: its "
+                "standalone module is a plain Python wrapper whose kernels are tuned "
+                "at compile time, and its size_asserts (and, for a dynamic capture, "
+                "scalar_asserts) check at load that a call's inputs have the layout "
+                "and ranges its graph was compiled for."
             )
         return _MakeFxCapture(
             fn,
