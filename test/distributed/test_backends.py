@@ -4,7 +4,11 @@ import os
 
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 """
@@ -13,6 +17,8 @@ common backend API tests
 
 
 class TestMiscCollectiveUtils(TestCase):
+    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+
     def test_device_to_backend_mapping(self, device) -> None:
         """
         Test device to backend mapping
