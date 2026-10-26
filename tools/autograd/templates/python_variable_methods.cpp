@@ -182,7 +182,7 @@ static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 static PyObject * THPVariable_const_data_ptr(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self_)) {
+  if (has_torch_function(self_)) {
     return handle_torch_function(self_, "const_data_ptr", args);
   }
   auto& self = THPVariable_Unpack(self_);

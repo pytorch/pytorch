@@ -38,6 +38,10 @@ namespace at {
 
 class Tensor;
 
+namespace native::xnnpack::internal {
+TORCH_API void register_backend();
+} // namespace native::xnnpack::internal
+
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
 
 enum class CuBLASReductionOption : uint8_t {
@@ -412,6 +416,7 @@ class TORCH_API Context {
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
   bool rocmAllowGroupGemmCk() const;
+  bool rocmAllowGroupGemmCkTile() const;
   bool preferCublasltGroupedGemm() const;
   void setPreferCublasltGroupedGemm(bool /*b*/);
 

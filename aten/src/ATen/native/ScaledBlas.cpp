@@ -118,8 +118,8 @@ void validate_scaled_mm_meta_inputs(
 //  - `scale_b`/`recipe_b`/`swizzle_b`: as above, for `mat_b`
 //  - `bias`: optional bias, `torch.float16` or `torch.bfloat16`
 //  - `out_dtype`: optional output dtype; defaults to `mat_a.dtype()`
-//  - `contraction_dim`: optional pair `(a_dim, b_dim)` overriding the default `(1, 0)`
-//    contraction; useful for packed formats (e.g. NVFP4 x2) where cheap `.t()` is unavailable
+//  - `contraction_dim`: only the default `(1, 0)` contraction and its negative-index
+//    equivalents are supported by the implementations
 //  - `use_fast_accum`: enables fast tensor-core accumulation (Hopper+ only); ignored otherwise
 TORCH_META_FUNC(_scaled_mm_v2)(
     const Tensor& self,
@@ -134,6 +134,12 @@ TORCH_META_FUNC(_scaled_mm_v2)(
     std::optional<c10::ScalarType> out_dtype,
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
+  TORCH_CHECK_VALUE(
+      contraction_dim.empty() ||
+          (contraction_dim.size() == 2 &&
+           (contraction_dim[0] == 1 || contraction_dim[0] == -1) &&
+           (contraction_dim[1] == 0 || contraction_dim[1] == -2)),
+      "torch._scaled_mm_v2 only supports contraction_dim=(1, 0)");
   validate_scaled_mm_meta_inputs(
       self,
       mat2,

@@ -1,7 +1,7 @@
 template <typename T>
 kernel void repeat_interleave(
-    constant T* repeat_ptr [[buffer(0)]],
-    constant int64_t* cumsum_ptr [[buffer(1)]],
+    device const T* repeat_ptr [[buffer(0)]],
+    device const int64_t* cumsum_ptr [[buffer(1)]],
     device T* result_ptr [[buffer(2)]],
     constant int64_t& repeat_stride [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
@@ -15,16 +15,16 @@ kernel void repeat_interleave(
 
 template [[host_name("repeat_interleave_int32_t")]] kernel void
 repeat_interleave<int32_t>(
-    constant int32_t*,
-    constant int64_t*,
+    device const int32_t*,
+    device const int64_t*,
     device int32_t*,
     constant int64_t&,
     uint);
 
 template [[host_name("repeat_interleave_int64_t")]] kernel void
 repeat_interleave<int64_t>(
-    constant int64_t*,
-    constant int64_t*,
+    device const int64_t*,
+    device const int64_t*,
     device int64_t*,
     constant int64_t&,
     uint);
