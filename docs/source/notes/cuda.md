@@ -131,6 +131,17 @@ is overridden to `ieee`.
 
 We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
 
+On NVIDIA GPUs, the convolution kernels that `torch.compile` generates itself (for example with
+`mode="max-autotune"`) use TF32 only if `torch.backends.cudnn.conv.fp32_precision` is `tf32`, like eager cuDNN
+convolutions. When cuDNN is turned off (`torch.backends.cudnn.enabled = False`), they use full FP32. 1x1
+convolutions that `torch.compile` turns into matrix multiplications follow `torch.backends.cuda.matmul.fp32_precision`
+instead. For example, this turns off TF32 for eager convolutions and for the generated convolution kernels:
+
+```python
+torch.backends.cudnn.conv.fp32_precision = "ieee"
+model = torch.compile(model, mode="max-autotune")
+```
+
 ```{warning}
 
   Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
@@ -1015,12 +1026,12 @@ allocator with Python callables:
 from cuda.bindings import runtime
 
 
-def alloc(size: int) -> int | None:
+def alloc(size: int, _device: int, _stream: int) -> int | None:
     err, ptr = runtime.cudaMalloc(size)
     return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
 
 
-def free(ptr: int, _size: int) -> None:
+def free(ptr: int, _size: int, _device: int, _stream: int) -> None:
     (err,) = runtime.cudaFree(ptr)
     if err != runtime.cudaError_t.cudaSuccess:
         raise RuntimeError(f"cudaFree failed with error {err}")
@@ -1039,9 +1050,10 @@ observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
 fails. Other exceptions raised by the allocation callback propagate normally.
 Exceptions raised by the free callback produce a warning and are swallowed.
 
-PyTorch makes the segment's device and allocation stream current before calling
-either function. A callback that needs them can use
-{func}`torch.cuda.current_device` and {func}`torch.cuda.current_stream`.
+The ``device`` argument is the segment's CUDA device ordinal and ``stream`` is
+the raw address of its allocation stream. PyTorch does not make them current
+before entering the callback. Allocators using APIs that rely on current CUDA
+state are responsible for establishing the appropriate device and stream.
 
 Callbacks can be invoked concurrently from multiple threads, so their Python
 and native state must be thread-safe, including in a no-GIL Python build.

@@ -103,6 +103,7 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
+    skipIfCppFakeTensor,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -5427,6 +5428,35 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
+    def test_copy_reduce_override(self):
+        # object.__reduce_ex__ must defer to a type's overridden __reduce__
+        # rather than the copyreg __newobj__ path.
+
+        class Custom:
+            def __init__(self, a, b=None):
+                self.a = a
+                self.b = b
+
+            def __reduce__(self):
+                return (type(self), (self.a,), {"b": self.b})
+
+            def __setstate__(self, state):
+                self.b = state["b"]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        # graph break on equality comparison for py_functools.args tuples
+        cfn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        obj = Custom(1, [10, 20])
+        c, d = cfn(obj)
+        self.assertEqual(c.a, 1)
+        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
+        self.assertEqual(d.a, 1)
+        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
+        self.assertEqual(d.b, obj.b)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
@@ -10621,6 +10651,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         optimized_loaded_model = torch.compile(loaded_model, backend="eager")(*inputs)
 
+    def test_precompile_entry_survives_reset(self):
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+        )
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        guard_manager = torch._dynamo.guards.GuardManagerWrapper()
+        guard_ref = weakref.ref(guard_manager)
+        _load_precompile_entry(fn.__code__, guard_manager, fn.__code__)
+        del guard_manager
+        entries = _debug_get_precompile_entries(fn.__code__)
+        self.assertEqual(len(entries), 1)
+
+        torch._dynamo.reset()
+        self.assertEqual(_debug_get_precompile_entries(fn.__code__), [])
+        gc.collect()
+        self.assertIsNotNone(guard_ref())
+        self.assertIs(entries[0].guard_manager, guard_ref())
+
     def test_precompile_entry_hit(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
@@ -14509,6 +14564,73 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
 
+    @parametrize("maxlen", [None, 0, 1, 2, 3])
+    def test_deque_input_maxlen(self, maxlen):
+        def fn(q, x):
+            result = q.copy()
+            result.append(4)
+            result.appendleft(5)
+            return x * len(result), q.maxlen, list(result), result
+
+        x = torch.randn(3)
+        ref = collections.deque([1, 2], maxlen=maxlen)
+        actual = collections.deque([1, 2], maxlen=maxlen)
+        expected = fn(ref, x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(actual, x)
+        self.assertEqual(result, expected)
+        self.assertEqual(list(actual), list(ref))
+        self.assertEqual(result[3].maxlen, maxlen)
+
+    @parametrize("maxlen", [None, 0, 1, 2])
+    def test_deque_input_maxlen_mutation(self, maxlen):
+        def fn(q, x):
+            q.append(x)
+            after_append = x + sum(q)
+            q.appendleft(x + 1)
+            return after_append, x + sum(q), q
+
+        ref = collections.deque([1, 2], maxlen=maxlen)
+        actual = collections.deque([1, 2], maxlen=maxlen)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for x in (torch.ones(3), torch.full((3,), 3.0)):
+            expected = fn(ref, x)
+            result = compiled(actual, x)
+            self.assertEqual(result, expected)
+            self.assertEqual(actual, ref)
+            self.assertEqual(actual.maxlen, maxlen)
+            self.assertIs(result[2], actual)
+
+    @parametrize("maxlen", [None, 0, 1, 3])
+    def test_deque_input_reinit_maxlen(self, maxlen):
+        def fn(q, x):
+            q.__init__([x, x + 1, x + 2], maxlen)
+            q.appendleft(x + 3)
+            return x + sum(q), q
+
+        x = torch.ones(3)
+        ref = collections.deque([1, 2], maxlen=2)
+        actual = collections.deque([1, 2], maxlen=2)
+        expected = fn(ref, x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(actual, x)
+        self.assertEqual(result, expected)
+        self.assertEqual(actual, ref)
+        self.assertEqual(actual.maxlen, maxlen)
+        self.assertIs(result[1], actual)
+
+    def test_deque_input_maxlen_guards(self):
+        def fn(q, x):
+            result = q.copy()
+            result.extend([1, 2])
+            return x + len(result), result.maxlen, list(result)
+
+        x = torch.randn(3)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for maxlen in (None, 0, 1, 2, None, 0, 1, 2):
+            q = collections.deque(maxlen=maxlen)
+            self.assertEqual(compiled(q, x), fn(q, x))
+        self.assertEqual(counter.frame_count, 4)
+
     def test_deque_mul_bounded_large(self):
         # A bounded deque repeated by a huge count must stay bounded and keep
         # only the last maxlen items, matching CPython, instead of building the
@@ -16210,6 +16332,7 @@ fn
         self.assertIn(0, result)
         self.assertTrue(same(result[0], torch.tensor(3)))
 
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_dynamo_reset_clears_cache(self):
         """Test that dynamo bytecode and fake tensor caches are freed
         when dynamo reset is called
@@ -16546,7 +16669,55 @@ fn
         # move cache entry to front
         opt_fn(inp, 2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertIs(c1[1], c2[0])
+        self.assertEqual(c2, [c1[1], c1[0], c1[2]])
+
+    @parametrize("getter", ("debug", "region"))
+    @parametrize("isolate_recompiles", (False, True))
+    def test_cache_entry_survives_reset(self, getter, isolate_recompiles):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(
+            fn, backend="eager", isolate_recompiles=isolate_recompiles
+        )
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        region_id = opt_fn._isolate_recompiles_id
+        if getter == "debug":
+            entries = _debug_get_cache_entry_list(fn)
+        else:
+            entries = torch._dynamo.eval_frame._get_cache_entries_for_region(
+                fn, region_id
+            )
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        code_ref = weakref.ref(entry.code)
+        guard_ref = weakref.ref(entry.guard_manager)
+        compile_id = entry.compile_id
+        trace_annotation = entry.trace_annotation
+        entry_hash = hash(entry)
+        with self.assertRaises(RuntimeError):
+            entry.update_diff_guard_root_manager()
+        with self.assertRaises(RuntimeError):
+            entry.guard_manager.extra_state.invalidate(entry, entry.guard_manager)
+
+        torch._dynamo.reset()
+        self.assertEqual(_debug_get_cache_entry_list(fn), [])
+        self.assertEqual(
+            torch._dynamo.eval_frame._get_cache_entries_for_region(fn, region_id), []
+        )
+        gc.collect()
+        # Check liveness before dereferencing a potentially freed C++ entry.
+        self.assertIsNotNone(code_ref())
+        self.assertIsNotNone(guard_ref())
+        self.assertIs(entry.code, code_ref())
+        self.assertIs(entry.guard_manager, guard_ref())
+        self.assertIs(entry.compile_id, compile_id)
+        self.assertEqual(entry.trace_annotation, trace_annotation)
+        self.assertEqual(entry.isolate_recompiles_id, region_id)
+        self.assertEqual(hash(entry), entry_hash)
+        self.assertIsNone(entry.guard_manager.cache_entry)
+        self.assertIsNone(entry.guard_manager.extra_state)
 
     def test_inspect_signature_bind(self):
         import inspect
@@ -20442,11 +20613,13 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     def test_interpolate_propagate_real_tensors(self, device):
         real_tensor_refs = []
         from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+        from torch._subclasses.fake_tensor import maybe_get_real_tensor
 
         def record_real_tensor(mode, tensor, **kwargs):
             fake = from_tensor(mode, tensor, **kwargs)
-            if mode.propagate_real_tensors and fake.real_tensor is not None:
-                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            real_tensor = maybe_get_real_tensor(fake)
+            if mode.propagate_real_tensors and real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(real_tensor))
             return fake
 
         @torch.compile(backend="eager", fullgraph=True)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
 #include <utility>
 
 namespace c10 {
@@ -112,28 +114,30 @@ class ExclusivelyOwned {
     return EOT::take(repr_);
   }
 
-  [[nodiscard]] typename EOT::const_pointer_type operator->() const {
+  [[nodiscard]] typename EOT::const_pointer_type operator->() const
+      C10_LIFETIMEBOUND {
     return get();
   }
 
-  [[nodiscard]] typename EOT::const_pointer_type get() const {
+  [[nodiscard]] typename EOT::const_pointer_type get() const C10_LIFETIMEBOUND {
     return EOT::getImpl(repr_);
   }
 
-  [[nodiscard]] typename EOT::pointer_type operator->() {
+  [[nodiscard]] typename EOT::pointer_type operator->() C10_LIFETIMEBOUND {
     return get();
   }
 
-  [[nodiscard]] typename EOT::pointer_type get() {
+  [[nodiscard]] typename EOT::pointer_type get() C10_LIFETIMEBOUND {
     return EOT::getImpl(repr_);
   }
 
   [[nodiscard]] std::remove_pointer_t<typename EOT::const_pointer_type>&
-  operator*() const {
+  operator*() const C10_LIFETIMEBOUND {
     return *get();
   }
 
-  [[nodiscard]] std::remove_pointer_t<typename EOT::pointer_type>& operator*() {
+  [[nodiscard]] std::remove_pointer_t<typename EOT::pointer_type>& operator*()
+      C10_LIFETIMEBOUND {
     return *get();
   }
 };
