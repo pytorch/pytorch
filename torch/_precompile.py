@@ -1965,35 +1965,27 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
     forward (desugaring tensor subclasses, applying decompositions) and a backward,
     either of which can call ops that graph never does.
     """
+    from torch._functorch._aot_autograd.aot_autograd_result import (
+        GenericAOTAutogradResult,
+    )
+
     names: set[tuple[str, str]] = set()
     for artifact in artifacts:
-        content = getattr(artifact, "content", None)
-        names |= _custom_op_names_in_source(
-            getattr(content, "aot_forward_graph_str", None)
-        )
-        serialized = getattr(content, "serialized_bw_module", None)
-        if serialized is not None:
-            names |= _custom_op_names(serialized.deserialize())
+        content = artifact.content
+        # An eager backend's artifact is the Dynamo graph itself, already recorded.
+        if not isinstance(content, GenericAOTAutogradResult):
+            continue
+        # The printed forward exists only when AOTAutograd logged it.
+        names |= _custom_op_names_in_source(content.aot_forward_graph_str)
+        if content.serialized_bw_module is not None:
+            names |= _custom_op_names(content.serialized_bw_module.deserialize())
     return names
 
 
-# Where an operator's schema was registered: torch's own C++ registrations live in
-# its C++ sources; a Python torch.library registration names the file that made it.
+# Where an operator's schema was registered, for ops no Python registration
+# recorded: torch's own C++ registrations live in its C++ sources.
 _REGISTERED_AT = re.compile(r"registered at (.*):\d+$")
 _TORCH_CPP_SOURCES = ("/torch/csrc/", "/aten/src/", "/c10/")
-# torch.library helpers (torch.library.define, _scoped_library, ...) create the
-# Library themselves, so a registration traced here names no user module.
-_TORCH_LIBRARY_SOURCES = ("/torch/library.py", "/torch/_library/")
-
-
-def _module_of_file(path: str) -> str | None:
-    """The imported module loaded from ``path``, if any."""
-    path = os.path.realpath(path)
-    for name, module in list(sys.modules.items()):
-        file = getattr(module, "__file__", None)
-        if file is not None and os.path.realpath(file) == path:
-            return name
-    return None
 
 
 def _importable(name: str | None) -> str | None:
@@ -2010,11 +2002,11 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     """The importable module that registers ``op_name``, ``_TORCH_BUILTIN`` for an
     op torch's own C++ registers, or None when neither is known.
 
-    A ``torch.library.custom_op`` registers in the module whose import ran the call
-    (recorded by ``custom_op``); a C++ op can name its module with
-    ``m.set_python_module``; any other Python registration is traced to its file.
+    ``torch.library.custom_op`` and ``torch.library.Library.define`` record the module
+    whose import ran them; a C++ op can name its module with ``m.set_python_module``.
     """
     from torch._library.custom_ops import OPDEFS
+    from torch.library import _registering_modules
 
     opdef = OPDEFS.get(op_name)
     if opdef is not None:
@@ -2022,16 +2014,14 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     pystub = torch._C._dispatch_pystub(op_name, overload)
     if pystub is not None:
         return _importable(pystub[0])
+    if op_name in _registering_modules:
+        return _importable(_registering_modules[op_name])
     try:
         debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     except RuntimeError:
         return None
     match = _REGISTERED_AT.search(debug)
     path = match.group(1).replace("\\", "/") if match else ""
-    if any(source in path for source in _TORCH_LIBRARY_SOURCES):
-        return None
-    if path.endswith(".py"):
-        return _importable(_module_of_file(path))
     if any(source in path for source in _TORCH_CPP_SOURCES):
         return _TORCH_BUILTIN
     return None
@@ -2087,6 +2077,16 @@ def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> N
     buf.writeline("for _module, _ops in CUSTOM_OP_MODULES.items():")
     buf.writeline("    if not all(_custom_op_registered(_op) for _op in _ops):")
     buf.writeline("        _importlib.import_module(_module)")
+    buf.writeline(
+        "        _missing = [_op for _op in _ops if not _custom_op_registered(_op)]"
+    )
+    buf.writeline("        if _missing:")
+    buf.writeline("            raise ImportError(")
+    buf.writeline(
+        "                f\"importing {_module!r} did not register {', '.join(_missing)}, \""
+    )
+    buf.writeline('                "which this artifact\'s compiled graphs call"')
+    buf.writeline("            )")
     buf.writeline("")
 
 

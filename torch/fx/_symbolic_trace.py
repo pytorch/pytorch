@@ -918,11 +918,6 @@ class Tracer(TracerBase):
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
-                # Before anything is patched, so a torch.fx.wrap that resolving them
-                # runs is registered before _patch_wrapped_functions reads the table.
-                _resolve_lazy_imports(patcher, fn_globals)
-                for module in self._autowrap_search:
-                    _resolve_lazy_imports(patcher, module.__dict__)
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(
                     torch.nn.Module,
@@ -1344,9 +1339,12 @@ def _resolve_lazy_imports(
     finally:
         for suspended in reversed(chain):
             suspended.reapply_all_patches()
+    # Outermost first, so the trace that outlives the others owns the patch and an
+    # inner trace's exit does not revert it.
     for key, wrapped_globals in _wrapped_fns_to_patch.copy().items():
         if key not in wraps_before:
-            _patch_wrapped_function(patcher, wrapped_globals, key[1])
+            for owner in reversed(chain or [patcher]):
+                _patch_wrapped_function(owner, wrapped_globals, key[1])
 
 
 def _patch_wrapped_function(

@@ -9368,36 +9368,27 @@ class TestPrecompileCustomOpRecording(TestCase):
         return _custom_op_modules(_custom_op_names(torch.fx.symbolic_trace(f)))
 
     def test_an_op_no_importable_module_registers_is_reported_at_capture(self):
-        main_ns, define_ns = (
-            f"precompile_{kind}_{uuid.uuid4().hex}" for kind in ("main", "define")
-        )
+        ns = f"precompile_main_{uuid.uuid4().hex}"
         exec(
-            f"@torch.library.custom_op('{main_ns}::f', mutates_args=())\n"
+            f"@torch.library.custom_op('{ns}::f', mutates_args=())\n"
             "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n",
             {"__name__": "__main__", "torch": torch},
         )
-        self._import_module_from_source(
-            "import torch\n\n"
-            f"torch.library.define('{define_ns}::g', '(Tensor x) -> Tensor')\n"
-        )
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             self.assertEqual(
-                self._modules_of_graph_calling(
-                    getattr(torch.ops, main_ns).f, getattr(torch.ops, define_ns).g
-                ),
-                {},
+                self._modules_of_graph_calling(getattr(torch.ops, ns).f), {}
             )
-        output = "\n".join(logs.output)
-        self.assertIn(f"{main_ns}::f", output)
-        self.assertIn(f"{define_ns}::g", output)
+        self.assertIn(f"{ns}::f", "\n".join(logs.output))
 
     def test_an_op_is_recorded_under_the_module_whose_import_registers_it(self):
-        impl_ns, wrapped_ns, lib_ns = (
-            f"rec_{kind}_{uuid.uuid4().hex}" for kind in ("impl", "wrapped", "lib")
+        impl_ns, wrapped_ns, lib_ns, define_ns, shared_ns = (
+            f"rec_{kind}_{uuid.uuid4().hex}"
+            for kind in ("impl", "wrapped", "lib", "define", "shared")
         )
         impl = self._import_module_from_source(
             "import torch\n\n\ndef f(x: torch.Tensor) -> torch.Tensor:\n"
             "    return x.clone()\n"
+            f"\n\nshared = torch.library.Library('{shared_ns}', 'FRAGMENT')\n"
         )
         ops = self._import_module_from_source(
             f"import torch\nimport {impl}\n\n\n"
@@ -9407,15 +9398,37 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"wrapped = register('{wrapped_ns}::g')({impl}.f)\n"
             f"lib = torch.library.Library('{lib_ns}', 'DEF')\n"
             "lib.define('h(Tensor x) -> Tensor')\n"
+            f"torch.library.define('{define_ns}::i', '(Tensor x) -> Tensor')\n"
+            # A Library made in another module, defining here.
+            f"{impl}.shared.define('j(Tensor x) -> Tensor')\n"
+        )
+        expected = (
+            f"{impl_ns}::f",
+            f"{wrapped_ns}::g",
+            f"{lib_ns}::h",
+            f"{define_ns}::i",
+            f"{shared_ns}::j",
         )
         self.assertEqual(
             self._modules_of_graph_calling(
                 getattr(torch.ops, impl_ns).f,
                 getattr(torch.ops, wrapped_ns).g,
                 getattr(torch.ops, lib_ns).h,
+                getattr(torch.ops, define_ns).i,
+                getattr(torch.ops, shared_ns).j,
             ),
-            {ops: tuple(sorted((f"{impl_ns}::f", f"{wrapped_ns}::g", f"{lib_ns}::h")))},
+            {ops: tuple(sorted(expected))},
         )
+
+    def test_load_rejects_a_malformed_custom_op_module_mapping(self):
+        from torch._precompile import _check_custom_op_modules
+
+        for value in (5, ("mod",), {"mod": "ns::op"}, {"mod": (1,)}, {"mod": ("op",)}):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    torch.compiler.PrecompileError, "CUSTOM_OP_MODULES"
+                ):
+                    _check_custom_op_modules(value)
 
     def test_an_op_torch_registers_in_cpp_needs_no_module(self):
         with self.assertNoLogs("torch._precompile", level="WARNING"):
@@ -9427,6 +9440,8 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_a_cpp_op_is_recorded_under_its_python_module(self):
         from torch._precompile import _custom_op_module
 
+        # No op the test suite can reach registers a pystub, so the mock stands in
+        # for a C++ library calling m.set_python_module.
         ns = f"precompile_pystub_{uuid.uuid4().hex}"
         with torch.library._scoped_library(ns, "DEF") as lib:
             lib.define("f(Tensor x) -> Tensor")

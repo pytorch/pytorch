@@ -52,6 +52,9 @@ _P = ParamSpec("_P")
 # libraries calling into kernels not intended to be called.
 _impls: set[str] = set()
 _defs: set[str] = set()
+# For each operator a Library defined, the module whose import ran the define, if
+# known (see torch._library.custom_ops._registering_module).
+_registering_modules: dict[str, str | None] = {}
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
@@ -325,6 +328,11 @@ class Library:
 
         self._op_defs.add(qualname)
         _defs.add(qualname)
+        from torch._library.custom_ops import _registering_module
+
+        _registering_modules[qualname.split(".")[0]] = _registering_module(
+            inspect.currentframe()
+        )
         return result
 
     def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=True):
