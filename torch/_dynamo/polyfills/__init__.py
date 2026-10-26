@@ -420,6 +420,13 @@ def dictview_richcompare(
     return all(item in self for item in other)
 
 
+def dictview_isdisjoint(self: Iterable[T], other: Iterable[T]) -> bool:
+    """Mirrors dictviews_isdisjoint in Objects/dictobject.c, without its
+    iterate-the-shorter-operand optimization, which does not change the result.
+    """
+    return not any(item in self for item in other)
+
+
 def assert_dict_equal(
     self_: Any, d1: dict[T, U], d2: dict[T, U], msg: str | None = None
 ) -> None:

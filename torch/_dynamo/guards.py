@@ -25,6 +25,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import gc
 import hashlib
 import importlib
 import inspect
@@ -170,6 +171,7 @@ from .source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -335,6 +337,11 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
         and value.__self__ is expected.receiver
         and value == getattr(expected.receiver, expected.name)
     )
+
+
+def _mapping_proxy_mapping(value: object) -> object:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return gc.get_referents(value)[0]
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -2241,6 +2248,16 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
