@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import weakref
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -116,6 +117,67 @@ class TestStaticTritonLauncherUnit(TestCase):
         for size in [None, 0]:
             make_kernel(tmem_size=size)
         make_kernel()
+
+    def _compile_result_for_repeated_launcher(self, device=0):
+        kernel = self._global_scratch_kernel(global_scratch_size=0)
+        kernel.function = None
+        kernel.hash = "0" * 64
+        kernel.C_impl = mock.Mock()
+        kernel.C_impl._load_kernel.return_value = (101, 102, 7, 0)
+        self.addCleanup(kernel.close)
+        result = StaticTritonCompileResult(
+            kernel,
+            SimpleNamespace(kwargs={}, num_warps=4, num_stages=1),
+            {
+                "device": device,
+                "device_type": "cuda",
+                "constants": {},
+                "signature": {"out": "*fp32"},
+            },
+            {},
+        )
+        result._gen_launcher_code = mock.Mock(
+            side_effect=lambda *args, **kwargs: SimpleNamespace()
+        )
+        return result
+
+    def test_make_launcher_reuses_loaded_kernel_after_cache_context(self):
+        result = self._compile_result_for_repeated_launcher(device=3)
+        kernel = result.kernel
+        with (
+            tempfile.TemporaryDirectory() as compile_cache,
+            tempfile.TemporaryDirectory() as runtime_cache,
+        ):
+            kernel.cubin_path = None
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=compile_cache):
+                first = result.make_launcher()
+            compile_path = kernel.C_impl._load_kernel.call_args.args[0]
+            self.assertEqual(Path(compile_path).read_bytes(), b"cubin")
+            self.assertIsNone(kernel.cubin_path)
+            self.assertIsNone(kernel.cubin_raw)
+            self.assertEqual(kernel.function, 102)
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=runtime_cache):
+                second = result.make_launcher()
+            self.assertTrue(os.path.exists(compile_path))
+            self.assertEqual(os.listdir(runtime_cache), [])
+            self.assertEqual(first.n_regs, second.n_regs)
+            kernel.C_impl._load_kernel.assert_called_once_with(
+                compile_path, kernel.name, kernel.shared, 3
+            )
+
+    def test_make_launcher_missing_unloaded_binary_still_errors(self):
+        result = self._compile_result_for_repeated_launcher()
+        result.kernel.cubin_path = None
+        result.kernel.cubin_raw = None
+        with (
+            tempfile.TemporaryDirectory() as cache,
+            mock.patch.dict(os.environ, TRITON_CACHE_DIR=cache),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "Cubin file saved by TritonBundler not found"
+            ):
+                result.make_launcher()
+        result.kernel.C_impl._load_kernel.assert_not_called()
 
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
