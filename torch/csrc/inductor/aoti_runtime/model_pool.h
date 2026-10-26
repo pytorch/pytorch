@@ -145,6 +145,20 @@ class ModelPool {
     return Lease(*this, acquire(stream));
   }
 
+  // Waits until no run is still executing on the device. The caller must keep
+  // new runs from starting meanwhile.
+  void drain() {
+    std::unique_lock lk(models_mutex_);
+    while (Slot* slot = oldest(State::kInFlight)) {
+      transition(*slot, State::kInFlight, State::kCheckedOut);
+      lk.unlock();
+      wait_for_device(*slot);
+      lk.lock();
+      transition(*slot, State::kCheckedOut, State::kAvailable);
+      model_state_changed_.notify_all();
+    }
+  }
+
   // For run_single_threaded(), which bypasses the pool's locking entirely.
   Model* first_available_model_unsynchronized() {
     Slot* slot = oldest(State::kAvailable);
