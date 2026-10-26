@@ -9960,12 +9960,13 @@ class TestPrecompileCustomOpModules(TestCase):
         ops["d"].register_vmap(elsewhere(vmap, "string"))
         ops["e"] = self._define_op(ns, "e", module="unittest", fake=False)
         ops["e"].register_fake(elsewhere(fake, "textwrap"))
-        # Autograd and vmap rules only matter where an eager graph calls the op,
-        # and the fake only where the artifact can trace again.
+        # Autograd and vmap rules only matter where an eager graph calls the op or
+        # the artifact can trace again, and the fake only in the second case.
         for name, module, reached_by in (
             ("a", "json", {}),
             ("b", "csv", {}),
             ("c", "base64", {"eager_op_names": {f"{ns}::c"}}),
+            ("c", "base64", {"retrace": True}),
             ("d", "string", {"eager_op_names": {f"{ns}::d"}}),
             ("e", "textwrap", {"retrace": True}),
         ):

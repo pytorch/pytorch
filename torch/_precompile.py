@@ -2083,7 +2083,8 @@ def _custom_op_modules(
     too, since importing the recorded module does not make them: device kernels
     and ``__torch_dispatch__`` rules always; autograd and vmap rules for the ops in
     ``eager_op_names``, which an eager graph serves (compiled code has its
-    backward compiled in); and the fake when the artifact can ``retrace``.
+    backward compiled in); and, when the artifact can ``retrace``, those rules and
+    the fake for every op.
     """
     from torch._library.custom_ops import OPDEFS
 
@@ -2153,7 +2154,8 @@ def _custom_op_modules(
             *map(inspect.unwrap, opdef._backend_fns.values()),
             *opdef._torch_dispatch_fns.values(),
         ]
-        if {op_name, qualname, op_name.partition(".")[0]} & eager_op_names:
+        served_eagerly = {op_name, qualname, op_name.partition(".")[0]} & eager_op_names
+        if served_eagerly or retrace:
             reached += [opdef._backward_fn, opdef._setup_context_fn, opdef._vmap_fn]
         if retrace:
             reached.append(opdef._abstract_fn)
