@@ -1302,7 +1302,10 @@ int TensorIteratorBase::get_dim_to_split() const {
   int dim_to_split = -1;
   for (int dim = ndim() - 1; dim >= 0; dim--) {
     const int64_t size = shape_[dim];
-    if (size == 0) {
+    // split() requires size >= 2. A size-1 dim has extent 0 for every operand, so it
+    // would otherwise win the scan when all extents are 0 (e.g. a reduction over an
+    // expanded input whose non-reduced dim was already split down to size 1).
+    if (size <= 1) {
       continue;
     }
     for (auto& op : operands_) {
