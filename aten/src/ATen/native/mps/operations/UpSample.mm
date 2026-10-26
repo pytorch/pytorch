@@ -64,7 +64,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 // Encode a forward/backward upsample kernel: bind the PSO, the two tensors and
-// the params struct, then launch one thread per output spatial element.
+// the params struct, then launch one thread per job.
 template <typename params_t>
 static void dispatch_upsample(const std::string& fname,
                               const Tensor& a,
@@ -115,16 +115,28 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
     return;
   }
 
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic(fmt::format("upsample_{}_backward", name));
-
   UpsampleParams<N> params(grad_input, grad_output, align_corners, scales);
-  dispatch_upsample(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)),
-                    grad_input,
-                    grad_output,
-                    params,
-                    c10::multiply_integers(output_size));
+
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms();
+  if (serial && grad_input.scalar_type() != kFloat) {
+    auto grad_input_float = grad_input.to(kFloat);
+    upsample_kernel_backward_out_template<N>(
+        grad_input_float, grad_output.to(kFloat), output_size, align_corners, scales, name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
+  auto njobs = serial ? grad_output.size(0) * grad_output.size(1) : c10::multiply_integers(output_size);
+
+  dispatch_upsample(
+      fmt::format("upsample_{}_backward_{}{}", name, scalarToMetalTypeString(grad_input), serial ? "_serial" : ""),
+      grad_input,
+      grad_output,
+      params,
+      njobs);
 }
 
 static void upsample_gather_backward_out_template(const Tensor& grad_input,

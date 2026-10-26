@@ -158,7 +158,12 @@ def plan_effects(
         effects.notes.append("issue already has an oncall: label; skipping")
         return effects
     if decision == "skip_already_routed":
-        effects.notes.append("plan chose to skip")
+        effects.notes.append("skip has no existing oncall label; flagging for review")
+        effects.add_labels = [
+            label
+            for label in (TRIAGE_REVIEW, BOT_TRIAGED)
+            if label not in existing_labels
+        ]
         return effects
 
     requested = [
@@ -351,8 +356,10 @@ def main() -> int:
     state_after = (
         "closed" if effects.close else ("open" if args.replay else issue["state"])
     )
-    # A skip plan never mutates (plan_effects returns early).
-    if plan["decision"] == "skip_already_routed":
+    # Only confirmed routing justifies reporting a skipped issue.
+    if plan["decision"] == "skip_already_routed" and any(
+        label.startswith("oncall:") for label in existing
+    ):
         outcome = "skipped"
     else:
         outcome = classify(labels_after, state_after, effects.mutates)

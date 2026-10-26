@@ -1,13 +1,16 @@
 """Behavior of the trusted plan-to-effects mapping for pi issue triage."""
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from apply_plan import (
     CLOSING_TEMPLATES,
     LABELING_DECISIONS,
     labels_before_triage,
+    main,
     plan_effects,
 )
 from labels import load_templates, load_valid_labels, TRIAGE_SKILL
@@ -56,6 +59,30 @@ class PlanEffectsTest(unittest.TestCase):
     def test_existing_oncall_label_wins_over_plan(self):
         result = effects("label", ["module: nn"], existing={"oncall: pt2"})
         self.assertFalse(result.mutates)
+
+    def test_skip_requires_an_existing_oncall(self):
+        self.assertFalse(
+            effects("skip_already_routed", existing={"oncall: pt2"}).mutates
+        )
+        skipped = effects("skip_already_routed")
+        self.assertEqual(skipped.add_labels, ["triage review", "bot-triaged"])
+        self.assertFalse(skipped.close)
+        self.assertEqual(skipped.comment, "")
+
+    def test_unjustified_skip_reports_review(self):
+        with tempfile.TemporaryDirectory() as temp:
+            plan = Path(temp) / "plan.json"
+            plan.write_text(json.dumps({"decision": "skip_already_routed"}))
+            with (
+                patch("sys.argv", ["apply_plan", "pytorch/ciforge", "123", str(plan)]),
+                patch(
+                    "apply_plan.fetch_issue",
+                    return_value=({"labels": [], "state": "open"}, []),
+                ),
+                patch("apply_plan.publish") as publish,
+            ):
+                self.assertEqual(main(), 0)
+            self.assertIn("→ review", publish.call_args.args[0])
 
     def test_a_distributed_sub_queue_becomes_the_parent_queue(self):
         result = effects("redirect_oncall", ["oncall: distributed checkpointing"])

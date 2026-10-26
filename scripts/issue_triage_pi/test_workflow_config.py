@@ -79,5 +79,55 @@ class IssueInputTest(unittest.TestCase):
                 self.assertEqual(output, "")
 
 
+class HandoffLookupTest(unittest.TestCase):
+    def test_api_failure_is_not_an_absent_handoff(self):
+        scripts = []
+        for name in ("claude-distributed-triage.yml", "distributed-triage-pi.yml"):
+            workflow = ROOT / ".github/workflows" / name
+            if workflow.exists():
+                jobs = yaml.safe_load(workflow.read_text())["jobs"]
+                scripts.extend(
+                    step["run"]
+                    for job in jobs.values()
+                    for step in job.get("steps", [])
+                    if ".artifacts[].name" in step.get("run", "")
+                )
+        self.assertEqual(len(scripts), 1)
+        fake = """
+        gh() {
+          if [[ "$1" == "api" ]]; then
+            printf '%s\\n' "$ARTIFACTS_RESULT"
+            return "$API_RC"
+          fi
+          printf '123\\n' > issue_number.txt
+        }
+        """
+        for api_rc, artifacts, succeeds, downloaded in (
+            (1, "", False, False),
+            (0, "", True, False),
+            (0, "triage-completed-data", True, True),
+        ):
+            with self.subTest(api_rc=api_rc, artifacts=artifacts):
+                with tempfile.TemporaryDirectory() as temp:
+                    result = subprocess.run(
+                        ["bash", "-euo", "pipefail", "-c", fake + scripts[0]],
+                        cwd=temp,
+                        env={
+                            **os.environ,
+                            "API_RC": str(api_rc),
+                            "ARTIFACTS_RESULT": artifacts,
+                            "RUN_ID": "123",
+                            "GITHUB_REPOSITORY": "pytorch/ciforge",
+                        },
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(result.returncode == 0, succeeds, result.stderr)
+                    self.assertEqual(
+                        (Path(temp) / "issue_number.txt").exists(), downloaded
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()
