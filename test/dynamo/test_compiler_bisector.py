@@ -261,24 +261,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
-    def test_bad_lowering(self):
-        def test_fn():
-            torch._dynamo.reset()
-            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
-
-                def my_func(x):
-                    return ((x * -1) - 0.01).relu()
-
-                inp = torch.rand([100], device=GPU_TYPE)
-
-                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "lowerings")
-        self.assertEqual(out.bisect_number, 2)
-        self.assertTrue("relu" in out.debug_info)
-
     def test_eager_backend(self):
         # should indicate problem with first backend
         def test_fn():
@@ -422,6 +404,25 @@ class TestCompilerBisectorDevice(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    def test_bad_lowering(self, device):
+        def test_fn():
+            torch._dynamo.reset()
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+
+                def my_func(x):
+                    return ((x * -1) - 0.01).relu()
+
+                inp = torch.rand([100], device=device)
+
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "lowerings")
+        self.assertEqual(out.bisect_number, 2)
+        self.assertTrue("relu" in out.debug_info)
 
 
 instantiate_device_type_tests(

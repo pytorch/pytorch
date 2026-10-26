@@ -405,7 +405,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            grad_input_n.data_ptr<scalar_t>(),
+            grad_input_n.mutable_data_ptr<scalar_t>(),
             is_channels_last);
       }
 

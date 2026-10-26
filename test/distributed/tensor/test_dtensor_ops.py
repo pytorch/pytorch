@@ -146,6 +146,7 @@ dtensor_fails = {
     xfail("nn.functional.ctc_loss"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("transpose"),
+    xfail("polar"),
     # conv stride+padding: TP convolution rejects stride != 1 with padding
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -277,13 +278,8 @@ dtensor_compiled_fails = {
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.logsigmoid"),
     xfail("scatter"),
-    # False positives: these have no sharding strategy and their
-    # eager DTensor failure is registered elsewhere.
-    xfail("nn.functional.multilabel_soft_margin_loss"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/181204
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
@@ -291,6 +287,17 @@ dtensor_compiled_fails = {
     xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
+
+if not torch._dynamo.config.use_cpp_fake_tensor:
+    dtensor_compiled_fails |= {
+        # The log_sigmoid_forward decomp checks self.is_cuda, which on a Python
+        # FakeTensor dispatches prim::device into PlacementTrackingMode, where
+        # sharding propagation fails. C++ FakeTensor answers it from the
+        # TensorImpl without dispatching.
+        xfail("nn.functional.binary_cross_entropy_with_logits"),
+        xfail("nn.functional.logsigmoid"),
+        xfail("nn.functional.multilabel_soft_margin_loss"),
+    }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
 # These are excluded from TestCompiledDTensorOps skip list since we don't check numerics.
@@ -374,7 +381,6 @@ dtensor_fails_no_strategy = {
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.unfold"),
     xfail("nonzero"),
-    xfail("polar"),
     xfail("put"),
     xfail("renorm"),
     xfail("scatter_reduce", "amax"),
