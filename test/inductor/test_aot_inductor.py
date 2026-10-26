@@ -1243,6 +1243,51 @@ int64_t count_inconsistent_runs(const std::string& so_path, int64_t num_swaps) {
         self.assertEqual(output, expected)
         del junk
 
+    def test_swap_waits_for_inflight_runs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("needs CUDA streams")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(1024, 1024, device=device)
+
+            def forward(self, x):
+                return x @ self.w
+
+        x = torch.randn(64, 1024, device=self.device)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=(x,),
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        expected = model(x)
+        self.assertEqual(runner.run([x])[0], expected)
+        new_w = torch.randn(1024, 1024, device=self.device)
+        runner.update_constant_buffer({"L__self___w": new_w}, True, False)
+        # Warm up what the sequence below runs. A cudaMalloc or a kernel loaded
+        # lazily there would serialize the streams and hide the race.
+        nan_w = torch.full_like(new_w, float("nan"))
+        side = torch.cuda.Stream()
+        with torch.cuda.stream(side):
+            runner.run([x])
+        torch.cuda.synchronize()
+
+        # Queue a run behind a long sleep on the side stream, swap, then
+        # overwrite the now-inactive buffer in place. The queued run must still
+        # read the weights that were active when it was launched.
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(5e8))
+            output = runner.run([x])[0]
+        runner.swap_constant_buffer()
+        runner.update_constant_buffer({"L__self___w": nan_w}, True, False)
+        torch.cuda.synchronize()
+        self.assertEqual(output, expected)
+        self.assertEqual(runner.run([x])[0], x @ new_w)
+
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
         if self.device == "mps":
             raise unittest.SkipTest("MPS baseline mismatch")
