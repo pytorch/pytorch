@@ -36,6 +36,7 @@ __all__ = [
     "reorderable_logging_functions",
     "force_disable_caches",
     "compile_on_one_rank",
+    "precompile_freeze_never_run_backward",
 ]
 
 
@@ -118,6 +119,16 @@ compile_on_one_rank: bool = Config(
 When enabled, device- and rank-specific values (devices, process groups) are computed at
 runtime via custom ops rather than baked in at compile time, so a graph can be compiled on
 one rank and run on all ranks. Read across the stack: make_fx, inductor, and distributed.
+"""
+
+precompile_freeze_never_run_backward: bool = Config(default=False)
+"""
+When a precompile capture finalizes its runtime cache, freeze a backward Triton
+kernel that no captured step ran with its first config that loads, instead of
+failing the capture. A training capture that lowers each backward with its forward
+can compile a backward the captured steps never execute. Serving that kernel then
+runs a config that was never benchmarked; for reductions its numerics can differ
+from a tuned run.
 """
 
 dynamic_sources: str = Config(

@@ -460,8 +460,12 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         frozen = _pickle_snapshot(key, kernel, snapshot, rejected)
         if frozen is not None:
             return frozen
-    if rejected and all(
-        entry["reason"] == "launcher_count_not_one" for entry in rejected
+    import torch
+
+    if (
+        torch.compiler.config.precompile_freeze_never_run_backward
+        and rejected
+        and all(entry["reason"] == "launcher_count_not_one" for entry in rejected)
     ):
         frozen = _freeze_never_run_backward(key, ordered, rejected)
         if frozen is not None:
@@ -484,15 +488,14 @@ def _freeze_never_run_backward(
     instances: list[CachingAutotuner],
     rejected: list[dict[str, object]],
 ) -> bytes | None:
-    """Freeze a backward kernel no captured step ran, using a config that loads.
+    """Freeze a backward kernel no captured step ran, with its first usable config.
 
-    A training capture lowers each backward with its forward, so it can compile
-    a backward that no captured step runs, e.g. one whose outputs were unused.
-    Such a kernel never autotuned down to one launcher, or never built one. Its
-    configs are semantically equivalent (not bitwise identical for reductions),
-    so freeze the first static one that loads and would not tune on launch,
-    rather than fail the whole capture. Forward kernels still have to run inside
-    the capture block.
+    Opt-in via ``torch.compiler.config.precompile_freeze_never_run_backward``.
+    Such a kernel never autotuned down to one launcher, or never built one. A
+    kernel without launchers builds them now, through the autotuner's own load
+    path, as its first run would: that drops the configs that cannot load on its
+    device. The configs left are semantically equivalent, so take the first that
+    would not tune on launch and whose binary can be retained.
     """
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
@@ -500,26 +503,32 @@ def _freeze_never_run_backward(
         if not getattr(kernel, "is_backward", False):
             continue
         with kernel.lock:
-            loaded = bool(kernel.launchers)
+            if not kernel.launchers:
+                try:
+                    kernel._make_launchers()
+                except RuntimeError as exc:
+                    diagnostic = _triton_export_diagnostic(kernel, "load_failed")
+                    diagnostic["error"] = str(exc)
+                    rejected.append(diagnostic)
+                    continue
             candidates = [
                 getattr(launcher, "_compile_result", None)
                 for launcher in kernel.launchers
-            ] or list(kernel.compile_results)
-            for index, result in enumerate(candidates):
-                if not isinstance(result, StaticTritonCompileResult):
-                    continue
-                reason = _tuning_rejection(kernel, result)
-                if reason is None and not loaded:
-                    reason = _load_rejection(result)
+            ]
+        for index, candidate in enumerate(candidates, start=1):
+            with kernel.lock:
+                if not isinstance(candidate, StaticTritonCompileResult):
+                    reason: str | None = "non_static_compile_result"
+                else:
+                    reason = _tuning_rejection(kernel, candidate)
                 if reason is not None:
                     rejected.append(_triton_export_diagnostic(kernel, reason))
                     continue
+                result = cast(StaticTritonCompileResult, candidate)
                 snapshot = _snapshot_kernel(kernel, result)
-                break
-            else:
+            frozen = _pickle_snapshot(key, kernel, snapshot, rejected)
+            if frozen is None:
                 continue
-        frozen = _pickle_snapshot(key, kernel, snapshot, rejected)
-        if frozen is not None:
             log.warning(
                 "precompile: froze never-run backward Triton kernel %s with "
                 "candidate %d of %d (config %s); serving it runs that config "
@@ -527,23 +536,9 @@ def _freeze_never_run_backward(
                 kernel.inductor_meta.get("kernel_name"),
                 index,
                 len(candidates),
-                result.config.kwargs,
+                result.config,
             )
             return frozen
-    return None
-
-
-def _load_rejection(result: StaticTritonCompileResult) -> str | None:
-    """Why a never-loaded ``result`` cannot launch on this device, or None.
-
-    The autotuner skips configs that fail to load (e.g. too much shared memory),
-    but a frozen kernel carries only the one it was given.
-    """
-    try:
-        copy.copy(result).make_launcher()
-    except Exception:
-        log.debug("precompile: static Triton config failed to load", exc_info=True)
-        return "launch_failed"
     return None
 
 
@@ -576,7 +571,7 @@ def _pickle_snapshot(
     saved, saved_result = snapshot
     saved.prepare_for_pickle()
     saved.compile_results = [saved_result]
-    saved._reload_kernel = None
+    saved._reload_kernel = None  # pyrefly: ignore [bad-assignment]
     try:
         _retain_cubin(saved_result)
     except (OSError, RuntimeError) as exc:

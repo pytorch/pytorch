@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import pickle
+import re
 import shutil
 import subprocess
-import re
 import sys
 import sysconfig
 import tempfile
