@@ -31,6 +31,7 @@ from labels import (
     is_sub_queue,
     load_templates,
     load_valid_labels,
+    PTD_TRIAGED,
     strip_redundant,
     TRIAGE_SKILL,
 )
@@ -160,7 +161,11 @@ def plan_effects(
         effects.notes.append("plan chose to skip")
         return effects
 
-    requested = [label for label in plan.get("labels", []) if label != BOT_TRIAGED]
+    requested = [
+        label
+        for label in plan.get("labels", [])
+        if label not in (BOT_TRIAGED, PTD_TRIAGED)
+    ]
     # Stage 2 routes to the parent queue only. The distributed triage picks the
     # sub-queue, and it stops early on an issue that already has one.
     sub_queues = [label for label in requested if is_sub_queue(label)]
@@ -196,6 +201,9 @@ def plan_effects(
         effects.notes.append(f"dropped redundant labels {redundant}")
     if forbidden or (not labels and (unknown or decision in LABELING_DECISIONS)):
         labels.append(TRIAGE_REVIEW)
+    if "triaged" in labels and TRIAGE_REVIEW in existing_labels | set(labels):
+        effects.notes.append("dropped 'triaged': the issue needs human review")
+        labels = [label for label in labels if label != "triaged"]
 
     keys = list(dict.fromkeys(plan.get("templates", [])))
     effects.close = decision in CLOSING_TEMPLATES
