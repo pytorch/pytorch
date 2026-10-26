@@ -39,8 +39,8 @@ class ModelPool {
 
   // Takes ownership of a model. The pool is filled before it is shared.
   Model& add_model(std::unique_ptr<Model> model) {
-    available_models_.push_back(model.get());
     models_.push_back(std::move(model));
+    available_models_.push_back(models_.back().get());
     return *models_.back();
   }
 
@@ -48,13 +48,17 @@ class ModelPool {
     return models_.size();
   }
 
-  // Every model has the same constant metadata, so any one of them can answer
-  // for all of them.
-  Model& any_model() {
+  // Always the first model. The container loads and owns the per-model
+  // constant state (load_constants(), did_call_load_constants(),
+  // update_constants_from_blob()) through it, and it answers for the constant
+  // metadata that every model shares.
+  Model& primary_model() {
+    AOTI_RUNTIME_CHECK(!models_.empty(), "No available models in pool!");
     return *models_.front();
   }
 
-  const Model& any_model() const {
+  const Model& primary_model() const {
+    AOTI_RUNTIME_CHECK(!models_.empty(), "No available models in pool!");
     return *models_.front();
   }
 
