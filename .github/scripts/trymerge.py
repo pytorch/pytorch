@@ -16,7 +16,7 @@ from functools import cache, partial
 from pathlib import Path
 from re import Pattern
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from warnings import warn
 
 import yaml
@@ -498,6 +498,10 @@ IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 # same second and fail together, as on #199675 and #201134, whose merges were then
 # blocked by failures the AI CI Advisor had cleared.
 DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
+# Longest a Dr.CI socket may sit silent. HUD caps the endpoint at 900 s
+# (maxDuration in drci.ts) and sends nothing until it finishes, so only a
+# connection that is truly stuck waits longer.
+DRCI_TIMEOUT_SECONDS = 960
 # Set when a Dr.CI call has used up every attempt, cleared by the next success.
 # While set, retries do not pause: one merge calls Dr.CI many times, so during an
 # outage the pauses are paid once per process rather than once per call.
@@ -2624,8 +2628,9 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
     global _drci_unavailable
+    delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
     pause = False
-    for attempt, delay in enumerate((0, *DRCI_RETRY_DELAYS_SECONDS)):
+    for attempt, delay in enumerate(delays):
         if pause and not _drci_unavailable:
             time.sleep(delay)
         try:
@@ -2639,24 +2644,51 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 },
                 method="POST",
                 reader=json.load,
+                timeout=DRCI_TIMEOUT_SECONDS,
             )
             _drci_unavailable = False
             return failures.get(str(pr_num), {}) if failures else {}
         except HTTPError as err:
-            # Dr.CI answers 400 for any exception it hits while recomputing and
-            # names it only in the body, so the status line alone says nothing.
+            # gh_fetch_url has already printed the status. Dr.CI answers 400 for
+            # any exception it hits while recomputing and names it only in the
+            # body.
             print(
-                f"Attempt {attempt} to call Dr.CI failed with HTTP {err.code}: "
-                f"{_http_error_body(err)}"
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed, "
+                f"response body: {_http_error_body(err)}"
             )
-            pause = err.code in (400, 429) or err.code >= 500
+            pause = _drci_retry_may_help(err)
         except Exception as e:
-            # No HTTP status (e.g. no route to HUD, as on internal runners, or
-            # a body that is not JSON), which waiting is not expected to fix.
-            print(f'Attempt {attempt} to call Dr.CI failed with "{e}"')
-            pause = False
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed "
+                f'with "{e}"'
+            )
+            pause = _drci_retry_may_help(e)
     _drci_unavailable = True
     return None
+
+
+def _drci_retry_may_help(err: Exception) -> bool:
+    """A guess from the exception type at whether pausing before the next
+    attempt could help."""
+    if isinstance(err, HTTPError):
+        return err.code in (400, 408, 429) or err.code >= 500
+    if isinstance(err, URLError):
+        # urlopen wraps errors raised while connecting and sending. DNS
+        # failures, refused connections and no route (as on internal runners)
+        # do not clear by waiting; a connection broken or timed out mid-send
+        # may.
+        return isinstance(
+            err.reason,
+            (
+                ConnectionResetError,
+                ConnectionAbortedError,
+                BrokenPipeError,
+                TimeoutError,
+            ),
+        )
+    # Raised while waiting for or reading the response, e.g. RemoteDisconnected,
+    # IncompleteRead, a timeout, or JSONDecodeError on a cut-off body.
+    return True
 
 
 def _http_error_body(err: HTTPError, limit: int = 500) -> str:

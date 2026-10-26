@@ -16,6 +16,7 @@ import os
 import warnings
 from dataclasses import replace
 from hashlib import sha256
+from http.client import RemoteDisconnected
 from io import BytesIO
 from itertools import pairwise
 from types import MethodType
@@ -23,7 +24,7 @@ from typing import Any, TYPE_CHECKING
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError, URLError
 
-from github_utils import gh_graphql, GHGraphQLError, GitHubComment
+from github_utils import gh_fetch_url, gh_graphql, GHGraphQLError, GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -71,6 +72,7 @@ from trymerge import (
     check_greenlight_reviewed_head_sha,
     DRCI_CHECKRUN_NAME,
     DRCI_RETRY_DELAYS_SECONDS,
+    DRCI_TIMEOUT_SECONDS,
     ensure_mergeable_labels,
     find_matching_merge_rule,
     format_failure_comment,
@@ -4449,7 +4451,7 @@ class TestDrciRetries(TestCase):
         mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
         self.assertEqual(mock_fetch.call_count, 2)
         logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
-        self.assertIn("HTTP 400", logged)
+        self.assertIn(f"Attempt 1 of {len(DRCI_RETRY_DELAYS_SECONDS) + 1}", logged)
         self.assertIn('{"error": "boom"}', logged)
 
     def test_first_success_does_not_pause(
@@ -4459,6 +4461,17 @@ class TestDrciRetries(TestCase):
         self.assertEqual(get_drci_classifications(1), {"FLAKY": []})
         mock_sleep.assert_not_called()
         self.assertEqual(mock_fetch.call_count, 1)
+        self.assertEqual(mock_fetch.call_args.kwargs["timeout"], DRCI_TIMEOUT_SECONDS)
+
+    def test_unreadable_error_body_still_retries(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"")
+        err.read = mock.Mock(side_effect=TimeoutError("stalled"))  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
 
     def test_logged_error_body_is_bounded(
         self, mock_fetch: Any, mock_sleep: Any
@@ -4488,10 +4501,34 @@ class TestDrciRetries(TestCase):
             list(DRCI_RETRY_DELAYS_SECONDS),
         )
 
-    def test_any_exception_is_retried(self, mock_fetch: Any, mock_sleep: Any) -> None:
-        mock_fetch.side_effect = [TimeoutError("slow"), {}]
-        with mock.patch("builtins.print"):
-            self.assertEqual(get_drci_classifications(1), {})
+    def test_dropped_connection_pauses(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        for dropped in (
+            RemoteDisconnected("closed"),
+            URLError(ConnectionResetError("reset")),
+            URLError(TimeoutError("timed out")),
+            TimeoutError("timed out"),
+            json.JSONDecodeError("cut off", "{", 1),
+            _drci_http_error(408, b""),
+        ):
+            mock_fetch.reset_mock()
+            mock_sleep.reset_mock()
+            mock_fetch.side_effect = [dropped, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+            mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+            self.assertEqual(mock_fetch.call_count, 2)
+
+
+class TestFetchUrlTimeout(TestCase):
+    @mock.patch("github_utils.urlopen")
+    def test_timeout_reaches_urlopen_only_when_given(self, mock_urlopen: Any) -> None:
+        url = "https://hud.pytorch.org/x"
+        gh_fetch_url(url, reader=lambda conn: None, timeout=DRCI_TIMEOUT_SECONDS)
+        self.assertEqual(
+            mock_urlopen.call_args.kwargs, {"timeout": DRCI_TIMEOUT_SECONDS}
+        )
+        gh_fetch_url(url, reader=lambda conn: None)
+        self.assertEqual(mock_urlopen.call_args.kwargs, {})
 
 
 if __name__ == "__main__":
