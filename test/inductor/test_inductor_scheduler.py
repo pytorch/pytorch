@@ -1844,7 +1844,7 @@ class TestScheduler(TestCase):
         consumer.read_writes.reads = OrderedSet([read])
         consumer.unmet_dependencies = OrderedSet([read])
         plan = Mock(
-            nested_stage=Mock(grouped_nodes=(consumer,))
+            nested_stage=Mock(grouped_nodes=(consumer,), lane_accesses=())
             if ownership != "none"
             else None,
             sub_parent_stages=(Mock(access_relations=(), epilogue_nodes=(consumer,)),)
@@ -1860,6 +1860,38 @@ class TestScheduler(TestCase):
                 producer, consumer, plan
             )
         expected = (MemoryDepMatch(write, read),) if ownership == "nested" else None
+        self.assertEqual(matches, expected)
+
+    @parametrize("planned_lanes", [(3,), (4,), ()])
+    def test_nested_dependency_matches_require_planned_lane(self, planned_lanes):
+        d0, w0 = sympy.symbols("d0 w0", integer=True, nonnegative=True)
+        write = MemoryDep("buf", w0, (w0,), (64,))
+        read = MemoryDep("buf", 16 * d0 + 3, (d0,), (4,))
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
+        lanes = tuple(
+            SubParentAccessRelation(
+                (write,), MemoryDep("buf", 16 * d0 + lane, (d0,), (4,)), lane, True
+            )
+            for lane in planned_lanes
+        )
+        plan = Mock(
+            requires_persistent=False,
+            nested_stage=Mock(grouped_nodes=(consumer,), lane_accesses=lanes),
+            sub_parent_stages=(),
+        )
+        plan.sub_parent_access_pairs.return_value = ()
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            matches = scheduler._prove_staged_fusion_dependencies(
+                producer, consumer, plan
+            )
+        expected = (MemoryDepMatch(write, read),) if planned_lanes == (3,) else None
         self.assertEqual(matches, expected)
 
     @parametrize("reason", ["multiwrite", "tmp", "atomic", "missing_axis"])
@@ -2076,9 +2108,152 @@ class TestScheduler(TestCase):
         grouped.get_nodes.return_value = (grouped,)
         context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
 
-        self.assertFalse(
-            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        self.assertIsNone(
+            NestedReduction._try_get_r_grouped_lane_accesses(
+                outer, grouped, context, ()
+            )
         )
+
+    @parametrize(
+        "case",
+        [
+            "local_writer",
+            "parent_writer",
+            "early_parent_writer",
+            "unaligned_base",
+            "strided_write",
+            "not_reduced",
+            "two_writes",
+            "atomic",
+            "reduction_writer",
+            "lane_out_of_range",
+            "symbolic_lane",
+            "row_boundary",
+        ],
+    )
+    def test_nested_grouped_lane_access_conditions(self, case):
+        # Parent [4, 64] in groups of 16; the consumer reads lane 3 of each group.
+        d0, d1, d2, e0, e1 = sympy.symbols("d:3 e:2", integer=True, nonnegative=True)
+        local_ranges, reduced_ranges = {d0: 4, d1: 4, d2: 16}, {d0: 4, d1: 4}
+        base = 64 * d0 + 16 * d1
+        write_index, read_index = {
+            "unaligned_base": (base + d2 + 1, base + 4),
+            "strided_write": (2 * (base + d2), 2 * base + 6),
+            "lane_out_of_range": (base + d2, base + 16),
+            "symbolic_lane": (base + d2, 64 * d0 + 17 * d1),
+        }.get(case, (base + d2, base + 3))
+        mode = "atomic_add" if case == "atomic" else None
+        write = MemoryDep("src", write_index, (d0, d1, d2), (4, 4, 16), mode)
+        writes, writer_ranges = [write], local_ranges
+        if case == "two_writes":
+            writes.append(MemoryDep("src", write_index + 256, (d0, d1, d2), (4, 4, 16)))
+        elif case in ("parent_writer", "early_parent_writer"):
+            write = MemoryDep("src", 64 * e0 + e1, (e0, e1), (4, 64))
+            writes, writer_ranges = [write], {e0: 4, e1: 64}
+        read = MemoryDep("src", read_index, (d0, d1), (4, 4))
+        consumer_ranges = local_ranges if case == "not_reduced" else reduced_ranges
+        if case == "row_boundary":
+            read = MemoryDep("src", 128 * d0 + 16 * d1 + 3, (d0, d1), (2, 8))
+            consumer_ranges = {d0: 2, d1: 8}
+
+        read_writes = {}
+
+        def snode(name, var_ranges, reads, writes, is_reduction=False):
+            node = self._mock_base_snode(name)
+            node.__class__ = SchedulerNode
+            node.node = Mock(spec=ir.ComputedBuffer)
+            node._sizes = ()
+            node.mutation_renames = {}
+            node.is_reduction.return_value = is_reduction
+            node.get_buffer_names.return_value = OrderedSet(dep.name for dep in writes)
+            deps = (OrderedSet(reads), OrderedSet(writes), OrderedSet())
+            read_writes[node._body] = ReadWrites(*deps, var_ranges=var_ranges)
+            return node
+
+        writer = snode("writer", writer_ranges, (), writes, case == "reduction_writer")
+        grouped_read = MemoryDep("src", write_index, (d0, d1, d2), (4, 4, 16))
+        grouped = snode("grouped", local_ranges, (grouped_read,), (), True)
+        grouped.get_ranges.return_value = ([4, 4], [16])
+        consumer = snode("consumer", consumer_ranges, (read,), ())
+        Domain = NestedReduction.PointwiseDomain
+        local, reduced = Domain.LOCAL_REDUCTION_INPUT, Domain.REDUCED
+        domains = [(consumer, local if case == "not_reduced" else reduced)]
+        outer, grouped_node = Mock(), Mock()
+        if case == "parent_writer":
+            outer.get_nodes.return_value = ()
+            grouped_node.get_nodes.return_value = (writer, grouped, consumer)
+            domains.append((writer, Domain.PARENT_FULL))
+        else:
+            outer.get_nodes.return_value = (writer,)
+            grouped_node.get_nodes.return_value = (grouped, consumer)
+            if case != "early_parent_writer":
+                domains.append((writer, local))
+        context = Mock(
+            grouped_axis=NestedReduction.GroupedAxis.R,
+            grouped_reduction=grouped,
+            parent_full_domain=(4, 64),
+            group_size=16,
+        )
+
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            patch(
+                "torch._inductor.dependencies.extract_read_writes",
+                side_effect=lambda body, *sizes, normalize: read_writes[body],
+            ),
+        ):
+            result = NestedReduction._try_get_r_grouped_lane_accesses(
+                outer, grouped_node, context, domains
+            )
+
+        if case in ("local_writer", "parent_writer"):
+            self.assertEqual(
+                result, (SubParentAccessRelation((write,), read, 3, True),)
+            )
+        else:
+            self.assertIsNone(result)
+
+    @parametrize("case", ["local_source", "sub_parent", "sub_parent_no_lanes"])
+    def test_nested_plan_restricts_lane_sources(self, case):
+        writer = self._mock_schedule_node("writer", writes=("src",))
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        outer = Mock(group=(None, (4, 64)))
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("src",), writes=("amax",), is_reduction=True
+        )
+        consumer = self._mock_schedule_node("consumer", reads=("src", "amax"))
+        epilogue = self._mock_schedule_node("epilogue", reads=("amax",))
+        grouped_node = Mock(group=(None, (16, 16)))
+        grouped_node.get_nodes.return_value = (grouped, consumer, epilogue)
+        Domain = NestedReduction.PointwiseDomain
+        domains = [(consumer, Domain.REDUCED), (writer, Domain.LOCAL_REDUCTION_INPUT)]
+        if case.startswith("sub_parent"):
+            domains.append((epilogue, Domain.SUB_PARENT))
+        lanes = () if case == "sub_parent_no_lanes" else (Mock(),)
+
+        with (
+            patch.object(NestedReduction.PointwiseDomainContext, "create"),
+            patch.object(
+                NestedReduction,
+                "_classify_nested_pointwise_nodes",
+                return_value=domains,
+            ),
+            patch.object(
+                NestedReduction, "_try_get_r_grouped_lane_accesses", return_value=lanes
+            ),
+            patch.object(NestedReduction, "_plan_nested_sub_parent_stage"),
+        ):
+            plan = NestedReduction.plan_from_topology(
+                outer, grouped_node, grouped, 16, NestedReduction.GroupedAxis.R
+            )
+
+        if case in ("local_source", "sub_parent_no_lanes"):
+            self.assertEqual(plan.nested_stage.lane_accesses, lanes)
+        else:
+            self.assertIsNone(plan)
 
     @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
     def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
