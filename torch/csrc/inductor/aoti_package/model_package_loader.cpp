@@ -7,6 +7,7 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
+#include <c10/util/irange.h>
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
@@ -521,7 +522,7 @@ class RAIIMinizArchive {
     std::vector<std::string> zip_filenames{};
     zip_filenames.reserve(num_zip_files);
 
-    for (unsigned i{0}; i < num_zip_files; ++i) {
+    for (const auto i : c10::irange(num_zip_files)) {
       // filename_buf_size == 0 returns the filename length, including null
       // terminator
       const auto zip_filename_len{

@@ -2009,7 +2009,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -2988,7 +2988,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3027,7 +3027,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,

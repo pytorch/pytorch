@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -243,7 +244,7 @@ class TeamManager {
 
     // Create new teams if what's requested is more than what we have
     int stride = 0; // stride in globe, uninitialized
-    for (int i = 0; i < need_n; ++i) {
+    for (const auto i : c10::irange(need_n)) {
       if (team_pool[i] != NVSHMEM_TEAM_INVALID) {
         continue;
       }
@@ -251,7 +252,7 @@ class TeamManager {
       if (stride == 0) { // Check only once
         TORCH_CHECK(global_ranks.size() > 1);
         stride = global_ranks[1] - global_ranks[0];
-        for (size_t r = 1; r < global_ranks.size(); ++r) {
+        for (const auto r : c10::irange(1, global_ranks.size())) {
           TORCH_CHECK(global_ranks[r] - global_ranks[r - 1] == stride);
         }
       }

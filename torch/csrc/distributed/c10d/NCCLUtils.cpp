@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
 #ifdef USE_C10D_NCCL
+#include <c10/util/irange.h>
 #include <fmt/format.h>
 #include <thread>
 #include <vector>
@@ -43,7 +44,7 @@ void NCCLComm::setUniqueHash(ncclUniqueId ncclId) {
 
   fmt::memory_buffer buf;
   buf.reserve(NCCL_UNIQUE_ID_BYTES * 2); // 2 hex chars per byte
-  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+  for (const auto i : c10::irange(NCCL_UNIQUE_ID_BYTES)) {
     fmt::format_to(
         std::back_inserter(buf), "{:02x}", static_cast<int>(bytes[i]));
   }
@@ -696,7 +697,7 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
         // get the collective finished if launched on GPU and hash its output.
         AT_CUDA_CHECK(
             cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost));
-        for (size_t i = 0; i < data_size; ++i) {
+        for (const auto i : c10::irange(data_size)) {
           // Update the hash for each byte in the tensor
           hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
         }
