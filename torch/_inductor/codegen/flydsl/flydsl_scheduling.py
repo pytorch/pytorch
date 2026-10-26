@@ -203,6 +203,7 @@ class FlyDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
+            "template_name": ftb.template.name,
             "tensor_names": tuple(
                 arg_name.removeprefix("arg_")
                 for arg_name, _ in kernel._template_input_args

@@ -3047,6 +3047,11 @@ class GraphLowering(torch.fx.Interpreter):
                 extra_flags=(
                     *self.wrapper_code.aot_kernel_objects,
                     *self.wrapper_code.external_kernel_libs,
+                    *self.wrapper_code.aot_link_options,
+                    *(
+                        f"-l:{library}"
+                        for library in self.wrapper_code.aot_link_libraries
+                    ),
                 ),
             )
 

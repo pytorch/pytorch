@@ -25,7 +25,7 @@ import functools
 import os
 
 import torch
-from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+from torch._inductor.runtime.flydsl_cache import compile_flydsl, run_cached_flydsl
 
 
 # NOTE: no flydsl_compat. `_buffer_ops` implements the descriptor loads/stores
@@ -978,7 +978,7 @@ def _compile_gfx950(jit_func, *args):
             f"MXFP8 grouped GEMM requires gfx950, but FlyDSL is targeting {arch!r}; "
             "set FLYDSL_GPU_ARCH if autodetection picked the wrong arch"
         )
-    return flyc.compile(jit_func, *args)
+    return compile_flydsl(flyc.compile, jit_func, *args)
 
 
 def _row_windows(M, K, N, offs, block_r=BLOCK_R):

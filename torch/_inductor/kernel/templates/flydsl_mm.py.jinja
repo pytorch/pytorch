@@ -9,7 +9,9 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import
     {% if IS_MXFP %}gemm_mxfp_gfx950{% else %}gemm_gfx950{% endif %} as _kernel,
 )
 from torch._inductor.runtime.flydsl_cache import (
+    compile_flydsl,
     configure_flydsl_cache_dir,
+    is_capturing_flydsl_compiles,
     run_cached_flydsl,
     temporary_env,
 )
@@ -98,8 +100,8 @@ def _inductor_tensor_arg(tensor):
             "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
             "by the FlyDSL precompile path"
         )
-    if flydsl_compile_only:
-        flyc.compile(_kernel, *compile_args)
+    if flydsl_compile_only or is_capturing_flydsl_compiles():
+        compile_flydsl(flyc.compile, _kernel, *compile_args)
     else:
         run_cached_flydsl(
             _kernel,
