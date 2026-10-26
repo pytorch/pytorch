@@ -17,9 +17,9 @@
 
 namespace torch::aot_inductor {
 
-// The model instances that AOTInductorModelContainer hands out to concurrent
-// run() calls. Model must provide is_finished() and wait_for_completion();
-// Stream is an opaque device stream handle.
+// Owns the model instances that AOTInductorModelContainer hands out to
+// concurrent run() calls. Model must provide is_finished() and
+// wait_for_completion(); Stream is an opaque device stream handle.
 template <typename Model, typename Stream>
 class ModelPool {
  public:
@@ -32,14 +32,82 @@ class ModelPool {
     std::unique_lock<std::mutex> lock_;
   };
 
+  // Owns a checked-out model. Dropping the lease returns the model to the
+  // available pool, which is right for a run that never reached the device. A
+  // run that did reach the device ends with mark_pending() instead: its work
+  // may still be in flight, so the model is reused only once it has finished.
+  class Lease {
+   public:
+    Lease(const Lease&) = delete;
+    Lease& operator=(const Lease&) = delete;
+    Lease(Lease&& other) noexcept : pool_(other.pool_), model_(other.model_) {
+      other.model_ = nullptr;
+    }
+    Lease& operator=(Lease&&) = delete;
+
+    ~Lease() {
+      if (model_ != nullptr) {
+        pool_->return_model_to_available(model_);
+      }
+    }
+
+    Model* operator->() const {
+      AOTI_RUNTIME_CHECK(
+          model_ != nullptr, "The lease no longer holds a model");
+      return model_;
+    }
+
+    Model& operator*() const {
+      return *operator->();
+    }
+
+    void mark_pending() {
+      AOTI_RUNTIME_CHECK(
+          model_ != nullptr, "The lease no longer holds a model");
+      pool_->return_model_to_pending(model_);
+      model_ = nullptr;
+    }
+
+   private:
+    friend class ModelPool;
+    Lease(ModelPool& pool, Model* model) : pool_(&pool), model_(model) {}
+
+    ModelPool* pool_;
+    Model* model_;
+  };
+
   void reserve(size_t num_models) {
     models_.reserve(num_models);
     available_models_.reserve(num_models);
   }
 
-  void add_model(Model* model) {
-    models_.push_back(model);
-    available_models_.push_back(model);
+  // Takes ownership of a model. The pool is filled before it is shared.
+  Model& add_model(std::unique_ptr<Model> model) {
+    models_.push_back(std::move(model));
+    available_models_.push_back(models_.back().get());
+    return *models_.back();
+  }
+
+  size_t size() const {
+    return models_.size();
+  }
+
+  // The first-added model. Its identity is stable for the pool's lifetime.
+  // The pool must not be empty.
+  Model& primary_model() {
+    return *models_.front();
+  }
+
+  const Model& primary_model() const {
+    return *models_.front();
+  }
+
+  // The caller must keep runs from using the models meanwhile.
+  template <typename Fn>
+  void for_each_model(Fn&& fn) {
+    for (auto& model : models_) {
+      fn(*model);
+    }
   }
 
   // Stream affinity is intended for controlled multi-stream benchmarking with
@@ -79,28 +147,19 @@ class ModelPool {
       return AOTI_STREAM_AFFINITY_UNBOUND;
     }
     for (size_t i = 0; i < models_.size(); ++i) {
-      if (models_[i] == stream_it->second) {
+      if (models_[i].get() == stream_it->second) {
         return static_cast<int64_t>(i);
       }
     }
     AOTI_RUNTIME_CHECK(false, "Stream affinity refers to an unknown model");
   }
 
-  Model* get_available_model() {
-    std::unique_lock lk(models_mutex_);
-    return checkout_available_model(lk);
+  Lease checkout() {
+    return Lease(*this, get_available_model());
   }
 
-  Model* get_available_model(Stream stream) {
-    std::unique_lock lk(models_mutex_);
-#if defined(USE_CUDA) || defined(USE_XPU)
-    if (use_stream_affinity_ && stream != nullptr) {
-      return get_stream_affine_model(stream, lk);
-    }
-#else
-    (void)stream;
-#endif
-    return checkout_available_model(lk);
+  Lease checkout(Stream stream) {
+    return Lease(*this, get_available_model(stream));
   }
 
   StreamLock acquire_stream_lock(Stream stream) {
@@ -125,6 +184,29 @@ class ModelPool {
 #endif
   }
 
+  // For run_single_threaded(), which bypasses the pool's locking entirely.
+  Model* first_available_model_unsynchronized() {
+    return available_models_[0];
+  }
+
+ private:
+  Model* get_available_model() {
+    std::unique_lock lk(models_mutex_);
+    return checkout_available_model(lk);
+  }
+
+  Model* get_available_model(Stream stream) {
+    std::unique_lock lk(models_mutex_);
+#if defined(USE_CUDA) || defined(USE_XPU)
+    if (use_stream_affinity_ && stream != nullptr) {
+      return get_stream_affine_model(stream, lk);
+    }
+#else
+    (void)stream;
+#endif
+    return checkout_available_model(lk);
+  }
+
   void return_model_to_available(Model* model) {
     {
       std::lock_guard lk(models_mutex_);
@@ -146,12 +228,6 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  // For run_single_threaded(), which bypasses the pool's locking entirely.
-  Model* first_available_model_unsynchronized() {
-    return available_models_[0];
-  }
-
- private:
   Model* checkout_available_model(std::unique_lock<std::mutex>& lk) {
     return take_available_model(lk, /*prefer_unbound=*/use_stream_affinity_);
   }
@@ -319,8 +395,8 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  // All model instances, in the container's index order.
-  std::vector<Model*> models_;
+  // Every model instance, in the container's index order.
+  std::vector<std::unique_ptr<Model>> models_;
 
   // Holds the model instances available for inference. When stream affinity
   // is enabled, each model is in exactly one execution state under
