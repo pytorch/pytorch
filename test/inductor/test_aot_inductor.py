@@ -95,6 +95,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     IS_X86,
     parametrize,
@@ -912,6 +913,143 @@ class AOTInductorTestsTemplate:
         runner.swap_constant_buffer()
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "cpp_extension doesn't work here")
+    @unittest.skipIf(
+        IS_WINDOWS or IS_MACOS or TEST_WITH_ROCM, "uses CUDA and pthread affinity"
+    )
+    def test_run_refolds_buffer_swapped_in_during_lazy_fold(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("needs CUDA")
+
+        # run() drops every lock between folding the active buffer and running
+        # on it. The driver keeps swapping in a buffer that was never folded
+        # while two threads run inference, all three sharing one CPU so that a
+        # swap regularly lands in that gap. The bias is not folded, so a run on
+        # an unfolded buffer pairs a stale folded weight with the new bias and
+        # matches none of the weight sets. Python threads cannot drive this:
+        # the runner's run() binding holds the GIL.
+        driver_source = r"""
+#include <ATen/ATen.h>
+#include <cuda_runtime_api.h>
+#include <pthread.h>
+#include <sched.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+
+#include <atomic>
+#include <chrono>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+int64_t count_inconsistent_runs(const std::string& so_path, int64_t num_swaps) {
+  int device = 0;
+  cudaGetDevice(&device);
+  torch::inductor::AOTIModelContainerRunnerCuda runner(so_path, 2);
+  const auto opts = at::TensorOptions().device(at::kCUDA, device);
+  const at::Tensor x = at::randn({8, 4}, opts);
+  std::vector<std::unordered_map<std::string, at::Tensor>> sets(3);
+  std::vector<at::Tensor> expected;
+  for (auto& set : sets) {
+    set["L__self___w_pre"] = at::randn({4, 4}, opts);
+    set["L__self___w_add"] = at::randn({4, 4}, opts);
+    set["L__self___bias"] = at::randn({4}, opts);
+    expected.push_back(
+        at::matmul(
+            x, at::relu(set["L__self___w_pre"].t()) + set["L__self___w_add"]) +
+        set["L__self___bias"]);
+  }
+  runner.update_constant_buffer(sets[2], true, true);
+  runner.swap_constant_buffer();
+  runner.run({x});
+
+  cpu_set_t allowed;
+  CPU_ZERO(&allowed);
+  sched_getaffinity(0, sizeof(allowed), &allowed);
+  int cpu = 0;
+  while (!CPU_ISSET(cpu, &allowed)) {
+    ++cpu;
+  }
+  cpu_set_t one_cpu;
+  CPU_ZERO(&one_cpu);
+  CPU_SET(cpu, &one_cpu);
+  auto setup_thread = [&] {
+    pthread_setaffinity_np(pthread_self(), sizeof(one_cpu), &one_cpu);
+    cudaSetDevice(device);
+  };
+
+  std::atomic<bool> stop{false};
+  std::atomic<int64_t> bad{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 2; ++t) {
+    threads.emplace_back([&] {
+      setup_thread();
+      while (!stop.load()) {
+        try {
+          at::Tensor out = runner.run({x})[0];
+          bool ok = false;
+          for (const auto& e : expected) {
+            ok = ok || at::allclose(out, e, 1e-3, 1e-3);
+          }
+          bad += ok ? 0 : 1;
+        } catch (const std::exception&) {
+          bad += 1;
+        }
+      }
+    });
+  }
+  threads.emplace_back([&] {
+    setup_thread();
+    for (int64_t i = 0; i < num_swaps; ++i) {
+      runner.update_constant_buffer(sets[i % 3], true, true);
+      runner.swap_constant_buffer();
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    stop = true;
+  });
+  for (auto& t : threads) {
+    t.join();
+  }
+  return bad.load();
+}
+"""
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.w_add = torch.randn(4, 4, device=device)
+                self.bias = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w = torch.relu(torch.transpose(self.w_pre, 0, 1)) + self.w_add
+                return torch.matmul(x, w) + self.bias
+
+        x = torch.randn(8, 4, device=self.device)
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
+        ):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=Model(self.device),
+                example_inputs=(x,),
+            )
+
+        from torch.utils.cpp_extension import load_inline
+
+        driver = load_inline(
+            name="aoti_swap_race_driver",
+            cpp_sources=[driver_source],
+            functions=["count_inconsistent_runs"],
+            with_cuda=True,
+        )
+        self.assertEqual(driver.count_inconsistent_runs(so_path, 3000), 0)
 
     def test_failed_inactive_constant_folding_keeps_active_constants(self):
         class Model(torch.nn.Module):

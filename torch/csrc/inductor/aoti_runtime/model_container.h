@@ -247,27 +247,29 @@ class AOTInductorModelContainer {
       AOTIProxyExecutorHandle proxy_executor) {
     std::shared_lock model_lk(model_exec_mutex_);
 
-    auto& const_folded = active().fold_state;
-    if (const_folded == ConstantState::INITIALIZED) {
-      model_lk.unlock();
-      std::unique_lock constants_folding_lk(model_exec_mutex_);
-      // Double locking to make sure constant folding is only ran once.
-      if (const_folded == ConstantState::INITIALIZED) {
-        fold_constants(
-            /* use_inactive = */ false,
-            stream,
-            proxy_executor,
-            /* initialization = */ true);
-      }
-      constants_folding_lk.unlock();
-      model_lk.lock();
-    } else {
+    // swap_constant_buffer() can activate the other buffer while no lock is
+    // held below, so the active buffer's state is re-checked after relocking.
+    while (active().fold_state != ConstantState::FOLDED) {
       AOTI_RUNTIME_CHECK(
-          const_folded == ConstantState::FOLDED,
-          "Unknown constant state: " + toStringConstantState(const_folded));
+          active().fold_state == ConstantState::INITIALIZED,
+          "Unknown constant state: " +
+              toStringConstantState(active().fold_state));
+      model_lk.unlock();
+      {
+        std::unique_lock constants_folding_lk(model_exec_mutex_);
+        // Double locking to make sure constant folding is only ran once.
+        if (active().fold_state == ConstantState::INITIALIZED) {
+          fold_constants(
+              /* use_inactive = */ false,
+              stream,
+              proxy_executor,
+              /* initialization = */ true);
+        }
+      }
+      model_lk.lock();
     }
 
-    // Check out a model only after folding: holding one across the lock
+    // Check out a model only after the loop: holding one across the lock
     // upgrade deadlocks against a thread that holds a shared lock and waits
     // for a model.
     auto lease = pool_.checkout(stream);
