@@ -732,6 +732,21 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(scales, scales_ref)
 
     @skipIfNoCuteDSL
+    def test_to_mx_rceil_nd_misaligned_contiguous_input(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        storage = torch.randn(2 * 64 * 128 + 1, dtype=torch.bfloat16, device=device)
+        data_hp = storage[1:].view(2, 64, 128)
+        self.assertTrue(data_hp.is_contiguous())
+        self.assertNotEqual(data_hp.data_ptr() % 16, 0)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (1, 2), False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_transposed_unaligned_pitch(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -756,8 +771,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @parametrize(
         "shape",
-        ((0, 32), (32, 0), (0, 0), (0, 32, 64), (2, 0, 32), (2, 32, 0)),
-        name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
+        (
+            (0, 32),
+            (32, 0),
+            (0, 0),
+            (0, 32, 64),
+            (2, 0, 32),
+            (2, 32, 0),
+            (2, 0, 64, 128),
+        ),
+        name_fn=lambda shape: "".join(f"B{size}_" for size in shape[:-2])
         + f"M{shape[-2]}_K{shape[-1]}",
     )
     @skipIfNoCuteDSL
@@ -775,8 +798,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         scale_m_shape = (((K + 127) // 128) * ((M + 127) // 128) * 32 * 16, 1)
         scale_shape = scale_k_shape if dim[-1] == -1 else scale_m_shape
-        if len(shape) == 3:
-            scale_shape = (shape[0], *scale_shape)
+        scale_shape = (*shape[:-2], *scale_shape)
         expected_shapes = (shape, scale_shape)
         outputs = _quantize_mxfp8_tma(
             data_hp, dim, is_square_scaling, is_scale_swizzled
@@ -795,8 +817,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @parametrize(
         "shape",
-        ((0, 32), (32, 0), (0, 0), (0, 32, 64), (2, 0, 32), (2, 32, 0)),
-        name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
+        (
+            (0, 32),
+            (32, 0),
+            (0, 0),
+            (0, 32, 64),
+            (2, 0, 32),
+            (2, 32, 0),
+            (2, 0, 64, 128),
+        ),
+        name_fn=lambda shape: "".join(f"B{size}_" for size in shape[:-2])
         + f"M{shape[-2]}_K{shape[-1]}",
     )
     @skipIfNoCuteDSL
@@ -813,9 +843,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
         scale_k_shape = (1, scale_bytes)
         scale_m_shape = (scale_bytes, 1)
-        if len(shape) == 3:
-            scale_k_shape = (shape[0], *scale_k_shape)
-            scale_m_shape = (shape[0], *scale_m_shape)
+        scale_k_shape = (*shape[:-2], *scale_k_shape)
+        scale_m_shape = (*shape[:-2], *scale_m_shape)
         self.assertEqual(scales_k.shape, scale_k_shape)
         self.assertEqual(scales_m.shape, scale_m_shape)
         for output in (qdata_k, scales_k, qdata_m, scales_m):
