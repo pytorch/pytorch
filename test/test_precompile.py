@@ -728,6 +728,8 @@ class TestPrecompile(TestCase):
             "_ENTRY_BINDING": _b64(binding),
             "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
             "TORCH_VERSION": torch.__version__,
+            # The artifact's prelude defines it; these graphs call no custom op.
+            "_import_custom_op_modules": lambda: None,
         }
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         return ns["_build_multigraph_forward"]
@@ -9154,7 +9156,11 @@ _lib = torch.library.Library("{ns}", "FRAGMENT")
 # Leading whitespace, as a schema written across lines has.
 _lib.define("\\n    scaled(Tensor x) -> Tensor")
 _lib.impl("scaled", lambda x: x * 3, "CompositeExplicitAutograd")
-_lib.impl("scaled", torch.empty_like, "Meta")
+
+
+@torch.library.register_fake("{ns}::scaled")
+def _(x):
+    return torch.empty_like(x)
 """
 
 
@@ -9557,7 +9563,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             self.assertEqual(_custom_op_modules({(op_name, "")}), {})
 
     def test_a_registered_op_needs_the_overload_the_graph_calls(self):
-        from torch._precompile import _custom_op_registered
+        from torch._precompile_driver import _custom_op_registered
 
         ns = self._namespace("overload")
         with torch.library._scoped_library(ns, "DEF") as lib:
@@ -9656,10 +9662,10 @@ class TestPrecompileCustomOpRecording(TestCase):
             lib.define("f(Tensor x) -> Tensor")
             # As for a C++ op outside torch with no set_python_module: no Python
             # registration recorded it, and its source is not torch's.
-            holder = torch._library.simple_registry.singleton.find(
-                f"{ns}::f"
-            ).registering_module
-            with mock.patch.object(holder, "_module", None):
+            with mock.patch.dict(
+                torch._library.simple_registry.singleton._registering_modules,
+                {f"{ns}::f": None},
+            ):
                 with self.assertLogs("torch._precompile", level="WARNING") as logs:
                     self.assertEqual(_custom_op_modules({(f"{ns}::f", "")}), {})
         self.assertIn(f"{ns}::f", "\n".join(logs.output))
@@ -9763,39 +9769,29 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"import torch\n\nlib = torch.library.Library('{ns}', 'FRAGMENT')\n"
             "lib.define('f(Tensor x) -> Tensor')\n"
         )
-        holder = torch._library.simple_registry.singleton.get(
-            f"{ns}::f"
-        ).registering_module
-        self.assertEqual(holder.get(), module)
+        registry = torch._library.simple_registry.singleton
+        self.assertEqual(registry.registering_module(f"{ns}::f"), module)
         sys.modules[module].lib._destroy()
-        self.assertIsNone(holder.get())
+        self.assertIsNone(registry.registering_module(f"{ns}::f"))
 
-    def test_the_artifact_checks_registration_as_load_does(self):
-        from torch._inductor.utils import IndentedBuffer
-        from torch._precompile import _custom_op_registered, _write_custom_op_imports
-
-        ns = self._namespace("same_check")
-        buf = IndentedBuffer()
-        _write_custom_op_imports(buf, {})
-        artifact = {}
-        exec(buf.getvalue(), artifact)
+    def test_a_schema_with_leading_whitespace_defines_a_python_op(self):
+        ns = self._namespace("whitespace")
         with torch.library._scoped_library(ns, "DEF") as lib:
-            lib.define("f(Tensor x) -> Tensor")
-            lib.define("f.named(Tensor x) -> Tensor")
-            lib.define("g.named(Tensor x) -> Tensor")
-            for op in (f"{ns}::f", f"{ns}::f.named", f"{ns}::f.other", f"{ns}::g"):
-                with self.subTest(op=op):
-                    self.assertEqual(
-                        artifact["_custom_op_registered"](op),
-                        _custom_op_registered(op),
-                    )
+            lib.define("\n    k(Tensor x) -> Tensor")
+            self.assertIn(f"{ns}::k", torch.library._defs)
+            # A Python op's fake impl needs no C++ set_python_module.
+            torch.library.register_fake(f"{ns}::k", torch.empty_like, lib=lib)
 
     def test_cpp_wrapper_dispatcher_calls_are_recorded(self):
         from torch._precompile import _custom_op_names_in_source
 
-        source = 'aoti_torch_call_dispatcher("ns::post_pass", "named", stack);\n'
+        source = (
+            'aoti_torch_call_dispatcher("ns::post_pass", "named", stack);\n'
+            'c10::Dispatcher::singleton().findSchemaOrThrow("ns::boxed", "");\n'
+        )
         self.assertEqual(
-            _custom_op_names_in_source(source), {("ns::post_pass", "named")}
+            _custom_op_names_in_source(source),
+            {("ns::post_pass", "named"), ("ns::boxed", "")},
         )
 
     def test_serving_surfaces_the_error_of_an_op_module_that_fails_to_import(self):

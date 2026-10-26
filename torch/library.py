@@ -299,7 +299,7 @@ class Library:
         if isinstance(tags, torch.Tag):
             tags = (tags,)
 
-        name = schema.split("(")[0]
+        name = schema.split("(")[0].strip()
         packet_name = name.split(".")[0] if "." in name else name
         has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(
             getattr(torch.ops, self.ns), packet_name
@@ -311,7 +311,7 @@ class Library:
             _validate_inplace_schema(schema)
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        name = schema.split("(")[0]
+        name = schema.split("(")[0].strip()
         # C++ accepts a name prefixed with the matching namespace ("ns::foo");
         # don't double-prepend the namespace in that case.
         qualname = name if "::" in name else f"{self.ns}::{name}"
@@ -325,14 +325,9 @@ class Library:
 
         self._op_defs.add(qualname)
         _defs.add(qualname)
-        # The name the dispatcher registered: the schema may start with whitespace.
-        registered = name.strip()
-        if "::" not in registered:
-            registered = f"{self.ns}::{registered}"
-        entry = torch._library.simple_registry.singleton.find(registered)
         self._registration_handles.append(
-            entry.registering_module.register(
-                _library.utils.registering_module(inspect.currentframe())
+            torch._library.simple_registry.singleton.record_registering_module(
+                qualname, _library.utils.registering_module(inspect.currentframe())
             )
         )
         return result

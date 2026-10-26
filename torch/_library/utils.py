@@ -737,6 +737,10 @@ def registering_module(frame: Any) -> str | None:
     A registration made on first use while some module is being imported is
     recorded under that module; an artifact importing it then fails, naming the op
     the import did not register.
+
+    This is not the module ``Library._register_fake`` checks pystubs against, the
+    immediate caller (where the fake impl is written): it is the module whose import
+    runs the registration, which is the one an artifact has to import.
     """
     frame = frame.f_back if frame is not None else None
     while frame is not None and _in_package(

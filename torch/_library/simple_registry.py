@@ -9,7 +9,6 @@ from .utils import RegistrationHandle
 
 
 __all__ = [
-    "RegisteringModuleHolder",
     "SimpleLibraryRegistry",
     "SimpleOperatorEntry",
     "singleton",
@@ -35,6 +34,10 @@ class SimpleLibraryRegistry:
 
     def __init__(self) -> None:
         self._data: dict[str, SimpleOperatorEntry] = {}
+        # The module whose import defined each operator overload, if known (see
+        # torch._library.utils.registering_module). Kept out of SimpleOperatorEntry
+        # so recording it on every define creates no entry.
+        self._registering_modules: dict[str, str | None] = {}
 
     def find(self, qualname: str) -> "SimpleOperatorEntry":
         res = self._data.get(qualname, None)
@@ -44,6 +47,24 @@ class SimpleLibraryRegistry:
 
     def get(self, qualname: str) -> "SimpleOperatorEntry | None":
         return self._data.get(qualname, None)
+
+    def record_registering_module(
+        self, qualname: str, module: str | None
+    ) -> RegistrationHandle:
+        self._registering_modules[qualname] = module
+
+        def deregister() -> None:
+            self._registering_modules.pop(qualname, None)
+
+        return RegistrationHandle(deregister)
+
+    def registering_module(self, qualname: str) -> str | None:
+        """The module whose import defined ``qualname``, if known.
+
+        torch.compiler.precompile reads it to import that module wherever an
+        artifact calling the operator is served.
+        """
+        return self._registering_modules.get(qualname)
 
 
 singleton: SimpleLibraryRegistry = SimpleLibraryRegistry()
@@ -65,9 +86,6 @@ class SimpleOperatorEntry:
 
         self.effect: EffectHolder = EffectHolder(qualname)
         self.symm_mem_args: SymmMemArgsHolder = SymmMemArgsHolder(qualname)
-        self.registering_module: RegisteringModuleHolder = RegisteringModuleHolder(
-            qualname
-        )
 
     # For compatibility reasons. We can delete this soon.
     @property
@@ -96,30 +114,6 @@ class GenericTorchDispatchRuleHolder:
 
     def find(self, torch_dispatch_class: type) -> Callable[..., Any] | None:
         return self._data.get(torch_dispatch_class, None)
-
-
-class RegisteringModuleHolder:
-    """The module whose import defined the operator, if known (see
-    torch._library.utils.registering_module).
-
-    torch.compiler.precompile reads it to import that module wherever an artifact
-    calling the operator is served.
-    """
-
-    def __init__(self, qualname: str) -> None:
-        self._module: str | None = None
-        self.qualname: str = qualname
-
-    def register(self, module: str | None) -> RegistrationHandle:
-        self._module = module
-
-        def deregister() -> None:
-            self._module = None
-
-        return RegistrationHandle(deregister)
-
-    def get(self) -> str | None:
-        return self._module
 
 
 class SymmMemArgsHolder:

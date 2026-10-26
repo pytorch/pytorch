@@ -1982,9 +1982,11 @@ _OP_REFERENCE = re.compile(
 )
 
 
-# How cpp_wrapper's generated C++ calls an op.
+# How cpp_wrapper's generated C++ calls an op: through the stable dispatcher call, or
+# the boxed fallback for schemas it cannot represent.
 _DISPATCHER_CALL = re.compile(
-    r'aoti_torch_call_dispatcher\(\s*"([A-Za-z_]\w*)::([A-Za-z_]\w*)",\s*"(\w*)"'
+    r"(?:aoti_torch_call_dispatcher|findSchemaOrThrow)"
+    r'\(\s*"([A-Za-z_]\w*)::([A-Za-z_]\w*)",\s*"(\w*)"'
 )
 
 
@@ -2076,12 +2078,11 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     from torch._library.simple_registry import singleton
 
     pystub = torch._C._dispatch_pystub(op_name, overload)
-    entry = singleton.get(f"{op_name}.{overload}" if overload else op_name)
     # A recorded module that is not importable (a pystub naming a module not yet
     # imported, say) falls through to the next record.
     for recorded in (
         pystub[0] if pystub is not None else None,
-        entry.registering_module.get() if entry is not None else None,
+        singleton.registering_module(f"{op_name}.{overload}" if overload else op_name),
     ):
         # A registration inside a torch function, which torch runs itself.
         if recorded == "torch":
@@ -2131,46 +2132,25 @@ def _custom_op_modules(
     return {module: tuple(sorted(ops)) for module, ops in sorted(modules.items())}
 
 
-def _custom_op_registered(op_name: str) -> bool:
-    namespace, _, name = op_name.partition("::")
-    name, _, overload = name.partition(".")
-    packet = getattr(getattr(torch.ops, namespace), name, None)
-    return packet is not None and hasattr(packet, overload or "default")
+def _write_custom_op_imports(
+    buf: Any, modules: dict[str, tuple[str, ...]], *, run: bool = True
+) -> None:
+    """Emit ``CUSTOM_OP_MODULES`` and the driver's importer for it, called here
+    unless the driver calls it itself (after its version checks)."""
+    from torch import _precompile_driver as driver
 
-
-def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> None:
-    # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose registration defines it; under lazy imports the
-    # model's own import of that module may never resolve either. A module whose ops
-    # are already registered (by another import path, say) is not needed.
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
-    buf.writeline("import importlib as _importlib")
     buf.writeline("import torch as _torch")
+    for fn in (driver._custom_op_registered, driver._import_custom_op_modules):
+        buf.writeline("")
+        buf.writeline("")
+        for line in inspect.getsource(fn).rstrip().splitlines():
+            buf.writeline(line)
     buf.writeline("")
     buf.writeline("")
-    buf.writeline("def _custom_op_registered(op_name):")
-    buf.writeline('    namespace, _, name = op_name.partition("::")')
-    buf.writeline('    name, _, overload = name.partition(".")')
-    buf.writeline("    packet = getattr(getattr(_torch.ops, namespace), name, None)")
-    buf.writeline(
-        '    return packet is not None and hasattr(packet, overload or "default")'
-    )
-    buf.writeline("")
-    buf.writeline("")
-    buf.writeline("for _module, _ops in CUSTOM_OP_MODULES.items():")
-    buf.writeline("    if not all(_custom_op_registered(_op) for _op in _ops):")
-    buf.writeline("        _importlib.import_module(_module)")
-    buf.writeline(
-        "        _missing = [_op for _op in _ops if not _custom_op_registered(_op)]"
-    )
-    buf.writeline("        if _missing:")
-    buf.writeline("            raise ImportError(")
-    buf.writeline(
-        "                f\"importing {_module!r} did not register {', '.join(_missing)}, \""
-    )
-    buf.writeline('                "which this artifact\'s compiled graphs call"')
-    buf.writeline("            )")
-    buf.writeline("")
+    if run:
+        buf.writeline("_import_custom_op_modules()")
+        buf.writeline("")
 
 
 def _is_op_name(op: str) -> bool:
@@ -2200,6 +2180,8 @@ def _check_custom_op_modules(modules: object) -> None:
             "'namespace::op' or 'namespace::op.overload' names; it does not look like "
             "a torch.compiler.precompile artifact."
         )
+    from torch._precompile_driver import _custom_op_registered
+
     for module, ops in modules.items():
         if all(_custom_op_registered(op) for op in ops):
             continue
@@ -2617,7 +2599,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, custom_op_modules)
+    _write_custom_op_imports(buf, custom_op_modules, run=False)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)

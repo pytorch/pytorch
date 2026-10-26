@@ -1,7 +1,8 @@
 """Runtime driver for torch.compiler.precompile artifacts, authored as real code.
 
-Nothing here is imported or run by torch at runtime, and the generated artifacts never
-import this module. Instead torch._precompile emits these function bodies VERBATIM (via
+Nothing here is imported or run by torch at runtime (except ``_custom_op_registered``,
+which load() shares with the artifacts), and the generated artifacts never import this
+module. Instead torch._precompile emits these function bodies VERBATIM (via
 inspect.getsource, on the to_python_code / emit path only) into the self-contained
 python_code string, after the calling-convention metadata and the compiled/captured
 graph. Authoring the driver as real code -- instead of a hand-written string literal --
@@ -37,6 +38,8 @@ if TYPE_CHECKING:
     # ahead of the driver. Bound here with placeholder values (not bare annotations) so
     # static tools treat them as real names in the bodies below; this block is not emitted.
     MODULE_POSITIONS: list[int] = []
+    # Each module registering custom ops the compiled graphs call, with those ops.
+    CUSTOM_OP_MODULES: dict[str, tuple[str, ...]] = {}
     # Multi-graph artifact state. _FRAMES is one record per Dynamo frame (its
     # code, its variants' guard state and transformed bytecode, the globals it
     # reads), _BACKENDS the compiled subgraphs, _ENTRY_BINDING the entry's
@@ -73,6 +76,33 @@ if TYPE_CHECKING:
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
+
+
+def _custom_op_registered(op_name: str) -> bool:
+    """Whether ``ns::op`` (its default overload) or ``ns::op.overload`` exists."""
+    namespace, _, name = op_name.partition("::")
+    name, _, overload = name.partition(".")
+    packet = getattr(getattr(_torch.ops, namespace), name, None)
+    return packet is not None and hasattr(packet, overload or "default")
+
+
+def _import_custom_op_modules() -> None:
+    # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
+    # path imports the module whose registration defines it; under lazy imports the
+    # model's own import of that module may never resolve either. A module whose ops
+    # are already registered (by another import path, say) is not needed.
+    import importlib
+
+    for module, ops in CUSTOM_OP_MODULES.items():
+        if all(_custom_op_registered(op) for op in ops):
+            continue
+        importlib.import_module(module)
+        missing = [op for op in ops if not _custom_op_registered(op)]
+        if missing:
+            raise ImportError(
+                f"importing {module!r} did not register {', '.join(missing)}, "
+                "which this artifact's compiled graphs call"
+            )
 
 
 def _extract_param_buffers(mods):
@@ -470,6 +500,8 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
+    # Before anything unpickles a compiled subgraph that calls them.
+    _import_custom_op_modules()
     # After the version checks: a torch without it fails them cleanly first.
     from torch._dynamo.eval_frame import _warn_eager_fallback_miss
 
@@ -784,6 +816,8 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
+    # Before anything unpickles a compiled subgraph that calls them.
+    _import_custom_op_modules()
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
