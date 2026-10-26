@@ -7278,13 +7278,6 @@ def _never_run_kernel(shape, backward=True):
     return kernel
 
 
-def _build_launchers(kernel):
-    kernel.launchers = [
-        types.SimpleNamespace(config=result.config, _compile_result=result)
-        for result in kernel.compile_results
-    ]
-
-
 def _static_runtime_kernel(block):
     """A CachingAutotuner whose only launcher statically launches XBLOCK=block."""
     import triton
@@ -7574,47 +7567,31 @@ class TestPrecompileRuntimeCache(TestCase):
             _UnresolvedTritonExport,
         )
 
-        kernel = _never_run_kernel(shape)
-        with (
-            mock.patch.object(type(kernel), "_make_launchers") as make,
-            self.assertRaises(_UnresolvedTritonExport) as failure,
-        ):
-            _freeze_triton_kernel("source", [kernel])
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
+            _freeze_triton_kernel("source", [_never_run_kernel(shape)])
         reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
         self.assertEqual(reasons, ["launcher_count_not_one"])
-        make.assert_not_called()
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @parametrize("shape", ("unlaunched", "ambiguous"))
-    def test_never_run_kernel_freezes_its_first_config(self, shape):
+    def test_never_run_kernel_freezes_its_first_config(self):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler import _runtime_cache
 
-        kernel = _never_run_kernel(shape)
+        kernel = _never_run_kernel("ambiguous")
         original_results = kernel.compile_results
         original_launchers = list(kernel.launchers)
         with (
             mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
-            mock.patch.object(
-                type(kernel),
-                "_make_launchers",
-                autospec=True,
-                side_effect=_build_launchers,
-            ) as make,
             self.assertLogs(_runtime_cache.log, "WARNING") as logs,
         ):
             payload = _runtime_cache._freeze_triton_kernel(
                 "source", [kernel], freeze_never_run_backward=True
             )
-        # A kernel without launchers loads its configs on a private copy.
-        self.assertEqual(make.call_count, 1 if shape == "unlaunched" else 0)
-        if make.called:
-            self.assertIsNot(make.call_args.args[0], kernel)
         self.assertIs(kernel.compile_results, original_results)
         self.assertEqual(kernel.launchers, original_launchers)
         self.assertIsNone(kernel._cached_launcher)
         self.assertIn("backward Triton kernel runtime_kernel", logs.output[0])
-        self.assertIn("candidate 1 of", logs.output[0])
+        self.assertIn("candidate 1 of 2", logs.output[0])
         self.assertIn("XBLOCK: 32", logs.output[0])
         saved = pickle.loads(payload)
         self.assertEqual(saved.cache_key, "source")
@@ -7637,60 +7614,36 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(loaded.compile_results, [selected])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @parametrize("shape", ("unlaunched", "ambiguous"))
-    def test_never_run_kernel_skips_a_non_static_first_candidate(self, shape):
+    def test_never_run_kernel_skips_a_non_static_first_candidate(self):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler import _runtime_cache
 
-        kernel = _never_run_kernel(shape)
-        if shape == "unlaunched":
-            kernel.compile_results.insert(0, types.SimpleNamespace(config=None))
-            expected = {"XBLOCK": 32}
-        else:
-            kernel.launchers[0] = types.SimpleNamespace(_compile_result=object())
-            expected = {"XBLOCK": 128}
+        kernel = _never_run_kernel("ambiguous")
+        kernel.launchers[0] = types.SimpleNamespace(_compile_result=object())
         with (
             mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
-            mock.patch.object(
-                type(kernel),
-                "_make_launchers",
-                autospec=True,
-                side_effect=_build_launchers,
-            ),
             self.assertLogs(_runtime_cache.log, "WARNING") as logs,
         ):
             payload = _runtime_cache._freeze_triton_kernel(
                 "source", [kernel], freeze_never_run_backward=True
             )
         saved = pickle.loads(payload)
-        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, expected)
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 128})
         self.assertIn("candidate 2 of 2", logs.output[0])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @parametrize("error", (RuntimeError, AssertionError))
-    def test_never_run_kernel_that_cannot_load_stays_unresolved(self, error):
+    def test_never_run_kernel_without_launchers_stays_unresolved(self):
         from torch.compiler._runtime_cache import (
             _freeze_triton_kernel,
             _UnresolvedTritonExport,
         )
 
         kernel = _never_run_kernel("unlaunched")
-        with (
-            mock.patch.object(
-                type(kernel),
-                "_make_launchers",
-                side_effect=error("No valid triton configs"),
-            ),
-            self.assertRaises(_UnresolvedTritonExport) as failure,
-        ):
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
             _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
-        rejected = failure.exception.sources[0]["instances"]
-        self.assertEqual(
-            [r["reason"] for r in rejected], ["launcher_count_not_one", "load_failed"]
-        )
-        self.assertEqual(
-            rejected[1]["error"], f"{error.__name__}: No valid triton configs"
-        )
+        reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
+        self.assertEqual(reasons, ["launcher_count_not_one", "never_built_launchers"])
+        self.assertEqual(kernel.launchers, [])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_forward_kernel_stays_unresolved(self):
@@ -7737,7 +7690,7 @@ class TestPrecompileRuntimeCache(TestCase):
             _UnresolvedTritonExport,
         )
 
-        kernel = _never_run_kernel("unlaunched")
+        kernel = _never_run_kernel("ambiguous")
         if tuning == "coordesc":
             kernel.inductor_meta["coordinate_descent_tuning"] = True
             kernel._should_coordesc_tune = True
@@ -7745,15 +7698,13 @@ class TestPrecompileRuntimeCache(TestCase):
         else:
             kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
             expected = "combo_autotuning_incomplete"
-        with (
-            mock.patch.object(type(kernel), "_make_launchers") as make,
-            self.assertRaises(_UnresolvedTritonExport) as failure,
-        ):
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
             _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
-        reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
-        self.assertEqual(reasons, ["launcher_count_not_one", expected])
-        # A config that would tune is rejected before anything is loaded.
-        make.assert_not_called()
+        rejected = failure.exception.sources[0]["instances"]
+        self.assertEqual(
+            [(r["reason"], r.get("candidate")) for r in rejected],
+            [("launcher_count_not_one", None), (expected, 1), (expected, 2)],
+        )
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_fallback_needs_every_rejection_to_be_never_run(self):
@@ -7767,7 +7718,7 @@ class TestPrecompileRuntimeCache(TestCase):
         with self.assertRaises(_UnresolvedTritonExport) as failure:
             _freeze_triton_kernel(
                 "source",
-                [_never_run_kernel("unlaunched"), dynamic],
+                [_never_run_kernel("ambiguous"), dynamic],
                 freeze_never_run_backward=True,
             )
         reasons = {r["reason"] for r in failure.exception.sources[0]["instances"]}
@@ -7817,22 +7768,6 @@ class TestPrecompileRuntimeCache(TestCase):
             ],
         )
         self.assertIn("XBLOCK: 128", rejected[2]["config"])
-
-    @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    def test_never_run_kernel_with_no_loadable_config_says_so(self):
-        from torch.compiler._runtime_cache import (
-            _freeze_triton_kernel,
-            _UnresolvedTritonExport,
-        )
-
-        kernel = _never_run_kernel("unlaunched")
-        with (
-            mock.patch.object(type(kernel), "_make_launchers"),
-            self.assertRaises(_UnresolvedTritonExport) as failure,
-        ):
-            _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
-        reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
-        self.assertEqual(reasons, ["launcher_count_not_one", "no_loadable_config"])
 
     def test_capture_scope_rejects_a_conflicting_freeze_flag(self):
         from torch.compiler._runtime_cache import _active_capture, capture_scope
@@ -8775,8 +8710,8 @@ class TestPrecompileRuntimeCache(TestCase):
                 clear_caches()
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
-    @parametrize("case", ("disabled", "ambiguous", "unlaunched"))
-    def test_never_run_gpu_backward_serves_from_empty_caches(self, case):
+    @parametrize("enabled", (False, True))
+    def test_never_run_gpu_backward_serves_from_empty_caches(self, enabled):
         import gc
         from pathlib import Path
 
@@ -8806,9 +8741,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 with (
                     mock.patch.dict(os.environ, producer),
                     eager_backward,
-                    _runtime_cache.capture_scope(
-                        freeze_never_run_backward=case != "disabled"
-                    ),
+                    _runtime_cache.capture_scope(freeze_never_run_backward=enabled),
                 ):
                     out = torch.compile(fn, backend="inductor")(x)
                     recorded = _runtime_cache._capture.triton_kernels
@@ -8820,17 +8753,6 @@ class TestPrecompileRuntimeCache(TestCase):
                     }
                     never_run = [k for k in backward.values() if len(k.launchers) > 1]
                     self.assertTrue(never_run)
-                    if case == "unlaunched":
-                        # Record each as a kernel that never built a launcher.
-                        for key, kernels in recorded.items():
-                            for i, kernel in enumerate(kernels):
-                                if kernel in never_run:
-                                    unlaunched = type(kernel).__new__(type(kernel))
-                                    unlaunched.__dict__.update(
-                                        kernel.__dict__, launchers=[]
-                                    )
-                                    kernels[i] = unlaunched
-
                     fields = ("function", "cubin_raw", "cubin_path")
 
                     def live_state():
@@ -8846,7 +8768,7 @@ class TestPrecompileRuntimeCache(TestCase):
                         ]
 
                     live = live_state()
-                    if case == "disabled":
+                    if not enabled:
                         with self.assertRaisesRegex(
                             PrecompileError, "could not freeze"
                         ):
