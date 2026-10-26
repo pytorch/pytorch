@@ -530,7 +530,7 @@ class BatchLinearLHSFusion(BatchFusion):
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
-        ) and is_linear_node_can_be_fused(node, check_mutation=False):
+        ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
@@ -683,12 +683,13 @@ _OPERATOR_TO_ATEN = {
     operator.invert: torch.ops.aten.bitwise_not,
 }
 
+# Fresh-output or stride-order-preserving ops for a 2-D tensor. Batch and
+# attention ops need >=3-D inputs, which this pass never produces.
 _LAYOUT_INDEPENDENT_OPS = OrderedSet(
     [
         "cat",
         "stack",
         "mm",
-        "bmm",
         "matmul",
         "linear",
         "sum",
@@ -698,11 +699,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "layer_norm",
         "native_layer_norm",
         "rms_norm",
-        "scaled_dot_product_attention",
-        "_scaled_dot_product_flash_attention",
-        "_scaled_dot_product_efficient_attention",
-        "_scaled_dot_product_cudnn_attention",
-        "_scaled_dot_product_attention_math",
         "log_softmax",
         "rsub",
         "where",
@@ -713,7 +709,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "std",
         "cumsum",
         "addmm",
-        "baddbmm",
         "size",
         "sym_size",
         "dim",
@@ -796,9 +791,9 @@ def _compute_user_overload(user: torch.fx.Node):
     if target is torch.nn.functional.softmax or target is (
         torch.nn.functional.log_softmax
     ):
-        if get_arg_value(user, 1, "dim") is None:
-            return None
-        args = (*args[:2], *args[3:])
+        dim = get_arg_value(user, 1, "dim")
+        args = (args[0], -1 if dim is None else dim, *args[3:])
+        kwargs.pop("dim", None)
         name = "softmax" if target is torch.nn.functional.softmax else "log_softmax"
         target = getattr(torch.ops.aten, name)
     elif target is torch.nn.functional.softmin:
@@ -860,9 +855,9 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
     ``getitem(split(mm(...), dim=1))``, which has row stride ``sum(N)``. A
     direct user is sensitive when it can observe that layout or alias it:
     graph outputs, mutations and ``out=`` calls, stride/storage/contiguity
-    queries, views, copies and unknown ops. Pointwise and known
-    layout-independent ops stay eligible. Alias and copy traversal arrive in
-    later splits.
+    queries, views, copies and unknown ops. Pointwise ops, resolved pointwise
+    Tensor methods and known layout-independent ops stay eligible. Alias and
+    copy traversal arrive in later splits.
     """
     if user.op == "output":
         return True
@@ -895,9 +890,10 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     """Return True if a direct consumer of ``node`` rejects the fusion.
 
-    Only direct users are inspected in this split. Tensor methods, views,
-    aliases, copies and training dropout are conservatively rejected until
-    later splits add traversal.
+    Only direct users are inspected in this split. Resolved pointwise Tensor
+    methods and layout-independent ops stay eligible. Views, aliases, copies,
+    dropout and unresolved ops are conservatively rejected until later splits
+    add traversal.
     """
     for user in node.users:
         op = (
@@ -910,16 +906,13 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
                 log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
                 return True
             continue
-        if user.target is torch.nn.functional.dropout:
-            log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
-            return True
         if _direct_layout_user_is_sensitive(user, op, node):
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
     return False
 
 
-def is_linear_node_can_be_fused(node: torch.fx.Node, check_mutation=True):
+def is_linear_node_can_be_fused(node: torch.fx.Node):
     input = get_arg_value(node, 0, "input")
     weight = get_arg_value(node, 1, "weight")
     return (
@@ -931,10 +924,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node, check_mutation=True):
         # the mm -> bmm transform adds an unbind() op,
         # which is not safe for autograd when the output of the mm is mutated.
         # don't pattern match if any users of the mm mutate the input.
-        and (
-            not check_mutation
-            or not any(_is_mutable_node(user.target) for user in node.users)
-        )
+        and not any(_is_mutable_node(user.target) for user in node.users)
     )
 
 

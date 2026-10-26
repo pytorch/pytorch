@@ -885,7 +885,14 @@ class TestGroupBatchFusion(TestCase):
             ("contiguous_mutation", True),
             ("log_softmax", False),
             ("softmin", False),
-            ("softmax_no_dim", True),
+            ("softmax_no_dim", False),
+            ("softmin_no_dim", False),
+            ("softmax_kwarg_dim", False),
+            ("normalize_out", True),
+            ("clone", True),
+            ("sum", False),
+            ("topk", True),
+            ("aten_overload", False),
             ("relu_not_inplace", False),
             ("tensor_method_relu", False),
             ("iadd", True),
@@ -954,8 +961,30 @@ class TestGroupBatchFusion(TestCase):
             graph.call_method("relu", args=(linear,))
         elif case == "iadd":
             graph.call_function(operator.iadd, args=(linear, 1))
-        else:
+        elif case == "softmax_kwarg_dim":
+            graph.call_function(
+                torch.nn.functional.softmax, args=(linear,), kwargs={"dim": 1}
+            )
+        elif case == "softmin_no_dim":
+            graph.call_function(torch.nn.functional.softmin, args=(linear,))
+        elif case == "normalize_out":
+            graph.call_function(
+                torch.nn.functional.normalize,
+                args=(linear,),
+                kwargs={"out": placeholder(graph, "out")},
+            )
+        elif case == "clone":
+            graph.call_method("clone", args=(linear,))
+        elif case == "sum":
+            graph.call_function(torch.sum, args=(linear,))
+        elif case == "topk":
+            graph.call_function(torch.topk, args=(linear, 1))
+        elif case == "aten_overload":
+            graph.call_function(torch.ops.aten.sin.default, args=(linear,))
+        elif case == "normalize":
             graph.call_function(torch.nn.functional.normalize, args=(linear,))
+        else:
+            raise AssertionError(f"unknown case {case}")
         self.assertEqual(_has_layout_sensitive_user(linear), expected_sensitive)
 
     @parametrize(
@@ -1010,6 +1039,7 @@ class TestGroupBatchFusion(TestCase):
             with _record_fusion_subsets() as subsets:
                 actual = torch.compile(module, fullgraph=True)(x)
         self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         self.assertEqual(subsets, [2])
 
@@ -1044,6 +1074,7 @@ class TestGroupBatchFusion(TestCase):
             with _record_fusion_subsets() as subsets:
                 actual = torch.compile(module, fullgraph=True)(x)
         self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         self.assertEqual(subsets, [2])
 
