@@ -52,9 +52,9 @@ _P = ParamSpec("_P")
 # libraries calling into kernels not intended to be called.
 _impls: set[str] = set()
 _defs: set[str] = set()
-# For each operator a Library defined, the module whose import ran the define, if
-# known (see torch._library.custom_ops._registering_module).
-_registering_modules: dict[str, str | None] = {}
+# For each (operator, overload) a Library defined, the module whose import ran the
+# define, if known (see torch._library.custom_ops._registering_module).
+_registering_modules: dict[tuple[str, str], str | None] = {}
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
@@ -330,7 +330,12 @@ class Library:
         _defs.add(qualname)
         from torch._library.custom_ops import _registering_module
 
-        _registering_modules[qualname.split(".")[0]] = _registering_module(
+        # The name the dispatcher registered: the schema may start with whitespace.
+        registered = name.strip()
+        if "::" not in registered:
+            registered = f"{self.ns}::{registered}"
+        op_name, _, overload = registered.partition(".")
+        _registering_modules[(op_name, overload)] = _registering_module(
             inspect.currentframe()
         )
         return result

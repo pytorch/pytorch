@@ -1970,9 +1970,11 @@ _OP_REFERENCE = re.compile(
 
 def _custom_op_names_in_source(source: str | None) -> set[tuple[str, str]]:
     """The non-builtin operators generated code or a printed graph calls."""
+    # Comments quote user source lines, which can name ops the trace never reached.
+    code = "\n".join(line.partition("#")[0] for line in (source or "").splitlines())
     return {
         (f"{namespace}::{name}", "" if overload == "default" else overload)
-        for namespace, name, overload in _OP_REFERENCE.findall(source or "")
+        for namespace, name, overload in _OP_REFERENCE.findall(code)
         if namespace not in _BUILTIN_NAMESPACES
     }
 
@@ -2010,7 +2012,17 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
         for source in (content.aot_forward_graph_str, *generated):
             names |= _custom_op_names_in_source(source)
         if content.serialized_bw_module is not None:
-            names |= _custom_op_names(content.serialized_bw_module.deserialize())
+            try:
+                backward = content.serialized_bw_module.deserialize()
+            except Exception as e:
+                log.warning(
+                    "torch.compiler.precompile: could not read backend %s's backward "
+                    "graph (%s), so the custom ops only it calls are not recorded",
+                    artifact.key,
+                    e,
+                )
+            else:
+                names |= _custom_op_names(backward)
     return names
 
 
@@ -2018,12 +2030,13 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
 # recorded: torch's own C++ registrations live in its C++ sources. This is a
 # heuristic, for want of a dispatcher record of the registering library. It reads
 # the __FILE__ the registration was compiled with, so a build that strips error
-# messages (STRIP_ERROR_MESSAGES) leaves it nothing to read, and torch's C++ ops
-# then fall into the "no importable module" warning; an extension whose source
-# path contains one of these segments is taken for torch and gets neither an
-# import nor a warning.
+# messages (STRIP_ERROR_MESSAGES) leaves it nothing to read, as does a legacy
+# RegisterOperators registration, and those torch C++ ops then fall into the "no
+# importable module" warning; an extension whose source path contains one of
+# these segments is taken for torch and gets neither an import nor a warning.
+# Either way the op is left out of CUSTOM_OP_MODULES, so serving never fails on it.
 _REGISTERED_AT = re.compile(r"registered at (.*):\d+$")
-_TORCH_CPP_SOURCES = ("/torch/csrc/", "/aten/src/", "/c10/")
+_TORCH_CPP_SOURCES = ("torch/csrc/", "aten/src/", "c10/")
 
 
 def _importable(name: str | None) -> str | None:
@@ -2038,7 +2051,8 @@ _TORCH_BUILTIN = "torch builtin"
 
 def _custom_op_module(op_name: str, overload: str) -> str | None:
     """The importable module that registers ``op_name``, ``_TORCH_BUILTIN`` for an
-    op torch's own C++ registers, or None when neither is known.
+    op torch registers itself (in its C++, or inside one of its functions), or None
+    when neither is known.
 
     ``torch.library.custom_op`` and ``torch.library.Library.define`` record the module
     whose import ran them; a C++ op can name its module with ``m.set_python_module``.
@@ -2047,20 +2061,29 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     from torch.library import _registering_modules
 
     opdef = OPDEFS.get(op_name)
-    if opdef is not None:
-        return _importable(opdef._registering_module)
     pystub = torch._C._dispatch_pystub(op_name, overload)
-    if pystub is not None:
-        return _importable(pystub[0])
-    if op_name in _registering_modules:
-        return _importable(_registering_modules[op_name])
+    # A recorded module that is not importable (a pystub naming a module not yet
+    # imported, say) falls through to the next record.
+    for recorded in (
+        opdef._registering_module if opdef is not None else None,
+        pystub[0] if pystub is not None else None,
+        _registering_modules.get((op_name, overload)),
+    ):
+        # A registration inside a torch function, which torch runs itself.
+        if recorded == "torch":
+            return _TORCH_BUILTIN
+        module = _importable(recorded)
+        if module is not None:
+            return module
     try:
         debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     except RuntimeError:
         return None
     match = _REGISTERED_AT.search(debug)
     path = match.group(1).replace("\\", "/") if match else ""
-    if any(source in path for source in _TORCH_CPP_SOURCES):
+    if any(
+        path.startswith(source) or f"/{source}" in path for source in _TORCH_CPP_SOURCES
+    ):
         return _TORCH_BUILTIN
     return None
 
@@ -2068,18 +2091,20 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
 def _custom_op_modules(
     op_names: Iterable[tuple[str, str]],
 ) -> dict[str, tuple[str, ...]]:
-    """Each importable module registering ops among ``op_names``, with those ops,
-    warning once about the ops no importable module is known to register."""
+    """Each importable module registering ops among ``op_names``, with those ops
+    (``ns::op`` for a default overload, ``ns::op.overload`` otherwise), warning once
+    about the ops no importable module is known to register."""
     modules: dict[str, set[str]] = {}
     unrecorded: set[str] = set()
     for op_name, overload in op_names:
         module = _custom_op_module(op_name, overload)
+        qualified = f"{op_name}.{overload}" if overload else op_name
         if module == _TORCH_BUILTIN:
             continue
         if module is None:
-            unrecorded.add(op_name)
+            unrecorded.add(qualified)
         else:
-            modules.setdefault(module, set()).add(op_name)
+            modules.setdefault(module, set()).add(qualified)
     if unrecorded:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
@@ -2093,8 +2118,10 @@ def _custom_op_modules(
 
 
 def _custom_op_registered(op_name: str) -> bool:
-    namespace, name = op_name.split("::")
-    return hasattr(getattr(torch.ops, namespace), name)
+    namespace, _, name = op_name.partition("::")
+    name, _, overload = name.partition(".")
+    packet = getattr(getattr(torch.ops, namespace), name, None)
+    return packet is not None and hasattr(packet, overload or "default")
 
 
 def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> None:
@@ -2108,8 +2135,12 @@ def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> N
     buf.writeline("")
     buf.writeline("")
     buf.writeline("def _custom_op_registered(op_name):")
-    buf.writeline('    namespace, name = op_name.split("::")')
-    buf.writeline("    return hasattr(getattr(_torch.ops, namespace), name)")
+    buf.writeline('    namespace, _, name = op_name.partition("::")')
+    buf.writeline('    name, _, overload = name.partition(".")')
+    buf.writeline("    packet = getattr(getattr(_torch.ops, namespace), name, None)")
+    buf.writeline(
+        '    return packet is not None and hasattr(packet, overload or "default")'
+    )
     buf.writeline("")
     buf.writeline("")
     buf.writeline("for _module, _ops in CUSTOM_OP_MODULES.items():")
@@ -2129,8 +2160,14 @@ def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> N
 
 
 def _is_op_name(op: str) -> bool:
-    namespace, sep, name = op.partition("::")
-    return bool(sep and namespace and name) and "::" not in name
+    """Whether ``op`` reads ``namespace::name`` or ``namespace::name.overload``."""
+    namespace, sep, qualified = op.partition("::")
+    name, dot, overload = qualified.partition(".")
+    return (
+        bool(sep and namespace and name and (overload or not dot))
+        and "::" not in qualified
+        and "." not in overload
+    )
 
 
 def _check_custom_op_modules(modules: object) -> None:
@@ -2146,8 +2183,8 @@ def _check_custom_op_modules(modules: object) -> None:
     ):
         raise PrecompileError(
             "python_code's CUSTOM_OP_MODULES must map module names to tuples of "
-            "'namespace::op' names; it does not look like a torch.compiler.precompile "
-            "artifact."
+            "'namespace::op' or 'namespace::op.overload' names; it does not look like "
+            "a torch.compiler.precompile artifact."
         )
     for module, ops in modules.items():
         if all(_custom_op_registered(op) for op in ops):

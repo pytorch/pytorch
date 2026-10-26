@@ -9181,6 +9181,17 @@ def cond_fn(x):
         lambda y: y.cos(),
         (x,),
     )
+
+
+_lib = torch.library.Library("{ns}", "FRAGMENT")
+# Leading whitespace, as a schema written across lines has.
+_lib.define("\\n    scaled(Tensor x) -> Tensor")
+_lib.impl("scaled", lambda x: x * 3, "CompositeExplicitAutograd")
+_lib.impl("scaled", torch.empty_like, "Meta")
+
+
+def lib_fn(x):
+    return torch.ops.{ns}.scaled.default(x.sin()) + 1
 """
 
 
@@ -9281,6 +9292,8 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "cond_fn", "standalone"),
             ("dynamo", "inductor", "train_fn", "standalone"),
+            ("make_fx", "inductor", "lib_fn", None),
+            ("dynamo", "eager", "lib_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9326,7 +9339,9 @@ class TestPrecompileCustomOpModules(TestCase):
             ]
             # Only a training step compiles a backward, whose mutating op (reached
             # as an auto_functionalized argument) lives in bwmod.
-            expected = {module: (f"{ns}::triple",)}
+            expected = {
+                module: (f"{ns}::scaled" if entry == "lib_fn" else f"{ns}::triple",)
+            }
             if entry == "train_fn":
                 expected[bwmod] = (f"{bwns}::scale_into",)
             expected = dict(sorted(expected.items()))
@@ -9335,6 +9350,7 @@ class TestPrecompileCustomOpModules(TestCase):
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
 
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 class TestPrecompileCustomOpRecording(TestCase):
     def _op(self, name):
         ns = f"precompile_recording_{uuid.uuid4().hex}"
@@ -9398,6 +9414,9 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"wrapped = register('{wrapped_ns}::g')({impl}.f)\n"
             f"lib = torch.library.Library('{lib_ns}', 'DEF')\n"
             "lib.define('h(Tensor x) -> Tensor')\n"
+            "lib.define('h.named(Tensor x) -> Tensor')\n"
+            # Leading whitespace, as a schema written across lines has.
+            "lib.define(chr(10) + '    k(Tensor x) -> Tensor')\n"
             f"torch.library.define('{define_ns}::i', '(Tensor x) -> Tensor')\n"
             # A Library made in another module, defining here.
             f"{impl}.shared.define('j(Tensor x) -> Tensor')\n"
@@ -9406,6 +9425,8 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"{impl_ns}::f",
             f"{wrapped_ns}::g",
             f"{lib_ns}::h",
+            f"{lib_ns}::h.named",
+            f"{lib_ns}::k",
             f"{define_ns}::i",
             f"{shared_ns}::j",
         )
@@ -9413,7 +9434,9 @@ class TestPrecompileCustomOpRecording(TestCase):
             self._modules_of_graph_calling(
                 getattr(torch.ops, impl_ns).f,
                 getattr(torch.ops, wrapped_ns).g,
-                getattr(torch.ops, lib_ns).h,
+                getattr(torch.ops, lib_ns).h.default,
+                getattr(torch.ops, lib_ns).h.named,
+                getattr(torch.ops, lib_ns).k,
                 getattr(torch.ops, define_ns).i,
                 getattr(torch.ops, shared_ns).j,
             ),
@@ -9432,6 +9455,8 @@ class TestPrecompileCustomOpRecording(TestCase):
             {"mod": ("a::b::c",)},
             {"mod": ("::op",)},
             {"mod": ("ns::",)},
+            {"mod": ("ns::op.",)},
+            {"mod": ("ns::op.a.b",)},
         ):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(
@@ -9442,15 +9467,57 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_an_op_torch_registers_in_cpp_needs_no_module(self):
         with self.assertNoLogs("torch._precompile", level="WARNING"):
             self.assertEqual(
-                self._modules_of_graph_calling(torch.ops._c10d_functional.wait_tensor),
+                self._modules_of_graph_calling(
+                    torch.ops.inductor.accumulate_grad_.default
+                ),
                 {},
             )
+
+    def test_a_torch_op_whose_pystub_module_is_not_imported_needs_no_module(self):
+        # torch's quantized library names a python module (set_python_module) that
+        # is not imported here, so the op falls through to its C++ source.
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            self.assertEqual(
+                self._modules_of_graph_calling(torch.ops.quantized.add.default), {}
+            )
+
+    def test_an_op_torch_registers_lazily_is_not_recorded_under_the_importer(self):
+        from torch._precompile import _custom_op_modules
+
+        op_name = f"precompile_lazy_{uuid.uuid4().hex}::f"
+        # A torch module that registers an op on first use, as
+        # torch.sparse.semi_structured does.
+        torch_module = types.ModuleType(f"torch._precompile_test_{uuid.uuid4().hex}")
+        exec(
+            "import torch\n\n\ndef first_use():\n"
+            f"    @torch.library.custom_op('{op_name}', mutates_args=())\n"
+            "    def f(x: torch.Tensor) -> torch.Tensor:\n        return x.clone()\n",
+            torch_module.__dict__,
+        )
+        sys.modules[torch_module.__name__] = torch_module
+        self.addCleanup(sys.modules.pop, torch_module.__name__)
+        # First used while a user module is being imported.
+        self._import_module_from_source(
+            f"import {torch_module.__name__} as lazy\n\nlazy.first_use()\n"
+        )
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            self.assertEqual(_custom_op_modules({(op_name, "")}), {})
+
+    def test_a_registered_op_needs_the_overload_the_graph_calls(self):
+        from torch._precompile import _custom_op_registered
+
+        ns = f"precompile_overload_{uuid.uuid4().hex}"
+        with torch.library._scoped_library(ns, "DEF") as lib:
+            lib.define("f(Tensor x) -> Tensor")
+            self.assertTrue(_custom_op_registered(f"{ns}::f"))
+            self.assertFalse(_custom_op_registered(f"{ns}::f.named"))
+            self.assertFalse(_custom_op_registered(f"{ns}::g"))
 
     def test_a_cpp_op_is_recorded_under_its_python_module(self):
         from torch._precompile import _custom_op_module
 
-        # No op the test suite can reach registers a pystub, so the mock stands in
-        # for a C++ library calling m.set_python_module.
+        # The mock stands in for an extension's C++ library calling
+        # m.set_python_module with a module that is imported.
         ns = f"precompile_pystub_{uuid.uuid4().hex}"
         with torch.library._scoped_library(ns, "DEF") as lib:
             lib.define("f(Tensor x) -> Tensor")
@@ -9524,6 +9591,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             self.assertEqual(_aot_custom_op_names([artifact("bare", None)]), set())
         self.assertIn("bare", "\n".join(logs.output))
+
+    def test_op_references_in_comments_are_not_recorded(self):
+        from torch._precompile import _custom_op_names_in_source
+
+        source = (
+            "# File: m.py, code: torch.ops.b.g.default(x) if flag else y\n"
+            "buf0 = torch.ops.a.f.default(x)  # torch.ops.c.h.default\n"
+        )
+        self.assertEqual(_custom_op_names_in_source(source), {("a::f", "")})
 
     def test_an_op_without_a_recorded_module_or_torch_source_is_reported(self):
         from torch._precompile import _custom_op_modules

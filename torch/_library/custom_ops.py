@@ -273,18 +273,39 @@ def custom_op(
 
 
 def _registering_module(frame: Any) -> str | None:
-    """The module whose import runs a ``custom_op`` call made from ``frame``: the
-    nearest module-level frame on the stack, so a registration made through a helper
-    or a factory that the module calls at import time counts too. ``__main__`` cannot
-    be imported again, so it records nothing.
+    """The module whose import runs a registration made from ``frame``: the nearest
+    module-level frame on the stack, so a registration made through a helper or a
+    factory that the module calls at import time counts too.
+
+    A registration made inside one of torch's own functions is recorded as
+    ``"torch"``, whatever is being imported at the time: torch may run it lazily, on
+    first use, rather than on any import. ``__main__`` cannot be imported again, so
+    it records nothing.
     """
     frame = frame.f_back if frame is not None else None
+    # Past the registration APIs (torch.library.define calls Library.define, say).
+    while frame is not None and _is_registration_api(frame.f_globals.get("__name__")):
+        frame = frame.f_back
+    if (
+        frame is not None
+        and frame.f_code.co_name != "<module>"
+        and _is_torch_module(frame.f_globals.get("__name__"))
+    ):
+        return "torch"
     while frame is not None and frame.f_code.co_name != "<module>":
         frame = frame.f_back
     if frame is None:
         return None
     name = frame.f_globals.get("__name__")
     return None if name == "__main__" else name
+
+
+def _is_registration_api(name: str | None) -> bool:
+    return name == "torch.library" or (name or "").startswith("torch._library.")
+
+
+def _is_torch_module(name: str | None) -> bool:
+    return name == "torch" or (name or "").startswith("torch.")
 
 
 class CustomOpDef:
