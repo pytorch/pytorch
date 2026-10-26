@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._inductor.fx_utils import get_storage
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
@@ -845,7 +846,148 @@ def _fused_copy_matches_eager(node) -> bool:
     return bool(shape) and all(statically_known_true(dim > 1) for dim in shape)
 
 
+_NON_MERGING_ALIAS_OPS = OrderedSet(
+    [
+        "alias",
+        "chunk",
+        "detach",
+        "narrow",
+        "permute",
+        "select",
+        "slice",
+        "split",
+        "squeeze",
+        "t",
+        "transpose",
+        "unsqueeze",
+        "unbind",
+        "unflatten",
+        "expand",
+        "movedim",
+        "swapaxes",
+        "swapdims",
+        "split_with_sizes",
+        "tensor_split",
+    ]
+)
+
+_SPLIT_VIEW_OPS = OrderedSet(["view", "reshape", "_unsafe_view"])
+
+
+def _shape_value(value):
+    if isinstance(value, torch.Tensor) and value.dim() > 0:
+        return tuple(value.shape)
+    return None
+
+
+def _is_one(dim) -> bool:
+    if isinstance(dim, int):
+        return dim == 1
+    return statically_known_true(dim == 1)
+
+
+def _is_split_only_view(user: torch.fx.Node) -> bool:
+    source_node = get_arg_value(user, 0, "input")
+    if not isinstance(source_node, torch.fx.Node):
+        return False
+    source = _shape_value(_node_value(source_node))
+    target = _shape_value(_node_value(user))
+    if source is None or target is None:
+        return False
+    src = [dim for dim in source if not _is_one(dim)]
+    tgt = [dim for dim in target if not _is_one(dim)]
+    index = 0
+    for dim in src:
+        if index >= len(tgt):
+            return False
+        product = tgt[index]
+        index += 1
+        while not statically_known_true(product == dim):
+            if statically_known_true(product > dim) or index >= len(tgt):
+                return False
+            product = product * tgt[index]
+            index += 1
+    return index == len(tgt)
+
+
+def _allowed_alias(user: torch.fx.Node, op) -> bool:
+    # Traversable alias: safe only when it cannot merge dimensions.
+    if user.op == "call_function" and user.target is operator.getitem:
+        return True
+    if user.op == "call_method":
+        if user.target in _NON_MERGING_ALIAS_OPS:
+            return True
+        if user.target in _SPLIT_VIEW_OPS:
+            return _is_split_only_view(user)
+        return False
+    if user.op != "call_function" or op is None:
+        return False
+    name = op.overloadpacket.__name__
+    if name in _NON_MERGING_ALIAS_OPS:
+        return True
+    if name in _SPLIT_VIEW_OPS:
+        return _is_split_only_view(user)
+    return False
+
+
+def _is_alias_of(source: torch.Tensor, result: torch.Tensor) -> bool:
+    if not torch._C._has_storage(source) or not torch._C._has_storage(result):
+        return True
+    return get_storage(source) == get_storage(result)
+
+
+def _tensor_values(value):
+    if isinstance(value, torch.Tensor):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if isinstance(item, torch.Tensor)]
+    return []
+
+
+def _is_aliasing_user(user: torch.fx.Node) -> bool:
+    # Node-level: if any result aliases any input, every user is traversed.
+    # Multi-result ops may over-reject sibling results, but never miss a
+    # mutation.
+    if user.op not in ("call_method", "call_function"):
+        return True
+    value = _node_value(user)
+    if value is None:
+        # Missing metadata: assume an alias so an unchecked write cannot
+        # slip through.
+        return True
+    results = _tensor_values(value)
+    if not results:
+        # Known non-tensor results cannot alias a tensor input.
+        return False
+    sources = []
+    for arg in user.args:
+        sources.extend(_tensor_values(torch.fx.node.map_arg(arg, _node_value)))
+    for arg in user.kwargs.values():
+        sources.extend(_tensor_values(torch.fx.node.map_arg(arg, _node_value)))
+    if not sources:
+        # Missing source metadata: assume an alias.
+        return True
+    return any(_is_alias_of(source, result) for source in sources for result in results)
+
+
+def _layout_sensitive_after_alias(user: torch.fx.Node, op) -> bool:
+    if op is None:
+        return False
+    if op.overloadpacket.__name__ not in (
+        "cat",
+        "stack",
+        "pad",
+        "constant_pad_nd",
+    ):
+        return False
+    # These ops only consult size-1 strides for 4-D/5-D channels-last results.
+    value = _node_value(user)
+    return isinstance(value, torch.Tensor) and value.dim() >= 4
+
+
 def _is_mutable_user(user: torch.fx.Node, op) -> bool:
+    if _allowed_alias(user, op):
+        return False
     if op is not None:
         return op._schema.is_mutable
     if isinstance(user.target, torch._ops.OpOverload):
@@ -893,13 +1035,19 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
-    """Return True if a direct consumer of ``node`` rejects the fusion.
+    """Return True if a reachable consumer of ``node`` rejects the fusion.
 
-    Only direct users are inspected in this split. Tensor methods, views,
-    aliases, copies and training dropout are conservatively rejected until
-    later splits add traversal.
+    Direct users and non-merging aliases are inspected. Copies and training
+    dropout stay conservative until the next split.
     """
-    for user in node.users:
+    pending = [(user, False) for user in node.users]
+    visited = OrderedSet()
+    while pending:
+        user, behind_alias = pending.pop()
+        key = (user, behind_alias)
+        if key in visited:
+            continue
+        visited.add(key)
         op = (
             _compute_user_overload(user)
             if user.op in ("call_method", "call_function")
@@ -913,9 +1061,24 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         if user.target is torch.nn.functional.dropout:
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
-        if _direct_layout_user_is_sensitive(user, op, node):
+        if _is_mutable_user(user, op):
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
+        if behind_alias and _layout_sensitive_after_alias(user, op):
+            log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
+            return True
+        if _is_contiguous_user(user, op):
+            if _direct_layout_user_is_sensitive(user, op, node):
+                log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
+                return True
+            continue
+        if _allowed_alias(user, op):
+            pending.extend((next_user, True) for next_user in user.users)
+        elif _direct_layout_user_is_sensitive(user, op, node):
+            log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
+            return True
+        elif _is_aliasing_user(user):
+            pending.extend((next_user, True) for next_user in user.users)
     return False
 
 
