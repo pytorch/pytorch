@@ -1352,6 +1352,107 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_with_loss_kwarg_mbs(self, ScheduleClass):
+        """
+        Test that each microbatch's loss gets the shared loss_kwargs merged with
+        its own loss_kwarg_mbs entry, including a dict the loss fills.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid, batch_size = 16, 8
+            n_stages = 1
+            num_microbatches = 2
+            device = "cpu"
+
+            mod = torch.nn.Linear(d_hid, d_hid).to(device)
+            ref_mod = copy.deepcopy(mod)
+
+            x = torch.randn(batch_size, d_hid, device=device)
+            target = torch.randn(batch_size, d_hid, device=device)
+            weight = torch.rand(batch_size, 1, device=device)
+            scale = 0.5
+
+            def weighted_loss(output, target, scale, weight):
+                return ((output - target).square() * weight).sum() * scale
+
+            def loss_fn(output, target, *, scale, weight, metrics):
+                loss = weighted_loss(output, target, scale, weight)
+                metrics["loss"] = loss.detach()
+                return loss
+
+            stage = PipelineStage(mod, 0, n_stages, device)
+            if issubclass(ScheduleClass, PipelineScheduleSingle):
+                stages = stage
+            else:
+                stages = [stage]
+            schedule = ScheduleClass(
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+
+            x_mbs = torch.tensor_split(x, num_microbatches)
+            target_mbs = list(torch.tensor_split(target, num_microbatches))
+            weight_mbs = torch.tensor_split(weight, num_microbatches)
+            metrics_mbs = [{} for _ in range(num_microbatches)]
+            losses = []
+            schedule.step(
+                arg_mbs=[(x_mb,) for x_mb in x_mbs],
+                target_mbs=target_mbs,
+                losses=losses,
+                loss_kwargs={"scale": scale},
+                loss_kwarg_mbs=[
+                    {"weight": weight_mb, "metrics": metrics}
+                    for weight_mb, metrics in zip(weight_mbs, metrics_mbs, strict=True)
+                ],
+            )
+
+            ref_losses = []
+            for x_mb, target_mb, weight_mb in zip(
+                x_mbs, target_mbs, weight_mbs, strict=True
+            ):
+                ref_loss = weighted_loss(ref_mod(x_mb), target_mb, scale, weight_mb)
+                ref_loss.backward()
+                ref_losses.append(ref_loss.detach())
+
+            self.assertEqual(losses, ref_losses)
+            self.assertEqual(metrics_mbs, [{"loss": loss} for loss in ref_losses])
+            for name, param in mod.named_parameters():
+                self.assertEqual(
+                    param.grad,
+                    ref_mod.get_parameter(name).grad,
+                    msg=f"Gradient mismatch for {name}",
+                )
+
+            with self.assertRaisesRegex(
+                TypeError, "multiple values for keyword argument 'scale'"
+            ):
+                schedule.step(
+                    arg_mbs=[(x_mb,) for x_mb in x_mbs],
+                    target_mbs=target_mbs,
+                    loss_kwargs={"scale": scale},
+                    loss_kwarg_mbs=[
+                        {"scale": scale, "weight": weight_mb, "metrics": {}}
+                        for weight_mb in weight_mbs
+                    ],
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
     def test_schedule_pre_split_validation(self):
         store = FakeStore()
         torch.distributed.init_process_group(
@@ -1406,6 +1507,23 @@ class ScheduleTest(TestCase):
                     arg_mbs=[(x0,), (x1,)],
                     target_mbs=[x0],
                 )
+
+            with self.assertRaisesRegex(TypeError, "loss_kwarg_mbs must be a list"):
+                schedule.step(arg_mbs=[(x0,), (x1,)], loss_kwarg_mbs={"w": x0})
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 loss_kwarg_mbs"):
+                schedule.step(arg_mbs=[(x0,), (x1,)], loss_kwarg_mbs=[{}])
+
+            with self.assertRaisesRegex(
+                TypeError, "loss_kwarg_mbs must be a list of dicts"
+            ):
+                schedule.step(arg_mbs=[(x0,), (x1,)], loss_kwarg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split targets through target_mbs",
+            ):
+                schedule.step(target=x0, loss_kwarg_mbs=[{}, {}])
         finally:
             torch.distributed.destroy_process_group()
 
@@ -1522,6 +1640,56 @@ class ScheduleTest(TestCase):
                 schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
                 with self.assertRaisesRegex(RuntimeError, "fake process group"):
                     schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_post_metadata_inference_cleanup(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        device = torch.device("cpu")
+        x = torch.randn(2, 4, device=device)
+        target = torch.randn_like(x)
+        try:
+            dynamic_stage = PipelineStage(torch.nn.Linear(4, 4), 0, 1, device)
+            dynamic_schedule = ScheduleGPipe(
+                dynamic_stage,
+                n_microbatches=1,
+                loss_fn=torch.nn.MSELoss(),
+            )
+            cleanup_calls = 0
+
+            def cleanup() -> None:
+                nonlocal cleanup_calls
+                self.assertIsNone(dynamic_stage._metadata_inference_buffer_backup)
+                self.assertIsNone(dynamic_stage._fwd_outputs_for_bwd_meta)
+                cleanup_calls += 1
+
+            handle = dynamic_schedule.register_post_metadata_inference_cleanup(cleanup)
+            dynamic_schedule.step(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+            dynamic_schedule.step(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+
+            handle.remove()
+            dynamic_schedule.eval(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+
+            static_module = torch.nn.Linear(4, 4)
+            static_stage = PipelineStage(
+                static_module,
+                0,
+                1,
+                device,
+                input_args=x,
+                output_args=static_module(x),
+            )
+            static_schedule = ScheduleGPipe(static_stage, n_microbatches=1)
+            static_cleanup = MagicMock()
+            static_schedule.register_post_metadata_inference_cleanup(static_cleanup)
+            static_schedule.step(x)
+            static_cleanup.assert_not_called()
         finally:
             torch.distributed.destroy_process_group()
 

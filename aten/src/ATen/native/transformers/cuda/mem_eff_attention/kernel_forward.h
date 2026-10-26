@@ -183,6 +183,8 @@ struct AttentionKernel {
     int64_t bias_strideB = 0;
 
     int32_t num_batches = 0;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int32_t num_heads = 0;
     int32_t q_heads_per_kv = 1;
 
@@ -197,8 +199,8 @@ struct AttentionKernel {
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
     CUTLASS_DEVICE bool advance_to_block() {
-      auto batch_id = blockIdx.z;
-      auto head_id = blockIdx.y;
+      auto batch_id = blockIdx.z + batch_offset;
+      auto head_id = blockIdx.y + head_offset;
       auto kv_head_id = head_id / q_heads_per_kv;
       int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
@@ -1060,7 +1062,6 @@ struct AttentionKernel {
                 kKeysPerBlock;
           }
 
-          // int first_key_block = 0;
           MM1::Mma::drain_cp_asyncs();
           DISPATCH_BOOL(
               iter_key_start == first_key, kIsFirst, ([&] {
