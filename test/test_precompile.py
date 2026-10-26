@@ -9119,5 +9119,186 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertIn(f"runtime cache phase ok: {phase}", out.stdout)
 
 
+_CUSTOM_OP_MODULE = """
+import torch
+
+
+@torch.library.custom_op("{ns}::triple", mutates_args=())
+def triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+@triple.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+def fn(x):
+    return torch.ops.{ns}.triple.default(x.sin()) + 1
+
+
+class Child(torch.nn.Module):
+    def forward(self, x):
+        y = torch.ops.{ns}.triple.default(x.sin())
+        torch._dynamo.graph_break()
+        return y + 1
+
+
+child = Child()
+
+
+def step(x):
+    return child(x * 2) + 1
+
+
+def cond_fn(x):
+    return torch.cond(
+        x.sum() > 0,
+        lambda y: torch.ops.{ns}.triple.default(y),
+        lambda y: y.cos(),
+        (x,),
+    )
+"""
+
+
+_UNUSED_OP_MODULE = """
+import torch
+
+
+@torch.library.custom_op("{ns}::unused", mutates_args=())
+def unused(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@unused.register_fake
+def _(x):
+    return torch.empty_like(x)
+"""
+
+
+_CUSTOM_OP_DRIVER = """
+import os
+import sys
+
+import torch
+
+phase, directory, module, unused, tracer, backend, entry = sys.argv[1:8]
+if phase != "missing":
+    sys.path.insert(0, directory)
+pc = torch.compiler.precompile
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
+expected_path = os.path.join(directory, "expected.pt")
+x = torch.arange(6, dtype=torch.float32)
+if phase == "capture":
+    fn = getattr(__import__(module), entry)
+    __import__(unused)
+    torch._dynamo.config.nested_graph_breaks = False
+    with pc.capture(
+        fn,
+        artifact_path=artifact,
+        cache_path=cache,
+        tracer=pc.DynamoTracer() if tracer == "dynamo" else pc.MakeFxTracer(),
+        backend=backend,
+    ) as cap:
+        torch.save(cap(x), expected_path)
+elif phase == "replay":
+    assert module not in sys.modules, module
+    loaded = pc.load(artifact, cache)
+    torch.testing.assert_close(loaded(x), torch.load(expected_path))
+    assert module in sys.modules, "the artifact did not import its custom op module"
+    assert unused not in sys.modules, "the artifact imported an unused custom op module"
+else:
+    try:
+        pc.load(artifact, cache)
+    except torch.compiler.PrecompileError as e:
+        assert repr(module) in str(e), e
+    else:
+        raise AssertionError("load ran an artifact whose custom op module is missing")
+print("custom op phase ok:", phase)
+"""
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileCustomOpModules(TestCase):
+    @skipIfCrossRef
+    @parametrize(
+        "tracer,backend,entry,mode",
+        [
+            ("make_fx", "eager", "fn", None),
+            ("make_fx", "inductor", "fn", None),
+            ("dynamo", "eager", "fn", "standalone"),
+            ("dynamo", "inductor", "fn", "standalone"),
+            ("dynamo", "eager", "step", "installed"),
+            ("dynamo", "inductor", "cond_fn", "standalone"),
+        ],
+    )
+    def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
+        self, tracer, backend, entry, mode
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            tag = uuid.uuid4().hex
+            module, unused = f"precompile_op_module_{tag}", f"precompile_unused_{tag}"
+            ns = f"precompile_op_test_{tag}"
+            for name, source in ((module, _CUSTOM_OP_MODULE), (unused, _UNUSED_OP_MODULE)):
+                with open(os.path.join(directory, name + ".py"), "w") as f:
+                    f.write(source.replace("{ns}", ns))
+            for phase in ("capture", "replay", "missing"):
+                out = subprocess.run(
+                    [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
+                    + [module, unused, tracer, backend, entry],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"custom op phase ok: {phase}", out.stdout)
+            with open(os.path.join(directory, "artifact.py")) as f:
+                python_code = f.read()
+            (line,) = [
+                line
+                for line in python_code.splitlines()
+                if line.startswith("CUSTOM_OP_MODULES = ")
+            ]
+            self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module,)!r}")
+            if mode is not None:
+                self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
+
+
+class TestPrecompileCustomOpRecording(TestCase):
+    def _op(self, name):
+        ns = f"precompile_recording_{uuid.uuid4().hex}"
+
+        @torch.library.custom_op(f"{ns}::{name}", mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        return op, f"{ns}::{name}"
+
+    def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
+        from torch._precompile import _custom_op_modules
+
+        op, qualname = self._op("in_main")
+        op._init_fn.__module__ = "__main__"
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules([qualname]), ())
+        self.assertIn(qualname, "\n".join(logs.output))
+
+    def test_a_capture_names_only_the_ops_of_the_graphs_it_serves(self):
+        from torch._dynamo.precompile_package import _CapturePackage
+
+        served, served_name = self._op("served")
+        dropped, dropped_name = self._op("dropped")
+
+        def graph(op):
+            return torch.fx.symbolic_trace(lambda x: op._opoverload(x) + 1)
+
+        package = _CapturePackage(lambda x: x)
+        package.add_backend_graph("__compiled_fn_1", graph(served))
+        package.add_backend_graph("__compiled_fn_2", graph(dropped))
+        self.assertEqual(package.custom_op_names(["__compiled_fn_1"]), {served_name})
+
+
 if __name__ == "__main__":
     run_tests()
