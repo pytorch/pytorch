@@ -744,10 +744,10 @@ def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
 
     A lowering that splits one user-visible low-precision op into several IR
     nodes (e.g. peeling the bias off a convolution) must reproduce the rounding
-    of the op's declared output: eager has no intermediate node whose rounding a
-    fused consumer could observe instead.  make_pointwise already rounds this
-    value under the emulate_precision_casts barrier or when it is saved for
-    backward; this covers the remaining unsaved case under the same knob
+    of the op's declared output, else a fused consumer can observe a value
+    eager never produces.  make_pointwise already rounds this value under the
+    emulate_precision_casts barrier or when it is saved for backward; this
+    covers the remaining unsaved case under the same gate
     (emulate_precision_casts_on_saved_tensors), so the value no longer depends
     on whether backward saves it.
     """
@@ -762,8 +762,7 @@ def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
 
     node = getattr(V.graph, "current_node", None) if V.graph is not None else None
     if _has_lowp_pointwise_barrier(node) or _has_saved_lowp_output_use(node):
-        # make_pointwise already rounds this value for the current node; a
-        # second identical pair would be dead IR.
+        # make_pointwise already rounds this value for the current node.
         return x
 
     return make_pointwise(lambda out: out, force_output_cast=True)(x)
@@ -784,9 +783,8 @@ def make_pointwise(
     the define-by-run IR.
 
     force_output_cast rounds a bf16/fp16 result down and back up in registers,
-    emulating the rounding eager applies at the op's output; lowerings that
-    split one user-visible low-precision op into several nodes use it so fused
-    consumers see the op's declared output precision.
+    emulating the rounding eager applies at the op's output; see
+    emulate_lowp_output_cast.
     """
 
     def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
