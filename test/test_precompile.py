@@ -7737,6 +7737,12 @@ class TestPrecompileRuntimeCache(TestCase):
             [r["reason"] for r in failure.exception.sources[0]["instances"]],
             ["non_static_compile_result", "launcher_count_not_one"],
         )
+        # A launch that left no fast-path launcher (under the profiler, say) still
+        # counts as one.
+        ran._cached_launcher = None
+        ran._launched = True
+        with self.assertRaises(_UnresolvedTritonExport):
+            _freeze_triton_kernel("source", [unlaunched, ran])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_reports_a_never_run_kernel_once(self):
@@ -7822,7 +7828,12 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
         )
-        with fresh_cache():
+        # Built under a capture, the kernel is keyed for any host, as a replay
+        # holding frozen kernels looks it up.
+        with (
+            fresh_cache(),
+            mock.patch.object(_runtime_cache, "relocatable_cpp_keys", return_value=True),
+        ):
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
                 payload = pickle.dumps({lib.key: binary.read()})
