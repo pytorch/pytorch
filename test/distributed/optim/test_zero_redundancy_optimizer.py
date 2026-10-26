@@ -7,6 +7,7 @@
 
 import copy
 import sys
+import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, cast
 
@@ -168,6 +169,32 @@ class TestZeroRedundancyOptimizerSingleRank(MultiProcContinuousTest):
 
         # Check that the exposed `param_groups`` are on the proper device
         self.assertEqual(o.param_groups[0]["params"][0].device, x.device)
+
+    @parametrize("preserve_dtype", [None, False, True])
+    def test_load_state_dict_dtype_policy(self, preserve_dtype):
+        saved_param = torch.ones(2, device=self.device, dtype=torch.float32)
+        saved_optimizer = SGD([saved_param], momentum=0.9)
+        saved_buffer = torch.full_like(saved_param, 0.12345679)
+        saved_optimizer.state[saved_param] = {"momentum_buffer": saved_buffer}
+        checkpoint = saved_optimizer.state_dict()
+
+        param = torch.ones(
+            2, device=self.device, dtype=torch.bfloat16, requires_grad=True
+        )
+        optimizer = ZeroRedundancyOptimizer([param], optimizer_class=SGD, momentum=0.9)
+        context = (
+            nullcontext()
+            if preserve_dtype is None
+            else torch.optim.preserve_state_dtype_on_load(preserve_dtype)
+        )
+        with context, warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", FutureWarning)
+            optimizer.load_state_dict(checkpoint)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
+        self.assertEqual(caught, [])
+        self.assertEqual(optimizer.optim.state[param]["momentum_buffer"], saved_buffer)
+        expected = saved_buffer if preserve_dtype else saved_buffer.to(param.dtype)
+        self.assertEqual(optimizer.state[param]["momentum_buffer"], expected)
 
     def test_lr_scheduler(self):
         """Check that a normal PyTorch ``lr_scheduler`` is usable with

@@ -12,6 +12,9 @@ from torch.optim._muon import Muon as Muon
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
 )
+from torch.optim._utils import (
+    preserve_state_dtype_on_load as preserve_state_dtype_on_load,
+)
 from torch.optim.adadelta import Adadelta as Adadelta
 from torch.optim.adagrad import Adagrad as Adagrad
 from torch.optim.adam import Adam as Adam
@@ -20,10 +23,7 @@ from torch.optim.adamw import AdamW as AdamW
 from torch.optim.asgd import ASGD as ASGD
 from torch.optim.lbfgs import LBFGS as LBFGS
 from torch.optim.nadam import NAdam as NAdam
-from torch.optim.optimizer import (
-    Optimizer as Optimizer,
-    preserve_state_dtype_on_load as preserve_state_dtype_on_load,
-)
+from torch.optim.optimizer import Optimizer as Optimizer
 from torch.optim.radam import RAdam as RAdam
 from torch.optim.rmsprop import RMSprop as RMSprop
 from torch.optim.rprop import Rprop as Rprop

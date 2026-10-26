@@ -1724,6 +1724,7 @@ class TestOptimRenewed(TestCase):
         with warnings.catch_warnings(record=True) as caught, context:
             warnings.simplefilter("always", FutureWarning)
             optimizer.load_state_dict(saved_dict)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
         self.assertEqual(len(caught), int(preserve_dtype is None))
         if preserve_dtype is None:
             self.assertIs(caught[0].category, FutureWarning)
@@ -1755,10 +1756,13 @@ class TestOptimRenewed(TestCase):
         else:
             self.assertIs(loaded_state["step"], saved_state["step"])
 
+    @parametrize("fused", [False, True])
     @parametrize("has_state", [False, True])
-    def test_load_state_dict_matching_dtype_does_not_warn(self, device, has_state):
+    def test_load_state_dict_matching_dtype_does_not_warn(
+        self, device, fused, has_state
+    ):
         param = Parameter(torch.ones(2, device=device, dtype=torch.float32))
-        optimizer = torch.optim.Adam([param])
+        optimizer = torch.optim.Adam([param], fused=fused)
         if has_state:
             optimizer.state[param] = {
                 "step": torch.tensor(3.0, dtype=torch.float64),
@@ -1766,11 +1770,17 @@ class TestOptimRenewed(TestCase):
                 "exp_avg_sq": torch.zeros_like(param),
             }
         saved_dict = optimizer.state_dict()
+        expected_dict = deepcopy(saved_dict)
+        if has_state and fused:
+            expected_dict["state"][0]["step"] = torch.tensor(
+                3.0, dtype=torch.float32, device=device
+            )
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", FutureWarning)
             optimizer.load_state_dict(saved_dict)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
         self.assertEqual(caught, [])
-        self.assertEqual(optimizer.state_dict(), saved_dict, exact_device=True)
+        self.assertEqual(optimizer.state_dict(), expected_dict, exact_device=True)
 
     @skipMPS
     @parametrize("impl", ["forloop", "fused", "capturable"])
@@ -2914,6 +2924,7 @@ class TestOptimizerLoadStateDictContext(TestCase):
         ):
             warnings.simplefilter("always", FutureWarning)
             optimizer.load_state_dict(checkpoint)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
         self.assertEqual(caught, [])
         self.assertEqual(
             optimizer.state[param]["momentum_buffer"],
