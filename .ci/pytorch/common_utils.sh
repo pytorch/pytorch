@@ -336,6 +336,10 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
+function install_nccl4py() {
+  pip_install nccl4py==0.5.0
+}
+
 function install_spmd_types() {
   local commit
   commit=$(get_pinned_commit spmd_types)
@@ -348,7 +352,8 @@ function install_flash_attn_cute() {
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
     flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK do not pin CuTeDSL, so install the pinned version first.
+  install_cutlass_dsl
   pip_install \
     "$flash_attn_package" \
     quack-kernels==0.6.5 \

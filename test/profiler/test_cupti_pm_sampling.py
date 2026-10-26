@@ -17,7 +17,11 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # pm_sampling imports the cupti module at load, so only import it when cupti-python is present;
@@ -53,12 +57,14 @@ TEST_CUPTI_PM_SAMPLING = TEST_CUDA and TEST_CUPTI_V13_3 and bool(supported_metri
     not TEST_CUPTI_PM_SAMPLING,
     "requires cupti pm_sampling + the nvperf libraries + a capable CUDA GPU",
 )
-class TestPmSamplingWindowSizing(TestCase):
+class TestPmSamplingWindowSizingCUDA(TestCase):
     """PM-sampling window sizing exercised through real CUPTI PM sampling: a PmSampler configured
     with a window + interval samples live GPU work, and the decoded frames confirm the sizing --
     max_samples = window // interval flows through configure()/decode(), each frame carries a column
     per metric, HW timestamps are monotonic, and the decoded span stays within the requested window.
     Skips at runtime when PM sampling cannot engage on the host (needs perfmon-capable HW)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def _run_gpu_work(self, seconds: float = 0.2) -> None:
         a = torch.randn(512, 512, device="cuda")
