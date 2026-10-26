@@ -43,10 +43,12 @@ from torch._inductor.cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from torch._inductor.codecache import (
+    _host_independent_command_line,
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
     compiled_fx_graph_hash,
+    CppCodeCache,
     CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
@@ -5756,6 +5758,39 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+
+class TestCppCodeCacheKey(TestCase):
+    CODE = 'extern "C" int f() { return 0; }'
+
+    def _key(self, extra_flags: tuple[str, ...] = ()) -> str:
+        CppCodeCache.load_async(self.CODE, extra_flags=extra_flags)
+        (key,) = CppCodeCache.cache
+        return key
+
+    def test_key_ignores_install_and_cache_paths(self):
+        torch_root = os.path.dirname(os.path.dirname(os.path.abspath(torch.__file__)))
+        keys = []
+        for _ in range(2):
+            with fresh_cache():
+                keys.append(self._key((f"-I{cache_dir()}/include",)))
+        self.assertEqual(keys[0], keys[1])
+
+        here = _host_independent_command_line(f"cc -I{torch_root}/torch/include")
+        with mock.patch.object(torch, "__file__", "/elsewhere/torch/__init__.py"):
+            elsewhere = _host_independent_command_line("cc -I/elsewhere/torch/include")
+        self.assertEqual(here, elsewhere)
+
+    def test_key_tracks_torch_build(self):
+        with fresh_cache():
+            key = self._key()
+        with (
+            fresh_cache(),
+            mock.patch(
+                "torch._inductor.codecache.torch_key", return_value=b"other build"
+            ),
+        ):
+            self.assertNotEqual(self._key(), key)
 
 
 class TestVecISACheckBuild(TestCase):
