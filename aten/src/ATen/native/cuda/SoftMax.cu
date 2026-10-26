@@ -1514,12 +1514,12 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std:
 
   int softmax_elements = input.size(dim);
   // Persistent softmax is only supported when all of the conditions are held:
-  //     1) softmax_elements <= 1024
-  //     2) softmax_elements * input.element_size() <= 4096
+  //     1) softmax_elements <= 2048
+  //     2) softmax_elements * input.element_size() <= 8192
   //     3) mask.is_contiguous()
   //     4) dim == input.dim() - 1
   // Otherwise, we fallback to vanilla softmax (where we do not support transformer_mask since converting the mask is expensive)
-  if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous() || dim < input.dim()-1) {
+  if (softmax_elements > 2048 || softmax_elements * input.element_size() > 8192 || !mask.is_contiguous() || dim < input.dim()-1) {
     if (is_BxT_mask) {
       mask = mask.view({mask_.size(0), 1, 1, mask_.size(1)}).expand(input.sizes());
     }
@@ -1604,7 +1604,7 @@ Tensor masked_softmax_backward_cuda(
   int softmax_elements = output.size(dim);
   int64_t batch_count = grad.numel() / softmax_elements;
 
-  if (softmax_elements > 1024 || softmax_elements * grad.element_size() > 4096 || dim < grad.dim()-1) {
+  if (softmax_elements > 2048 || softmax_elements * grad.element_size() > 8192 || dim < grad.dim()-1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,

@@ -10163,7 +10163,7 @@ class TestNNDeviceType(NNTestCase):
         # Test that mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
         # and mask type 2 (generic BxHxLxL mask) are processed correctly on the
         # fast path and the results match explicit slow calculation.
-        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200), (4, 4, 1537), (2, 4, 2048)]
 
         for (B, num_heads, L) in sizes:
 
@@ -10340,7 +10340,9 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(input.grad, input.grad.masked_fill(mask, 0.0))
 
     def test_masked_softmax_grad(self, device):
-        shapes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        # 1537 and 2048 exercise the masked backward warp path (up to 2048),
+        # covering a non-power-of-two length and the exact upper bound.
+        shapes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200), (4, 2, 1537), (2, 2, 2048)]
         for shape in shapes:
             dims = [0, len(shape) - 1] if len(shape) > 0 else [0]
             for dim in dims:
