@@ -55,6 +55,14 @@ from label_utils import (
     LABEL_ERR_MSG,
     NOT_USER_FACING_LABEL,
 )
+from mergebot_status import (
+    MERGE_FAILURE,
+    MERGE_SUCCESS,
+    REVERT_FAILURE,
+    REVERT_SUCCESS,
+    Status,
+    with_status,
+)
 from native_stack import (
     branch_update_comments,
     build_native_stack_commits,
@@ -828,6 +836,26 @@ def is_bot_initiated_codev_merge(pr: GitHubPR, comment_id: int | None) -> bool:
     )
 
 
+def post_pr_comment(
+    org: str,
+    project: str,
+    pr_num: int,
+    comment: str,
+    *,
+    status: Status | None,
+    dry_run: bool = False,
+) -> None:
+    """Post a mergebot comment on a PR. Every comment trymerge posts goes through here.
+
+    `status` is required: a reply that reports how a merge or revert command went
+    passes its outcome, which is appended as a hidden machine-readable tag (see
+    mergebot_status.py); any other comment (a notice, a waiting message) passes None.
+    """
+    gh_post_pr_comment(
+        org, project, pr_num, with_status(comment, status), dry_run=dry_run
+    )
+
+
 def ensure_mergeable_labels(
     pr: GitHubPR, comment_id: int | None, dry_run: bool
 ) -> None:
@@ -843,7 +871,7 @@ def ensure_mergeable_labels(
         # then failed, the merge would abort with the PR already satisfying
         # has_required_labels — so the retry would take the early return above
         # and the promised audit trail would never be written.
-        gh_post_pr_comment(
+        post_pr_comment(
             pr.org,
             pr.project,
             pr.pr_num,
@@ -851,7 +879,8 @@ def ensure_mergeable_labels(
             "PR is being merged after its internal diff landed, without a "
             "release-notes label. If this change is user facing, please replace "
             "the label with the appropriate `release notes: ...` one.",
-            dry_run,
+            status=None,
+            dry_run=dry_run,
         )
         gh_add_labels(pr.org, pr.project, pr.pr_num, [NOT_USER_FACING_LABEL], dry_run)
     else:
@@ -2271,7 +2300,14 @@ def check_greenlight_reviewed_head_sha(
     )
     if result.comment:
         try:
-            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, result.comment, dry_run)
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                result.comment,
+                status=None,
+                dry_run=dry_run,
+            )
         except Exception as e:
             # The comment is a courtesy; failing to post it must not end a merge that
             # the guard itself is willing to keep waiting on.
@@ -2402,20 +2438,24 @@ def post_starting_merge_comment(
 ) -> None:
     """Post the initial merge starting message on the PR. Also post a short
     message on the other PRs that merging it lands, `stacked_prs`."""
-    gh_post_pr_comment(
+    post_pr_comment(
         pr.org,
         pr.project,
         pr.pr_num,
         explainer.get_merge_message(ignore_current_checks_info),
+        status=MERGE_SUCCESS,
         dry_run=dry_run,
     )
     for additional_pr in stacked_prs:
         if additional_pr.pr_num != pr.pr_num:
-            gh_post_pr_comment(
+            # Not a reply to a command on this PR: its merge outcome is reported
+            # on the PR that was asked to merge
+            post_pr_comment(
                 additional_pr.org,
                 additional_pr.project,
                 additional_pr.pr_num,
                 f"Starting merge as part of PR stack under #{pr.pr_num}",
+                status=None,
                 dry_run=dry_run,
             )
 
@@ -2429,7 +2469,15 @@ def manually_close_merged_pr(
     def _comment_and_close(pr: GitHubPR, comment: str) -> None:
         pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
         if not pr.is_closed():
-            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
+            # The merge landed; this reply is its only report of that
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                comment,
+                status=MERGE_SUCCESS,
+                dry_run=dry_run,
+            )
             gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
 
     message = (
@@ -2978,8 +3026,13 @@ def reopen_reverted_prs(
         ):
             revert_message += "\n:warning: This PR might contain internal changes"
             revert_message += "\ncc: @pytorch/pytorch-dev-infra"
-        gh_post_pr_comment(
-            pr.org, pr.project, pr.pr_num, revert_message, dry_run=dry_run
+        post_pr_comment(
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            revert_message,
+            status=REVERT_SUCCESS,
+            dry_run=dry_run,
         )
 
         pr.add_numbered_label("reverted", dry_run)
@@ -3093,7 +3146,7 @@ def refresh_reverted_branches(
         for number, msg in branch_update_comments(
             stack, updates, default_branch, original_pr.pr_num, "reverted"
         ):
-            gh_post_pr_comment(org, project, number, msg)
+            post_pr_comment(org, project, number, msg, status=None)
     except Exception as e:
         print(f"Failed to update the branches of the reverted PRs: {e}")
         traceback.print_exc()
@@ -3102,7 +3155,8 @@ def refresh_reverted_branches(
         if stack is None and len(reverted) == 1:
             return
         try:
-            gh_post_pr_comment(
+            # Reports a cleanup after a revert that landed, not the revert's outcome
+            post_pr_comment(
                 org,
                 project,
                 original_pr.pr_num,
@@ -3110,6 +3164,7 @@ def refresh_reverted_branches(
                 "not show only their own changes. To update them, comment "
                 f"`@pytorchbot rebase -b {default_branch}` on the topmost reverted "
                 f"PR. Error: {e}",
+                status=None,
             )
         except Exception as comment_error:
             print(f"Failed to comment on PR #{original_pr.pr_num}: {comment_error}")
@@ -3127,7 +3182,14 @@ def try_revert(
     try:
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
     except PostCommentError as e:
-        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, str(e), dry_run=dry_run)
+        post_pr_comment(
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            str(e),
+            status=REVERT_FAILURE,
+            dry_run=dry_run,
+        )
         return
 
     extra_msg = f" due to {reason}" if reason is not None else ""
@@ -3533,7 +3595,14 @@ def main() -> None:
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         msg = format_failure_comment(e, title, os.getenv("GH_RUN_URL"))
-        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        post_pr_comment(
+            org,
+            project,
+            args.pr_num,
+            msg,
+            status=REVERT_FAILURE if args.revert else MERGE_FAILURE,
+            dry_run=args.dry_run,
+        )
         traceback.print_exc()
 
     try:
@@ -3545,12 +3614,13 @@ def main() -> None:
 
     if args.revert:
         try:
-            gh_post_pr_comment(
+            post_pr_comment(
                 org,
                 project,
                 args.pr_num,
                 get_revert_message(org, project, pr.pr_num),
-                args.dry_run,
+                status=REVERT_SUCCESS,
+                dry_run=args.dry_run,
             )
             try_revert(
                 repo,
@@ -3564,21 +3634,23 @@ def main() -> None:
         return
 
     if pr.is_closed():
-        gh_post_pr_comment(
+        post_pr_comment(
             org,
             project,
             args.pr_num,
             f"Can't merge closed PR #{args.pr_num}",
+            status=MERGE_FAILURE,
             dry_run=args.dry_run,
         )
         return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
-        gh_post_pr_comment(
+        post_pr_comment(
             org,
             project,
             args.pr_num,
             "Cross-repo ghstack merges are not supported",
+            status=MERGE_FAILURE,
             dry_run=args.dry_run,
         )
         return
@@ -3600,7 +3672,14 @@ def main() -> None:
                     f"PR #{pr.pr_num} is in a stack based on {native_stack.base_ref} "
                     f"rather than {pr.default_branch()}, refusing merge request"
                 )
-            gh_post_pr_comment(org, project, args.pr_num, refusal, dry_run=args.dry_run)
+            post_pr_comment(
+                org,
+                project,
+                args.pr_num,
+                refusal,
+                status=MERGE_FAILURE,
+                dry_run=args.dry_run,
+            )
             return
 
     if args.check_mergeability:
@@ -3618,7 +3697,14 @@ def main() -> None:
             f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
         )
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
-        gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
+        post_pr_comment(
+            org,
+            project,
+            args.pr_num,
+            message,
+            status=MERGE_FAILURE,
+            dry_run=args.dry_run,
+        )
         return
     try:
         # Ensure comment id is set, else fail

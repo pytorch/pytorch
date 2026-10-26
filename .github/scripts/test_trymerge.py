@@ -31,6 +31,15 @@ from greenlight_guard import (
     GuardVerdict,
 )
 from greenlight_identity import normalize_login
+from mergebot_status import (
+    MERGE_FAILURE,
+    MERGE_SUCCESS,
+    parse_status,
+    REVERT_FAILURE,
+    REVERT_SUCCESS,
+    Status,
+    with_status,
+)
 from native_stack import (
     _landed_in,
     build_native_stack_commits,
@@ -2590,7 +2599,9 @@ class TestGreenlightGuardCallSite(TestCase):
             GitHubPR.merge_into(
                 pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True
             )
-        mock_post.assert_called_once_with("pytorch", "pytorch", 1, "hold tight", True)
+        mock_post.assert_called_once_with(
+            "pytorch", "pytorch", 1, "hold tight", dry_run=True
+        )
 
     @mock.patch("trymerge.gh_post_pr_comment")
     @mock.patch("trymerge.evaluate_greenlight_guard")
@@ -3395,7 +3406,13 @@ class TestStartingMergeComment(NoNetworkTestCase):
         self.assertEqual(
             post.call_args_list,
             [
-                mock.call("pytorch", "pytorch", 1002, "Merge started", dry_run=True),
+                mock.call(
+                    "pytorch",
+                    "pytorch",
+                    1002,
+                    with_status("Merge started", MERGE_SUCCESS),
+                    dry_run=True,
+                ),
                 mock.call(
                     "pytorch",
                     "pytorch",
@@ -3482,7 +3499,15 @@ class TestNativeStackMain(NoNetworkTestCase):
     def assertRefused(self, refusal: str = TARGETS_ANOTHER_BRANCH) -> None:
         self.assertEqual(
             self.post.call_args_list,
-            [mock.call("pytorch", "pytorch", 1002, refusal, dry_run=True)],
+            [
+                mock.call(
+                    "pytorch",
+                    "pytorch",
+                    1002,
+                    with_status(refusal, MERGE_FAILURE),
+                    dry_run=True,
+                )
+            ],
         )
         self.merge.assert_not_called()
 
@@ -3637,9 +3662,15 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.assertEqual(
             [(call.args[2], call.args[3]) for call in comments],
             [
-                (1000, "@author1000 your PR has been successfully reverted."),
-                (1001, f"@author1001 {stacked}"),
-                (1002, f"@author1002 {stacked}"),
+                (
+                    1000,
+                    with_status(
+                        "@author1000 your PR has been successfully reverted.",
+                        REVERT_SUCCESS,
+                    ),
+                ),
+                (1001, with_status(f"@author1001 {stacked}", REVERT_SUCCESS)),
+                (1002, with_status(f"@author1002 {stacked}", REVERT_SUCCESS)),
             ],
         )
         # Every reverted commit gets the revert line of the PR reverted last
@@ -4068,6 +4099,51 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.move_trunk()
         self.rebase_stack(self.stack, 103)
         self.assertLandsOwnChanges(self.merge(103), 101, 102, 103)
+
+
+class TestMainStatusTags(NoNetworkTestCase):
+    """main()'s replies to a merge or revert command carry their outcome."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.args = mock_parse_args()
+        self.patch("trymerge.parse_args", return_value=self.args)
+        self.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+        self.info = self.patch(
+            "trymerge.gh_get_pr_info", return_value=stacked_pr_info(base="main")
+        )
+        self.post = self.patch("trymerge.gh_post_pr_comment")
+        self.merge = self.patch("trymerge.merge")
+        self.patch("trymerge.gh_remove_label")
+        self.patch("trymerge.save_merge_record")
+        self.patch("trymerge.GitHubPR.get_merge_base", return_value="base-sha")
+        self.patch("trymerge.GitHubPR.get_author", return_value="author")
+        self.patch("trymerge.GitHubPR.last_commit_sha", return_value="head-sha")
+
+    def statuses(self) -> list[Status | None]:
+        return [parse_status(call.args[3]) for call in self.post.call_args_list]
+
+    def test_failed_merge_is_tagged_failure(self) -> None:
+        self.merge.side_effect = RuntimeError("boom")
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(self.post.call_args.args[3].startswith("## Merge failed"))
+
+    def test_closed_pr_is_tagged_failure(self) -> None:
+        self.info.return_value = {**stacked_pr_info(base="main"), "closed": True}
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.merge.assert_not_called()
+
+    def test_revert_start_and_failure_are_tagged(self) -> None:
+        self.args.revert = True
+        revert = self.patch("trymerge.try_revert", side_effect=RuntimeError("boom"))
+        trymerge_main()
+        revert.assert_called_once()
+        self.assertEqual(self.statuses(), [REVERT_SUCCESS, REVERT_FAILURE])
+        self.assertIn(
+            "successfully started a revert job", self.post.call_args_list[0].args[3]
+        )
 
 
 if __name__ == "__main__":

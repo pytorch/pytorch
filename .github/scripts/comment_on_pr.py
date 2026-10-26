@@ -3,6 +3,7 @@ from typing import Any
 
 from github_utils import gh_post_pr_comment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from mergebot_status import MERGE_FAILURE, REVERT_FAILURE, with_status
 from trymerge_explainer import BOT_COMMANDS_WIKI
 
 
@@ -28,6 +29,10 @@ def main() -> None:
         + " In later case, please do not hesitate to reissue the merge command\n"
         + f" For more information see [pytorch-bot wiki]({BOT_COMMANDS_WIKI})."
     )
+
+    # A canceled merge or revert job is that command's final reply
+    status = {"merge": MERGE_FAILURE, "revert": REVERT_FAILURE}.get(args.action)
+    msg = with_status(msg, status)
 
     gh_post_pr_comment(org, project, args.pr_num, msg)
     print(org, project, args.pr_num, msg)
