@@ -53,6 +53,10 @@ class TritonSplitScanKernel(TritonKernel):
     def should_use_persistent_reduction(self) -> bool:
         return False
 
+    def supports_scan_device_loop(self) -> bool:
+        # Programs split the reduction axis and communicate through memory.
+        return False
+
     def should_use_cooperative_reduction(self) -> bool:
         return False
 

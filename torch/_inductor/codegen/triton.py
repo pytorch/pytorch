@@ -13,6 +13,7 @@ import math
 import operator
 import os
 import textwrap
+import unittest.mock
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
@@ -122,6 +123,7 @@ from .common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from .scan_device_loop import CarryLoad, ScanDeviceLoopKernelState
 from .simd import (
     constant_repr,
     DerivedIterationRangesRoot,
@@ -5321,6 +5323,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
         """
+        if self.scan_loop is not None and name in self.scan_loop.spec.carries:
+            return self.load_scan_carry(name, index)
         var = self.read_arg(name)
         load_counts = self._load_counts
         load_counts[name] += 1
@@ -5563,6 +5567,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         store the 'value' to the memory location 'name', offset by some indexing expression 'index'.
         """
+        if self.scan_loop is not None and name in self.scan_loop.carry_inputs:
+            self.store_scan_carry(name, index, value, mode)
+            return
 
         var = self.args.output(name)
         original_index = index
@@ -6886,6 +6893,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         if not self.inside_reduction:
             raise AssertionError("expected inside_reduction")
+        if self.scan_loop is not None and name in self.scan_loop.carry_inputs:
+            self.scan_loop.fail(f"carry {name} is stored by a reduction")
         self.inside_reduction = False
         dtype = V.graph.get_dtype(name)
         var = self.args.output(name)
@@ -7489,8 +7498,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         dtype=var.dtype,
                         shape=("R0_BLOCK",),
                     )
-                    import unittest
-
                     with unittest.mock.patch.object(self, "compute", self.body):
                         updated = combine_fn(
                             accumulator,
@@ -7503,6 +7510,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )
 
+        elif self.scan_loop is not None:
+            self.codegen_scan_loop_body()
         elif self.inside_reduction and len(loop_trees) > 0:
             # Write the loop headers.
             for level, tree in enumerate(loop_trees):
@@ -7599,6 +7608,159 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.loads.clear()
         self.compute.clear()
         self.stores.clear()
+        self.post_loop_combine.clear()
+        self.post_loop_store.clear()
+
+    def supports_scan_device_loop(self) -> bool:
+        # A looped reduction would reload the carry from memory every step.
+        return not (
+            self.cooperative_reduction
+            or self.mix_order_reduction
+            or (self.inside_reduction and any(t.is_loop for t in self.range_trees))
+        )
+
+    def rename_indexing(self, index):
+        if self.scan_loop is not None and isinstance(index, sympy.Expr):
+            index = self.scan_loop.substitute_loop_index(index)
+        return super().rename_indexing(index)
+
+    def load_scan_carry(self, name: str, index: sympy.Expr) -> CSEVariable:
+        """Load a scan carry once, above the step loop. See NOTE [scan device loop]."""
+        state = self.scan_loop
+        if state is None:
+            raise AssertionError("expected a scan device loop")
+        # Checked before the cache: a cached load would drop the mask and fill.
+        if self._load_mask is not None:
+            state.fail(f"carry {name} is loaded under a mask")
+        if (load := state.loads.get(name)) is not None:
+            if load.index != index:
+                state.fail(f"carry {name} is loaded at {load.index} and {index}")
+            return load.var
+        if state.spec.carries[name] in state.stored:
+            state.fail(f"carry {name} is loaded after its update is stored")
+        hoist = state.check_carry_index(name, index)
+        self.scan_loop = None
+        try:
+            with unittest.mock.patch.object(
+                self, "loads", self.body if hoist else self.loads
+            ):
+                var = self.load(name, index)
+        finally:
+            self.scan_loop = state
+        state.loads[name] = CarryLoad(index, var)
+        return var
+
+    def store_scan_carry(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode
+    ) -> None:
+        """Keep a scan carry in registers and store it once, below the step loop."""
+        state = self.scan_loop
+        if state is None:
+            raise AssertionError("expected a scan device loop")
+        load = state.loads.get(state.carry_inputs[name])
+        if mode is not None or name in state.stored:
+            state.fail(f"carry {name} is stored more than once or atomically")
+        state.stored.add(name)
+        update = None
+        if load is None:
+            state.unhoisted.add(state.carry_inputs[name])
+        else:
+            update = self.scan_carry_update(state, name, index, value, load)
+        self.scan_loop = None
+        try:
+            if update is None:
+                self.store(name, index, value, mode)
+                return
+            if load is None:
+                raise AssertionError("a carry update needs its hoisted load")
+            state.carry_updates.append(f"{load.var} = {update}")
+            with unittest.mock.patch.object(self, "stores", state.epilogue):
+                self.store(name, index, load.var, mode)
+        finally:
+            self.scan_loop = state
+
+    @staticmethod
+    def scan_carry_update(
+        state: ScanDeviceLoopKernelState,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        load: CarryLoad,
+    ) -> str | None:
+        """Expression that turns ``value`` into what the next step would load."""
+        var = load.var
+        if load.index != index:
+            state.fail(f"carry {name} is stored at {index} but loaded at {load.index}")
+            return None
+        if var.shape is None or value.shape is None or var.dtype is None:
+            state.fail(f"carry {name} has an unknown block shape or dtype")
+            return None
+        if len(value.shape) > len(var.shape) or not all(
+            str(v) in ("1", str(c))
+            for v, c in zip(reversed(value.shape), reversed(var.shape))
+        ):
+            state.fail(f"carry {name} value shape {value.shape} != {var.shape}")
+            return None
+        # Round-trip through the storage dtype like the store and next load
+        # would, ending in the loop-carried variable's exact type.
+        update = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
+        if var.mask_vars:
+            # Masked lanes of the load read `other`; keep them that way.
+            mask = " & ".join(sorted(map(str, var.mask_vars)))
+            update = f"tl.where({mask}, {update}, 0)"
+        update = f"{update}.to({triton_type(var.dtype)})"
+        if tuple(map(str, value.shape)) != tuple(map(str, var.shape)):
+            update = f"tl.broadcast_to({update}, [{', '.join(map(str, var.shape))}])"
+        return update
+
+    def finalize_scan_device_loop(self) -> None:
+        """Check the kernel can run every scan step; records a failure otherwise."""
+        state = self.scan_loop
+        if state is None:
+            raise AssertionError("expected a scan device loop")
+        spec = state.spec
+        for name, out in spec.carries.items():
+            if out not in state.stored:
+                state.fail(f"carry {out} is not computed by this kernel")
+            if name in state.loads and name in state.unhoisted:
+                state.fail(f"carry {name} is loaded after its update is stored")
+        real_name = V.graph.scheduler.mutation_real_name
+        live_stores = OrderedSet(
+            real_name.get(name, name)
+            for name in self.store_buffer_names
+            if name not in self.removed_buffers and name not in V.graph.removed_buffers
+        )
+        if extra := live_stores - OrderedSet(state.carry_inputs) - spec.ys:
+            state.fail(f"kernel also writes {extra}")
+        if read := OrderedSet(self.args.input_buffers) & (
+            spec.ys | OrderedSet(state.carry_inputs)
+        ):
+            state.fail(f"kernel reads {read}, which it also writes")
+        if self.prologue or state.uses_loop_var(self.body):
+            state.fail("loop index used outside the loop body")
+        state.trip_count = self.index_to_str(spec.trip_count)
+
+    def codegen_scan_loop_body(self) -> None:
+        state = self.scan_loop
+        if state is None:
+            raise AssertionError("expected a scan device loop")
+        loop_var = state.loop_symbol.name
+        # The loop variable takes the bound's type, which can be narrower than
+        # the kernel's index dtype when the trip count is a literal.
+        wide = self.index_dtype != "tl.int32"
+        header_var = f"{loop_var}_iter" if wide else loop_var
+        self.body.writeline(f"for {header_var} in range(0, {state.trip_count}):")
+        with self.body.indent():
+            if wide:
+                self.body.writeline(f"{loop_var} = {header_var}.to({self.index_dtype})")
+            self.body.splice(self.indexing_code)
+            self.body.splice(self.loads)
+            self.body.splice(self.compute)
+            self.body.splice(self.stores)
+            self.body.splice(self.post_loop_combine)
+            self.body.splice(self.post_loop_store)
+            self.body.writelines(state.carry_updates)
+        self.body.splice(state.epilogue)
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
 

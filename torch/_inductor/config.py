@@ -233,6 +233,11 @@ cpp_cache_precompile_headers: bool = (
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
+# Run every step of a scan inside one Triton kernel, with the carry kept in
+# registers, when the scan body compiles to a single eligible kernel. Other
+# scans keep the host-side while loop. See NOTE [scan device loop].
+scan_device_loop = os.environ.get("TORCHINDUCTOR_SCAN_DEVICE_LOOP", "0") == "1"
+
 apply_gumbel_max_trick = (
     os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
 )

@@ -97,6 +97,7 @@ from .common import (
 )
 from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
+from .scan_device_loop import ScanDeviceLoopSpec
 from .triton_utils import (
     config_of,
     should_unwrap_unspec_arg,
@@ -6477,13 +6478,18 @@ class PythonWrapperCodegen(CodeGen):
                 self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))
 
-        self.writeline("while should_loop:")
+        device_loop = self.codegen_scan_device_loop_body(while_loop, stack_output)
+        # A device-loop body runs every step in one call; the loop index it
+        # returns is stale, which is fine since scan discards it.
+        self.writeline("if should_loop:" if device_loop else "while should_loop:")
         # Body execution
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
         codegen_subgraph(
             while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
         )
         self.writeline(ExitSubgraphLine(self))
+        if device_loop:
+            return
 
         # Collect outputs if enabled
         if stack_output:
@@ -6510,6 +6516,34 @@ class PythonWrapperCodegen(CodeGen):
                     f"{name}[{i}] = torch.stack({name}[{i + ckp_offset}], dim=0)"
                 )
                 self.writeline(ExitSubgraphLine(self))
+
+    def codegen_scan_device_loop_body(self, while_loop, stack_output) -> bool:
+        """Try to compile a scan's while_loop body as a device loop.
+
+        Returns whether the compiled body runs every step itself. See NOTE
+        [scan device loop].
+        """
+        body_graph = while_loop.body_subgraph.graph
+        eligible = (
+            config.scan_device_loop
+            and not stack_output
+            and not V.graph.aot_mode
+            and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
+        )
+        if eligible and body_graph.name not in self.already_codegened_subgraphs:
+            body_graph.scan_device_loop = ScanDeviceLoopSpec.from_while_loop(while_loop)
+            if body_graph.scan_device_loop is not None:
+                self.codegen_subgraph_common(while_loop.body_subgraph)
+        # A body shared with an earlier while_loop keeps its earlier decision.
+        spec = body_graph.scan_device_loop
+        applied = spec is not None and spec.applied
+        if applied and not (eligible and while_loop.scan_layout is not None):
+            raise AssertionError(
+                f"{body_graph.name} runs every step itself but is shared with a "
+                "while_loop that needs a per-step body"
+            )
+        return applied
 
     @staticmethod
     def statically_known_int_or_none(x):

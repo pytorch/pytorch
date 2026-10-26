@@ -135,6 +135,7 @@ if TYPE_CHECKING:
     from torch.fx import GraphModule
     from torch.fx.graph import Graph
 
+    from .codegen.scan_device_loop import ScanDeviceLoopSpec
     from .codegen.wrapper import PythonWrapperCodegen
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode
@@ -534,6 +535,9 @@ class GraphLowering(torch.fx.Interpreter):
         # own reference, so a retained tensor survives; recycling would not.
         self.never_reuse_but_free_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
+        # Set by the wrapper on the body of a scan-derived while_loop that may be
+        # compiled as a device loop. See NOTE [scan device loop].
+        self.scan_device_loop: ScanDeviceLoopSpec | None = None
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
 

@@ -938,11 +938,23 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 fx_additional_inputs,
             )
         )
+        existing_while_loops = OrderedSet(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.while_loop
+            )
+        )
         match.replace_by_example(
             lower_to_while_loop,
             lower_to_while_loop_args,
             run_functional_passes=False,
         )
+        # Record the operand layout (loop_idx, *ys, *carries, *xs) so Inductor can
+        # run the loop on the device. See NOTE [scan device loop].
+        for node in gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        ):
+            if node not in existing_while_loops:
+                node.meta["scan_layout"] = (len(ys_outputs), num_init_leaves)
 
     graph_pass.apply(gm)
 
