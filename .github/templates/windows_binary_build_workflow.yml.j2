@@ -140,7 +140,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
       - name: Bootstrap Python
@@ -254,7 +254,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
       - name: Bootstrap APL
@@ -354,7 +354,7 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/

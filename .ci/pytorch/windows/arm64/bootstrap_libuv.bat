@@ -11,7 +11,9 @@ for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 where cl.exe
 
 cd %DEPENDENCIES_DIR%
-git clone https://github.com/libuv/libuv.git -b v1.47.0
+:: v1.47.0
+git clone https://github.com/libuv/libuv.git
+git -C libuv checkout be6b81a352d17513c95be153afcb3148f1a451cd
 
 echo Configuring libuv...
 mkdir libuv\build

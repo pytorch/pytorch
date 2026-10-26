@@ -722,7 +722,10 @@ test_xpu_sycl_tla_backend() {
   # shellcheck disable=SC1091
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
-  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  # v0.8
+  rm -rf "${sycl_tla_dir}" && git init -q "${sycl_tla_dir}"
+  git -C "${sycl_tla_dir}" fetch -q --depth 1 https://github.com/intel/sycl-tla.git 2fc09973bfdf15755090fcb0e3b6ad236408a992
+  git -C "${sycl_tla_dir}" checkout -q FETCH_HEAD
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
@@ -1332,8 +1335,9 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch main \
-    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  git -C "${benchmark_dir}" init -q
+  git -C "${benchmark_dir}" fetch -q --depth 1 https://github.com/eellison/better-benchmark.git 225af6d85d284016fcb8226aa8bde1d6d53f2ab4
+  git -C "${benchmark_dir}" checkout -q FETCH_HEAD
   pushd "${benchmark_dir}"
 
   local gpu_indices
@@ -2606,7 +2610,7 @@ test_attention_microbenchmark() {
 
   # Install attention-gym dependency
   echo "Installing attention-gym..."
-  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@32bbc90a802dd09baa7c77719217010606d8ed26
   pip show triton
 
   cd "${TEST_DIR}"/benchmarks/transformer
