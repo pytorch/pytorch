@@ -573,22 +573,28 @@ def _has_cudnn_dll(path: str) -> bool:
 
 
 def _cudnn_library_file(version: str | None) -> str | None:
-    libname = 'cudnn.lib' if IS_WINDOWS else 'libcudnn.so'
-    if version is None:
-        if IS_WINDOWS:
-            flat = os.path.join(CUDNN_HOME, 'lib', _windows_arch(), libname)
-            return flat if os.path.isfile(flat) else None
-        for directory in (os.path.join(CUDNN_HOME, 'lib64'), os.path.join(CUDNN_HOME, 'lib')):
-            candidate = os.path.join(directory, libname)
+    # Linux cuDNN packages are flat. Versioned lib/<ver>/ is a Windows layout.
+    if not IS_WINDOWS:
+        if version is not None:
+            return None
+        for directory in (
+            os.path.join(CUDNN_HOME, 'lib64'),
+            os.path.join(CUDNN_HOME, 'lib'),
+        ):
+            candidate = os.path.join(directory, 'libcudnn.so')
             if os.path.isfile(candidate):
                 return candidate
         return None
-    if IS_WINDOWS:
-        return os.path.join(CUDNN_HOME, 'lib', version, _windows_arch(), libname)
-    return os.path.join(CUDNN_HOME, 'lib', version, libname)
+    libname = 'cudnn.lib'
+    if version is None:
+        flat = os.path.join(CUDNN_HOME, 'lib', _windows_arch(), libname)
+        return flat if os.path.isfile(flat) else None
+    return os.path.join(CUDNN_HOME, 'lib', version, _windows_arch(), libname)
 
 
 def _qualified_cudnn_versions() -> list[tuple[tuple[int, int], str]]:
+    if not IS_WINDOWS:
+        return []
     include_root = os.path.join(CUDNN_HOME, 'include')
     try:
         names = os.listdir(include_root)
@@ -634,32 +640,49 @@ def _flat_cudnn_pair() -> bool:
     return library is not None and os.path.isfile(library)
 
 
-def _versioned_cudnn_bin(version: str) -> str | None:
-    # Flat bin/ is left alone. Wheels already load their own cuDNN DLL from
-    # torch/lib, and adding CUDNN_HOME/bin would put a second copy on the
-    # process DLL path.
-    if not IS_WINDOWS:
-        return None
-    bin_dir = os.path.join(CUDNN_HOME, 'bin', version, _windows_arch())
-    return bin_dir if _has_cudnn_dll(bin_dir) else None
+def _windows_cudnn_bin(version: str | None) -> str | None:
+    # Flat bin/<arch> and versioned bin/<ver>/<arch> use one rule: the
+    # directory is used only when it contains a cuDNN DLL.
+    if version is None:
+        candidates = (
+            os.path.join(CUDNN_HOME, 'bin', _windows_arch()),
+            os.path.join(CUDNN_HOME, 'bin'),
+        )
+    else:
+        candidates = (
+            os.path.join(CUDNN_HOME, 'bin', version, _windows_arch()),
+        )
+    for path in candidates:
+        if _has_cudnn_dll(path):
+            return path
+    return None
 
 
 def _resolve_cudnn_dirs() -> tuple[str | None, str | None, str | None]:
-    # cuDNN 9 packages for CUDA 13+ nest include, lib, and Windows bin under
+    # Windows cuDNN 9 packages for CUDA 13+ nest include, lib, and bin under
     # one <major.minor>. That version is used only when the header and the
-    # import library both exist and the major matches torch. Otherwise the
-    # flat directories are used, and no DLL directory is registered.
+    # import library both exist and the major matches torch. Linux packages
+    # are flat, so they never take the versioned scan.
     if CUDNN_HOME is None:
         return None, None, None
+    if not IS_WINDOWS:
+        if _flat_cudnn_pair():
+            library = os.path.dirname(_cudnn_library_file(None))
+            return os.path.join(CUDNN_HOME, 'include'), library, None
+        return _fallback_include(), _fallback_library(), None
     if _flat_cudnn_pair():
         library = os.path.dirname(_cudnn_library_file(None))
-        return os.path.join(CUDNN_HOME, 'include'), library, None
+        return (
+            os.path.join(CUDNN_HOME, 'include'),
+            library,
+            _windows_cudnn_bin(None),
+        )
     chosen = _pick_cudnn_version(_qualified_cudnn_versions())
     if chosen is not None:
         include = os.path.join(CUDNN_HOME, 'include', chosen)
         library = os.path.dirname(_cudnn_library_file(chosen))
-        return include, library, _versioned_cudnn_bin(chosen)
-    return _fallback_include(), _fallback_library(), None
+        return include, library, _windows_cudnn_bin(chosen)
+    return _fallback_include(), _fallback_library(), _windows_cudnn_bin(None)
 
 
 def _fallback_include() -> str | None:
@@ -700,24 +723,48 @@ def _cudnn_bin_dir() -> str | None:
 _CUDNN_DLL_DIR_HANDLES: list[tuple[str, object]] = []
 
 
-def _prepend_cudnn_bin_path() -> None:
+def _same_existing_dir(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    try:
+        if os.path.exists(left) and os.path.exists(right):
+            return os.path.samefile(left, right)
+    except OSError:
+        pass
+    return (
+        os.path.normcase(os.path.abspath(left))
+        == os.path.normcase(os.path.abspath(right))
+    )
+
+
+def _insert_cudnn_bin_after_torch_lib() -> None:
+    # torch/lib must stay ahead of CUDNN_HOME. Otherwise torch_cuda.dll loads
+    # cudnn64_9.dll from CUDNN_HOME instead of the copy torch shipped.
     bin_dir = _cudnn_bin_dir()
     if not bin_dir:
         return
-    for entry in os.getenv('PATH', '').split(';'):
-        if not entry or not os.path.exists(entry):
-            continue
-        try:
-            if os.path.samefile(entry, bin_dir):
-                return
-        except OSError:
-            continue
-    os.environ['PATH'] = f"{bin_dir};{os.getenv('PATH', '')}"
+    entries = [
+        entry for entry in os.getenv('PATH', '').split(';')
+        if not _same_existing_dir(entry, bin_dir)
+    ]
+    torch_at = None
+    for index, entry in enumerate(entries):
+        if _same_existing_dir(entry, TORCH_LIB_PATH):
+            torch_at = index
+            break
+    if torch_at is None:
+        entries.insert(0, TORCH_LIB_PATH)
+        torch_at = 0
+    entries.insert(torch_at + 1, bin_dir)
+    os.environ['PATH'] = ';'.join(entries)
 
 
 def _add_cudnn_dll_directory() -> None:
-    # Extension-module loading on Windows does not search PATH. A standalone
-    # executable is a subprocess, so it inherits PATH and not this cookie.
+    # A .pyd load does not search PATH. torch already loaded the DLLs in
+    # torch/lib by full path, so a bundled cudnn64_9.dll stays loaded.
+    # Flat and versioned bins use this same directory when it has a cuDNN
+    # DLL. A standalone executable does not inherit the cookie; PATH lists
+    # torch/lib first.
     bin_dir = _cudnn_bin_dir()
     if not bin_dir or not hasattr(os, 'add_dll_directory'):
         return
@@ -3263,7 +3310,7 @@ def _get_exec_path(module_name, path, with_cudnn=False):
         if not torch_lib_in_path:
             os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
     if with_cudnn:
-        _prepend_cudnn_bin_path()
+        _insert_cudnn_bin_after_torch_lib()
     return os.path.join(path, f'{module_name}{EXEC_EXT}')
 
 
