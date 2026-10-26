@@ -69,10 +69,11 @@ For a job that reads untrusted input, combine the action with:
 
 - `step-security/harden-runner` with `egress-policy: block` and `disable-sudo: true` as the
   first step. pi needs `sts.us-east-1.amazonaws.com`, `bedrock-runtime.us-east-1.amazonaws.com`,
-  and `registry.npmjs.org`, plus the GitHub hosts the job uses. `pi.dev` is needed only when a
-  model is missing from pi's bundled catalog. `upload-artifact` works without extra entries.
+  and `registry.npmjs.org`, plus the GitHub hosts the job uses. `pi.dev` is used only with
+  `allow-unlisted-model: "true"` when a model is missing from pi's catalog.
+  `upload-artifact` works without extra entries.
 - No write scope in the model's job; apply effects in a separate job without AWS access.
-- No `bash` in `tools` (the default is `read,grep,find,ls`).
+- No `bash` in `tools` (the default is `read,grep,find,ls`); `write` and `edit` are always blocked.
 
 ## Models
 

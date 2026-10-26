@@ -2,7 +2,8 @@
  * Defense in depth for CI runs, loaded by .github/actions/pi-agent for every session.
  *
  * - Blocks any tool call whose name is not in PI_ALLOWED_TOOLS, even if pi or
- *   another extension activates a tool later in the session.
+ *   another extension activates a tool later in the session. write/edit are
+ *   always blocked, even if listed; this action does not confine file mutations.
  * - Confines read/grep/find/ls to the working directory, so the model cannot read
  *   runner secrets such as /proc/self/environ (AWS session credentials) or
  *   ~/.aws, /tmp, and RUNNER_TEMP.
@@ -42,7 +43,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("tool_call", (event) => {
-    if (!allowed.has(event.toolName)) {
+    if (!allowed.has(event.toolName) || event.toolName === "write" || event.toolName === "edit") {
       return { block: true, reason: `tool ${event.toolName} is not allowed in this run` };
     }
     if (PATH_TOOLS.has(event.toolName)) {
