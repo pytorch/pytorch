@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import ctypes
+import itertools
 import os
 import sys
 import types
@@ -9,8 +11,11 @@ import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
-from torch._inductor import config
+from torch._dynamo.testing import CompileCounterWithBackend
+from torch._inductor import config, ir
+from torch._inductor.codecache import CppCodeCache
 from torch._inductor.codegen.cpp import cexpr
+from torch._inductor.codegen.cpp_utils import CppPrinter as InductorCppPrinter
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
@@ -28,6 +33,9 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
+from torch.fx.experimental import _config as fx_config
+from torch.fx.experimental.symbolic_shapes import DimDynamic
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -606,6 +614,107 @@ class TestIndexingSimplification(InductorTestCase):
 
 
 class ExprPrinterTests(InductorTestCase):
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    def test_cpp_printer_signed_unsigned_comparisons(self):
+        symbol = sympy.Symbol("u0", integer=True)
+        definitions = ["#include <cstdint>", "#include <c10/macros/Export.h>"]
+        cases = []
+        for bound, relation, reverse, (cpp_type, arg_type, values) in itertools.product(
+            (-(2**63) - 1, 2**63, 2**64 - 1, 2**64),
+            (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge, sympy.Eq, sympy.Ne),
+            (False, True),
+            (
+                ("int64_t", ctypes.c_int64, (-(2**63), -1, 0, 2**63 - 1)),
+                ("uint64_t", ctypes.c_uint64, (0, 2**63 - 1, 2**63, 2**64 - 1)),
+            ),
+        ):
+            args = (bound, symbol) if reverse else (symbol, bound)
+            expr = relation(*args, evaluate=False)
+            name = f"compare_{len(cases)}"
+            definitions.append(
+                f'extern "C" C10_EXPORT bool {name}({cpp_type} u0) '
+                f"{{ return {cexpr(expr, simplify=False)}; }}"
+            )
+            cases.append((name, arg_type, values, expr))
+
+        library = CppCodeCache.load("\n".join(definitions))
+        for name, arg_type, values, expr in cases:
+            compare = getattr(library, name)
+            compare.argtypes = [arg_type]
+            compare.restype = ctypes.c_bool
+            for value in values:
+                with self.subTest(expr=expr, arg_type=arg_type, value=value):
+                    self.assertEqual(compare(value), bool(expr.subs(symbol, value)))
+
+    def test_inductor_int64_comparisons_with_oversized_bounds(self):
+        printer = InductorCppPrinter()
+        for name, bound, relation, reverse in itertools.product(
+            ("s0", "u0"),
+            (
+                -(1 << 63) - 1,
+                1 << 64,
+                -10 * (sys.maxsize // 2),
+                10 * (sys.maxsize // 2),
+            ),
+            (sympy.Le, sympy.Lt, sympy.Ge, sympy.Gt, sympy.Eq, sympy.Ne),
+            (False, True),
+        ):
+            symbol = sympy.Symbol(name, integer=True)
+            args = (
+                (sympy.Integer(bound), symbol)
+                if reverse
+                else (symbol, sympy.Integer(bound))
+            )
+            expr = relation(*args, evaluate=False)
+            with self.subTest(
+                name=name, bound=bound, relation=relation, reverse=reverse
+            ):
+                expected = bool(expr.subs(symbol, 0))
+                self.assertEqual(
+                    printer.doprint(expr, simplify=False),
+                    "true" if expected else "false",
+                )
+
+    def test_inductor_oversized_bounds_respect_symbol_printer(self):
+        class RenamingPrinter(InductorCppPrinter):
+            def _print_Symbol(self, expr):
+                return f"renamed_{expr.name}"
+
+        printer = RenamingPrinter()
+        symbol = sympy.Symbol("u0", integer=True)
+        bound = sympy.Integer(1 << 63)
+        for expr, expected in (
+            (
+                sympy.Lt(symbol, bound, evaluate=False),
+                "(renamed_u0 < 0 || static_cast<uint64_t>(renamed_u0) < 9223372036854775808ULL)",
+            ),
+            (
+                sympy.Le(bound, symbol, evaluate=False),
+                "(renamed_u0 >= 0 && static_cast<uint64_t>(renamed_u0) >= 9223372036854775808ULL)",
+            ),
+        ):
+            with self.subTest(expr=expr):
+                self.assertEqual(printer.doprint(expr, simplify=False), expected)
+
+    def test_inductor_preserves_finite_bounds_and_rejects_oversized_arithmetic(self):
+        printer = InductorCppPrinter()
+        symbol = sympy.Symbol("u0", integer=True)
+        self.assertEqual(
+            printer.doprint(symbol <= 7, simplify=False),
+            f"u0 <= 7{LONG_SUFFIX}",
+        )
+        self.assertEqual(
+            printer.doprint(symbol >= 0, simplify=False),
+            f"u0 >= 0{LONG_SUFFIX}",
+        )
+        for expr in (
+            symbol + (1 << 63),
+            sympy.Symbol("zuf0") <= (1 << 63),
+            sympy.Symbol("s0", real=True) <= (1 << 63),
+        ):
+            with self.subTest(expr=expr), self.assertRaises(OverflowError):
+                printer.doprint(expr, simplify=False)
+
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
@@ -937,6 +1046,131 @@ class TestIndexExprUpperBounds(InductorTestCase):
         )
         regular.indexing_node_schedule = [overflow]
         self.assertTrue(regular.any_index_expr_overflows_int32())
+
+
+@instantiate_parametrized_tests
+class TestSliceNormalization(InductorTestCase):
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @torch._dynamo.config.patch(specialize_int=True)
+    @parametrize("size_oblivious", [False, True])
+    @parametrize("bounds", [(0, sys.maxsize), (1, sys.maxsize), (0, 8)])
+    def test_backed_slice_scatter_lowering(self, size_oblivious, bounds):
+        start, end = bounds
+
+        def fn(x):
+            return torch.slice_scatter(x, x[start:end] + 1, 0, start, end)
+
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            counter = CompileCounterWithBackend("inductor")
+            compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+            x = torch.arange(4, dtype=torch.float32)
+            actual, kernels = run_and_get_kernels(compiled, x)
+            self.assertEqual(actual, fn(x))
+            self.assertTrue(kernels)
+            if end == sys.maxsize:
+                code = "\n".join(kernels)
+                self.assertNotIn(str(sys.maxsize), code)
+            for length in (8, 16):
+                x = torch.arange(length, dtype=torch.float32)
+                self.assertEqual(compiled(x), fn(x))
+            if size_oblivious:
+                self.assertEqual(counter.frame_count, 1)
+            if start == 0 and end == sys.maxsize:
+                copy = torch.compile(lambda x: x + 1, dynamic=True, fullgraph=True)
+                _, copy_kernels = run_and_get_kernels(
+                    copy, torch.arange(4, dtype=torch.float32)
+                )
+                self.assertEqual(kernels, copy_kernels)
+
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @torch._dynamo.config.patch(specialize_int=True)
+    @parametrize("size_oblivious", [False, True])
+    @parametrize("bounds", [(-8, -2, 1), (8, 20, 1), (20, 8, 1), (-8, -2, 2)])
+    def test_backed_slice_scatter_boundaries(self, size_oblivious, bounds):
+        start, end, step = bounds
+
+        def fn(x):
+            return torch.slice_scatter(x, x[start:end:step] + 1, 0, start, end, step)
+
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            compiled = torch.compile(fn, dynamic=True, fullgraph=True)
+            for length in (4, 8, 16, 32):
+                with self.subTest(length=length):
+                    x = torch.arange(length, dtype=torch.float32)
+                    self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("size_oblivious", [False, True])
+    def test_slice_to_end_normalizes_sentinel(self, size_oblivious):
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            sizevars = SizeVarAllocator()
+            symbol = sizevars.shape_env.create_symbol(
+                16, source=ConstantSource("slice_size"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            buffer = ir.InputBuffer(
+                name="slice_input",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [symbol], [1]
+                ),
+            )
+            guards_before = list(sizevars.shape_env.guards)
+            with V.set_graph_handler(SimpleNamespace(sizevars=sizevars)):
+                start, end = ir.SliceView.normalize_start_end(buffer, 0, 0, sys.maxsize)
+            self.assertEqual((start, end), (0, symbol))
+            self.assertEqual(sizevars.shape_env.guards, guards_before)
+
+    @parametrize("size_oblivious", [False, True])
+    def test_existing_symbolic_slice_clamps(self, size_oblivious):
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            sizevars = SizeVarAllocator()
+            symbol = sizevars.shape_env.create_symbol(
+                16, source=ConstantSource("slice_size"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            end = Min(symbol, 8)
+            buffer = ir.InputBuffer(
+                name="slice_input",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [symbol], [1]
+                ),
+            )
+            guards_before = list(sizevars.shape_env.guards)
+            with V.set_graph_handler(SimpleNamespace(sizevars=sizevars)):
+                normalized = ir.SliceView.normalize_start_end(buffer, 0, 0, end)
+            self.assertEqual(normalized, (0, end))
+            self.assertEqual(sizevars.shape_env.guards, guards_before)
+
+    @parametrize("size_oblivious", [False, True])
+    @parametrize("bounds", [(0, 8, 1), (8, 20, 1), (-8, -2, 2), (20, 8, 1)])
+    def test_backed_slice_clamps(self, size_oblivious, bounds):
+        start, end, step = bounds
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            sizevars = SizeVarAllocator()
+            symbol = sizevars.shape_env.create_symbol(
+                16, source=ConstantSource("slice_size"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            buffer = ir.InputBuffer(
+                name="slice_input",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [symbol], [1]
+                ),
+            )
+            guards_before = list(sizevars.shape_env.guards)
+            with V.set_graph_handler(SimpleNamespace(sizevars=sizevars)):
+                view = ir.SliceView.create(ir.StorageBox(buffer), 0, start, end, step)
+
+            if size_oblivious:
+                self.assertEqual(sizevars.shape_env.guards, guards_before)
+            elif bounds == (0, 8, 1):
+                self.assertGreater(len(sizevars.shape_env.guards), len(guards_before))
+
+            for length in (2, 5, 8, 9, 16, 32) if size_oblivious else (16,):
+                with self.subTest(length=length):
+                    layout = view.get_layout()
+                    size = int(sympy.sympify(view.get_size()[0]).subs(symbol, length))
+                    stride = int(sympy.sympify(layout.stride[0]).subs(symbol, length))
+                    offset = int(sympy.sympify(layout.offset).subs(symbol, length))
+                    source = torch.arange(length, dtype=torch.float32)
+                    actual = torch.as_strided(source, (size,), (stride,), offset)
+                    self.assertEqual(actual, source[start:end:step])
 
 
 class TestEvaluateMinMax(InductorTestCase):
