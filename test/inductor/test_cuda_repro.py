@@ -117,6 +117,7 @@ class CudaReproTests(TestCase):
     device = device_type
     common = check_model_cuda
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_mm_out_dtype_compile(self):
         a = torch.randn(1, 3, device=device_type, dtype=torch.float16)
         b = torch.randn(3, 2, device=device_type, dtype=torch.float16)
@@ -134,6 +135,7 @@ class CudaReproTests(TestCase):
     @parametrize("inp_shape", [(64, 32), (32,)])
     @parametrize("beta", [0.0, 1.0, 2.0])
     @parametrize("cpp_wrapper", [False, True])
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_addmm_out_dtype_compile(self, self_dtype, inp_shape, beta, cpp_wrapper):
         inp = torch.randn(inp_shape, device=device_type, dtype=self_dtype)
         if beta == 0:
@@ -157,6 +159,7 @@ class CudaReproTests(TestCase):
 
     @parametrize("self_dtype", [torch.float32, torch.bfloat16])
     @parametrize("coordinate_descent_tuning", [False, True])
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_addmm_out_dtype_k1_compile(self, self_dtype, coordinate_descent_tuning):
         # The Inductor addmm decomposition rewrites K == 1 as a pointwise
         # multiply in the promoted input dtype, so it must skip out_dtype.
@@ -173,6 +176,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_addmm_out_dtype_inplace_compile(self):
         acc = torch.randn(64, 32, device=device_type, dtype=torch.float32)
         a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
@@ -500,6 +504,7 @@ class CudaReproTests(TestCase):
         self.assertIsInstance(bias_grad_bias[0], torch.fx.Node)
         self.assertIsNotNone(bias_seed.grad)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 
@@ -548,6 +553,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
     @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -643,6 +649,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(compiled_q.grad, eager_q.grad, **tol_kwargs)
         self.assertEqual(compiled_kv.grad, eager_kv.grad, **tol_kwargs)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -908,6 +915,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(torch.compile(forward)(), forward())
 
     @config.patch({"emulate_precision_casts": True})
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_emulate_low_precision(self):
         def foo(x):
             return torch.nn.functional.gelu(x) * 10.0
@@ -1083,6 +1091,7 @@ class CudaReproTests(TestCase):
         actual = torch.compile(forward, fullgraph=True)(o)
         self.assertEqual(actual, correct)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_autotune_inplace_kernel(self):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
@@ -1212,6 +1221,7 @@ class CudaReproTests(TestCase):
         if not same(fn(a, b), fn_optimized(a, b)):
             raise AssertionError
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_simplify_dims(self):
         def fn(a):
             return (a + 1,)
@@ -1266,6 +1276,7 @@ class CudaReproTests(TestCase):
             raise AssertionError
 
     @config.patch({"triton.autotune_pointwise": True})
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_inplace_buffer_autotune(self):
         def foo(x, y, z):
             a = x @ y
@@ -1283,6 +1294,7 @@ class CudaReproTests(TestCase):
         )
 
     @skipIfXpu(msg="TypeError, torch-xpu-ops: 3004")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_memory_history_inductor(self):
         def called_inside_compile(x, w, b):
             a = x @ w + b
@@ -1440,6 +1452,7 @@ class CudaReproTests(TestCase):
         if not same(ref, correct):
             raise AssertionError
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_scatter_index_not_wrapped(self):
         src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device=self.device)
         index = torch.tensor([0, 1, 0, 1, 2, 0], device=self.device)
@@ -1471,6 +1484,7 @@ class CudaReproTests(TestCase):
             lambda msg: f"{msg}\nexpected norm <= 1.0 but got {norm.item()}",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_libdevice_routing(self):
         def foo(x):
             return x.exp()
@@ -1517,6 +1531,7 @@ class CudaReproTests(TestCase):
         view_copy(target, source)
         self.assertEqual(out, target.view(torch.uint16))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(
@@ -1568,6 +1583,7 @@ class CudaReproTests(TestCase):
                 self.assertEqual(r1, rn, atol=0, rtol=0)
 
     # https://github.com/pytorch/pytorch/issues/96406
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_linear_cpu_input(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -1974,6 +1990,7 @@ class CudaReproTests(TestCase):
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype
     ):
@@ -2185,6 +2202,7 @@ class CudaReproTests(TestCase):
             )
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_dont_inplace_disjoint_accesses(self):
         # TODO - would not need mms if we could annotate donated buffer..
         def forward(
@@ -2385,6 +2403,7 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_sorted_masks(self):
         @torch.compile()
         def foo(x, y):
@@ -2398,6 +2417,7 @@ class CudaReproTests(TestCase):
             code[0]
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_cat_int8_one_kernel(self):
         @torch.compile()
         def cat(inps):
@@ -2416,6 +2436,7 @@ class CudaReproTests(TestCase):
             ).run(code[0])
 
     @config.patch("triton.use_block_ptr", True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_selecsls42b_misaligned_address(self):
         # https://github.com/triton-lang/triton/issues/2836
 
@@ -2508,6 +2529,7 @@ class CudaReproTests(TestCase):
         self.assertNotEqual(misaligned.data_ptr() % 16, 0)
         run(misaligned)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -2863,6 +2885,7 @@ class CudaReproTests(TestCase):
     @skipIfXpu(msg="cudagraph is not supported on xpu")
     @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
             return x.sin().sin().sin().sin().cos() + 1
@@ -2902,6 +2925,7 @@ class CudaReproTests(TestCase):
     @skipIfXpu(msg="cudagraph is not supported on xpu")
     @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -2941,6 +2965,7 @@ foo(torch.rand([256], device=\"{device_type}\"))
 
         subprocess.run([sys.executable, "-c", script], check=True)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
             a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
@@ -2979,6 +3004,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     @skipCUDAIf(not SM90OrLater, "needs at least 6 GiB of GPU memory headroom")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_chunked_unrolled_slice_gather_int32_overflow(self):
         # Regression for an int32-indexing miscompile when an unrolled chunked
         # loop containing a per-chunk F.linear and a gather gets fused into one
@@ -3102,6 +3128,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
     @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
     @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
@@ -3157,6 +3184,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
     @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
     @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
             return torch.index_add(x, -1, idx, src, alpha=0.5)
@@ -3180,6 +3208,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
     @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
     @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_index_add_bfloat16_scalar_index(self):
         def f(x, idx, src):
             return torch.index_add(x, 1, idx, src)
@@ -3207,6 +3236,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         config.is_fbcode(),
         "fbcode uses its bfloat16 atomic add lowering",
     )
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_index_add_bfloat16_deterministic(self):
         def f(x, idx, src):
             return torch.index_add(x, 1, idx, src)
@@ -3250,6 +3280,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             "triton.max_tiles": 3,
         }
     )
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_3d_tiling(self):
         full_size, view_size, num_block_pointers, num_tiles = (
             (5, 5, 5, 5, 5),
@@ -3453,6 +3484,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager, compiled)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_identity_load(self):
         device = device_type
 
@@ -3493,6 +3525,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         msg="_scaled_dot_product_efficient_attention returns log_sumexp in the query "
         "dtype instead of float32, tripping Inductor's fake kernel metadata check"
     )
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
         device = device_type
@@ -3625,6 +3658,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @skipIfXpu(msg="triton dependency - torch-xpu-ops: 2554")
     @config.patch({"eager_numerics.division_rounding": False})
     @xfailIfROCm
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_truediv_base_not_bitwise_equivalent(self):
         from decimal import Decimal
 
@@ -3662,6 +3696,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @skipIfXpu(msg="Decimal object comparison failed - torch-xpu-ops: 2810")
     @skipIfRocm(msg="ROCm preserves subnormals by default")
     @config.patch({"eager_numerics.disable_ftz": False})
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_not_disabling_ftz_yields_zero(self):
         from decimal import Decimal
 
@@ -3760,6 +3795,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertNotIn(".to(tl.float16)", code[0])
 
     @config.patch("eager_numerics.division_rounding", True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_reciprocal_precision_rounding(self):
         # Test that reciprocal matches eager when division_rounding is enabled.
         # This requires OpDecompositions.reciprocal to use float32 constant so
@@ -3816,6 +3852,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         torch.testing.assert_close(actual, expected)
         self.assertTrue(any("rcp.approx.ftz.f32" in src for src in code))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_vector_norm_negative_dim_size_one(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182181
         def fn(x):

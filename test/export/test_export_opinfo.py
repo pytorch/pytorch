@@ -58,11 +58,15 @@ fake_export_failures = {
     xfail("masked.var"),
 }
 
-# following are failing fake export with no gpu device available
-fake_export_no_gpu_failures = {
+# These ops use real-device fallback when no Meta kernel is registered.
+fake_export_requires_gpu = {
     xfail("geqrf"),
     xfail("sparse.sampled_addmm"),
     xfail("to_sparse"),
+}
+
+# following are failing fake export with no gpu support in the build
+fake_export_no_gpu_failures = fake_export_requires_gpu | {
     xfail("__getitem__"),
     xfail("nn.functional.batch_norm"),
     xfail("nn.functional.grid_sample"),
@@ -75,6 +79,8 @@ fake_export_no_gpu_failures = {
 fake_export_failures_cuda = fake_export_failures.copy()
 if not torch.backends.cuda.is_built():
     fake_export_failures_cuda |= fake_export_no_gpu_failures
+elif not torch.cuda.is_available():
+    fake_export_failures_cuda |= fake_export_requires_gpu
 
 # XPU-specific skip set generation
 fake_export_failures_xpu = fake_export_failures.copy()

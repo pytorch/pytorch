@@ -64,13 +64,16 @@ class TestCppExtensionMTIABackend(common.TestCase):
         from torch._inductor import utils as _unused_inductor_utils  # noqa: F401
 
         build_dir = tempfile.mkdtemp()
+        extension_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "cpp_extensions"
+        )
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(
             name="mtia_extension",
-            sources=["cpp_extensions/mtia_extension.cpp"],
+            sources=[os.path.join(extension_dir, "mtia_extension.cpp")],
             build_directory=build_dir,
             extra_include_paths=[
-                "cpp_extensions",
+                extension_dir,
                 "path / with spaces in it",
                 "path with quote'",
             ],

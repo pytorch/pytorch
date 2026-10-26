@@ -5,7 +5,10 @@ import json
 import os
 import pickle
 import socket
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import contextmanager
 
@@ -210,6 +213,114 @@ class WorkerServerTest(TestCase):
         self.assertEqual(out.status_code, 200)
 
         server.shutdown()
+
+    def test_shutdown_releases_gil(self) -> None:
+        code = textwrap.dedent(
+            """\
+            import faulthandler
+            import http.client
+            import os
+            import sys
+            import threading
+
+            from torch._C._distributed_c10d import _WorkerServer
+
+            handler_started = threading.Event()
+            shutdown_started = threading.Event()
+            release_handler = threading.Event()
+            responses = []
+
+            def dump_traceback(fd, all_threads):
+                handler_started.set()
+                if not release_handler.wait(10):
+                    raise AssertionError("Shutdown did not release the handler")
+                os.write(fd, b"traceback\\n")
+
+            faulthandler.dump_traceback = dump_traceback
+            server = _WorkerServer("127.0.0.1", 0)
+
+            def request():
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", server.port, timeout=10
+                )
+                connection.request("POST", "/handler/dump_traceback")
+                response = connection.getresponse()
+                responses.append((response.status, response.read()))
+                connection.close()
+
+            def release():
+                if not shutdown_started.wait(10):
+                    raise AssertionError("Shutdown did not start")
+                release_handler.set()
+
+            client = threading.Thread(target=request, daemon=True)
+            releaser = threading.Thread(target=release, daemon=True)
+            client.start()
+            releaser.start()
+            if not handler_started.wait(10):
+                raise AssertionError("Python handler did not start")
+            print("Python handler entered; starting shutdown", flush=True)
+            # Keep the releaser from running between Event.set and shutdown.
+            sys.setswitchinterval(1000)
+            shutdown_started.set()
+            server.shutdown()
+            sys.setswitchinterval(0.005)
+            client.join(10)
+            releaser.join(10)
+            if responses != [(200, b"traceback\\n")]:
+                raise AssertionError(f"Unexpected handler responses: {responses}")
+            """
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired as error:
+            self.fail(
+                f"WorkerServer shutdown timed out:\n{error.stdout}\n{error.stderr}"
+            )
+        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
+
+    def test_shutdown_idle_unix_server(self) -> None:
+        code = textwrap.dedent(
+            """\
+            import http.client
+            import socket
+            import tempfile
+
+            from torch._C._distributed_c10d import _WorkerServer
+
+            with tempfile.TemporaryDirectory() as directory:
+                path = f"{directory}/socket.sock"
+                server = _WorkerServer(path)
+                connection = http.client.HTTPConnection("localhost", timeout=5)
+                connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                connection.sock.settimeout(5)
+                connection.sock.connect(path)
+                connection.request("GET", "/", headers={"Connection": "close"})
+                response = connection.getresponse()
+                if response.status != 200:
+                    raise AssertionError(f"Unexpected status: {response.status}")
+                response.read()
+                connection.close()
+                server.shutdown()
+            """
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired as error:
+            self.fail(
+                f"Unix WorkerServer shutdown timed out:\n{error.stdout}\n{error.stderr}"
+            )
+        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
 
     def test_dump_traceback(self) -> None:
         with local_worker_server() as pool:

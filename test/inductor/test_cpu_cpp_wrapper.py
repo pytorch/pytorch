@@ -115,6 +115,8 @@ def make_test_case(
         cpp_wrapper_build_separate=test_build_separate,
     )
     def fn(self):
+        if not condition:
+            self.skipTest(f"CPU backend requirements are unavailable for {test_name}")
         tests.setUpClass()
         tests.setUp()
         try:
@@ -147,12 +149,7 @@ def make_test_case(
     import copy
 
     fn.__dict__ = copy.deepcopy(func.__dict__)
-    if condition:
-        setattr(
-            CppWrapperTemplate,
-            new_test_name,
-            fn,
-        )
+    setattr(CppWrapperTemplate, new_test_name, fn)
 
 
 if RUN_CPU:

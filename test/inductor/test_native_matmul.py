@@ -10,6 +10,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -17,6 +18,7 @@ aten = torch.ops.aten
 
 
 @inductor_config.patch({"triton.native_matmul": True})
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestTritonDotReduction(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4

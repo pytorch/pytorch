@@ -14,6 +14,7 @@ import numpy
 import pytest
 from pytest import raises as assert_raises
 
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -377,6 +378,7 @@ CASES += _make_generalized_cases()
 #
 # Test different routines against the above cases
 #
+@tci.test(platform=(tci.platform.linux_x86_64, tci.platform.linux_x86_64_cuda_l4))
 class LinalgTestCase:
     TEST_CASES = CASES
 

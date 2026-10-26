@@ -24,6 +24,7 @@ from torch._inductor.utils import (
     needs_fallback_due_to_atomic_add_limitations,
     run_and_get_code,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import DeterministicGuard, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -249,6 +250,7 @@ class TestScatterOpt(TestCase):
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestPartitionedScatterOpt(TestCase):
     """Tests for the partitioned scatter FX pass (reduced_atomic_contention.py)."""
 
@@ -565,6 +567,7 @@ class TestPartitionedScatterOpt(TestCase):
         for e, a in zip(expected, actual):
             self.assertEqual(e, a, atol=1e-1, rtol=1e-2)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_index_add_alpha_not_matched(self):
         """alpha scales the source, which the rewrite does not carry, so an
         aten.index_add holding one must not be picked up. Asserted on the scan:
@@ -594,6 +597,7 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertIn(plain, ctx.candidates)
         self.assertNotIn(scaled, ctx.candidates)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_atomic_fallback_checks_accumulation_dtype(self):
         """Where bf16 atomics fall back (sm<90, XPU) aten.index_add is only ever
         bf16, so the gate must look at the dtype the rewrite emits: fp32 partials
@@ -672,6 +676,7 @@ class TestPartitionedScatterOpt(TestCase):
             widened = [ln for ln in allocations if "torch.float32" in ln]
             self.assertEqual(bool(widened), fp32_acc, f"{fp32_acc=} {allocations=}")
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_accumulation_dtype_follows_config(self):
         """Only float dtypes narrower than fp32 are promoted, and only when the
         config flag is set."""
@@ -736,6 +741,7 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
         self.assertLessEqual(promoted, native)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_accuracy_int32_exact(self):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
         torch.manual_seed(4)
@@ -747,6 +753,7 @@ class TestPartitionedScatterOpt(TestCase):
         out, idx, vals = self._make_scatter_inputs(N, (8,), torch.int32, index_high=8)
         self._check_accuracy(f, (out, idx, vals), exact=True)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_accuracy_inplace_index_put(self):
         """index_put_ (in-place) is also matched and produces correct output."""
         torch.manual_seed(7)
@@ -992,6 +999,7 @@ class TestPartitionedScatterOpt(TestCase):
                 0,
             )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_skip_accumulate_false(self):
         """index_put with accumulate=False doesn't match the registered patterns."""
         n = 256
@@ -1007,6 +1015,7 @@ class TestPartitionedScatterOpt(TestCase):
         self._check_accuracy(f, (out, idx, vals), exact=True)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pass_disabled(self):
         """When partitioned_scatter_enabled=False the pass is a no-op."""
         config.partitioned_scatter_enabled = False
@@ -1083,6 +1092,7 @@ class TestPartitionedScatterOpt(TestCase):
                 f"force mode output mismatch: expected={e[:5]} actual={a[:5]}",
             )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_skip_cpu_device(self):
         """CPU scatters are never rewritten, even with force enabled."""
         torch.manual_seed(21)
@@ -1147,6 +1157,7 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_compute_num_partitions_tight_budget(self):
         """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
         # P=4: overhead = 1M * 4 * 3 = 12 MB ≤ 20 MB
@@ -1154,6 +1165,7 @@ class TestPartitionedScatterOpt(TestCase):
         result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
         self.assertEqual(result, 4)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_widen_bytes_charged_outside_expanded_buffer(self):
         """fp32 partials also cost a widened copy of the values and the width the
         peak's own output copy cannot credit. Neither scales with num_partitions."""
@@ -1185,6 +1197,7 @@ class TestPartitionedScatterOpt(TestCase):
         partitioned_scatter_min_index_size=1,
         partitioned_scatter_min_contention_ratio=0.0,
     )
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_scatter_widening_uses_full_source_size(self):
         """scatter permits src to be larger than index, and the rewrite widens
         all of it, so the charge cannot be derived from the index."""
@@ -1209,6 +1222,7 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate.values_numel, values_node.meta["val"].numel())
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_compute_num_partitions_traffic_cap(self):
         """P <= writes_per_slot caps each buffer phase at the scatter's own
         traffic; min_p wins below that floor."""

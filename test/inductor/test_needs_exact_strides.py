@@ -8,6 +8,7 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
 )
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -35,6 +36,7 @@ if HAS_GPU_AND_TRITON:
             tl.store(buf_ptr + pid * stride_t + i * stride_i, 1.0)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestNeedsExactStrides(InductorTestCase):
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):

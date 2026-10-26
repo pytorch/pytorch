@@ -7,6 +7,7 @@ import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -23,6 +24,7 @@ requires_multigpu = functools.partial(
 aten = torch.ops.aten
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestMoveConstructorsToGpu(TestCase):
     def _check_fn(self, func, expect_cpu, *args):
         out_eager = func(*args)
@@ -107,6 +109,7 @@ class TestMoveConstructorsToGpu(TestCase):
 
         self._check_fn(foo, True, inp)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_multiple_constructors(self):
         def foo(x):
             tmp1 = torch.arange(x.shape[0])
@@ -152,6 +155,7 @@ class TestMoveConstructorsToGpu(TestCase):
         inp = torch.rand([100], device=GPU_TYPE)
         self._check_fn(foo, True, inp)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_no_gpu(self):
         def foo(x):
             return x[torch.arange(x.shape[0])]

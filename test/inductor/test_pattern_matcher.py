@@ -47,6 +47,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
 from torch.testing._internal.common_utils import (
@@ -85,6 +86,7 @@ register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestPatternMatcher(TestCase):
     device_type = GPU_TYPE
 
@@ -519,6 +521,7 @@ class TestPatternMatcher(TestCase):
         ):
             self._test_mixed_impl(fn, args, True, False)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_mixed_mm_cpu(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -579,6 +582,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
 
     @inductor_config.patch(var_std_reduction_dedup=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_var_std_reduction_dedup(self):
         def test_fn(x):
             return torch.var(x, dim=-1) + torch.std(x, dim=-1)
@@ -590,6 +594,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 1)
 
     @inductor_config.patch(var_std_reduction_dedup=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_var_std_reduction_dedup_no_match(self):
         def test_fn(x):
             return torch.std(x, dim=-1) + torch.var(x, dim=-1, correction=0)
@@ -601,6 +606,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
 
     @inductor_config.patch(var_std_reduction_dedup=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_var_std_reduction_dedup_keepdim(self):
         def test_fn(x):
             return torch.var(x, dim=-1, keepdim=True) + torch.std(
@@ -614,6 +620,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 1)
 
     @inductor_config.patch(var_std_reduction_dedup=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_var_std_reduction_dedup_different_dim(self):
         def test_fn(x):
             return torch.var(x, dim=-1), torch.std(x, dim=0)
@@ -625,6 +632,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
 
     @inductor_config.patch(var_std_reduction_dedup=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_var_std_reduction_dedup_float32(self):
         def test_fn(x):
             return torch.var(x, dim=-1) + torch.std(x, dim=-1)
@@ -699,6 +707,7 @@ class TestPatternMatcher(TestCase):
         # the addmm patterns don't declare alpha, so they must not match
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_undeclared_non_default_kwarg_blocks_match(self):
         add, div = torch.ops.aten.add, torch.ops.aten.div
         undeclared = CallFunction(add, KeywordArg("x"), KeywordArg("y"))
@@ -740,6 +749,7 @@ class TestPatternMatcher(TestCase):
         node = graph.call_function(torch.add, (x, y), {"alpha": 1})
         self.assertFalse(torch_add.match(node))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_failed_match_drops_traceback(self):
         # A FailedMatch raised mid-match (here: one KeywordArg bound to two
         # different nodes) is returned to the caller. Its traceback would hold
@@ -754,6 +764,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(str(m), "kwarg mismatch: x")
         self.assertIsNone(m.__traceback__)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_auto_functionalized_default_kwarg_matches(self):
         # functionalization passes defaulted args too; patterns written against
         # auto_functionalized usually omit them
@@ -1319,6 +1330,7 @@ class TestPatternMatcher(TestCase):
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @inductor_config.patch(joint_graph_constant_folding=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pointless_cumsum(self):
         def fn1():
             ones = torch.full(
@@ -1387,6 +1399,7 @@ class TestPatternMatcher(TestCase):
             subtest(lambda: torch.tensor(5.0).cumsum(-1), name="negative_dim"),
         ],
     )
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pointless_cumsum_scalar(self, fn):
         expected = fn()
         result = torch.compile(fn, fullgraph=True)()
@@ -1394,6 +1407,7 @@ class TestPatternMatcher(TestCase):
 
     @dynamo_config.patch(capture_scalar_outputs=True)
     @parametrize("dtype", [torch.int64, torch.float32, torch.bool])
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pointless_cumsum_symbolic_fill(self, dtype):
         # fill_value reaches the pattern as an fx Node either from an unbacked
         # .item(), or - the second closure below - from a recompile of the same code
@@ -1416,6 +1430,7 @@ class TestPatternMatcher(TestCase):
             fn = make(fill)
             self.assertEqual(torch.compile(fn, fullgraph=True)(), fn())
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_reciprocal_sqrt_to_rsqrt(self):
         # reciprocal(sqrt(x)) should fuse into a single rsqrt in the kernel.
         def fn(x):
@@ -1756,6 +1771,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_symint_pattern_matching(self):
         import torch._inductor.config as config
         from torch._inductor.pattern_matcher import (
@@ -1904,6 +1920,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_mutation_region_ids_update_after_replacement_adds_mutation(self):
         insert_mutation_pass = PatternMatcherPass()
 
@@ -1957,6 +1974,7 @@ class TestPatternMatcher(TestCase):
             nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pure_replacement_skips_mutation_region_refresh(self):
         pure_replacement_pass = PatternMatcherPass()
 
@@ -1982,6 +2000,7 @@ class TestPatternMatcher(TestCase):
         ):
             self.assertEqual(pure_replacement_pass.apply(gm.graph), 1)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pure_graph_pattern_skips_mutation_region_refresh(self):
         pure_graph_pass = PatternMatcherPass()
 
@@ -2004,6 +2023,7 @@ class TestPatternMatcher(TestCase):
         ):
             self.assertEqual(pure_graph_pass.apply(gm.graph), 1)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_mutating_register_replacement_refreshes_mutation_regions(self):
         insert_mutation_pass = PatternMatcherPass()
 
@@ -2061,6 +2081,7 @@ class TestPatternMatcher(TestCase):
             nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_graph_pattern_mutation_before_match_refreshes_full_graph(self):
         insert_mutation_pass = PatternMatcherPass()
 
@@ -2126,6 +2147,7 @@ class TestPatternMatcher(TestCase):
             nodes_by_target[aten.relu.default].meta["mutation_region_id"], 1
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_remove_pointless_clones(self):
         @torch.compile(fullgraph=True)
         def fn(a, b):
@@ -2170,6 +2192,7 @@ class TestPatternMatcher(TestCase):
     @parametrize("op", (torch.addmm, torch.baddbmm))
     @parametrize("device", ("cuda", "xpu", "mps"))
     @parametrize("beta", (0, 1))
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_unfuse_bias_zero_beta(self, op, device, beta):
         def fn(inp, a, b):
             return op(inp, a, b, beta=beta).relu()
@@ -2283,6 +2306,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(actual, mod(*args))
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_addmm_fusion_extra_check_without_beta_kwarg(self):
         graph = torch.fx.Graph()
         inp = graph.placeholder("inp")
@@ -2520,6 +2544,7 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fc_default, x, a, b)
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_serialized_patterns_up_to_date(self):
         import torch.utils._pytree as pytree
         from torch._inductor.fx_passes import joint_graph
@@ -2787,6 +2812,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_input_output_same(self):
         def pattern(x, y):
             out1 = torch.add(x, y)
@@ -2870,6 +2896,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_stable_topological_sort(self):
         def fn1(a, b):
             return a + b
@@ -2896,6 +2923,7 @@ class TestPatternMatcher(TestCase):
         stable_topological_sort(graph)
         self.assertEqual(list(graph.nodes), [b, a, c])
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_scaled_softmax(self):
         def mul_softmax(a, b):
             return F.softmax(a * b, dim=0)
@@ -2937,6 +2965,7 @@ class TestPatternMatcher(TestCase):
         self.common(div_softmax, (x, scale), 0, 0)
 
     @inductor_config.patch(fx_graph_cache=False)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_scaled_softmax_nonfinite_matches_eager(self):
         def check(fn, args):
             torch._dynamo.reset()
@@ -2978,6 +3007,7 @@ class TestPatternMatcher(TestCase):
         )
 
     @inductor_config.patch(fx_graph_cache=False)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_scaled_amax_sub_nonfinite_matches_eager(self):
         def fn(x, scale):
             y = x * scale
@@ -2994,6 +3024,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(actual[1, 0].item(), float("-inf"))
         self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
             if type not in ["call_function", "call_method"]:
@@ -3062,6 +3093,7 @@ class TestPatternMatcher(TestCase):
             expect=False,
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_multioutput_register_replacement(self):
         @torch.library.custom_op(
             "vllm::fused_rms_norm_quant_static", mutates_args=["result", "scale"]
@@ -3204,6 +3236,7 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_nested_replacement_args_do_not_percolate_tags(self):
         class DummyMatch:
             def __init__(self, outputs):
@@ -3319,6 +3352,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(my_patterns.apply(gm_decomposed.graph), 0)
 
     @inductor_config.patch(is_predispatch=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_remove_noop_pass_with_remove_passes(self):
         def fn_with_noop(x):
             batch_size, dim = x.shape
@@ -3385,6 +3419,7 @@ class TestPatternMatcher(TestCase):
             ),
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_bound_method_pattern_matcher(self):
         class ReluSumPattern:
             def __init__(self, e: float):
@@ -3494,6 +3529,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(result, x * 3)
         self.assertEqual(count, 1)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_get_attr_tensor_constant_pattern_matching(self):
         def pattern(x):
             y = x + 1
@@ -3522,6 +3558,7 @@ class TestPatternMatcher(TestCase):
         )
         self.assertFalse(generated_pattern.match(other_maximum))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pretty_print_get_attr_tensor_constant_under_fake_mode(self):
         def pattern(x):
             y = x + 1
@@ -3537,6 +3574,7 @@ class TestPatternMatcher(TestCase):
         self.assertIn("GetAttr(torch.tensor(", pattern_str)
         self.assertIn("dtype=torch.float32", pattern_str)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pretty_print_get_attr_nonfinite_tensor_constant_executes(self):
         get_attr_pattern = GetAttr(
             torch.tensor([float("inf"), -float("inf"), float("nan")])
@@ -3564,6 +3602,7 @@ class TestPatternMatcher(TestCase):
         self.assertIn("complex(float('nan'), 1.0)", complex_pattern_str)
         self.assertIn("complex(2.0, float('inf'))", complex_pattern_str)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_pretty_print_get_attr_tensor_constant_requires_contiguous(self):
         get_attr_pattern = GetAttr(torch.arange(6)[1:5:2])
 
@@ -3572,6 +3611,7 @@ class TestPatternMatcher(TestCase):
         ):
             PatternPrettyPrinter.run(get_attr_pattern)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_get_attr_nonfinite_tensor_constant_pattern_matching(self):
         def make_attr_node(value):
             graph = torch.fx.Graph()
@@ -3601,6 +3641,7 @@ class TestPatternMatcher(TestCase):
             )
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_get_attr_tensor_constant_metadata_must_match(self):
         def make_attr_node(value):
             graph = torch.fx.Graph()
@@ -3630,6 +3671,7 @@ class TestPatternMatcher(TestCase):
             GetAttr(expected.float()).match(make_attr_node(same_values_requires_grad))
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_get_attr_fake_tensor_constant_requires_value(self):
         def make_attr_node(value):
             graph = torch.fx.Graph()
@@ -3651,6 +3693,7 @@ class TestPatternMatcher(TestCase):
         self.assertFalse(GetAttr(expected).match(make_attr_node(unknown_fake)))
         self.assertTrue(GetAttr(known_fake).match(make_attr_node(expected)))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_register_replacement_with_get_attr_tensor_constant(self):
         def pattern(x):
             y = x + 1
@@ -3705,6 +3748,7 @@ class TestPatternMatcher(TestCase):
                 node.meta["_numeric_debug_handle"] = 42
                 node.meta["custom"] = {"test_key": "test_value"}
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_replace_random_pass_preserves_stack_trace_on_rng_prims(self):
         def fn(x):
             return x + torch.randn(x.shape, device=x.device)
@@ -3777,6 +3821,7 @@ class TestPatternMatcher(TestCase):
                 msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_meta_matches_specializes_backed_not_unbacked(self):
         def meta_matches(shape_env, actual, expected):
             with FakeTensorMode(shape_env=shape_env):
@@ -4031,6 +4076,7 @@ class TestPatternMatcher(TestCase):
 
 
 @inductor_config.patch(fx_graph_cache=False)
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
 
@@ -4301,6 +4347,7 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
             self.assertEqual(accumulated_count, count1 + count2)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_list_tensor_pattern_replacement(self):
         with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:
             lib.define("list_op(Tensor[] xs) -> Tensor[]")
@@ -4365,6 +4412,7 @@ class TestPatternMatcherLogging(LoggingTestCase):
             run_case(1)
             run_case(2)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_scalar_workaround_arg_survives_specific_match(self):
         def src_pattern(x, dim):
             xmax = x.amax(dim=dim, keepdim=True)
@@ -4410,6 +4458,7 @@ class TestPatternMatcherLogging(LoggingTestCase):
         self.assertEqual(dims, [1])
         self.assertEqual(gm(x), torch.softmax(x, dim=1))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_opaque_obj_custom_op(self):
         with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
             lib.define(

@@ -9,6 +9,7 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -45,6 +46,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 @inductor_config.patch(inplace_padding=enable_inplace_padding)
+@tci.test(exclude=tci.platform.linux_x86_64)
 class InplacePaddingTest(TestCase):
     def test_skip_pad_due_to_fusion(self):
         """

@@ -16,6 +16,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -94,6 +95,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     }
 )
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class MultiKernelTest(TestCase):
     @staticmethod
     def _benchmark_lock_call(events):
@@ -112,6 +114,7 @@ class MultiKernelTest(TestCase):
         }
         return multi_kernel_call
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_benchmark_sub_kernels_holds_gpu_lock_across_candidates(self):
         events = []
         multi_kernel_call = self._benchmark_lock_call(events)
@@ -153,6 +156,7 @@ class MultiKernelTest(TestCase):
             ],
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_benchmark_sub_kernels_releases_gpu_lock_on_failure(self):
         events = []
         multi_kernel_call = self._benchmark_lock_call(events)

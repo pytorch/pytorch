@@ -82,6 +82,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._prims_common import compute_required_storage_length
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -91,6 +92,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
     skipIfTorchInductor,
+    subtest,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -170,6 +172,7 @@ class FailChoiceCaller(ChoiceCaller):
 )
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestMaxAutotune(TestCase):
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
         make_matrix = functools.partial(
@@ -203,6 +206,7 @@ class TestMaxAutotune(TestCase):
         ):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_max_autotune_includes_max_autotune_pointwise_configs(self):
         """
         Verify that `max_autotune` includes all pointwise configs from
@@ -331,6 +335,7 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_use_triton_tma_template_rejects_descriptor_shapes_exceeding_int32(self):
         from torch._inductor.utils import use_triton_tma_template
 
@@ -361,6 +366,7 @@ class TestMaxAutotune(TestCase):
                 use_triton_tma_template(mat1, mat2, output_layout=output_layout)
             )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_descriptor_shape_fits_in_int32_uses_expected_guarding(self):
         from torch._inductor.utils import _descriptor_shape_fits_in_int32
 
@@ -406,6 +412,7 @@ class TestMaxAutotune(TestCase):
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_tma_descriptor_max_offset_fits_in_int32(self):
         from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
 
@@ -421,6 +428,7 @@ class TestMaxAutotune(TestCase):
         mat.get_stride.return_value = [16384 * 5120, 5120, 1]
         self.assertTrue(_tma_descriptor_max_offset_fits_in_int32(mat))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_tma_descriptor_max_offset_fits_in_int32_uses_expected_guarding(self):
         from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
 
@@ -937,6 +945,7 @@ class TestMaxAutotune(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     @parametrize("beta", (0, 1))
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_addmm_0d_bias_max_autotune(self, beta):
         torch._dynamo.reset()
         bias = torch.tensor(0.5)
@@ -1407,7 +1416,13 @@ class TestMaxAutotune(TestCase):
         fallback_random=True,
         max_autotune_gemm=True,
     )
-    @parametrize("device", ("cpu", GPU_TYPE))
+    @parametrize(
+        "device",
+        (
+            subtest("cpu", decorators=[tci.test(add=tci.platform.linux_x86_64)]),
+            GPU_TYPE,
+        ),
+    )
     def test_matmul_dropout(self, device):
         def fwd(a, b):
             x = a @ b
@@ -1671,6 +1686,7 @@ class TestMaxAutotune(TestCase):
                     FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_conv3d(self, search_space):
         fn = torch.nn.functional.conv3d
         image = torch.randn([1, 3, 8, 16, 32])
@@ -2402,6 +2418,7 @@ class TestMaxAutotune(TestCase):
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
     )
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_override_template_heuristics_with_custom_class(self):
         """
         Test that override_template_heuristics works with a custom heuristic class.
@@ -2507,6 +2524,7 @@ class TestMaxAutotune(TestCase):
             FileCheck().check("triton_tem_fused_bmm").run(code[0])
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = set(
             inspect.signature(
@@ -2833,6 +2851,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_generated_code_cache_key_input_aliasing(self):
         """make_key must distinguish aliased inputs, e.g. mm(x, x), from
         distinct inputs with identical layouts, and stay name-insensitive."""
@@ -4004,6 +4023,7 @@ class TestMaxAutotune(TestCase):
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestTemplateConfigPruning(TestCase):
     """Test class for pruning logic in GEMM autotuning."""
 
@@ -4407,7 +4427,9 @@ class TestTemplateConfigPruning(TestCase):
                 self.assertEqual(kept, expected_block_k)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestMaxAutotunePrecompile(TestCase):
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_precompilation_threads(self):
         import threading
         from typing import Any
@@ -4518,6 +4540,7 @@ class TestMaxAutotunePrecompile(TestCase):
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestMaxAutotuneSubproc(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(
@@ -4527,6 +4550,7 @@ class TestMaxAutotuneSubproc(TestCase):
             ),
         )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_async_autotuner_skips_unscheduled_choices(self):
         inputs_key = "inputs"
         scheduled_choice = mock.Mock(hash_key=lambda: "scheduled")
@@ -4545,6 +4569,7 @@ class TestMaxAutotuneSubproc(TestCase):
                 ),
             )
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_async_autotuner_does_not_reuse_future_across_modules(self):
         """A Future belongs to the generated module it was scheduled for.
 
@@ -4817,6 +4842,7 @@ class TestMaxAutotuneSubproc(TestCase):
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestMaxAutotuneRemoteCache(TestCase):
     def setUp(self):
         super().setUp()
@@ -5113,6 +5139,7 @@ class TestTuningProcessPool(TestCase):
         tuning_pool.shutdown()
 
     @config.patch({"autotune_multi_device": True})
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_tuning_pool_multiple_devices(self):
         # Adapt the test to the available devices (and whether the backend-specific
         # visible devices env var
@@ -5228,6 +5255,7 @@ class TestTuningProcessPool(TestCase):
         # Verify they were cleared
         self.assertEqual(len(cache.feedback_saver_fns), 0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_feedback_saver_integration(self):
         """Test that feedback savers are actually called during autotuning."""
         # Clear any existing feedback savers
@@ -5286,6 +5314,7 @@ class TestTuningProcessPool(TestCase):
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestPrologueFusion(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -5999,6 +6028,7 @@ class TestPrologueFusion(TestCase):
                 f = FileCheck().check("k_idx").check("a =").check_not("tl.where")
             f.check("tl.dot").run(code[0])
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_preserves_zero_analysis_lowp_rounding_cast(self):
         from torch._inductor.analyze_preserves_zero_mask import PreservesZeros
         from torch._inductor.index_propagation import TypedExpr
@@ -7879,6 +7909,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
         2,
     )
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_autotune_process_pool_inactivity_shutdown(self):
         AutotuneProcessPool.shutdown_instance()
         AutotuneProcessPool._shutdown_for_inactivity = False
@@ -7901,6 +7932,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
         2,
     )
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_autotune_process_pool_inactivity_shutdown_warmup_only(self):
         """Test that the pool shuts down from inactivity even when only warmup is called."""
         AutotuneProcessPool.shutdown_instance()

@@ -10,6 +10,7 @@ from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
+from torch.testing._internal import tci
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -50,6 +51,7 @@ def T(*size, dtype=torch.float32, device=DEVICE, grad=False) -> torch.Tensor:
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestCase(InductorTestCase):
     device = DEVICE
 
@@ -94,6 +96,7 @@ class UnsupportedTests(TestCase):
         inp = (T(10, 10),)
         self.assertZero(calculate_runtime(f, *inp))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_no_cuda(self):
         def f(a):
             return a

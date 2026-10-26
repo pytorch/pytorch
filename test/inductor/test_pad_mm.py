@@ -15,9 +15,11 @@ from torch._inductor.fx_passes.pad_mm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()

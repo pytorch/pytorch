@@ -3915,13 +3915,16 @@ def forward(self, add_tensor):
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    @patch.object(torch.distributions.Distribution, "_validate_args", False)
     def test_non_strict_export_distribution_validation(self):
         class SquashedNormal(torch.distributions.TransformedDistribution):
             def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
                 self.loc = loc
                 self.scale = scale
                 self.tanh_transform_clamp = tanh_transform_clamp
-                self.base_dist = torch.distributions.Normal(loc, scale)
+                self.base_dist = torch.distributions.Normal(
+                    loc, scale, validate_args=True
+                )
                 super().__init__(self.base_dist, [])
 
             @property
@@ -3967,7 +3970,9 @@ def forward(self, add_tensor):
 
         class NormalMean(torch.nn.Module):
             def forward(self, scale):
-                return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+                return torch.distributions.Normal(
+                    torch.zeros_like(scale), scale, validate_args=True
+                ).mean
 
         normal_inputs = (torch.ones(2, 3),)
         normal_ep = export(NormalMean(), normal_inputs, strict=False)
@@ -3979,7 +3984,7 @@ def forward(self, add_tensor):
         class LogProb(torch.nn.Module):
             def forward(self, value):
                 dist = torch.distributions.Normal(
-                    torch.zeros_like(value), torch.ones_like(value)
+                    torch.zeros_like(value), torch.ones_like(value), validate_args=True
                 )
                 return dist.log_prob(value)
 

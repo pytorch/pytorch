@@ -19,6 +19,7 @@ from torch._inductor.lowering import lowerings, register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -84,6 +85,7 @@ def _exact_inputs(*shape: int, dtype: torch.dtype) -> torch.Tensor:
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestSubgraphChoice(TestCase):
     def setUp(self):
         super().setUp()

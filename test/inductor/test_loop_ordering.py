@@ -32,6 +32,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -521,6 +522,7 @@ class ImplDetailTest(MockSchedulerTest):
     }
 )
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class LoopOrderingTest(TestCase):
     device = GPU_TYPE
 
@@ -676,6 +678,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
     @inductor_config.patch(split_reductions=False)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_different_reduction_order(self):
         """
         We should not reorder loops in this case. Since reordering loops does
@@ -690,6 +693,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(2, metrics.generated_kernel_count)
         self.assertEqual(0, metrics.num_loop_reordering)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_keep_fake_dep(self):
         """
         In this model, there are fake dependencies (StarDep) between Scatter
@@ -744,6 +748,7 @@ class LoopOrderingTest(TestCase):
         # The two kernels are not fused due to c is broadcasted
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_view(self):
         """
         Passing this test relies that we compare normalized MemoryDep.
@@ -1607,6 +1612,7 @@ class LoopOrderingTest(TestCase):
     }
 )
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class MemoryCoalescingTest(MockSchedulerTest):
     """Tests for memory coalescing analysis with specific tensor sizes."""
 
@@ -1690,6 +1696,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             ((5, 6, 20), (3, 10, 20), (30, 20)),
         ),
     )
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_inferred_splits(self, inps):
         """
         Test memory coalescing analysis with the specified tensor sizes.
@@ -1863,6 +1870,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             self.assertEqual(foo(x), torch.compile(foo)(x))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_coalescing(self):
         from torch._inductor import tiling_utils
 
@@ -2009,6 +2017,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
         ):
             self.assertEqual(torch.compile(foo)(x, y), foo(x, y))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_solve_for_zero(self):
         from torch._inductor import tiling_utils
 
@@ -2034,6 +2043,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_zero(expr)
             self.assertEqual(result, expected)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_solve_for_zero_floordiv_does_not_query_constant(self):
         from torch._inductor import tiling_utils
 
@@ -2046,6 +2056,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
         ):
             self.assertIsNone(tiling_utils.solve_for_zero(expr))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_solve_for_tiling(self):
         from torch._inductor import tiling_utils
 
@@ -2070,6 +2081,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_solve_for_tiling_nested_modularindexing(self):
         from torch._inductor import tiling_utils
 
@@ -2144,6 +2156,7 @@ layouts = ("cont", "NHWC", "T")
     }
 )
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestTiling(TestCase):
     def T(self, layout: str):
         SIZE_A = 128
@@ -2278,6 +2291,7 @@ class TestTiling(TestCase):
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
             torch.compile(f)(x)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_find_broadcast_var(self):
         """Test broadcast variable detection for tiling improvements."""
         from torch._inductor import tiling_utils

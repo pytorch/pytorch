@@ -4,6 +4,7 @@ from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -78,6 +79,7 @@ class TestMetrics(TestCase):
 
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("partitioned_scatter_enabled", False)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_atomic_add(self):
         @torch.compile
         def f(lhs, index, rhs):
@@ -98,6 +100,7 @@ class TestMetrics(TestCase):
     @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE, inductor=True)
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_kernel_args_num_gb(self):
         @torch.compile
         def f(x):

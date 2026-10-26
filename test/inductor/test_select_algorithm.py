@@ -41,6 +41,7 @@ from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI300_ARCH,
@@ -369,6 +370,7 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(run_method.call_args_list[1].args[-1].value, 22)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()
@@ -1128,6 +1130,7 @@ class TestExternKernelCaller(TestCase):
     @requires_gpu()
     @patches
     @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_extern_kernel_tensor_meta_failure(self):
         """
         Test that when TensorMeta.from_irnodes fails during ExternKernelCaller
@@ -1180,6 +1183,7 @@ class TestExternKernelCaller(TestCase):
         )
 
     @patches
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
             # Two identical matmuls with same shapes
@@ -1212,6 +1216,7 @@ class TestExternKernelCaller(TestCase):
     # per test. https://github.com/triton-lang/triton/issues/11696
     @skipIfRocmArch(MI300_ARCH)
     @patches
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):
             return torch.mm(a, b)

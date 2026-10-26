@@ -492,8 +492,7 @@ class MinimumMaximumTest(TestCase):
         self.assertEqual(actual_max_bits, torch.zeros_like(actual_max_bits))
 
 
-if HAS_GPU:
-    instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
+instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":

@@ -35,9 +35,12 @@ class TestRamjetSource(TestCase):
         self.root = Path(temporary.name).resolve() / "repo"
         self.output = self.root.parent / "snapshots"
         self.tracked = {
+            ".github/actions/reuse-old-whl/reuse_old_whl.py",
+            ".spin/cmds.py",
             "README.md",
             "cmake/config.cmake",
             "docs/example.md",
+            "pyproject.toml",
             "pytest.ini",
             "scripts/example.sh",
             "test/test_example.py",
@@ -84,6 +87,8 @@ class TestRamjetSource(TestCase):
             ("test/test_example.py", True),
             ("tools/test/test_ramjet.py", True),
             ("tools/ramjet.md", True),
+            (".spin/cmds.py", True),
+            (".github/actions/reuse-old-whl/reuse_old_whl.py", True),
             ("docs/example.md", False),
         ],
     )
@@ -104,6 +109,7 @@ class TestRamjetSource(TestCase):
             "cmake/config.cmake",
             "third_party/pkg/LICENSE",
             "README.md",
+            "pyproject.toml",
         ],
     )
     def test_wheel_inputs_change_build_key(self, path):
@@ -133,6 +139,25 @@ class TestRamjetSource(TestCase):
         self.assertTrue(
             {"tools/stats/helper.py", "test/test_example.py", "pytest.ini"} <= members
         )
+
+    def test_runtime_includes_source_fixtures_without_unrelated_ci_files(self):
+        unrelated = ".github/workflows/test.yml"
+        (self.root / unrelated).parent.mkdir(parents=True)
+        (self.root / unrelated).write_text("unrelated workflow")
+        self.tracked.add(unrelated)
+        snapshot = ramjet_source.snapshot_source(self.root, self.output)
+        with tarfile.open(snapshot["tests"][0]) as archive:
+            members = set(archive.getnames())
+            self.assertTrue(ramjet_source.RUNTIME_FILES <= members)
+            self.assertNotIn(unrelated, members)
+            for file in ramjet_source.RUNTIME_FILES:
+                stream = archive.extractfile(file)
+                if stream is None:
+                    raise AssertionError(f"Expected runtime fixture {file}")
+                self.assertEqual(stream.read(), (self.root / file).read_bytes())
+        build = json.loads(snapshot["build"][0].read_text())
+        self.assertNotIn(".spin/cmds.py", build)
+        self.assertNotIn(".github/actions/reuse-old-whl/reuse_old_whl.py", build)
 
     @parametrize("relative", sorted(ramjet_source.BOOTSTRAP))
     def test_bootstrap_files_are_frozen_copies(self, relative):

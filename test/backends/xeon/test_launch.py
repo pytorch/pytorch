@@ -88,8 +88,18 @@ class TestTorchrun(TestCase):
                 f"Expected [0, 1], got {cpuinfo.numa_aware_check([2, 3, 4, 5])}"
             )
 
+    def test_cpu_info_without_numa(self):
+        from torch.backends.xeon.run_cpu import _CPUinfo
+
+        cpuinfo = _CPUinfo("0,0,0,\n1,1,0,\n2,0,0,\n3,1,0,\n")
+        self.assertEqual(cpuinfo.node_nums, 1)
+        self.assertEqual(cpuinfo.get_all_physical_cores(), [0, 1])
+        self.assertEqual(cpuinfo.get_all_logical_cores(), [0, 1, 2, 3])
+        self.assertEqual(cpuinfo.numa_aware_check([0, 1, 2, 3]), [0])
+
     def test_multi_threads(self):
         num = 0
+        output = []
         with subprocess.Popen(
             f"python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
             --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python pwd",
@@ -98,16 +108,20 @@ class TestTorchrun(TestCase):
             stderr=subprocess.STDOUT,
         ) as p:
             for line in p.stdout.readlines():
-                segs = str(line, "utf-8").strip().split("-")
+                decoded = line.decode("utf-8")
+                output.append(decoded)
+                segs = decoded.strip().split("-")
                 if segs[-1].strip() == "pwd":
                     num += 1
         if num != 4:
             raise AssertionError(
-                f"Failed to launch multiple instances for inference, got {num}"
+                f"Failed to launch multiple instances for inference, got {num}\n"
+                + "".join(output)
             )
 
     def test_multi_ncores_per_instance_setting(self):
         num = 0
+        output = []
         with subprocess.Popen(
             f"python -m torch.backends.xeon.run_cpu --ninstances 3 --ncores-per-instance 5 5 6 --use-default-allocator \
             --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python pwd",
@@ -116,12 +130,15 @@ class TestTorchrun(TestCase):
             stderr=subprocess.STDOUT,
         ) as p:
             for line in p.stdout.readlines():
-                segs = str(line, "utf-8").strip().split("-")
+                decoded = line.decode("utf-8")
+                output.append(decoded)
+                segs = decoded.strip().split("-")
                 if segs[-1].strip() == "pwd":
                     num += 1
         if num != 3:
             raise AssertionError(
-                f"Failed to launch multiple instances for inference, got {num}"
+                f"Failed to launch multiple instances for inference, got {num}\n"
+                + "".join(output)
             )
 
 

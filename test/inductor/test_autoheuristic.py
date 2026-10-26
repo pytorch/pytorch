@@ -10,10 +10,12 @@ from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class AutoHeuristicTest(TestCase):
     def count_lines_in_file(self, file_path):
         with open(file_path) as file:
@@ -167,11 +169,13 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(counters["inductor"]["pad_mm_bench"], 0)
 
     @inductor_config.patch(deterministic=True)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_use_autoheuristic_pad_mm_enabled_in_deterministic_mode(self):
         inductor_config.autoheuristic_use.pad_mm = None
         """pad_mm set to None; with deterministic=True, use_autoheuristic should return True."""
         self.assertTrue(inductor_config.use_autoheuristic("pad_mm"))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_autoheuristic_init_no_cuda(self):
         """AutoHeuristic.__init__ must not crash in non-CUDA environments."""
 

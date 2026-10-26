@@ -19,6 +19,7 @@ from torch._inductor.virtualized import NullHandler, V
 from torch.autograd import DeviceType
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -110,11 +111,13 @@ class TestBench(TestCase):
             functools.partial(torch.nn.functional.linear, x, w)
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
         log.warning("do_bench_using_profiling result: %s", res)
@@ -274,4 +277,4 @@ class TestReinterpretView(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests(device_type)
+    run_tests()

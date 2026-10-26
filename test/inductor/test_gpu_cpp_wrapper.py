@@ -26,6 +26,7 @@ from torch._inductor.codegen.mtia.device_op_overrides import MTIADeviceOpOverrid
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     find_library_location,
     instantiate_parametrized_tests,
@@ -130,6 +131,7 @@ class TestGpuWrapper(InductorTestCase):
         durations = compilation_time_metrics["cpp_wrapper_compile"]
         self.assertTrue(any(t > 0 for t in durations))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
         seq_length = 50
@@ -1241,6 +1243,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
     device = GPU_TYPE
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_annotation_training(self):
         batch_size = 32
         seq_length = 50

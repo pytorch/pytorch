@@ -301,9 +301,8 @@ def get_hf_bert(rank):
     except ImportError as e:
         raise unittest.SkipTest("Unable to import transformers") from e
 
-    device_type = (
-        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-    )
+    acc = torch.accelerator.current_accelerator(check_available=True)
+    device_type = acc.type if acc else "cpu"
     batch_size, max_length, config, device = (
         4,
         512,

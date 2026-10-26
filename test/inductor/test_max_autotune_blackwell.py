@@ -36,6 +36,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1239,6 +1240,7 @@ class TestBlackwellAutoWSConfigs(TestCase):
                             )
 
     @parametrize("global_meta_ws", (False, True))
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_global_meta_ws_disables_flatten(self, global_meta_ws):
         # Triton's Meta WS knob rewrites every WS kernel, so configs with
         # use_meta_ws=False must not be flattened either.

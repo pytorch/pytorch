@@ -1,6 +1,5 @@
 # Owner(s): ["module: __torch_function__"]
 
-import sys
 import torch
 import numpy as np
 import inspect
@@ -47,13 +46,6 @@ from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
-
-if torch.version.cuda and not torch.cuda.is_available():
-    print(
-        "Skipping due to failing when cuda build runs on non cuda machine, "
-        + "see https://github.com/pytorch/pytorch/pull/150059 for example"
-    )
-    sys.exit()
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
@@ -949,7 +941,7 @@ def generate_tensor_like_override_tests(cls):
             elif arg_type.startswith("int"):
                 return 0
             elif arg_type == "Stream":
-                return torch.Stream()
+                return torch.Stream(device="cpu")
             elif arg_type.startswith("float") or arg_type == "double":
                 return 1.0
             elif arg_type in {"Generator", "MemoryFormat", "TensorOptions"}:

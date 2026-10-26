@@ -2,10 +2,12 @@
 import pathlib
 import sys
 
-from test_xpu import TestXpu, TestXpuOpsXPU  # noqa: F401
-
 import torch
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+
+
+if torch.xpu.is_available():
+    from test_xpu import TestXpu, TestXpuOpsXPU  # noqa: F401
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent

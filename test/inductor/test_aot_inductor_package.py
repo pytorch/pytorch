@@ -29,6 +29,7 @@ from torch.export.pt2_archive._package import (
     load_pt2,
     load_weights_to_pt2_contents,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
 from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -1371,6 +1372,14 @@ model(torch.ones(2))
             "Failed to find a generated cpp file or so file for model 'forward' in the zip archive.",
         ):
             load_package(package_path, model_name="forward")
+
+
+for _name in (
+    f"TestAOTInductorPackage_{GPU_TYPE}",
+    f"TestAOTInductorPackageCpp_{GPU_TYPE}",
+):
+    if _name in globals():
+        tci.test(exclude=tci.platform.linux_x86_64)(globals()[_name])
 
 
 if __name__ == "__main__":

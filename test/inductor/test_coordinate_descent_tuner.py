@@ -13,6 +13,7 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -108,6 +109,7 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_values("num_warps", 2, radius=2)
         self.assertEqual(set(neighbours), {1, 4, 8})
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     def test_persistent_reduction(self):
         def f(x):
             return x / x.sum(dim=-1, keepdim=True)

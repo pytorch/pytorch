@@ -5,6 +5,7 @@ from torch._C import FileCheck
 from torch._inductor.custom_graph_pass import CustomPartitionerFn, get_hash_for_files
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal import tci
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -26,6 +27,7 @@ class MyCustomPartitionerFn(CustomPartitionerFn):
         return get_hash_for_files((__file__,))
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestCustomPartitionerFn(TestCase):
     def test_custom_partitioner_fn(self):
         """

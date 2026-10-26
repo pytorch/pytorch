@@ -14,6 +14,7 @@ from torch._higher_order_ops.auto_functionalize import (
 from torch._inductor import inductor_prims
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -84,6 +85,7 @@ def boo(x: torch.Tensor) -> None:
     x.sin_()
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         ReinplaceCounters.clear()
@@ -138,6 +140,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_dont_reinplace_scatter_from_overlapping_view(self):
         # https://github.com/pytorch/pytorch/issues/197829
         def f(x):
@@ -172,6 +175,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         ],
     )
     @parametrize("aliased", ["indices", "values_view", "none"])
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_index_put_reinplace_with_aliased_operand(self, op, aliased):
         inplace_op = {
             aten.index_put.default: aten.index_put_.default,
@@ -570,6 +574,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_generalized_scatter(self):
         # This is an integration test for the reinplacing pass.
         def fn(x_1):

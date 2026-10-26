@@ -5591,7 +5591,10 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
           }),
           py::arg("host_or_file"),
           py::arg("port") = -1)
-      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown)
+      .def(
+          "shutdown",
+          &::c10d::control_plane::WorkerServer::shutdown,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "port", &::c10d::control_plane::WorkerServer::port);
 

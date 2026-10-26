@@ -6,6 +6,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from pathlib import Path
 from types import MethodType
 from typing import Any, TYPE_CHECKING, TypeGuard
 
@@ -193,9 +194,59 @@ class TciPytestPlugin:
             items[:] = selected
 
 
+class TestSelectionPlugin:
+    def __init__(self, selectors: list[str]):
+        self.selectors = set(selectors)
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        matched = {node for node in self.selectors if "::" not in node}
+        selected, deselected = [], []
+        for item in items:
+            node = config.cwd_relative_nodeid(item.nodeid)
+            prefixes = {node, node.split("[", 1)[0]}
+            while "::" in node:
+                node = node.rsplit("::", 1)[0]
+                prefixes.add(node)
+            matches = self.selectors.intersection(prefixes)
+            if matches:
+                matched.update(matches)
+                selected.append(item)
+            else:
+                deselected.append(item)
+        missing = self.selectors - matched
+        if missing:
+            names = "\n".join(sorted(missing))
+            raise pytest.UsageError(f"Test selection not found:\n{names}")
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+    os.environ.pop("PYTORCH_TEST_COLLECTION_STATUS_FILE", None)
+
+    selection_file = os.environ.pop("PYTORCH_TEST_SELECTION_FILE", None)
+    selected = None
+    if selection_file:
+        try:
+            with open(selection_file) as source:
+                selected = json.load(source)
+        except (OSError, ValueError) as error:
+            raise pytest.UsageError(
+                f"Cannot read test selection {selection_file}: {error}"
+            ) from error
+        if (
+            not isinstance(selected, list)
+            or not selected
+            or any(not isinstance(node, str) or not node for node in selected)
+        ):
+            raise pytest.UsageError(
+                "Test selection must be a nonempty JSON list of node IDs"
+            )
+        config.args = list(dict.fromkeys(node.split("::", 1)[0] for node in selected))
 
     list_files = config.getoption("list_test_files")
     if list_files and config.getoption("list_markers"):
@@ -211,6 +262,10 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             TciPytestPlugin(config.getoption("list_markers")), "tci_plugin"
         )
+        if selected is not None:
+            config.pluginmanager.register(
+                TestSelectionPlugin(selected), "testselectionplugin"
+            )
 
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
@@ -342,6 +397,20 @@ class ListTestsPlugin:
     def __init__(self, list_files: bool):
         self.list_files = list_files
         self.files: set[str] = set()
+        self.output_file = os.environ.pop("PYTORCH_TEST_LIST_MARKERS_FILE", None)
+
+    def write_metadata(self, metadata) -> None:
+        if self.output_file:
+            with open(self.output_file, "w") as output:
+                json.dump(metadata, output, sort_keys=True)
+        else:
+            print(json.dumps(metadata, indent=2, sort_keys=True))
+
+    def pytest_collectreport(self, report) -> None:
+        if report.failed:
+            print(report.longrepr, file=sys.stderr)
+            for title, content in report.sections:
+                print(f"{title}:\n{content}", file=sys.stderr)
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_make_collect_report(self, collector):
@@ -361,7 +430,7 @@ class ListTestsPlugin:
         missing_paths = []
         for arg in session.config.args:
             path = arg.split("::", 1)[0]
-            if not os.path.exists(path):
+            if not Path(session.config.invocation_params.dir, path).exists():
                 missing_paths.append(arg)
         if missing_paths:
             missing_path = missing_paths[0]
@@ -374,7 +443,7 @@ class ListTestsPlugin:
             pytest.exit(reason="test collection failed", returncode=2)
 
         if self.list_files:
-            print(json.dumps(sorted(self.files), indent=2))
+            self.write_metadata(sorted(self.files))
             pytest.exit(reason="test files collected", returncode=0)
         markers_by_test = {
             session.config.cwd_relative_nodeid(item.nodeid): sorted(
@@ -382,7 +451,7 @@ class ListTestsPlugin:
             )
             for item in session.items
         }
-        print(json.dumps(markers_by_test, indent=2, sort_keys=True))
+        self.write_metadata(markers_by_test)
         pytest.exit(reason="test markers collected", returncode=0)
 
 

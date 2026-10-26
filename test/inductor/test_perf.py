@@ -30,6 +30,7 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -92,6 +93,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestCase(InductorTestCase):
     device = DEVICE
 
@@ -742,6 +744,7 @@ class SchedulerFusionTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """800""")
 
     @patch.object(config, "pattern_matcher", False)
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_fusion_choice4_cpu(self):
         # Fuse nodes with same number of elements and compatible original var ranges
         # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
@@ -926,6 +929,7 @@ class NoopTests(TestCase):
         inp = T(10)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_noop_slice_scatter_same_split(self):
         def f(a):
             parts = aten.split_with_sizes(a, [3, 2, 3], 1)
@@ -938,6 +942,7 @@ class NoopTests(TestCase):
         inp = T(10, 8, device="cpu")
         self.assertExpectedInline(count_numel(f, inp), """160""")
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_noop_slice_scatter_same_split_kwargs(self):
         def f(a):
             parts = aten.split_with_sizes(a, [3, 2, 3], dim=1)
@@ -948,6 +953,7 @@ class NoopTests(TestCase):
         inp = T(10, 8, device="cpu")
         self.assertExpectedInline(count_numel(f, inp), """160""")
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_noop_slice_scatter_same_split_negative_dim(self):
         def f(a):
             parts = aten.split_with_sizes(a, [3, 2, 3], dim=-1)
@@ -958,6 +964,7 @@ class NoopTests(TestCase):
         inp = T(10, 8, device="cpu")
         self.assertExpectedInline(count_numel(f, inp), """160""")
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_slice_scatter_different_split_is_not_noop(self):
         def f(a):
             parts = aten.split_with_sizes(a, [3, 2, 3], 1)

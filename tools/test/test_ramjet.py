@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import importlib.machinery
 import io
 import json
 import math
@@ -11,12 +12,15 @@ import tarfile
 import tempfile
 import textwrap
 import threading
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from _pytest.junitxml import mangle_test_address  # pyrefly: ignore[missing-import]
 from tools import ramjet
+from tools.ramjet_fixtures import build_fixtures, EDGE_PROFILER, FIXTURE_FILES
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -33,6 +37,10 @@ MARKED = "Suite::test_marked"
 SPECIFIC = "Another::test_specific"
 
 
+class FakeImageBuildError(RuntimeError):
+    image_id = "im-build-test"
+
+
 @instantiate_parametrized_tests
 class TestRamjet(TestCase):
     root: Path
@@ -43,6 +51,11 @@ class TestRamjet(TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="ramjet-tests-")
         cls.addClassCleanup(temporary.cleanup)
         cls.root = Path(temporary.name)
+        catalog = mock.patch(
+            "tools.ramjet_discovery.TESTS", ["test_first", "nested/test_second"]
+        )
+        catalog.start()
+        cls.addClassCleanup(catalog.stop)
         (cls.root / "test/nested").mkdir(parents=True)
         for path in ("pytest.ini", "test/conftest.py", "test/pytest_shard_custom.py"):
             shutil.copyfile(REPO_ROOT / path, cls.root / path)
@@ -239,14 +252,92 @@ class TestRamjet(TestCase):
         self.assertIsNotNone(case)
         self.assertIsNone(case.find("skipped"))
 
+    def test_timeout_preserves_output_and_stops_test_descendants(self):
+        node = f"{FIRST}::{MARKED}"
+        script = textwrap.dedent(
+            """\
+            import subprocess
+            import sys
+            import threading
+
+            child = subprocess.Popen([
+                sys.executable, "-c", "import threading; threading.Event().wait(30)"
+            ])
+            print(f"child={child.pid}", flush=True)
+            print("test diagnostics", file=sys.stderr, flush=True)
+            threading.Event().wait(30)
+            """
+        )
+        started = time.monotonic()
+        with (
+            mock.patch.object(ramjet, "TEST_TIMEOUT", 30.5),
+            mock.patch(
+                "tools.ramjet_discovery.test_command",
+                return_value=[sys.executable, "-c", script],
+            ),
+        ):
+            result = ramjet.execute_tests([node], root=str(self.root))
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(result["returncode"], 124)
+        self.assertIn("test diagnostics", result["stderr"])
+        self.assertIn("timed out", result["error"])
+        child = int(result["stdout"].strip().removeprefix("child="))
+        status = Path(f"/proc/{child}/stat")
+        deadline = time.monotonic() + 2
+        while status.exists():
+            try:
+                state = status.read_text().rsplit(")", 1)[1].split()[0]
+            except FileNotFoundError:
+                break
+            if state == "Z":
+                break
+            self.assertLess(time.monotonic(), deadline, "test child survived timeout")
+            threading.Event().wait(0.01)
+        combined = ramjet.merge_results([[node]], [result])
+        failure = combined["failure_summary"]["shards"][0]
+        self.assertEqual(failure["nodes"], [node])
+        self.assertIn("timed out", failure["error"])
+
+    def test_launch_error_retains_selected_nodes_and_diagnostics(self):
+        node = f"{FIRST}::{MARKED}"
+        with mock.patch.object(
+            ramjet.subprocess, "Popen", side_effect=OSError("compiler launch failed")
+        ):
+            result = ramjet.execute_tests([node], root=str(self.root))
+        self.assertNotEqual(result["returncode"], 0)
+        self.assertIn("compiler launch failed", result["stderr"])
+        combined = ramjet.merge_results([[node]], [result])
+        failure = combined["failure_summary"]["shards"][0]
+        self.assertEqual(failure["nodes"], [node])
+        self.assertIn("compiler launch failed", failure["error"])
+
+    @parametrize("report", ["<testsuites>", "<unrelated />", None])
+    def test_invalid_report_preserves_process_output(self, report):
+        node = f"{FIRST}::{MARKED}"
+        operation = "mkdir()" if report is None else f"write_text({report!r})"
+        script = (
+            "import pathlib, sys; "
+            f"pathlib.Path(sys.argv[-1].split('=', 1)[1]).{operation}; "
+            "print('test output before invalid report')"
+        )
+        with mock.patch(
+            "tools.ramjet_discovery.test_command",
+            return_value=[sys.executable, "-c", script],
+        ):
+            result = ramjet.execute_tests([node], root=str(self.root))
+        self.assertNotEqual(result["returncode"], 0)
+        self.assertIn("test output before invalid report", result["stdout"])
+        self.assertIn("Invalid test report", result["error"])
+
 
 def worker_result(nodes, **overrides):
     suites = ET.Element("testsuites")
     suite = ET.SubElement(suites, "testsuite", tests=str(len(nodes)))
     for node in nodes:
-        file, _, name = node.partition("::")
-        ET.SubElement(suite, "testcase", classname=file, name=name)
+        parts = mangle_test_address(node)
+        ET.SubElement(suite, "testcase", classname=".".join(parts[:-1]), name=parts[-1])
     return {
+        "nodes": nodes,
         "returncode": 0,
         "stdout": "worker output",
         "stderr": "worker diagnostics",
@@ -271,10 +362,14 @@ class TestRamjetCLI(TestCase):
         )
         functions = {
             "collection_targets": mock.Mock(remote=mock.Mock(return_value=[[FIRST]])),
-            "collect_markers": mock.Mock(
+            "collect_file": mock.Mock(
                 map=mock.Mock(
                     return_value=[
-                        {node: [value[0] for value in ramjet.PLATFORMS.values()]}
+                        {
+                            "markers": {
+                                node: [value[0] for value in ramjet.PLATFORMS.values()]
+                            }
+                        }
                     ]
                 )
             ),
@@ -294,9 +389,9 @@ class TestRamjetCLI(TestCase):
         def drained(workers):
             test.with_options.assert_not_called()
             if functions["collection_targets"] in workers.values():
-                functions["collect_markers"].map.assert_not_called()
+                functions["collect_file"].map.assert_not_called()
             else:
-                functions["collect_markers"].map.assert_called_once()
+                functions["collect_file"].map.assert_called_once()
 
         def register(**options):
             def decorate(function):
@@ -328,6 +423,17 @@ class TestRamjetCLI(TestCase):
                 mock.patch.object(ramjet, "create_run_directory", return_value=output),
                 mock.patch.object(ramjet, "snapshot_source", return_value=snapshots),
                 mock.patch.object(ramjet, "prepare_image", side_effect=prepare),
+                mock.patch.object(
+                    ramjet, "prepare_fixtures", side_effect=lambda image, *args: image
+                ),
+                mock.patch.object(
+                    ramjet,
+                    "prepare_dependencies",
+                    side_effect=lambda image, *args: image,
+                ),
+                mock.patch.object(
+                    ramjet, "prepare_cli_tools", side_effect=lambda image, *args: image
+                ),
                 mock.patch.object(ramjet, "save_build"),
                 mock.patch.object(
                     ramjet, "drain_workers", side_effect=drained
@@ -350,7 +456,7 @@ class TestRamjetCLI(TestCase):
             else:
                 self.assertEqual(
                     [list(call.args[0].values()) for call in drain.call_args_list],
-                    [[functions["collection_targets"]], [functions["collect_markers"]]],
+                    [[functions["collection_targets"]], [functions["collect_file"]]],
                 )
         mounts = [
             call for call in image.mock_calls if call[0].endswith("add_local_file")
@@ -372,7 +478,7 @@ class TestRamjetCLI(TestCase):
         )
         self.assertTrue(all(not call.kwargs.get("copy", False) for call in mounts))
         modal.Image.from_registry.assert_not_called()
-        for name in ("collection_targets", "collect_markers"):
+        for name in ("collection_targets", "collect_file"):
             self.assertIsNone(options_by_function[name].get("gpu"))
             self.assertEqual(options_by_function[name]["buffer_containers"], 0)
             self.assertEqual(options_by_function[name]["scaledown_window"], 2)
@@ -489,6 +595,7 @@ class TestRamjetImages(TestCase):
             "add_local_file",
             "add_local_dir",
             "run_function",
+            "run_commands",
         ):
             getattr(self.image, method).return_value = self.image
         self.volume = mock.MagicMock()
@@ -712,12 +819,128 @@ class TestRamjetImages(TestCase):
         self.image.publish.assert_not_called()
         self.volume.batch_upload.assert_not_called()
 
+    def cli_snapshot(self, pin):
+        adapter = "tools/linter/adapters/pyrefly_linter.py"
+        content = b"# no pin" if pin is None else f'# "pyrefly=={pin}",'.encode()
+        snapshot = self.root / "cli-tests.tar.gz"
+        with tarfile.open(snapshot, "w:gz") as archive:
+            entry = tarfile.TarInfo(adapter)
+            entry.size = len(content)
+            archive.addfile(entry, io.BytesIO(content))
+        self.snapshots["tests"] = (snapshot, "test-hash")
+        source = self.root / adapter
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('# "pyrefly==9.99.9",')
+
+    @parametrize("pin", ["0.58.0", "0.59.1"])
+    def test_cli_layer_uses_frozen_pin_and_preserves_native_layers(self, pin):
+        self.cli_snapshot(pin)
+        image = ramjet.prepare_cli_tools(self.image, self.snapshots)
+        self.assertIs(image, self.image)
+        self.image.env.assert_called_once_with(
+            {
+                "UV_TOOL_DIR": "/opt/ramjet-cli-tools/tools",
+                "UV_TOOL_BIN_DIR": "/opt/ramjet-cli-tools/bin",
+                "UV_PYTHON_INSTALL_DIR": "/opt/ramjet-cli-tools/python",
+            }
+        )
+        self.image.run_commands.assert_called_once_with(
+            "env -u UV_INDEX_URL -u UV_COMPILE_BYTECODE "
+            f"uv tool install --python 3.12 pyrefly=={pin}",
+            gpu=None,
+        )
+        self.image.run_function.assert_not_called()
+        self.image.add_local_file.assert_not_called()
+        self.image.add_local_dir.assert_not_called()
+
+    @parametrize("pin", [None, "0.58..0", "0.58.0; false", "0.58.0$(false)"])
+    def test_cli_layer_rejects_missing_or_unsafe_pin(self, pin):
+        self.cli_snapshot(pin)
+        with self.assertRaisesRegex(ValueError, "numeric Pyrefly version pin"):
+            ramjet.prepare_cli_tools(self.image, self.snapshots)
+        self.image.env.assert_not_called()
+        self.image.run_commands.assert_not_called()
+
+    def fixture_snapshot(self):
+        sources = {path: f"frozen {path}".encode() for path in FIXTURE_FILES}
+        snapshot = self.root / "fixtures-tests.tar.gz"
+        with tarfile.open(snapshot, "w:gz") as archive:
+            for relative, content in sources.items():
+                path = self.root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+                if relative != EDGE_PROFILER:
+                    entry = tarfile.TarInfo(relative)
+                    entry.size = len(content)
+                    archive.addfile(entry, io.BytesIO(content))
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    EDGE_PROFILER: {
+                        "sha256": hashlib.sha256(sources[EDGE_PROFILER]).hexdigest()
+                    }
+                }
+            )
+        )
+        self.snapshots["tests"] = (snapshot, "fixture-test-hash")
+        return sources
+
+    def test_fixture_layer_uses_frozen_tests_and_cpu_resources(self):
+        sources = self.fixture_snapshot()
+        changed = next(path for path in FIXTURE_FILES if path != EDGE_PROFILER)
+        self.root.joinpath(changed).write_text("checkout changed after snapshot")
+        self.root.joinpath("tools/ramjet_fixtures.py").write_text("changed helper")
+
+        image = ramjet.prepare_fixtures(
+            self.image, self.root, self.snapshots, self.plan
+        )
+
+        self.assertIs(image, self.image)
+        context = self.image.add_local_dir.call_args.args[0]
+        self.assertEqual(self.image.add_local_dir.call_args.args[1:], ("/",))
+        self.assertEqual(self.image.add_local_dir.call_args.kwargs, {"copy": True})
+        for relative, content in sources.items():
+            self.assertEqual(
+                context.joinpath("opt/ramjet-fixtures", relative).read_bytes(), content
+            )
+        self.assertEqual(
+            context.joinpath("opt/ramjet/tools/ramjet_fixtures.py").read_text(),
+            "frozen tools/ramjet_fixtures.py",
+        )
+        self.image.run_function.assert_called_once_with(
+            build_fixtures,
+            cpu=4,
+            memory=32768,
+            gpu=None,
+            timeout=900,
+            include_source=False,
+        )
+        digest = self.plan["fixture_sha256"]
+        self.root.joinpath(changed).write_text("another checkout edit")
+        ramjet.prepare_fixtures(self.image, self.root, self.snapshots, self.plan)
+        self.assertEqual(self.plan["fixture_sha256"], digest)
+
+    def test_fixture_layer_rejects_build_source_changed_after_snapshot(self):
+        self.fixture_snapshot()
+        self.root.joinpath(EDGE_PROFILER).write_text("changed native build source")
+        with self.assertRaisesRegex(RuntimeError, "Source changed after snapshot"):
+            ramjet.prepare_fixtures(self.image, self.root, self.snapshots, self.plan)
+        self.image.add_local_dir.assert_not_called()
+        self.image.run_function.assert_not_called()
+
     def test_runtime_preparation_uses_installed_wheel_and_preserves_bootstrap(self):
         source = self.root / "source"
         source.mkdir()
         for name in ("torch", "torchgen", "functorch", "build", "aten", "tools"):
             source.joinpath(name).mkdir()
+        source.joinpath("torch/__init__.py").write_text("source package")
+        source.joinpath("torch/csrc/distributed/c10d").mkdir(parents=True)
+        source.joinpath("torch/csrc/distributed/c10d/ProcessGroup.cpp").write_text(
+            "native source"
+        )
         source.joinpath("version.txt").write_text("version")
+        source.joinpath("torch/_native").mkdir()
+        source.joinpath("torch/_native/common_utils.py").write_text("Python source")
         runtime = self.root / "runtime"
         runtime.joinpath("tools").mkdir(parents=True)
         bootstrap = runtime / "tools/ramjet.py"
@@ -756,8 +979,147 @@ class TestRamjetImages(TestCase):
         self.assertEqual(runtime.joinpath("tools/helper.py").read_text(), "helper")
         self.assertTrue(runtime.joinpath("aten").is_symlink())
         self.assertTrue(runtime.joinpath("version.txt").is_symlink())
-        for name in ("torch", "torchgen", "functorch", "build"):
+        self.assertEqual(
+            runtime.joinpath(
+                "torch/csrc/distributed/c10d/ProcessGroup.cpp"
+            ).read_text(),
+            "native source",
+        )
+        self.assertFalse(runtime.joinpath("torch/__init__.py").exists())
+        self.assertEqual(
+            runtime.joinpath("torch/_native/common_utils.py").read_text(),
+            "Python source",
+        )
+        installed = self.root / "site-packages"
+        installed.joinpath("torch").mkdir(parents=True)
+        installed.joinpath("torch/__init__.py").write_text("installed wheel")
+        spec = importlib.machinery.PathFinder.find_spec(
+            "torch", [str(runtime), str(installed)]
+        )
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.origin, str(installed / "torch/__init__.py"))
+        for name in ("torchgen", "functorch", "build"):
             self.assertFalse(runtime.joinpath(name).exists())
+
+
+@instantiate_parametrized_tests
+class TestRamjetAppRetries(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.modal = mock.MagicMock()
+        self.modal.exception.ImageBuildError = FakeImageBuildError
+        self.app = self.modal.App.return_value
+        self.app.run.return_value.__exit__.return_value = False
+        self.logs = self.modal.Image.from_id.return_value.logs.tail
+        self.logs.return_value = [
+            SimpleNamespace(
+                source="system",
+                message="Terminating task due to error: could not read bytes "
+                'for base index BlobHash("abc123"): timeout\n',
+            )
+        ]
+        patches = (
+            mock.patch.dict(sys.modules, {"modal": self.modal}),
+            mock.patch.object(ramjet.time, "sleep"),
+            mock.patch("builtins.print"),
+        )
+        _, self.sleep, self.printed = [patch.start() for patch in patches]
+        for patch in patches:
+            self.addCleanup(patch.stop)
+
+    @parametrize("failures", [1, 2])
+    def test_snapshot_timeout_retries_initialization(self, failures):
+        self.app.run.return_value.__enter__.side_effect = [
+            *[FakeImageBuildError("image save failed") for _ in range(failures)],
+            self.app,
+        ]
+        with ramjet.run_app(self.app) as app:
+            self.assertIs(app, self.app)
+        self.assertEqual(self.app.run.call_count, failures + 1)
+        self.assertEqual(
+            [call.args for call in self.sleep.call_args_list],
+            [(delay,) for delay in (10, 30)[:failures]],
+        )
+        self.assertEqual(
+            [call.kwargs for call in self.logs.call_args_list],
+            [{"entries": 100}] * failures,
+        )
+        self.modal.Image.from_id.assert_called_with("im-build-test")
+        cleanup = self.app.run.return_value.__exit__
+        cleanup.assert_called_once()
+        self.assertEqual(cleanup.call_args.args[-3:], (None, None, None))
+        self.assertIn("cached layers", self.printed.call_args.args[0])
+
+    def test_snapshot_timeout_stops_after_three_attempts(self):
+        failure = FakeImageBuildError("image save failed")
+        self.app.run.return_value.__enter__.side_effect = failure
+        with self.assertRaises(FakeImageBuildError) as raised:
+            with ramjet.run_app(self.app):
+                self.fail("Failed initialization entered test execution")
+        self.assertIs(raised.exception, failure)
+        self.assertEqual(self.app.run.call_count, 3)
+        self.assertEqual(
+            [call.args for call in self.sleep.call_args_list], [(10,), (30,)]
+        )
+        self.assertEqual(self.logs.call_count, 2)
+        self.app.run.return_value.__exit__.assert_not_called()
+
+    @parametrize(
+        "message,source",
+        [
+            ("Compiler failed with exit code 1", "system"),
+            ("Terminating task due to error: out of memory", "system"),
+            ("Image build timed out", "system"),
+            ("Image build terminated due to external shut-down", "system"),
+            (
+                "Terminating task due to error: could not read bytes "
+                'for base index BlobHash("abc123"): timeout',
+                "stderr",
+            ),
+        ],
+    )
+    def test_other_build_failures_do_not_retry(self, message, source):
+        failure = FakeImageBuildError("image build failed")
+        self.logs.return_value = [SimpleNamespace(message=message, source=source)]
+        self.app.run.return_value.__enter__.side_effect = failure
+        with self.assertRaises(FakeImageBuildError) as raised:
+            with ramjet.run_app(self.app):
+                self.fail("Failed initialization entered test execution")
+        self.assertIs(raised.exception, failure)
+        self.app.run.assert_called_once()
+        self.sleep.assert_not_called()
+
+    def test_log_fetch_failure_preserves_build_error(self):
+        failure = FakeImageBuildError("image save failed")
+        self.app.run.return_value.__enter__.side_effect = failure
+        self.logs.side_effect = RuntimeError("log service unavailable")
+        with self.assertRaises(FakeImageBuildError) as raised:
+            with ramjet.run_app(self.app):
+                self.fail("Failed initialization entered test execution")
+        self.assertIs(raised.exception, failure)
+        self.app.run.assert_called_once()
+        self.sleep.assert_not_called()
+
+    @parametrize("error_type", [RuntimeError, KeyboardInterrupt, FakeImageBuildError])
+    def test_execution_failures_do_not_retry(self, error_type):
+        failure = error_type("test execution failed")
+        with self.assertRaises(error_type) as raised:
+            with ramjet.run_app(self.app):
+                raise failure
+        self.assertIs(raised.exception, failure)
+        self.app.run.assert_called_once()
+        self.app.run.return_value.__exit__.assert_called_once()
+        self.logs.assert_not_called()
+        self.sleep.assert_not_called()
+
+    def test_cancelled_initialization_does_not_retry(self):
+        self.app.run.return_value.__enter__.side_effect = KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            with ramjet.run_app(self.app):
+                self.fail("Cancelled initialization entered test execution")
+        self.app.run.assert_called_once()
+        self.logs.assert_not_called()
+        self.sleep.assert_not_called()
 
 
 @instantiate_parametrized_tests
@@ -767,11 +1129,32 @@ class TestRamjetReports(TestCase):
     def setUp(self):
         super().setUp()
         self.modal = mock.MagicMock()
+        self.modal.exception.ImageBuildError = FakeImageBuildError
         module_patch = mock.patch.dict(sys.modules, {"modal": self.modal})
         module_patch.start()
         self.addCleanup(module_patch.stop)
 
-    @parametrize("stage", ["success", "build", "collection", "tests", "interrupt"])
+    def test_collect_file_returns_explicit_skip_data(self):
+        with mock.patch.object(
+            ramjet,
+            "collect_markers",
+            side_effect=ramjet.CollectionSkipped("unsupported backend"),
+        ):
+            self.assertEqual(
+                ramjet.collect_file([FIRST]), {"skipped": "unsupported backend"}
+            )
+        with (
+            mock.patch.object(
+                ramjet, "collect_markers", side_effect=RuntimeError("broken import")
+            ),
+            self.assertRaisesRegex(RuntimeError, "broken import"),
+        ):
+            ramjet.collect_file([FIRST])
+
+    @parametrize(
+        "stage",
+        ["success", "build", "collection", "collection_skip", "tests", "interrupt"],
+    )
     def test_main_preserves_outcome_and_records_run(self, stage):
         app_id = "ap-ramjet-report-test"
         app = self.modal.App.return_value
@@ -780,8 +1163,8 @@ class TestRamjetReports(TestCase):
         node = f"{FIRST}::{MARKED}"
         functions = {
             "collection_targets": mock.Mock(remote=mock.Mock(return_value=[[FIRST]])),
-            "collect_markers": mock.Mock(
-                map=mock.Mock(return_value=[{node: [ramjet.CPU_PLATFORM]}])
+            "collect_file": mock.Mock(
+                map=mock.Mock(return_value=[{"markers": {node: [ramjet.CPU_PLATFORM]}}])
             ),
             "run_tests": mock.Mock(),
         }
@@ -794,9 +1177,12 @@ class TestRamjetReports(TestCase):
             app.run.return_value.__enter__.side_effect = failure
         elif stage == "collection":
             failure = RuntimeError("collection failed")
-            functions["collect_markers"].map.return_value = [failure]
-        elif stage == "tests":
-            failure = RuntimeError("Test run failed")
+            functions["collect_file"].map.return_value = [failure]
+        elif stage == "collection_skip":
+            functions["collection_targets"].remote.return_value = [[FIRST], [SECOND]]
+            functions["collect_file"].map.return_value.insert(
+                0, {"skipped": "unsupported backend"}
+            )
         elif stage == "interrupt":
             failure = KeyboardInterrupt("user cancelled")
             functions["collection_targets"].remote.side_effect = failure
@@ -827,33 +1213,58 @@ class TestRamjetReports(TestCase):
                 mock.patch.object(ramjet, "create_run_directory", return_value=output),
                 mock.patch.object(ramjet, "snapshot_source", return_value=snapshots),
                 mock.patch.object(ramjet, "prepare_image", side_effect=prepare),
+                mock.patch.object(
+                    ramjet, "prepare_fixtures", side_effect=lambda image, *args: image
+                ),
+                mock.patch.object(
+                    ramjet,
+                    "prepare_dependencies",
+                    side_effect=lambda image, *args: image,
+                ),
+                mock.patch.object(
+                    ramjet, "prepare_cli_tools", side_effect=lambda image, *args: image
+                ),
                 mock.patch.object(ramjet, "save_build"),
                 mock.patch.object(ramjet, "run_shards", return_value=[worker]),
                 mock.patch("builtins.print") as printed,
             ):
                 if failure is None:
-                    ramjet.main()
+                    self.assertEqual(ramjet.main(), int(stage == "tests"))
                 else:
                     with self.assertRaisesRegex(type(failure), str(failure)):
                         ramjet.main()
             result = json.loads((output / "result.json").read_text())
-            self.assertEqual(result["returncode"], int(stage != "success"))
+            self.assertEqual(
+                result["returncode"], int(stage not in ("success", "collection_skip"))
+            )
             self.assertEqual(result["app_id"], app_id)
             self.assertEqual(result["dashboard_url"], f"https://modal.com/id/{app_id}")
             self.assertEqual(result["test_sha256"], "test-hash")
             self.assertNotIn("cost", result)
-            if stage in ("success", "tests"):
+            if stage in ("success", "collection_skip", "tests"):
                 self.assertEqual(result["stdout"], worker["stdout"])
                 self.assertEqual(result["shards"][0]["nodes"], [node])
                 self.assertEqual((output / "junit.xml").read_text(), result["junit"])
+                self.assertEqual(
+                    json.loads((output / "failures.json").read_text()),
+                    result["failure_summary"],
+                )
+            if stage == "collection_skip":
+                self.assertEqual(result["collection_skips"], ["unsupported backend"])
             if failure is not None:
                 self.assertIn(str(failure), result["error"])
+            else:
+                self.assertNotIn("error", result)
             if stage != "build":
                 app.run.return_value.__exit__.assert_called_once()
             self.modal.Workspace.from_context.assert_not_called()
             messages = [
                 str(call.args[0]) for call in printed.call_args_list if call.args
             ]
+            if stage == "tests":
+                self.assertIn(
+                    f"Test run failed; see {output / 'failures.json'}", messages
+                )
             self.assertFalse(any("Modal cost" in message for message in messages))
             self.assertEqual(messages[-1], f"Modal run: https://modal.com/id/{app_id}")
 
@@ -1169,7 +1580,7 @@ class TestRamjetParallel(TestCase):
         self.assertCountEqual([options["gpu"] for options, _ in calls], [None, "L4"])
         for options, kwargs in calls:
             self.assertEqual(options["max_containers"], None if jobs is None else 1)
-            self.assertEqual(kwargs["order_outputs"], True)
+            self.assertEqual(kwargs["order_outputs"], False)
             self.assertEqual(kwargs["return_exceptions"], True)
             self.assertIn(
                 kwargs["kwargs"]["platform"], (ramjet.CPU_PLATFORM, ramjet.L4_PLATFORM)
@@ -1198,6 +1609,126 @@ class TestRamjetParallel(TestCase):
             len(ET.fromstring(combined["junit"]).findall(".//testcase")),
             1 + completed_gpu_shards,
         )
+
+    def test_completion_order_checkpoints_preserve_original_result_order(self):
+        batches = [["first"], ["second"], ["third"]]
+        observed = []
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+
+            def mapped(nodes, **kwargs):
+                self.assertFalse(kwargs["order_outputs"])
+                yield worker_result(nodes[2])
+                observed.extend(
+                    json.loads(line)["nodes"]
+                    for line in output.joinpath("results-cpu.jsonl")
+                    .read_text()
+                    .splitlines()
+                )
+                yield worker_result(nodes[0])
+                yield worker_result(nodes[1])
+
+            worker = mock.Mock(map=mapped)
+            results = ramjet.run_shards(
+                mock.Mock(with_options=mock.Mock(return_value=worker)),
+                {"cpu": batches},
+                None,
+                output=output,
+            )
+            checkpointed = [
+                json.loads(line)["nodes"]
+                for line in output.joinpath("results-cpu.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+        self.assertEqual(observed, [batches[2]])
+        self.assertEqual(checkpointed, [batches[2], batches[0], batches[1]])
+        self.assertEqual([record["nodes"] for record in results], batches)
+        self.assertTrue(all(record["returncode"] == 0 for record in results))
+
+    def test_unindexed_worker_failures_only_fail_unmatched_shards(self):
+        batches = [["first"], ["missing-one"], ["third"], ["missing-two"]]
+        worker = mock.Mock(
+            map=mock.Mock(
+                return_value=[
+                    TimeoutError("worker deadline exceeded"),
+                    worker_result(batches[2]),
+                    MemoryError("container ran out of memory"),
+                    worker_result(batches[0]),
+                ]
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            results = ramjet.run_shards(
+                mock.Mock(with_options=mock.Mock(return_value=worker)),
+                {"cpu": batches},
+                None,
+                output=output,
+            )
+            errors = [
+                json.loads(line)
+                for line in output.joinpath("worker-errors-cpu.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            checkpointed = [
+                json.loads(line)["nodes"]
+                for line in output.joinpath("results-cpu.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+        self.assertEqual([record["nodes"] for record in results], batches)
+        self.assertEqual([record["returncode"] for record in results], [0, 1, 0, 1])
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(all("nodes" not in error for error in errors))
+        self.assertEqual(checkpointed[:2], [batches[2], batches[0]])
+        for index in (1, 3):
+            self.assertIn("input identity unavailable", results[index]["stderr"])
+            self.assertIn("worker deadline exceeded", results[index]["stderr"])
+            self.assertIn("container ran out of memory", results[index]["stderr"])
+        combined = ramjet.merge_results(batches, results)
+        self.assertNotEqual(combined["returncode"], 0)
+        self.assertEqual(
+            len(ET.fromstring(combined["junit"]).findall(".//testcase")), 2
+        )
+
+    @parametrize("test_fails", [False, True])
+    def test_unindexed_failure_after_all_results_remains_fatal(self, test_fails):
+        batches = [["first"], ["second"]]
+
+        def mapped(nodes, **kwargs):
+            for batch in reversed(nodes):
+                record = worker_result(batch)
+                if test_fails and batch == nodes[0]:
+                    report = ET.fromstring(record["junit"])
+                    case = report.find(".//testcase")
+                    self.assertIsNotNone(case)
+                    ET.SubElement(case, "failure", message="test assertion failed")
+                    record["junit"] = ET.tostring(report, encoding="unicode")
+                yield record
+            raise RuntimeError("output stream failed")
+
+        results = ramjet.run_shards(
+            mock.Mock(with_options=mock.Mock(return_value=mock.Mock(map=mapped))),
+            {"cpu": batches},
+            None,
+        )
+        combined = ramjet.merge_results(batches, results)
+        self.assertNotEqual(combined["returncode"], 0)
+        self.assertIn("output stream failed", combined["stderr"])
+        self.assertEqual(
+            len(ET.fromstring(combined["junit"]).findall(".//testcase")), 2
+        )
+        summary = combined["failure_summary"]
+        self.assertEqual(len(summary["tests"]), int(test_fails))
+        self.assertEqual(len(summary["shards"]), 2)
+        for shard in summary["shards"]:
+            self.assertIn("output stream failed", shard["error"])
+            self.assertEqual(
+                shard["worker_errors"],
+                [{"error": "RuntimeError: output stream failed"}],
+            )
 
     @parametrize(
         "file_counts,jobs",
@@ -1242,6 +1773,53 @@ class TestRamjetParallel(TestCase):
         )
         self.assertTrue(all(len(shard) == 1 for shard in shards))
 
+    @parametrize(
+        "file,cap",
+        [
+            ("test/inductor/test_torchinductor_opinfo.py", 32),
+            ("test/inductor/test_cpu_repro.py", 32),
+            ("test/functorch/test_aotdispatch.py", 32),
+            ("test/functorch/test_control_flow.py", 32),
+            ("test/distributed/tensor/test_dtensor_ops.py", 32),
+            ("test/test_decomp.py", 128),
+        ],
+    )
+    @parametrize("jobs", [None, 1, 10000])
+    def test_compile_shards_spread_adjacent_cases(self, file, cap, jobs):
+        nodes = [f"{file}::Suite::test_{index:04}" for index in range(4097)]
+        shards = ramjet.shard_tests(nodes, jobs)
+        self.assertEqual(
+            shards, ramjet.shard_tests(list(reversed(nodes)) + nodes[:3], jobs)
+        )
+        self.assertEqual(sorted(node for shard in shards for node in shard), nodes)
+        if jobs is not None:
+            cap = min(cap, math.ceil(len(nodes) / jobs))
+        self.assertTrue(all(0 < len(shard) <= cap for shard in shards))
+        adjacent = set(nodes[:16])
+        self.assertTrue(all(len(adjacent.intersection(shard)) <= 1 for shard in shards))
+
+    @parametrize("jobs", [None, 1, 4])
+    def test_subprocess_suites_preserve_per_test_isolation(self, jobs):
+        isolated = "test/distributed/test_c10d_gloo.py"
+        nodes = [
+            f"{file}::Suite::test_{index}"
+            for file in (FIRST, isolated, "test/inductor/test_torchinductor_opinfo.py")
+            for index in range(300)
+        ]
+        shards = ramjet.shard_tests(nodes, jobs)
+        self.assertEqual(
+            sorted(node for shard in shards for node in shard), sorted(nodes)
+        )
+        self.assertTrue(
+            all(len(shard) == 1 for shard in shards if shard[0].startswith(isolated))
+        )
+        self.assertTrue(
+            all(
+                len({node.split("::", 1)[0] for node in shard}) == 1 for shard in shards
+            )
+        )
+        self.assertTrue(any(len(shard) > 1 for shard in shards))
+
     @parametrize("jobs", [None, 4])
     def test_empty_selection_has_no_shards(self, jobs):
         self.assertEqual(ramjet.shard_tests([], jobs), [])
@@ -1274,7 +1852,12 @@ class TestRamjetParallel(TestCase):
         self.assertEqual(len(cases), 3)
         self.assertEqual(
             sorted((case.attrib["classname"], case.attrib["name"]) for case in cases),
-            sorted(tuple(node.split("::", 1)) for shard in shards for node in shard),
+            sorted(
+                (".".join(parts[:-1]), parts[-1])
+                for shard in shards
+                for node in shard
+                for parts in [mangle_test_address(node)]
+            ),
         )
         for key, value in metadata.items():
             if key != "gpu":
@@ -1297,7 +1880,7 @@ class TestRamjetParallel(TestCase):
         self.assertIn(ramjet.CPU_PLATFORM, suites[0].attrib["name"])
         self.assertIn(ramjet.L4_PLATFORM, suites[1].attrib["name"])
 
-    @parametrize("tag", ["failure", "error", "skipped"])
+    @parametrize("tag", ["failure", "error"])
     def test_junit_failures_override_successful_worker_exit(self, tag):
         shards = [[f"{FIRST}::{MARKED}"], [f"{SECOND}::{MARKED}"]]
         workers = [worker_result(nodes) for nodes in shards]
@@ -1311,6 +1894,53 @@ class TestRamjetParallel(TestCase):
         combined = ET.fromstring(result["junit"])
         self.assertEqual(len(combined.findall(".//testcase")), 2)
         self.assertEqual(len(combined.findall(f".//testcase/{tag}")), 1)
+        self.assertEqual(result["passed"], 1)
+        self.assertEqual(result["failed"], int(tag == "failure"))
+        self.assertEqual(result["errors"], int(tag == "error"))
+        self.assertEqual(result["failure_summary"]["tests"][0]["node"], shards[1][0])
+        self.assertEqual(result["failure_summary"]["shards"], [])
+
+    @parametrize("case", ["wrong_method", "wrong_class", "duplicate"])
+    def test_equal_case_count_requires_exact_selected_identities(self, case):
+        nodes = [f"{FIRST}::{MARKED}", f"{FIRST}::{SPECIFIC}"]
+        replacements = {
+            "wrong_method": [nodes[0], f"{FIRST}::Another::test_other"],
+            "wrong_class": [nodes[0], f"{FIRST}::Other::test_specific"],
+            "duplicate": [nodes[0], nodes[0]],
+        }
+        worker = worker_result(replacements[case])
+        result = ramjet.merge_results([nodes], [worker])
+        self.assertNotEqual(result["returncode"], 0)
+        self.assertIn("JUnit identities do not match", result["stderr"])
+        self.assertEqual(result["failure_summary"]["shards"][0]["nodes"], nodes)
+
+    def test_junit_identity_preserves_literal_and_parameter_separators(self):
+        nodes = [
+            f"{FIRST}::Suite::test_case[value::with[brackets]]",
+            f"{SECOND}::test_function[value.py]",
+            f"{FIRST}::Suite::test_expected_at::kCPU",
+        ]
+        worker = worker_result(nodes)
+        result = ramjet.merge_results([nodes], [worker])
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(result["passed"], 3)
+
+    @parametrize("all_skipped", [False, True])
+    def test_runtime_skips_are_preserved(self, all_skipped):
+        nodes = [f"{FIRST}::{MARKED}", f"{FIRST}::{SPECIFIC}"]
+        worker = worker_result(nodes)
+        report = ET.fromstring(worker["junit"])
+        cases = report.findall(".//testcase")
+        for case in cases if all_skipped else cases[:1]:
+            ET.SubElement(case, "skipped", message="runtime dependency unavailable")
+        worker["junit"] = ET.tostring(report, encoding="unicode")
+        result = ramjet.merge_results([nodes], [worker])
+        self.assertEqual(result["returncode"], int(all_skipped))
+        self.assertEqual(result["skipped"], 2 if all_skipped else 1)
+        self.assertEqual(
+            result["failure_summary"]["run_errors"],
+            ["No selected tests executed"] if all_skipped else [],
+        )
 
     @parametrize(
         "report", ["", "<testsuites>", "<testsuites><testsuite /></testsuites>"]
@@ -1322,7 +1952,7 @@ class TestRamjetParallel(TestCase):
         self.assertNotEqual(result["returncode"], 0)
         cases = ET.fromstring(result["junit"]).findall(".//testcase")
         self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0].attrib["classname"], FIRST)
+        self.assertEqual(cases[0].attrib["classname"], "test.test_first.Suite")
         self.assertEqual(len(result["shards"]), 2)
 
     def test_report_with_extra_cases_fails(self):
@@ -1362,9 +1992,12 @@ class TestRamjetParallel(TestCase):
         )
         self.assertNotEqual(result["returncode"], 0)
         self.assertIn("worker timed out", result["stderr"])
+        self.assertIn(
+            "worker timed out", result["failure_summary"]["shards"][0]["error"]
+        )
         cases = ET.fromstring(result["junit"]).findall(".//testcase")
         self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0].attrib["classname"], SECOND)
+        self.assertEqual(cases[0].attrib["classname"], "test.nested.test_second.Suite")
         self.assertEqual([shard["nodes"] for shard in result["shards"]], shards)
 
     def test_merge_rejects_missing_results(self):

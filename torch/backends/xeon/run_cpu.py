@@ -179,7 +179,7 @@ class _CPUinfo:
 
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
-            self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
+            self.node_nums = max(int(line[3] or "0") for line in self.cpuinfo) + 1
             self.node_physical_cores: list[list[int]] = []  # node_id is index
             self.node_logical_cores: list[list[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id

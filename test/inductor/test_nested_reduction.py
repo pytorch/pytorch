@@ -15,6 +15,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -59,6 +60,7 @@ def _choices_context(force_persistent: bool | None):
     return V.set_choices_handler(_Choices())
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestBase(TestCase):
     force_persistent_outer_reduction: bool | None = None
 
@@ -3209,6 +3211,7 @@ def _capture_layernorm_block_amax_pointwise_epilogue_sources(
     )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class _InternalsBase:
     force_persistent_outer_reduction: bool | None = None
 
@@ -3765,6 +3768,7 @@ class NestedReductionInternalsNonPersistentTest(_InternalsBase, TestCase):
     force_persistent_outer_reduction = False
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class NestedReductionAOTITest(TestCase):
     __unittest_skip__ = not HAS_GPU
 

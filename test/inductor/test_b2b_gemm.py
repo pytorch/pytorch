@@ -7,12 +7,14 @@ from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import recover_orig_fp32_precision, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 @skipIfXpu(msg="Segmentation fault on CI machine")
+@tci.test(exclude=tci.platform.linux_x86_64)
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 

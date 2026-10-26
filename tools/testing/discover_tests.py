@@ -106,6 +106,7 @@ TESTS = discover_tests(
         "distributions/test_utils",
         "lazy/test_meta_kernel",
         "lazy/test_extract_compiled_graph",
+        "optim/test_swa_utils",  # executed by test_optim.py
         "test/inductor/test_aot_inductor_utils",
         "inductor/test_aoti_cross_compile_windows",
         "onnx/test_onnxscript_no_runtime",

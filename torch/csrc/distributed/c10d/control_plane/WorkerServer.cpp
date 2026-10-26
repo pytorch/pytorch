@@ -121,6 +121,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   if (port == -1) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
+    // Closing a Unix listening socket may not wake a blocked accept call.
+    server_.set_idle_interval(0, 200000);
     TORCH_CHECK(
         !c10::filesystem::exists(hostOrFile),
         fmt::format("{} already exists", hostOrFile));

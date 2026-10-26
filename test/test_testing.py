@@ -892,6 +892,9 @@ if __name__ == "__main__":
                 "PYTORCH_TEST_DO_NOT_USE_PYTEST",
                 "PYTORCH_TEST_RERUN_DISABLED_TESTS",
                 "PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL",
+                "PYTORCH_TEST_TCI_PLATFORM",
+                "PYTORCH_TEST_SELECTION_FILE",
+                "PYTORCH_TEST_COLLECTION_STATUS_FILE",
                 "TESTS_TO_INCLUDE",
             ):
                 env.pop(flag, None)

@@ -7559,7 +7559,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (result,))
 
     @requires_vectorization
-    @config.patch("cpp.min_chunk_size", 1)
+    @config.patch({"cpp.min_chunk_size": 1, "cpp.threads": 4})
     def test_for_loop_collapsed(self):
         # https://github.com/pytorch/pytorch/issues/122281
         def fn(x):

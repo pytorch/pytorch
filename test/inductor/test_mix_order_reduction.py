@@ -18,6 +18,7 @@ from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
@@ -45,6 +46,7 @@ HAS_GPU_TMA = has_triton_tma_device() and (
 )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestBase(TestCase):
     def setUp(self):
         super().setUp()
@@ -1857,6 +1859,7 @@ instantiate_device_type_tests(
 )
 
 
+@tci.test(add=tci.platform.linux_x86_64)
 class MixOrderReductionHeuristicTest(TestBase):
     """
     CPU-runnable unit tests for the mix-order persistent_reduction autotuning

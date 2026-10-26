@@ -9,6 +9,7 @@ import unittest
 
 import torch
 from torch._inductor import config
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -27,6 +28,7 @@ def trivial_kernel(x):
     return torch.sin(x) + torch.cos(x)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestKernelBestConfig(TestCase):
     device_type = GPU_TYPE
 

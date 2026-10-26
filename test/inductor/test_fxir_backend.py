@@ -34,6 +34,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -74,6 +75,7 @@ test_config = {
 @requires_gpu()
 @config.patch(test_config)
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
@@ -930,6 +932,7 @@ class FxirTestCase(InductorTestCase):
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
@@ -1319,6 +1322,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     @parametrize("dynamic", (False, True))
     @parametrize("input_", (1.5, 2, False))
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_item(self, input_, dynamic: bool):
         """
         Test calling Tensor.item.

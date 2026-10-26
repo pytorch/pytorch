@@ -12,6 +12,7 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -29,6 +30,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class DeterministicTest(TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -39,6 +41,7 @@ class DeterministicTest(TestCase):
         self._exit_stack.close()
         super().tearDown()
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_use_deterministic_algorithsm(self):
         old_val = torch.are_deterministic_algorithms_enabled()
         try:
@@ -159,6 +162,7 @@ class DeterministicTest(TestCase):
             self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
         self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
+    @tci.test(add=tci.platform.linux_x86_64)
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
 

@@ -12,6 +12,7 @@ from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestVarianceReductionHeuristic(TestCase):
     def setUp(self):
         super().setUp()
@@ -136,6 +138,7 @@ class _TestingHeuristics(InductorChoices):
     }
 )
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class CooperativeReductionTests(TestCase):
     def setUp(self):
         super().setUp()
@@ -349,6 +352,7 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
     }
 )
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestFixedConfigs(TestCase):
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)

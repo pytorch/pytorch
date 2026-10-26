@@ -99,9 +99,15 @@ def _restore_autocast_state(snapshot: _AutocastState) -> None:
 
 
 def run_tests(needs: str | tuple[str, ...] = ()) -> None:
-    from torch.testing._internal.common_utils import run_tests
+    from torch.testing._internal.common_utils import (
+        _record_test_collection_skip,
+        run_tests,
+    )
 
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
+        _record_test_collection_skip(
+            "Dynamo tests are disabled in Dynamo/CrossRef testing modes"
+        )
         return  # skip testing
 
     if (
@@ -109,6 +115,7 @@ def run_tests(needs: str | tuple[str, ...] = ()) -> None:
         and IS_WINDOWS
         and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
     ):
+        _record_test_collection_skip("Inductor tests on Windows are not enabled")
         return
 
     if isinstance(needs, str):
@@ -116,11 +123,15 @@ def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     for need in needs:
         if need == "cuda":
             if not torch.cuda.is_available():
+                _record_test_collection_skip("This test module requires CUDA")
                 return
         else:
             try:
                 importlib.import_module(need)
-            except ImportError:
+            except ImportError as error:
+                _record_test_collection_skip(
+                    f"Required module {need!r} cannot be imported: {error}"
+                )
                 return
 
     run_tests()

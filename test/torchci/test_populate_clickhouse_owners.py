@@ -3,8 +3,10 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import call, MagicMock, patch
@@ -144,7 +146,40 @@ class TestClickHouseOwners(TestCase):
         clickhouse.get_client.assert_not_called()
 
     def test_dry_run_uses_shared_owners(self):
-        repo_root = Path(__file__).resolve().parents[2]
+        source_root = Path(__file__).resolve().parents[2]
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        repo_root = Path(temporary.name)
+        repo_root.joinpath("test").mkdir()
+        repo_root.joinpath("test/test_example.py").write_text(
+            '# Owner(s): ["module: ci"]\n'
+        )
+        repo_root.joinpath("scripts/codeowners").mkdir(parents=True)
+        for relative in (
+            "CODEOWNERS",
+            "scripts/codeowners/owners.py",
+            "scripts/codeowners/check_taxonomy.py",
+        ):
+            shutil.copyfile(source_root / relative, repo_root / relative)
+        commands = (
+            ["git", "init", "-q"],
+            ["git", "add", "test"],
+            [
+                "git",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "--no-gpg-sign",
+                "-qm",
+                "fixture",
+            ],
+        )
+        for command in commands:
+            subprocess.run(command, cwd=repo_root, check=True, capture_output=True)
         environment = os.environ.copy()
         for name in ("ENDPOINT", "USERNAME", "PASSWORD"):
             environment.pop(f"CLICKHOUSE_{name}", None)

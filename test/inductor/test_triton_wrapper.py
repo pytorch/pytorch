@@ -10,9 +10,11 @@ import torch
 import torch._inductor.async_compile
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal import tci
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestTritonWrapper(TestCase):
     def setUp(self):
         super().setUp()

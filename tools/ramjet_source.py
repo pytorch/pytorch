@@ -19,9 +19,20 @@ BOOTSTRAP = {
     "tools/ramjet.py",
     "tools/ramjet_source.py",
     "tools/ramjet_build.py",
+    "tools/ramjet_discovery.py",
+    "tools/ramjet_dependencies.py",
+    "tools/ramjet_fixtures.py",
+    "tools/ramjet_run.py",
+    "tools/ramjet_schedule.py",
 }
 BUILD_EXCLUDED_ROOTS = {"test", "docs", ".github", ".agents", ".claude", ".spin"}
 EXCLUDED_ROOTS = {"build", ".venv", "agent_space"}
+RUNTIME_FILES = {
+    ".github/actions/reuse-old-whl/reuse_old_whl.py",
+    ".spin/cmds.py",
+    "pyproject.toml",
+    "pytest.ini",
+}
 
 
 def _signature(value: os.stat_result) -> list[int]:
@@ -190,7 +201,7 @@ def snapshot_source(root: Path, output: Path) -> dict[str, tuple[Path, str]]:
             raise ValueError(f"Invalid source path: {relative}")
         if path.parts[0] in EXCLUDED_ROOTS or ".git" in path.parts:
             continue
-        is_runtime = path.parts[0] in {"test", "tools"} or relative == "pytest.ini"
+        is_runtime = path.parts[0] in {"test", "tools"} or relative in RUNTIME_FILES
         is_build = (
             path.parts[0] not in BUILD_EXCLUDED_ROOTS
             and relative != "pytest.ini"

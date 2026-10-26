@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    raise_on_run_directly,
     TestCase,
 )
 
@@ -317,4 +318,4 @@ class TestSWAUtils(TestCase):
 
 
 if __name__ == "__main__":
-    print("These tests should be run through test/test_optim.py instead")
+    raise_on_run_directly("test/test_optim.py")

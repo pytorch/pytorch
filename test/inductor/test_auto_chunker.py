@@ -6,6 +6,7 @@ from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -32,6 +33,7 @@ class LinearAndCEL(nn.Module):
 
 @config.patch("auto_chunker.enable", True)
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class AutoChunkerTest(TestCase):
     def setUp(self):
         super().setUp()

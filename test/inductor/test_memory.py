@@ -8,6 +8,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -60,6 +61,7 @@ class Foo(torch.nn.Module):
 # happy.
 @config.patch("score_fusion_memory_threshold", 1)
 @instantiate_parametrized_tests
+@tci.test(exclude=tci.platform.linux_x86_64)
 class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()

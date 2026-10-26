@@ -1376,21 +1376,22 @@ def sanitize_test_filename(filename):
     return re.sub('/', r'.', strip_py)
 
 def lint_test_case_extension(suite):
+    if isinstance(suite, types.ModuleType):
+        loader = unittest.TestLoader()
+        classes = (
+            cls for cls in vars(suite).values()
+            if isinstance(cls, type) and issubclass(cls, unittest.TestCase)
+            and getattr(cls, '__test__', True)
+            and (loader.getTestCaseNames(cls) or hasattr(cls, 'runTest'))
+        )
+    else:
+        classes = (type(test) for test in discover_test_cases_recursively(suite))
     succeed = True
-    for test_case_or_suite in suite:
-        test_case = test_case_or_suite
-        if isinstance(test_case_or_suite, unittest.TestSuite):
-            first_test = test_case_or_suite._tests[0] if len(test_case_or_suite._tests) > 0 else None
-            if first_test is not None and isinstance(first_test, unittest.TestSuite):
-                return succeed and lint_test_case_extension(test_case_or_suite)
-            test_case = first_test
-
-        if test_case is not None:
-            if not isinstance(test_case, TestCase):
-                test_class = test_case.id().split('.', 1)[1].split('.')[0]
-                err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
-                print(f"{test_class} - failed. {err}")
-                succeed = False
+    for test_class in set(classes):
+        if not issubclass(test_class, TestCase):
+            err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
+            print(f"{test_class.__name__} - failed. {err}")
+            succeed = False
     return succeed
 
 
@@ -1538,6 +1539,18 @@ class HardwareClassificationTestLoader(TciTestLoader):
         return self.get_filtered_suite(suite)
 
 
+def _record_test_collection_skip(reason: str) -> None:
+    status_file = os.getenv("PYTORCH_TEST_COLLECTION_STATUS_FILE")
+    if status_file and "--list-markers" in sys.argv:
+        caller = sys._getframe(1)
+        with open(status_file, "w") as report:
+            json.dump({
+                "skipped": reason,
+                "filename": caller.f_code.co_filename,
+                "line": caller.f_lineno,
+            }, report)
+
+
 def run_tests(argv=None):
     parse_cmd_line_args()
     if argv is None:
@@ -1567,7 +1580,7 @@ def run_tests(argv=None):
         return
 
     # Before running the tests, lint to check that every test class extends from TestCase
-    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    suite = __main__ if USE_PYTEST else unittest.TestLoader().loadTestsFromModule(__main__)
     if not lint_test_case_extension(suite):
         sys.exit(1)
 

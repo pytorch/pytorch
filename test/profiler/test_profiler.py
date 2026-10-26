@@ -3373,12 +3373,17 @@ class TestExperimentalUtils(TestCase):
         def get_text_sections():
             text_sections = []
             seen = set()
-            for filename in os.listdir("/proc/self/map_files"):
-                library = os.readlink("/proc/self/map_files/" + filename)
+            with open("/proc/self/maps") as maps:
+                mappings = [line.split(maxsplit=5) for line in maps]
+            for mapping in mappings:
+                if len(mapping) != 6:
+                    continue
+                filename, _, file_offset, _, _, library = mapping
+                library = library.rstrip("\n")
                 if ".so" not in library or library in seen:
                     continue
                 seen.add(library)
-                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
+                with open(library, "rb") as f:
                     mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
 
                     def unpack(fmt, offset):
@@ -3409,7 +3414,8 @@ class TestExperimentalUtils(TestCase):
                         (section_size,) = unpack(
                             "Q", section_headers_start + i * section_header_size + 32
                         )
-                        start = int(filename.split("-")[0], 16) + section_offset
+                        base = int(filename.split("-")[0], 16) - int(file_offset, 16)
+                        start = base + section_offset
                         text_sections.append((start, section_size))
                         break
                     mm.close()
