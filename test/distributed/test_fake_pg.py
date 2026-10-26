@@ -1481,6 +1481,61 @@ class TestFakePGUniformRanks(TestCase):
         with self.assertRaisesRegex(RuntimeError, "recorded no output"):
             work.result()
 
+    def test_uniform_writes_leave_the_version_counter(self):
+        """Several in-place ops per collective, still no bump. See NOTE
+        [FakeProcessGroup output version counters]."""
+        self._init(rank=0, world_size=4)
+        out = torch.ones(2)
+        dist.all_reduce(out)
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(2)
+        dist.reduce_scatter_tensor(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(8)
+        dist.all_to_all_single(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+
+
+class TestFakePGVersionCounter(TestCase):
+    """Fake collectives move output version counters as NCCL does. See NOTE
+    [FakeProcessGroup output version counters]."""
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_output_versions_match_nccl(self):
+        # NCCL writes these from its own kernels: no bump.
+        out = torch.zeros(8)
+        dist.all_gather_into_tensor(out, torch.ones(2))
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(2)
+        dist.reduce_scatter_tensor(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(8)
+        dist.all_to_all_single(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+
+        # NCCL fills these with copy_: bump. Peers' gather slots arrive by ncclRecv.
+        outs = [torch.zeros(2) for _ in range(4)]
+        dist.all_gather(outs, torch.ones(2))
+        self.assertEqual([o._version for o in outs], [1, 1, 1, 1])
+        outs = [torch.zeros(2) for _ in range(4)]
+        dist.gather(torch.ones(2), outs, dst=0)
+        self.assertEqual([o._version for o in outs], [1, 0, 0, 0])
+
+    def test_tensor_saved_for_backward_survives_all_gather_into_it(self):
+        weights = torch.zeros(8)
+        x = torch.ones(8, requires_grad=True)
+        loss = (x * weights).sum()  # mul saves `weights` for backward
+        dist.all_gather_into_tensor(weights, torch.ones(2))
+        loss.backward()
+        self.assertEqual(x.grad, weights)
+
 
 instantiate_parametrized_tests(TestFakePG)
 instantiate_parametrized_tests(TestFakePGUniformRanks)
