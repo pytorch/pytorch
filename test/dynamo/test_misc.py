@@ -7691,6 +7691,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def test_temporary_directory_cleanup(self):
+        @torch.compile(backend="eager")
+        def fn(x, tmpdir):
+            y = x + 1
+            tmpdir.cleanup()
+            return y + 1
+
+        x = torch.ones(2)
+        tmpdir = tempfile.TemporaryDirectory()
+        with tmpdir:
+            self.assertEqual(fn(x, tmpdir), x + 2)
+            self.assertFalse(os.path.exists(tmpdir.name))
+
     @skipIfWindows(
         msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
     )
