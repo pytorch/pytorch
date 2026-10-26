@@ -1142,6 +1142,15 @@ max_pointwise_cat_inputs = 8
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
 
+# Lower a cat input that is all of an already-laid-out computed buffer through
+# ConcatKernel, so its copy can fuse into the producer instead of being re-read
+# by a pointwise cat. Off by default: profitability depends on the destination
+# layout (a permuted destination makes the fused stores uncoalesced).
+# TODO: map out profitability and remove this flag. A stack's size-1 views
+# freeze such buffers, which should not happen; once they don't, this rule is
+# rarely needed.
+cat_fuse_computed_input_copies = False
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
