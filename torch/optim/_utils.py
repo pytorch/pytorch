@@ -23,10 +23,9 @@ def preserve_state_dtype_on_load(preserve_dtype: bool = True) -> Iterator[None]:
             state tensors versus casting to the parameter's dtype. If ``False``,
             cast these tensors to the parameter dtype for floating-point parameters.
             Note that the state will be moved to match the parameter's device in
-            both cases.
-            Default: ``True``.
+            both cases. Default: ``True``.
 
-    The setting applies to all optimizers that call
+    The setting applies only to state processed by
     :meth:`~torch.optim.Optimizer.load_state_dict` in the current thread or
     asynchronous task, including nested calls. Exiting the context restores the
     previous setting, including when an exception is raised. Using this context
@@ -35,18 +34,18 @@ def preserve_state_dtype_on_load(preserve_dtype: bool = True) -> Iterator[None]:
 
     .. note::
         Preserved state dtypes must be compatible with the selected optimizer
-        implementation. Otherwise, :meth:`~torch.optim.Optimizer.step` may raise
-        a dtype mismatch error or use unintended precision. Pass
-        ``preserve_dtype=False`` to retain automatic casting, or explicitly
-        convert state tensors before stepping, for example with
+        implementation, for example fused bfloat16 AdamW. Otherwise,
+        :meth:`~torch.optim.Optimizer.step` may raise a dtype mismatch error
+        or use unintended precision. Pass ``preserve_dtype=False`` to retain
+        automatic casting to match parameter dtype, or explicitly convert state
+        tensors before stepping, for example with
         :meth:`~torch.optim.Optimizer.register_load_state_dict_post_hook`.
 
     .. note::
         Subclasses that override ``load_state_dict`` control their own loading
-        behavior. Calls to :meth:`~torch.optim.Optimizer.load_state_dict`, through
-        ``super()`` or a wrapped optimizer, use the context's dtype policy. The
-        context does not intercept overrides or undo conversions they perform
-        before calling the base implementation.
+        behavior. State loaded independently by an override is unaffected.
+        Calls to :meth:`~torch.optim.Optimizer.load_state_dict`, through
+        ``super()`` or a wrapped optimizer, use the context's dtype policy.
 
     .. note::
         The ``step`` tensor keeps its saved dtype and device unless the parameter

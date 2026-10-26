@@ -923,11 +923,14 @@ class Optimizer:
         .. warning::
             By default, state tensors other than ``step`` are currently cast to the
             parameter dtype for floating-point parameters. In a future release,
-            the default will preserve their saved dtype. Use
-            :func:`torch.optim.preserve_state_dtype_on_load` to select either
-            behavior explicitly. A ``FutureWarning`` is emitted when the default
-            behavior changes a state tensor's dtype. These tensors are moved to
-            the parameter's device in either case.
+            the default will preserve their saved dtype in order to respect the
+            dtype in the checkpoint. However, this behavior will break use cases
+            that rely on the state being automatically cast to the parameter's
+            dtype, as many optimizer :meth:`step` implementations do not support
+            mixed precision. We emit a ``FutureWarning`` when loading the checkpoint
+            changes a state tensor's dtype. Use :func:`torch.optim.preserve_state_dtype_on_load`
+            to select the desired behavior explicitly. In either case, state tensors
+            are moved to the parameter's device.
 
         .. note::
             When preserving dtypes, state tensors must be compatible with the
