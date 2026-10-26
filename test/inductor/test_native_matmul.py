@@ -325,6 +325,60 @@ class TestNativeMatmulCodegen(TestCase):
             )
         )
 
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": True,
+            "triton.persistent_reductions": False,
+            "assume_aligned_inputs": True,
+            "force_disable_caches": True,
+        }
+    )
+    @parametrize("backend", ["pointer", "device_tma", "host_tma"])
+    @parametrize("batch_shape", [(), (3,)])
+    @parametrize("transpose_a", [False, True])
+    @parametrize("transpose_b", [False, True])
+    @parametrize("shape", [(40, 72, 136), (128, 128, 128)])
+    def test_matmul_load_singletons(
+        self, device, backend, batch_shape, transpose_a, transpose_b, shape
+    ):
+        use_tma = backend in ("device_tma", "host_tma")
+        if use_tma and not has_triton_tma_device():
+            self.skipTest("Tensor descriptors are not supported")
+        if backend == "host_tma" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("Host tensor descriptors are not supported")
+
+        def f(a, b):
+            return a @ b
+
+        m, k, n = shape
+        a = torch.randn((*batch_shape, m, k), device=device, dtype=torch.float16)
+        b = torch.randn((*batch_shape, k, n), device=device, dtype=torch.float16)
+        if transpose_a:
+            a = a.mT.contiguous().mT
+        if transpose_b:
+            b = b.mT.contiguous().mT
+        self.enterContext(
+            inductor_config.patch(
+                {
+                    "triton.use_tensor_descriptor": use_tma,
+                    "triton.enable_host_side_tma": backend == "host_tma",
+                }
+            )
+        )
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, a, b)
+        self.assertEqual(compiled(a, b), f(a, b), atol=1e-3, rtol=1e-3)
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self.assertEqual(code.count("tl.dot("), 1)
+        self.assertNotIn("tl.reshape(tmp", code)
+        self.assertNotIn("[:, :, None], [", code)
+        self.assertNotIn("[:, :, :, None], [", code)
+        if backend == "pointer":
+            self.assertIn("tl.reshape(tl.load(in_ptr0 + (tl.squeeze(", code)
+            self.assertIn("tl.reshape(tl.load(in_ptr1 + (tl.squeeze(", code)
+        else:
+            self.assertEqual(code.count(".load(["), 2)
+
     def _check_masked_values(self, f, inputs, where_count, descriptor=True):
         if descriptor and not has_triton_tma_device():
             self.skipTest("Tensor descriptors are not supported")
