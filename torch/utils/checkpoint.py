@@ -2034,6 +2034,9 @@ def _checkpoint_without_reentrant_generator_impl(
                 device_ctx,
                 nested_fx_trace_ctx,
                 torch.fx._symbolic_trace._is_fx_tracing_context(is_fx_tracing),
+                # Recomputation reuses the original inputs, so it would count
+                # as a second use of single-use tensors.
+                torch.autograd.graph.disallow_implicit_grad_accumulation(False),
             ):  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
