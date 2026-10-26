@@ -4024,7 +4024,11 @@ def _resolve_needs_vec_isa(
 
 @functools.cache
 def _relocatable_roots() -> tuple[str, ...]:
-    """The torch and Python install roots, which move when a packaged job does."""
+    """The torch and Python install roots, which move when a packaged job does.
+
+    System prefixes such as ``/usr`` are not roots: they hold headers and
+    toolchains of their own that do not move with the package.
+    """
     roots = dict.fromkeys(
         normalize_path_separator(root)
         for root in (
@@ -4036,8 +4040,10 @@ def _relocatable_roots() -> tuple[str, ...]:
         # A relative root would match inside unrelated absolute paths.
         if root and os.path.isabs(root)
     )
+    for system in ("/", "/usr", "/usr/local"):
+        roots.pop(system, None)
     # Longest first, so a root nested in another is replaced before its parent.
-    return tuple(sorted((r for r in roots if len(r) > 1), key=len, reverse=True))
+    return tuple(sorted(roots, key=len, reverse=True))
 
 
 @functools.cache
@@ -4324,12 +4330,12 @@ class CppCodeCache:
             if frozen:
                 # Served from a directory of its own, so the frozen binary never
                 # stands in for this build in the shared cache.
+                # Named by the portable key, so relocated launches reuse one copy.
                 binary_path = normalize_path_separator(
                     os.path.join(
                         cache_dir(),
                         "precompile_cpp",
-                        portable_key(),
-                        os.path.basename(binary_path),
+                        portable_key() + os.path.splitext(binary_path)[1],
                     )
                 )
                 restore_cpp_kernel(portable_key(), binary_path)

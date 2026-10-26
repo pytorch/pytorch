@@ -646,10 +646,20 @@ class TestCppPortableKey(TestCase):
             self._key("-I/data/usr/include", roots=("/usr",)),
             self._key("-I/data/opt/py/include", roots=("/opt/py",)),
         )
-        self.assertEqual(
-            self._key("-I/usr/include -L/usr/lib", roots=("/usr",)),
-            self._key("-I/opt/py/include -L/opt/py/lib", roots=("/opt/py",)),
+        # Every form a build command puts a root in is stripped.
+        forms = (
+            "-I{} -L{}/lib",
+            "-I'{}/include dir'",
+            '/I "{}" /LIBPATH:"{}/libs"',
+            "-Wl,-rpath,{}/lib",
+            "--sysroot={}",
         )
+        for form in forms:
+            self.assertEqual(
+                self._key(form.format("/opt/a", "/opt/a"), roots=("/opt/a",)),
+                self._key(form.format("/srv/b", "/srv/b"), roots=("/srv/b",)),
+                form,
+            )
 
     def test_key_is_computed_only_for_precompile(self):
         from torch._inductor import codecache
@@ -658,6 +668,7 @@ class TestCppPortableKey(TestCase):
         source = 'extern "C" long portable_key_probe(long x) { return x; }'
         with (
             fresh_cache(),
+            mock.patch.object(codecache.CppCodeCache, "_portable_keys", {}),
             mock.patch.object(
                 codecache, "_portable_cpp_key", wraps=codecache._portable_cpp_key
             ) as portable,
@@ -679,6 +690,16 @@ class TestCppPortableKey(TestCase):
         self.assertNotEqual(base, self._key("src", "cmd", version="cc 2"))
         with mock.patch.object(codecache, "torch_key", return_value=b"other torch"):
             self.assertNotEqual(base, self._key("src", "cmd"))
+
+    def test_system_prefixes_are_not_relocatable_roots(self):
+        from torch._inductor import codecache
+
+        with (
+            mock.patch.object(sys, "prefix", "/usr"),
+            mock.patch.object(sys, "base_prefix", "/usr/local"),
+        ):
+            roots = codecache._relocatable_roots.__wrapped__()
+        self.assertFalse({"/", "/usr", "/usr/local"} & set(roots))
 
     def test_relocatable_roots_are_absolute_and_longest_first(self):
         from torch._inductor import codecache
