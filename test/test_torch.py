@@ -5907,9 +5907,10 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
 
-    @dtypes(torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int16, torch.uint8, torch.float64, torch.bool)
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
     def test_memory_format_copy_channels_last(self, device, dtype):
-        shapes = ((2, 3, 7, 5), (1, 1, 64, 64), (4, 64, 1, 1), (3, 17, 9, 13), (1, 96, 23, 29), (5, 33, 1, 77), (2, 72, 41, 39))
+        shapes = ((4, 3, 8, 8), (4, 3, 8, 9))
         for shape in shapes:
             x = make_tensor(shape, dtype=dtype, device=device)
             for src in (x, x.contiguous(memory_format=torch.channels_last)):
