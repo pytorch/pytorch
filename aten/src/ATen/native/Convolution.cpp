@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
@@ -1702,10 +1703,10 @@ at::Tensor _convolution(
       }
       output = at::mkldnn_convolution(
           input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
-      break;
     case ConvBackend::MkldnnTranspose:
 #if AT_MKLDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
@@ -1717,19 +1718,19 @@ at::Tensor _convolution(
       }
       output = mkldnn_convolution_transpose_stub(input.device().type(),
           input, weight, bias, params.padding, params.output_padding, params.stride, params.dilation, params.groups);
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
-      break;
     case ConvBackend::MkldnnEmpty:
 #if AT_MKLDNN_ENABLED()
       output = empty_mkldnn(
           calc_output_size(input, weight, params), optTypeMetaToScalarType(input.options().dtype_opt()),
           input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
-      break;
     case ConvBackend::Overrideable:
       output = at::convolution_overrideable(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed,
@@ -1774,10 +1775,10 @@ at::Tensor _convolution(
       output = at::_mps_convolution(input, weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
 #endif
-      break;
     case ConvBackend::MpsTranspose:
 #ifdef USE_MPS
       check_input_same_type_as_parameters(input, weight, bias);
@@ -1788,10 +1789,10 @@ at::Tensor _convolution(
       if (bias.defined()) {
         output.add_(reshape_bias(input.dim(), bias));
       }
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
 #endif
-      break;
   }
 
   if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
@@ -2193,10 +2194,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::mps_convolution_backward(input, grad_output, weight, params.padding,
           params.stride, params.dilation, params.groups, output_mask);
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
 #endif
-      break;
     }
     case ConvBackend::MpsTranspose:
     {
@@ -2208,10 +2209,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         output_mask[1] ? input.contiguous(backend_memory_format) : input,
         grad_output, weight, params.padding, params.output_padding,
         params.stride, params.dilation, params.groups, input_weight_output_mask);
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
 #endif
-      break;
     }
     case ConvBackend::CudnnTranspose:
     {
@@ -2256,10 +2257,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         // mkldnn bias is not supported during training by the mkldnn backend
         backend_grad_bias = at::zeros(*bias_sizes_opt, weight.options());
       }
+      break;
 #else
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
-      break;
     case ConvBackend::Miopen:
       check_input_same_type_as_parameters(input, weight);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
@@ -2359,10 +2360,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     // Backward is not supported for these backends.
     case ConvBackend::Winograd3x3Depthwise:
       TORCH_CHECK(false, "Backward is not supported for depthwise 3x3 winograd");
-      break;
     case ConvBackend::Xnnpack2d:
       TORCH_CHECK(false, "Backward is not supported for xnnpack");
-      break;
   }
 
   // Convert 2D inputs back to 1D for backends that don't natively support 1D
