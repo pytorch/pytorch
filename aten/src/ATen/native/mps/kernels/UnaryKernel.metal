@@ -114,7 +114,9 @@ struct logit_functor {
     if IF_CONSTEXPR (::metal::is_same_v<E, float>) {
       return static_cast<E>(::precise::log(z / (1.0f - z)));
     } else {
-      // fast:: error is far below half/bfloat rounding
+      // fast:: is identical to precise after rounding to half/bfloat,
+      // checked over all 65536 input bit patterns of each dtype with
+      // eps in {none, 1e-6, 1e-3, 0.2, 0.6}
       return static_cast<E>(
           ::metal::fast::log(::metal::fast::divide(z, 1.0f - z)));
     }
