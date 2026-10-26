@@ -1003,6 +1003,13 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
     }
     return false;
   }
+  if (dprops->major == 10 && dprops->minor == 7 &&
+      at::detail::getCUDAHooks().versionRuntimeCuDNN() < 92500) {
+    if (debug) {
+      TORCH_WARN("cuDNN SDPA on SM 10.7 requires cuDNN 9.25.0 or newer.");
+    }
+    return false;
+  }
   return true;
 }
 
