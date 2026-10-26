@@ -8,12 +8,10 @@ import sys
 from collections.abc import Callable
 
 import sympy
-from sympy.core.relational import is_ge, is_gt, is_le, is_lt
 
 import torch
 import torch.fx as fx
-from torch._inductor.bounds import ValueRangeAnalysis
-from torch._inductor.index_propagation import TypedExpr
+from sympy.core.relational import is_ge, is_gt, is_le, is_lt
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
@@ -27,19 +25,19 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._sympy.functions import (
-    BitwiseFn_bitwise_and,
     CeilDiv,
     FloorDiv,
     Identity,
     IntTrueDiv,
-    LShift,
     Max as TorchSymMax,
     Min as TorchSymMin,
+    LShift,
     Mod,
     ModularIndexing,
     OpaqueUnaryFn_cos,
     PythonMod,
     RShift,
+    BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
@@ -53,6 +51,8 @@ from torch.utils._sympy.reference import (
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch._inductor.bounds import ValueRangeAnalysis
+from torch._inductor.index_propagation import TypedExpr
 
 
 UNARY_OPS = [
@@ -142,7 +142,9 @@ def valid_binary(fn, a, b):
         return False
     elif fn == "pow_by_natural" and (
         # sympy will expand to x*x*... for integral b; don't do it if it's big
-        b > 4 or b < 0 or (a == b == 0)
+        b > 4
+        or b < 0
+        or (a == b == 0)
     ):
         return False
     elif fn == "mod" and (a < 0 or b <= 0):
@@ -237,14 +239,18 @@ class TestNumbers(TestCase):
 class TestCppPrinter(TestCase):
     def test_min_max_preserve_float_expressions(self):
         s0 = sympy.Symbol("s0")
-        expr = TorchSymMin(sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0)
+        expr = TorchSymMin(
+            sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0
+        )
         printed = CppPrinter().doprint(expr)
 
         self.assertIn("std::min", printed)
         self.assertIn("static_cast<double>", printed)
         self.assertNotIn("static_cast<int64_t>", printed)
 
-        expr = TorchSymMax(sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0)
+        expr = TorchSymMax(
+            sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0
+        )
         printed = CppPrinter().doprint(expr)
 
         self.assertIn("std::max", printed)
@@ -329,12 +335,12 @@ class TestValueRanges(TestCase):
 
     def test_trunc_infinite(self):
         self.assertEqual(
-            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float("inf"))),
-            ValueRanges.wrap(sympy.Float("inf")),
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('inf'))),
+            ValueRanges.wrap(sympy.Float('inf')),
         )
         self.assertEqual(
-            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float("-inf"))),
-            ValueRanges.wrap(sympy.Float("-inf")),
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('-inf'))),
+            ValueRanges.wrap(sympy.Float('-inf')),
         )
 
     @parametrize("fn", UNARY_BOOL_OPS)
@@ -508,6 +514,7 @@ class TestValueRanges(TestCase):
                 r = getattr(ReferenceAnalysis, fn)(a, b)
                 self.assertIn(r, ref_r)
 
+
     def test_python_mod(self):
         """Test python_mod value range analysis."""
         # Test with positive divisor
@@ -537,31 +544,23 @@ class TestValueRanges(TestCase):
 
         # Test with infinite bounds
         # x % [1, int_oo] should be in [0, int_oo - 1] = [0, int_oo]
-        r = ValueRangeAnalysis.python_mod(
-            ValueRanges(-100, 100), ValueRanges(1, int_oo)
-        )
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(1, int_oo))
         self.assertEqual(r.lower, 0)
         self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
 
         # x % [-int_oo, -1] should be in [-int_oo + 1, 0] = [-int_oo, 0]
-        r = ValueRangeAnalysis.python_mod(
-            ValueRanges(-100, 100), ValueRanges(-int_oo, -1)
-        )
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-int_oo, -1))
         self.assertEqual(r.lower, -int_oo)  # -int_oo + 1 == -int_oo
         self.assertEqual(r.upper, 0)
 
         # x % [-int_oo, int_oo] should be in [-int_oo + 1, int_oo - 1] = [-int_oo, int_oo]
-        r = ValueRangeAnalysis.python_mod(
-            ValueRanges(-100, 100), ValueRanges(-int_oo, int_oo)
-        )
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-int_oo, int_oo))
         self.assertEqual(r.lower, -int_oo)  # -int_oo + 1 == -int_oo
         self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
 
         # x % [0, int_oo] should be in [0, int_oo - 1] = [0, int_oo]
         # (assuming y != 0 at runtime, lower bound should be 0, not 1)
-        r = ValueRangeAnalysis.python_mod(
-            ValueRanges(-int_oo, int_oo), ValueRanges(0, int_oo)
-        )
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-int_oo, int_oo), ValueRanges(0, int_oo))
         self.assertEqual(r.lower, 0)
         self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
 
@@ -579,11 +578,7 @@ class TestValueRanges(TestCase):
                 result = x % y
                 y_range = ValueRanges(y, y)
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
-                self.assertIn(
-                    result,
-                    r,
-                    lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}",
-                )
+                self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
 
     def test_bound_sympy_mod_subtraction(self):
         s0 = sympy.Symbol("s0", integer=True)
@@ -762,9 +757,9 @@ class TestSympyInterp(TestCase):
         gm = fx.symbolic_trace(trace_f)
         self.assertEqual(gm(7, 2), 3.5)
 
-
 class TestSympyInterpDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
 
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
@@ -1274,7 +1269,6 @@ class TestSingletonInt(TestCase):
 
         self.assertEqual(j1.free_symbols, set())
 
-
 class TestIdentity(TestCase):
     def test_expand_identity(self):
         """
@@ -1306,7 +1300,6 @@ class TestIdentity(TestCase):
         tup_I = Identity(tup)
         self.assertRaises(TypeError, int, tup_I)
         self.assertRaises(TypeError, float, tup_I)
-
 
 class TestTypedExpr(TestCase):
     def test_typed_expr(self):
