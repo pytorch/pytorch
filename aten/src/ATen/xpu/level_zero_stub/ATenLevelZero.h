@@ -35,7 +35,9 @@ namespace at::xpu {
 
 #define AT_FORALL_ZE(_)        \
   _(zeModuleCreate)            \
+  _(zeModuleDestroy)           \
   _(zeKernelCreate)            \
+  _(zeKernelDestroy)           \
   _(zeKernelGetProperties)     \
   _(zeMemGetAllocProperties)   \
   _(zeModuleBuildLogGetString) \
