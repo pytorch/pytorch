@@ -661,7 +661,9 @@ class TestGroupBatchFusion(TestCase):
         bias.meta["example_value"] = torch.randn(bias_shape)
         linear = graph.call_function(torch._C._nn.linear, args=(input, weight, bias))
         linear.meta["example_value"] = torch.randn(4, 6)
-        graph.output(graph.call_function(torch.sin, args=(linear,)))
+        sin = graph.call_function(torch.sin, args=(linear,))
+        sin.meta["example_value"] = torch.sin(linear.meta["example_value"])
+        graph.output(sin)
         rule = BatchLinearLHSFusion()
         if bias_shape == (6,):
             self.assertIsNotNone(rule.match(linear))
@@ -882,6 +884,18 @@ class TestGroupBatchFusion(TestCase):
             ("pointwise", False),
             ("add_scalar", False),
             ("normalize", False),
+            ("split_view", False),
+            ("view_with_one", False),
+            ("transpose", False),
+            ("getitem", False),
+            ("split_call_function", False),
+            ("stride", True),
+            ("split_view_mutation", True),
+            ("view_setitem", True),
+            ("storage_offset", True),
+            ("as_strided", True),
+            ("transpose_output", True),
+            ("alias_output", True),
         ],
     )
     def test_batch_linear_lhs_direct_user_classification(
@@ -894,6 +908,21 @@ class TestGroupBatchFusion(TestCase):
         def placeholder(graph, name):
             result = graph.placeholder(name)
             result.meta["example_value"] = torch.empty(4, 6)
+            return result
+
+        def sin_of(x):
+            result = graph.call_function(torch.sin, args=(x,))
+            result.meta["example_value"] = torch.sin(x.meta["example_value"])
+            return result
+
+        def split_view(x):
+            result = graph.call_method("view", args=(x, 2, 2, 6))
+            result.meta["example_value"] = x.meta["example_value"].view(2, 2, 6)
+            return result
+
+        def transpose(x):
+            result = graph.call_method("transpose", args=(x, 0, 1))
+            result.meta["example_value"] = x.meta["example_value"].transpose(0, 1)
             return result
 
         graph = torch.fx.Graph()
@@ -930,6 +959,40 @@ class TestGroupBatchFusion(TestCase):
             graph.call_function(torch.sin, args=(linear,))
         elif case == "add_scalar":
             graph.call_function(operator.add, args=(linear, 1.0))
+        elif case == "split_view":
+            sin_of(split_view(linear))
+        elif case == "view_with_one":
+            result = graph.call_method("view", args=(linear, 4, 1, 6))
+            result.meta["example_value"] = linear.meta["example_value"].view(4, 1, 6)
+            sin_of(result)
+        elif case == "transpose":
+            sin_of(transpose(linear))
+        elif case == "getitem":
+            item = graph.call_function(operator.getitem, args=(linear, 0))
+            item.meta["example_value"] = linear.meta["example_value"][0]
+            sin_of(item)
+        elif case == "split_call_function":
+            parts = graph.call_function(torch.split, args=(linear, [3, 3], 1))
+            parts.meta["example_value"] = torch.split(
+                linear.meta["example_value"], [3, 3], 1
+            )
+            item = graph.call_function(operator.getitem, args=(parts, 0))
+            item.meta["example_value"] = parts.meta["example_value"][0]
+            sin_of(item)
+        elif case == "stride":
+            graph.call_function(torch.ops.aten.sym_stride, args=(linear, 0))
+        elif case == "split_view_mutation":
+            graph.call_method("mul_", args=(split_view(linear), 2))
+        elif case == "view_setitem":
+            graph.call_function(operator.setitem, args=(split_view(linear), 0, 0))
+        elif case == "storage_offset":
+            graph.call_method("storage_offset", args=(linear,))
+        elif case == "as_strided":
+            graph.call_method("as_strided", args=(linear, (6,), (1,)))
+        elif case == "transpose_output":
+            graph.output(transpose(linear))
+        elif case == "alias_output":
+            graph.output(graph.call_method("t", args=(linear,)))
         else:
             graph.call_function(torch.nn.functional.normalize, args=(linear,))
         self.assertEqual(_has_layout_sensitive_user(linear), expected_sensitive)
