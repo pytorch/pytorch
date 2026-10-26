@@ -151,7 +151,14 @@ def get_worker(key: tuple[int, str]) -> Any:
     Deliberately dedicated rather than Inductor's shared TuningProcessPool:
     TunableOp's flags are process-global, so a worker that also benchmarks triton
     candidates would tune unrelated GEMMs and append them to the results file. One
-    worker per compile rather than one per GEMM, since startup dominates otherwise.
+    worker reused across GEMMs rather than one per GEMM, since startup dominates
+    otherwise.
+
+    Lifetime: module-global, torn down on a key change or at interpreter exit --
+    not when a compile finishes, because nothing marks that boundary yet. So an
+    idle child keeps its CUDA/HIP context, and whatever the caching allocator
+    held for benchmarking, for the rest of the process. Callers that know where
+    autotuning ends should call shutdown_worker() there.
 
     Keyed on (device, resolved results filename). The results file is per
     device ordinal, so a worker left pinned to an earlier device would
@@ -190,14 +197,31 @@ def shutdown_worker() -> None:
         _shutdown_locked()
 
 
-def _shutdown_locked() -> None:
-    """Assumes _worker_lock is held (get_worker calls it on key change)."""
+def _shutdown_locked(graceful: bool = True) -> None:
+    """Assumes _worker_lock is held (get_worker calls it on key change).
+
+    graceful=False skips the exit sentinel and kills the child outright. Use it
+    when a GPU fault is suspected: the child may be stuck in device teardown, and
+    once the reference is dropped there is no handle left to kill it with.
+
+    Either way the process is reaped before the reference goes. shutdown(wait=False)
+    on its own leaves the pipes, the selector fd and the Popen for GC, which is why
+    TuningProcessPool.shutdown pairs it with wait().
+    """
     global _worker, _worker_key
     if _worker is not None:
         try:
-            _worker.shutdown(wait=False)
+            if graceful:
+                _worker.shutdown(wait=False)
+                _worker.wait()
+            else:
+                _worker.kill()
         except Exception:
             log.debug("TunableOp worker shutdown failed", exc_info=True)
+            try:
+                _worker.close()
+            except Exception:
+                log.debug("TunableOp worker close failed", exc_info=True)
         _worker = None
     _worker_key = None
 
@@ -214,15 +238,34 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 
 
 # Tuning knobs propagated to the worker: (parent getter, worker setter) pairs.
-# Numerical-check tolerances are deliberately absent -- set_numerical_check_-
-# tolerances has no getter, so there is nothing to snapshot. Documented here so
-# a reader does not assume full propagation.
+#
+# Not propagated, and not an exhaustive-by-accident list:
+#   * numerical-check tolerances -- set_numerical_check_tolerances has no
+#     getter, so there is nothing to snapshot;
+#   * wildcard_fallback_enable, record_untuned_enable and
+#     _record_borrowed_enable -- these do have getters, but they select what
+#     the worker records rather than how it tunes, and the worker's recording
+#     policy is set per job rather than inherited from the parent;
+#   * the thread-local dynamic-dims mask, which is per call rather than per
+#     process and so travels on the job itself, not in this snapshot.
+# Anything read from the environment reaches the worker by inheritance.
 _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
     ("get_max_tuning_duration", "set_max_tuning_duration"),
     ("get_max_tuning_iterations", "set_max_tuning_iterations"),
     ("get_rotating_buffer_size", "set_rotating_buffer_size"),
     ("get_cublaslt_requested_algo_count", "set_cublaslt_requested_algo_count"),
 )
+
+# Getters whose units differ from the matching setter's.
+# get_rotating_buffer_size returns bytes (rotating_buffer_size_, or the L2 size
+# when unset), while set_rotating_buffer_size takes MB and multiplies by
+# 1024*1024 into a signed int. Stamping the raw value would square the scale:
+# a 4 MiB L2 becomes 2**42, which truncates to 0 and silently tunes with the
+# rotating buffer disabled. Only visible when the env var is unset, since that
+# takes precedence inside the getter.
+_SETTING_CONVERSIONS: dict[str, Any] = {
+    "set_rotating_buffer_size": lambda v: v // (1024 * 1024),
+}
 
 
 def snapshot_settings() -> dict[str, Any]:
@@ -237,7 +280,9 @@ def snapshot_settings() -> dict[str, Any]:
     settings: dict[str, Any] = {}
     for getter, setter in _TUNABLE_SETTINGS:
         try:
-            settings[setter] = getattr(tunable, getter)()
+            value = getattr(tunable, getter)()
+            convert = _SETTING_CONVERSIONS.get(setter)
+            settings[setter] = convert(value) if convert else value
         except Exception:
             log.debug("TunableOp setting snapshot failed for %s", getter)
     return settings
@@ -316,8 +361,10 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                 # alive, so every later GEMM would fail the same way. Restart it
                 # here, inside the lock, so no other thread observes the dead
                 # worker or interleaves on the pipe; recorded solutions survive
-                # via the results file.
-                _shutdown_locked()
+                # via the results file. Kill rather than ask: a child wedged in
+                # device teardown would never act on the sentinel, and would
+                # hold the GPU for the rest of the job.
+                _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
     except Exception as e:  # lock/restart machinery itself failed
         log.debug("TunableOp worker machinery failed: %s", e)
