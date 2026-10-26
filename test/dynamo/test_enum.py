@@ -509,6 +509,38 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         for backend in Backend:
             self.assertEqual(fn(x, backend), opt_fn(x, backend))
 
+    @parametrize("base", [int, enum.IntEnum])
+    def test_stateful_eq_on_constant_subclass(self, base):
+        # https://github.com/pytorch/pytorch/pull/201565: the constant compare
+        # fast path must not run a user __eq__ eagerly at trace time.
+        if base is int:
+
+            class Mode(int):
+                def __eq__(self, other):
+                    return self.enabled
+
+            a, b = Mode(0), Mode(1)
+        else:
+
+            class Mode(enum.IntEnum):
+                A = 0
+                B = 1
+
+                def __eq__(self, other):
+                    return self.enabled
+
+            a, b = Mode.A, Mode.B
+
+        def fn(x):
+            return x + (1 if a == b else 2)
+
+        x = torch.zeros(())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a.enabled = False
+        self.assertEqual(fn(x), opt_fn(x))
+        a.enabled = True
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_flag_enum(self):
         """Test Flag enum operations."""
 

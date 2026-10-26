@@ -986,6 +986,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             def compare_by_value(
                 tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
             ) -> VariableTracker:
+                # User subclasses (int subclasses, IntEnum members, ...) may
+                # override the dunder; trace it instead of running it eagerly.
+                if op in _OPERATOR_TO_DUNDER and (
+                    isinstance(a, UserDefinedObjectVariable)
+                    or isinstance(b, UserDefinedObjectVariable)
+                ):
+                    return generic_richcompare(tx, a, b, _OPERATOR_TO_DUNDER[op])
                 try:
                     return VariableTracker.build(tx, op(a.value, b.value))  # type: ignore[attr-defined]
                 except TypeError as exc:
