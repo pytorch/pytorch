@@ -1050,8 +1050,10 @@ def _register_overrides_from_graph(
     # genuine bug. A failed runtime initialization declines that candidate so
     # routing can continue. The impl is called directly: going through
     # `_native::<id>` would add a dispatcher trip for nothing, as the router
-    # already sits below the autograd / autocast / Python-mode keys. No match
-    # falls back to the captured original kernel.
+    # already sits below the autograd / autocast / Python-mode keys. While
+    # profiling, the call is wrapped in a `_native::<id>` record_function so
+    # traces show which override ran. No match falls back to the captured
+    # original kernel.
     #
     # Compile/export routers run under FakeTensor where some predicates are
     # undefined (e.g. _is_cow_tensor), so we swallow cond exceptions and treat
@@ -1069,13 +1071,7 @@ def _register_overrides_from_graph(
 
     coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
 
-    def _dispatch(
-        args,
-        kwargs,
-        *,
-        swallow_cond_exceptions: bool,
-        eager: bool,
-    ):
+    def _dispatch(args, kwargs, *, eager: bool):
         # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
         if coverage is not None and coverage.covers(args, kwargs):
             return _NO_MATCH
@@ -1083,7 +1079,7 @@ def _register_overrides_from_graph(
             try:
                 matched = cond(*args, **kwargs)
             except Exception:
-                if not swallow_cond_exceptions:
+                if eager:
                     raise
                 continue
             if matched:
@@ -1091,7 +1087,10 @@ def _register_overrides_from_graph(
                     return getattr(torch.ops._native, impl_name)(*args, **kwargs)
                 if try_initialize_runtime is not None and not try_initialize_runtime():
                     continue
-                return impl_fn(*args, **kwargs)
+                if not torch.autograd._profiler_enabled():
+                    return impl_fn(*args, **kwargs)
+                with torch.autograd.profiler.record_function(f"_native::{impl_name}"):
+                    return impl_fn(*args, **kwargs)
         return _NO_MATCH
 
     def eager_router(
@@ -1139,23 +1138,13 @@ def _register_overrides_from_graph(
             finally:
                 _router_active.on = False
 
-        result = _dispatch(
-            args,
-            kwargs,
-            swallow_cond_exceptions=False,
-            eager=True,
-        )
+        result = _dispatch(args, kwargs, eager=True)
         if result is _NO_MATCH:
             return _fallback.call_boxed(keyset, *args, **kwargs)
         return result
 
     def compile_router(*args, **kwargs):
-        result = _dispatch(
-            args,
-            kwargs,
-            swallow_cond_exceptions=True,
-            eager=False,
-        )
+        result = _dispatch(args, kwargs, eager=False)
         if result is _NO_MATCH:
             return NotImplemented
         return result

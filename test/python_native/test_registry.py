@@ -910,6 +910,25 @@ class TestRegistryRuntime(TestCase):
         out = torch.ops.aten.mul.Tensor(a, b)
         self.assertTrue(torch.equal(out, torch.tensor([42.0, 42.0])))
 
+    def test_eager_profile_names_the_override(self):
+        self.registry.register_op_override(
+            "test_dsl",
+            "aten",
+            "mul.Tensor",
+            "CPU",
+            lambda *a, **k: True,
+            lambda a, b: torch.full_like(a, 42.0),
+        )
+        self._install("mul.Tensor", "CPU")
+        node = self.registry._graphs[("aten", "mul.Tensor", "CPU")][0]
+
+        with torch.profiler.profile() as prof:
+            out = torch.ops.aten.mul.Tensor(torch.tensor([2.0]), torch.tensor([4.0]))
+
+        self.assertTrue(torch.equal(out, torch.tensor([42.0])))
+        names = [e.name for e in prof.events()]
+        self.assertEqual(names.count(f"_native::{node.node_id}"), 1)
+
     def test_no_recursion_in_aten_backward_formula(self):
         """Backward of bmm calls bmm again; the fallback must bypass the router.
 
