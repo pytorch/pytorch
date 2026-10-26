@@ -26,7 +26,8 @@ void kai_pack_rhs_groupwise_int4(
   auto weight_packed_data =
       reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
   const auto weight_data = weight.const_data_ptr<uint8_t>();
-  auto scales_data = scales.const_data_ptr();
+  const auto scales_contig = scales.contiguous();
+  const auto scales_data = scales_contig.const_data_ptr();
 
   if (weight_data == nullptr) {
     AT_ERROR("kai_pack_rhs_groupwise_int4: Weight data pointer is null");

@@ -7012,23 +7012,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 all_elements_within_threshold, "Some elements have error >= 0.06"
             )
 
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
-    @onlyNativeDeviceTypes
+    @onlyCPU
     @parametrize("q_group", [32, 64])
     @parametrize("bias_type", ["bf16", "strided_fp32"])
     def test__dyn_quant_matmul_4bit_bias_regression(
         self, device, q_group, bias_type
     ):
-        if self.device_type != "cpu":
-            self.skipTest("CPU-only KleidiAI regression test")
-
-        if not (
-            hasattr(torch.ops.aten, "_dyn_quant_pack_4bit_weight")
-            and hasattr(torch.ops.aten, "_dyn_quant_matmul_4bit")
-        ):
-            self.skipTest("Dynamic INT4 operators are unavailable")
-
         torch.manual_seed(1)
 
         m, k, n = 4, 64, 4096
@@ -7082,6 +7071,38 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             / reference.abs().clamp(min=1e-6)
         ).mean()
         self.assertLess(mean_err.item(), 0.05)
+
+        # Verify that groupwise packing handles non-contiguous BF16 scales.
+        if q_group < k:
+            scales_storage = torch.empty(
+                (*scales.shape, 2),
+                dtype=scales.dtype,
+                device=scales.device,
+            )
+            scales_storage[..., 0] = scales
+            scales_noncontiguous = scales_storage[..., 0]
+
+            self.assertFalse(scales_noncontiguous.is_contiguous())
+
+            packed_noncontiguous = torch._dyn_quant_pack_4bit_weight(
+                b_uint8,
+                scales_noncontiguous,
+                bias,
+                q_group,
+                k,
+                n,
+            )
+
+            # Compare numerical outputs for contiguous and strided scales.
+            output_noncontiguous = matmul(packed_noncontiguous)
+            output_contiguous = matmul(packed_reference)
+
+            torch.testing.assert_close(
+                output_noncontiguous,
+                output_contiguous,
+                rtol=0,
+                atol=0,
+            )
 
         packed_without_bias = pack(None)
         output_without_bias = matmul(packed_without_bias)
