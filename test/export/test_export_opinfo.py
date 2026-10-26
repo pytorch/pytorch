@@ -44,7 +44,6 @@ export_failures = {
 
 # following are failing fake export on gpu device
 fake_export_failures = {
-    xfail("histogram"),
     xfail("masked.amax"),
     xfail("masked.amin"),
     xfail("masked.argmax"),
@@ -73,6 +72,9 @@ fake_export_no_gpu_failures = {
 
 # CUDA-specific skip set generation
 fake_export_failures_cuda = fake_export_failures.copy()
+fake_export_failures_cuda |= {
+    xfail("histogram"),
+}
 if not torch.backends.cuda.is_built():
     fake_export_failures_cuda |= fake_export_no_gpu_failures
 
