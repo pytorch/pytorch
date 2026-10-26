@@ -7548,6 +7548,27 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertIs(kernel.fn.fn, original_fn)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("shape", ("unlaunched", "ambiguous"))
+    def test_never_run_kernel_freezes_its_first_config(self, shape):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler._runtime_cache import _freeze_triton_kernel
+
+        kernel = _static_runtime_kernel(32)
+        if shape == "unlaunched":
+            kernel.launchers = []
+        else:
+            kernel.launchers.append(_static_runtime_kernel(128).launchers[0])
+        kernel._cached_launcher = None
+        original_launchers = kernel.launchers
+        with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
+            payload = _freeze_triton_kernel("source", [kernel])
+        saved = pickle.loads(payload)
+        self.assertEqual(saved.cache_key, "source")
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 32})
+        self.assertEqual(saved.kernel.launchers, [])
+        self.assertIs(kernel.launchers, original_launchers)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_failure_leaves_live_kernel(self):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler._runtime_cache import (
@@ -8138,8 +8159,13 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched.heuristic_type = HeuristicType.REDUCTION
         unlaunched.configs = [unlaunched.compile_results[0].config]
         unlaunched.inductor_meta["private_config"] = "do not include config values"
+        # Never-run kernels are frozen with their first static config; these have
+        # none, so they stay unresolved.
+        unlaunched.compile_results = [object()]
         ambiguous = _static_runtime_kernel(64)
         ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
+        for launcher in ambiguous.launchers:
+            launcher._compile_result = object()
         dynamic = _static_runtime_kernel(64)
         dynamic.launchers[0]._compile_result = object()
         combo = _static_runtime_kernel(64)
@@ -8209,9 +8235,7 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(info["config_count"], 1)
             self.assertEqual(info["launcher_count"], 0)
             self.assertEqual(info["compile_result_count"], 1)
-            self.assertEqual(
-                info["compile_result_types"], ["StaticTritonCompileResult"]
-            )
+            self.assertEqual(info["compile_result_types"], ["object"])
             self.assertEqual(sources["ambiguous"]["instances"][0]["launcher_count"], 2)
             self.assertEqual(
                 sources["dynamic"]["instances"][0]["launcher_result_types"],
@@ -8505,6 +8529,7 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched.launchers = []
         unlaunched._cached_launcher = None
         unlaunched.inductor_meta = {"kernel_name": "triton_poi_unlaunched_0"}
+        unlaunched.compile_results = [object()]
 
         def record():
             _runtime_cache.record_triton_kernel("unlaunched", unlaunched)
