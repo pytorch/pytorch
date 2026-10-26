@@ -1828,6 +1828,95 @@ class TestFX(JitTestCase):
                 self.assertIs(dict.__getitem__(frame_dict, "leaf"), wrapper)
         self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
 
+    def test_trace_resolves_lazy_imports_with_patches_reverted(self):
+        from torch.fx import _symbolic_trace
+        from torch.fx._symbolic_trace import _orig_module_call, _orig_module_getattr
+
+        resolved = {}
+
+        class Lazy:
+            def __init__(self, name, value):
+                self.name, self.value = name, value
+
+            def resolve(self):
+                # What the lazily imported module's body would see.
+                resolved[self.name] = (
+                    torch.nn.Module.__call__ is _orig_module_call
+                    and torch.nn.Module.__getattr__ is _orig_module_getattr
+                )
+                return self.value
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if isinstance(value, Lazy):
+                    value = value.resolve()
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def lazy_globals(**names):
+            return Globals(
+                __builtins__=builtins,
+                **{name: Lazy(name, value) for name, value in names.items()},
+            )
+
+        def with_globals(fn, frame_dict):
+            return types.FunctionType(fn.__code__, frame_dict, fn.__name__)
+
+        def sub_forward(self, x):
+            return x * 2
+
+        def root_forward(self, x):
+            return self.sub2(self.sub1(x))
+
+        Sub = type(
+            "Sub",
+            (torch.nn.Module,),
+            {"forward": with_globals(sub_forward, lazy_globals(sub_helper=object()))},
+        )
+
+        class Root(torch.nn.Module):
+            forward = with_globals(root_forward, lazy_globals(root_helper=object()))
+
+            def __init__(self):
+                super().__init__()
+                self.sub1 = Sub()
+                self.sub2 = Sub()
+
+        class SubIsLeaf(torch.fx.Tracer):
+            def is_leaf_module(self, m, qualname):
+                return isinstance(m, Sub) or super().is_leaf_module(m, qualname)
+
+        def wrapped(x):
+            return x
+
+        # A torch.fx.wrap("wrapped") registration whose name is a lazy import.
+        wrap_globals = lazy_globals(wrapped=wrapped)
+        with (
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: isinstance(dict.__getitem__(d, name), Lazy),
+                create=True,
+            ),
+            unittest.mock.patch.dict(
+                _symbolic_trace._wrapped_fns_to_patch,
+                {(id(wrap_globals), "wrapped"): wrap_globals},
+            ),
+        ):
+            graph = SubIsLeaf().trace(Root())
+        # Resolved by _patch_wrapped_functions, the root's scan, and the scan of the
+        # first submodule call, each with every patch reverted.
+        self.assertEqual(
+            resolved, {"wrapped": True, "root_helper": True, "sub_helper": True}
+        )
+        # The patches reapplied after sub1's scan still intercept sub2's call.
+        self.assertEqual(
+            [node.target for node in graph.nodes if node.op == "call_module"],
+            ["sub1", "sub2"],
+        )
+        self.assertIs(dict.__getitem__(wrap_globals, "wrapped"), wrapped)
+
     def test_autowrap_under_a_lazy_import_runtime(self):
         # -L alone is not enough: torch imports under lazy imports only on a runtime
         # set up for them (e.g. a Cinder target with lazy imports enabled), which
