@@ -1711,6 +1711,30 @@ class TestCachingAutotunerLaunched(TestCase):
         self.assertTrue(autotuner.is_backward)
         self.assertTrue(autotuner._forward_use)
 
+    def test_forward_use_recorded_on_a_cache_hit(self):
+        from torch._inductor.async_compile import (
+            AsyncCompile,
+            CompiledTritonKernels,
+            loading_graph,
+        )
+        from torch._inductor.codecache import LambdaFuture, StaticAutotunerFuture
+
+        # A bundled kernel, and a compile still pending for a backward graph.
+        for make_future in (StaticAutotunerFuture, lambda k: LambdaFuture(lambda: k)):
+            autotuner = self._make_autotuner()
+            autotuner.set_compile_info(None, is_backward=True)
+            source = f"# a cached kernel {id(autotuner)}"
+            CompiledTritonKernels.save(source, make_future(autotuner))
+            self.addCleanup(CompiledTritonKernels.remove_future, source)
+            with (
+                loading_graph(False),
+                patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            ):
+                future = AsyncCompile().triton("triton_", source)
+            if isinstance(future, LambdaFuture):
+                self.assertIs(future.result(), autotuner)
+            self.assertTrue(autotuner._forward_use)
+
 
 class TestFastLauncherDeviceSupport(TestCase):
     @staticmethod
