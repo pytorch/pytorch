@@ -604,6 +604,17 @@
   - pull
   - inductor
 
+- name: c10 utilities
+  patterns:
+  - c10/util/**
+  - c10/test/util/**
+  approved_by:
+  - r-barnes
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
