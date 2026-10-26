@@ -38,9 +38,6 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
   - [Docker Image](#docker-image)
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
-  - [Building the Documentation](#building-the-documentation)
-    - [Troubleshooting CI Errors](#troubleshooting-ci-errors)
-    - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Resources](#resources)
@@ -61,7 +58,6 @@ At a granular level, PyTorch is a library that consists of the following compone
 | ---- | --- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | A Tensor library like NumPy, with strong GPU support |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
 | [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
@@ -439,120 +435,6 @@ See [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the lis
 make -f docker.Makefile
 ```
 
-### Building the Documentation
-
-To build documentation in various formats, you will need [Sphinx](https://www.sphinx-doc.org)
-and the `pytorch_sphinx_theme2`.
-
-Before you build the documentation locally, ensure `torch` is
-installed in your environment. For small fixes, you can install the
-nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
-
-For more complex fixes, such as adding a new module and docstrings for
-the new module, you might need to install torch [from source](#from-source).
-See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
-for docstring conventions.
-
-```bash
-cd docs/
-pip install -r requirements.txt
-make html
-make serve
-```
-
-Run `make` to get a list of all available output formats.
-
-If you get a katex error run `npm install katex`.  If it persists, try
-`npm install -g katex`
-
-> [!NOTE]
-> If you see a numpy incompatibility error, run:
-> ```
-> pip install 'numpy<2'
-> ```
-
-
-#### Troubleshooting CI Errors
-Your build may show errors you didn't have locally - here's how to find the errors relevant to the docs.
-
-If the build has any errors, you will see something like this on the PR:
-
-<img width="781" height="400" alt="Monosnap Update installation instructions for doc build · Pull Request #169534 · pytorch:pytorch 2025-12-18 18-22-53" src="https://github.com/user-attachments/assets/49a3dfe7-81c2-4246-852b-bc3f807e95af" />
-
-Any doc-related errors will occur in jobs that include "doc" somewhere in the title. It doesn't look like any of these jobs are relevant to our docs.
-
-
-Let's take a look anyway. Click on the job to see the logs:
-
-<img width="1187" height="668" alt="Monosnap Update installation instructions for doc build · pytorch:pytorch@7380336 2025-12-18 18-24-15" src="https://github.com/user-attachments/assets/117df543-8356-4323-8e1c-ef02a95554ba" />
-
-And we can be sure that this job does not involve docs.
-
-Looking at this build, we can see these jobs are relevant to our docs - and they didn't have any errors:
-
-<img width="777" height="395" alt="Check the docs jobs" src="https://github.com/user-attachments/assets/5d7c196b-2d40-49ad-87e3-f57de6e14a5b" />
-
-You might also see a comment on the PR like this:
-
-<img width="651" height="246" alt="PR Comment" src="https://github.com/user-attachments/assets/27e0120a-ba33-4b1c-b4a5-bf3064520586" />
-
-We can see that some of these issues are relevant to our docs.
-
-Open the logs by clicking on the `gh` link:
-
-<img width="873" height="360" alt="View Logs" src="https://github.com/user-attachments/assets/ab5b862f-8026-489c-b95e-a6cd4257e4b7" />
-
-And here we can see there is a doc-related error:
-
-<img width="1117" height="433" alt="Doc Error" src="https://github.com/user-attachments/assets/0a275921-736d-43a7-ab0f-3e8854d43280" />
-
-You can always find the relevant doc builds by going to the `Checks` tab on your PR, and scrolling down to `pull`.
-
-<img width="481" height="561" alt="checks" src="https://github.com/user-attachments/assets/eef18f2b-7134-4e2e-bd90-bcdc12800132" />
-
-You can either click through or toggle the accordion to see all of the jobs here, where you can see the docs jobs highlighted:
-
-<img width="570" height="611" alt="jobs" src="https://github.com/user-attachments/assets/f62812ca-caee-421b-863c-54f38fd28d46" />
-
-If you click through, you'll see the doc jobs at the bottom, like this:
-
-<img width="354" height="312" alt="View Docs jobs" src="https://github.com/user-attachments/assets/8fadb935-5314-4c4b-a1b5-133781754f03" />
-
-
-#### Building a PDF
-
-To compile a PDF of all PyTorch documentation, ensure you have
-`texlive` and LaTeX installed. On macOS, you can install them using:
-
-```
-brew install --cask mactex
-```
-
-To create the PDF:
-
-1. Run:
-
-   ```
-   make latexpdf
-   ```
-
-   This will generate the necessary files in the `build/latex` directory.
-
-2. Navigate to this directory and execute:
-
-   ```
-   make LATEXOPTS="-interaction=nonstopmode"
-   ```
-
-   This will produce a `pytorch.pdf` with the desired content. Run this
-   command one more time so that it generates the correct table
-   of contents and index.
-
-> [!NOTE]
-> To view the Table of Contents, switch to the **Table of Contents**
-> view in your PDF viewer.
-
-
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
@@ -589,21 +471,12 @@ Pointers to get you started:
 
 ## Releases and Contributing
 
-Typically, PyTorch has three minor releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
-
-We appreciate all contributions. Whether you plan to contribute a bug-fix or a new feature, please first open an issue (or find an existing one) and discuss it with us.
-Once a maintainer marks the issue "actionable", you can send a PR for it.
-Sending a PR without an actionable issue will result in the PR being automatically closed.
-See the [Issue and PR Workflow](CONTRIBUTING.md#issue-and-pr-workflow) for details.
-
-To learn more about making a contribution to PyTorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+To report issues or contribute changes to PyTorch, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For information about PyTorch releases, see [RELEASE.md](RELEASE.md).
 
 ## The Team
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
-
-PyTorch is currently maintained by [Soumith Chintala](https://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), [Alban Desmaison](https://github.com/albanD), [Piotr Bialecki](https://github.com/ptrblck) and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jekbradbury), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito). <!-- codespell:ignore -->
+PyTorch is a community-driven project with several skillful [engineers and researchers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html) contributing to it.
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
