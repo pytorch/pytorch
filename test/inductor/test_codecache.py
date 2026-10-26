@@ -5763,6 +5763,15 @@ class TestUtils(TestCase):
 class TestCppCodeCacheKey(TestCase):
     CODE = 'extern "C" int f() { return 0; }'
 
+    def setUp(self):
+        super().setUp()
+        from torch.compiler import _runtime_cache
+
+        # Frozen C++ kernels another test installed would make every key relocatable.
+        patcher = mock.patch.dict(_runtime_cache._frozen_cpp_kernels, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _key(self, extra_flags: tuple[str, ...] = ()) -> str:
         CppCodeCache.load_async(self.CODE, extra_flags=extra_flags)
         (key,) = CppCodeCache.cache
@@ -5823,6 +5832,9 @@ class TestCppCodeCacheKey(TestCase):
         self.assertIn("-I<torch_root>/torch/include", cmd)
         self.assertIn(f"-I{root}-ext/inc", cmd)
 
+    @unittest.skipIf(
+        sys.platform == "win32", "creating symlinks needs extra privileges on Windows"
+    )
     def test_frozen_kernel_replays_after_relocation(self):
         from torch._inductor.cpp_builder import CppBuilder
         from torch.compiler import _runtime_cache
