@@ -816,7 +816,6 @@
   "test/test_mobile_optimizer.py",
   "test/test_monitor.py",
   "test/test_mps.py",
-  "test/test_multigpu.py",
   "test/test_multiprocessing.py",
   "test/test_multiprocessing_spawn.py",
   "test/test_nestedtensor.py",

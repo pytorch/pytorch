@@ -688,21 +688,19 @@ class TestMultiGPUDevice(TestCase):
     def test_mem_get_info(self, device):
         device_module = torch.get_device_module(device)
 
-        def _test(device: str | int | torch.device):
+        def _test(dev: str | int | torch.device):
             # Prevent PyTorch from reusing the allocated memory
             device_module.empty_cache()
             device_module.synchronize()
-            before_free_bytes, before_available_bytes = device_module.mem_get_info(
-                device
-            )
+            before_free_bytes, before_available_bytes = device_module.mem_get_info(dev)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
+            t = torch.randn(1024 * 1024 * 8, device=dev)  # noqa: F841
 
             if IS_JETSON:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure
                 device_module.synchronize()
-            after_free_bytes, after_available_bytes = device_module.mem_get_info(device)
+            after_free_bytes, after_available_bytes = device_module.mem_get_info(dev)
 
             self.assertLess(after_free_bytes, before_free_bytes)
             self.assertEqual(before_available_bytes, after_available_bytes)
@@ -1025,10 +1023,7 @@ t2.start()
             for k, v in expected.items():
                 self.assertEqual(v, stats[k])
 
-    @staticmethod
-    def _test_memory_stats_generator(self, device, N=35):
-        device_module = torch.get_device_module(device)
-
+    def _test_memory_stats_generator(self, device_module, device, N=35):
         m0 = device_module.memory_allocated(device)
         last_m_arr = [device_module.memory_allocated(device)]
         max_m_arr = [device_module.max_memory_allocated(device)]
@@ -1191,8 +1186,9 @@ t2.start()
     @serialTest()
     def test_memory_stats(self, device):
         gc.collect()
-        torch.get_device_module(device).empty_cache()
-        for _ in self._test_memory_stats_generator(self, device):
+        device_module = torch.get_device_module(device)
+        device_module.empty_cache()
+        for _ in self._test_memory_stats_generator(device_module, device):
             self._check_memory_stat_consistency(device)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/129860")
@@ -1201,6 +1197,7 @@ t2.start()
     @deviceCountAtLeast(2)
     def test_memory_stats_multigpu(self, devices):
         device_module = torch.get_device_module(devices[0])
+        d1 = torch.device(devices[1])
 
         # advance a generator with a end flag
         def advance(gen, end):
@@ -1213,8 +1210,8 @@ t2.start()
 
         # interlace
         device_module.empty_cache()
-        gen0 = self._test_memory_stats_generator(self, device=devices[0], N=35)
-        gen1 = self._test_memory_stats_generator(self, device=devices[1], N=35)
+        gen0 = self._test_memory_stats_generator(device_module, devices[0], N=35)
+        gen1 = self._test_memory_stats_generator(device_module, d1, N=35)
         end0 = end1 = False
         while not (end0 and end1):
             end0 = advance(gen0, end0)
@@ -1222,8 +1219,8 @@ t2.start()
 
         # semi-random order
         device_module.empty_cache()
-        gen0 = self._test_memory_stats_generator(self, device=devices[0], N=35)
-        gen1 = self._test_memory_stats_generator(self, device=devices[1], N=35)
+        gen0 = self._test_memory_stats_generator(device_module, 0, N=35)
+        gen1 = self._test_memory_stats_generator(device_module, d1, N=35)
         end0 = end1 = False
 
         while not (end0 and end1):
@@ -1910,7 +1907,7 @@ class TestCudaComm(TestCase):
 
 
 instantiate_device_type_tests(
-    TestMultiGPUDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestMultiGPUDevice, globals(), except_for="cpu", allow_xpu=True
 )
 
 
