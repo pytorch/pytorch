@@ -4930,9 +4930,11 @@ class TestPrecompileDynamoCapture(TestCase):
         )
 
     def test_mode_and_options_are_checked_like_torch_compile(self):
+        from torch._dynamo.precompile_package import PrecompileSession
+
         single = self.mod.single
         options = {"size_asserts": True}
-        with self.assertRaisesRegex(ValueError, "Either mode or options"):
+        with self.assertRaisesRegex(RuntimeError, "Either mode or options"):
             self._capture(single, mode="reduce-overhead", options=options)
         with self.assertRaisesRegex(ValueError, "backend='eager' takes neither"):
             self._capture(single, backend="eager", mode="reduce-overhead")
@@ -4941,10 +4943,14 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unrecognized mode"):
             self._capture(single, mode="no-such-mode")
         make_fx = MakeFxTracer()
-        with self.assertRaisesRegex(PrecompileError, "cannot serve CUDA graphs"):
+        reason = "outside Inductor's CUDA graph wrapper"
+        with self.assertRaisesRegex(PrecompileError, reason):
             self._capture(single, tracer=make_fx, mode="reduce-overhead")
-        with self.assertRaisesRegex(PrecompileError, "cannot serve CUDA graphs"):
+        with self.assertRaisesRegex(PrecompileError, reason):
             self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
+        wrapper = torch._TorchCompileInductorWrapper(None, options, None)
+        with self.assertRaisesRegex(ValueError, "not 'eager'"):
+            PrecompileSession(single, backend="eager", inductor=wrapper)
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
             self._capture(single, options={"cudagraph_policy": None})
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
@@ -4953,12 +4959,16 @@ class TestPrecompileDynamoCapture(TestCase):
             with self.assertRaisesRegex(PrecompileError, "always compiles with"):
                 self._capture(single, tracer=make_fx, options={key: False})
 
+    @parametrize("how", ["options", "mode"])
     @parametrize("tracer", ["make_fx", "dynamo"])
-    def test_options_reach_the_inductor_compile(self, tracer):
+    def test_options_reach_the_inductor_compile(self, tracer, how):
         from torch._functorch import aot_autograd
-        from torch._inductor import compile_fx
+        from torch._inductor import compile_fx, list_mode_options
 
+        mode = "max-autotune-no-cudagraphs"
         options = {"max_autotune_gemm_backends": "ATEN"}
+        expected = options if how == "options" else list_mode_options(mode)
+        kwargs = {"options": options} if how == "options" else {"mode": mode}
         if tracer == "make_fx":
             target, name, kwarg = aot_autograd, "compile_to_python", "options"
         else:
@@ -4967,7 +4977,7 @@ class TestPrecompileDynamoCapture(TestCase):
         fn = self.mod.single if tracer == "make_fx" else self.mod.step
         tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
         with mock.patch.object(target, name, wraps=getattr(target, name)) as spy:
-            with self._capture(fn, tracer=tracer_obj, options=options) as cap:
+            with self._capture(fn, tracer=tracer_obj, **kwargs) as cap:
                 y = cap(self.model, self.x2)
                 graphs = cap.summary().backend_graphs if tracer == "dynamo" else 1
         # compile_fx re-enters itself without config_patches once it has applied
@@ -4976,7 +4986,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(len(seen), graphs)
         self.assertGreaterEqual(len(seen), 2 if tracer == "dynamo" else 1)
         for patches in seen:
-            self.assertEqual(patches["max_autotune_gemm_backends"], "ATEN")
+            self.assertLessEqual(expected.items(), patches.items())
         # A graph-breaking capture mints resume names this process already holds,
         # and under crossref its guards hold only inside the harness's mode.
         if tracer == "dynamo":

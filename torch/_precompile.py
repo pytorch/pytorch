@@ -3451,7 +3451,8 @@ def capture(
     as the capture compiled under them (``mode`` and ``options`` over the
     process's ``torch._inductor.config`` when ``capture()`` is called) in its
     ``CUDAGRAPH_CONFIG``, and the loading process records its CUDA graphs
-    afresh on its first calls. Whether a graph can run as a CUDA graph at all (``triton.cudagraph_support_input_mutation``,
+    afresh on its first calls. Whether a graph can run as a CUDA graph at all
+    (``triton.cudagraph_support_input_mutation``,
     ``force_disable_cudagraph_TESTING_ONLY``) is decided when it compiles, and
     that decision ships with it. The settings CUDA graph trees read while the
     graphs run (``triton.cudagraph_capture_sizes``,
@@ -3468,8 +3469,8 @@ def capture(
     :class:`MakeFxTracer` capture refuses a ``mode`` or ``options`` that turns
     on ``triton.cudagraphs``, since its standalone module runs outside
     Inductor's CUDA graph wrapper (it ignores the ambient flag, as before), and
-    refuses ``size_asserts`` or ``scalar_asserts`` off, which it always
-    compiles with on.
+    refuses ``size_asserts`` or ``scalar_asserts`` off: it compiles with
+    ``size_asserts`` on, and with ``scalar_asserts`` on for a dynamic capture.
 
     .. note::
 
@@ -3495,7 +3496,7 @@ def capture(
                 "takes neither."
             )
         if mode is not None and options is not None:
-            raise ValueError(
+            raise RuntimeError(
                 "Either mode or options can be specified, but both can't be "
                 "specified at the same time."
             )

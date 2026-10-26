@@ -1760,6 +1760,10 @@ class PrecompileSession(Generic[_P, _R]):
         dynamic: bool | None = None,
         inductor: torch._TorchCompileInductorWrapper | None = None,
     ) -> None:
+        if inductor is not None and backend != "inductor":
+            raise ValueError(
+                f"an Inductor wrapper compiles with backend='inductor', not {backend!r}."
+            )
         self._fn = fn
         self._backend = backend
         self._inductor = inductor
