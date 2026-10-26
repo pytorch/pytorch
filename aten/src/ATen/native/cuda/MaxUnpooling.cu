@@ -263,8 +263,10 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
     return output;
   }
 
-  int totalZ = inputTime * inputSlices * batchSize;
-  int offsetZ = 0;
+  // 64-bit: the slice count can exceed INT_MAX, which would wrap negative and
+  // skip the launch loop below entirely.
+  int64_t totalZ = inputTime * inputSlices * batchSize;
+  int64_t offsetZ = 0;
   dim3 block(32, 8);
 
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
