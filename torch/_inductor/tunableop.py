@@ -137,6 +137,8 @@ class Outcome(NamedTuple):
 _worker: Any = None
 _worker_key: tuple[int, str] | None = None
 _atexit_registered = False
+# How long a graceful shutdown waits for the child before resorting to SIGKILL.
+_SHUTDOWN_TIMEOUT_S = 10.0
 # One worker, one pipe. Extern kernels are benchmarked sequentially today
 # (select_algorithm routes them to benchmark_in_current_process, not the thread
 # pool), but nothing structural enforces that, and interleaved put/get would
@@ -213,15 +215,26 @@ def _shutdown_locked(graceful: bool = True) -> None:
         try:
             if graceful:
                 _worker.shutdown(wait=False)
-                _worker.wait()
+                # Bounded: TuningProcess.wait() blocks on process.wait() with no
+                # timeout, and this runs under _worker_lock on a key change and
+                # again from atexit. A child wedged in device teardown would
+                # otherwise stall every later submit(), or stop the compiling
+                # process from exiting at all.
+                try:
+                    if _worker.alive():
+                        _worker.process.wait(timeout=_SHUTDOWN_TIMEOUT_S)
+                except Exception:
+                    log.debug(
+                        "TunableOp worker did not exit in %ss; killing",
+                        _SHUTDOWN_TIMEOUT_S,
+                    )
+                    _worker.kill()
+                else:
+                    _worker.close()
             else:
                 _worker.kill()
         except Exception:
             log.debug("TunableOp worker shutdown failed", exc_info=True)
-            try:
-                _worker.close()
-            except Exception:
-                log.debug("TunableOp worker close failed", exc_info=True)
         _worker = None
     _worker_key = None
 
