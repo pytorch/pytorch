@@ -26,13 +26,13 @@ jobs:
             upload_subfolders: "cu126 cu128 cu129"
             arch: "x86_64"
           - build_cuda_short: "130"
-            upload_subfolders: "cu130"
+            upload_subfolders: "cu130 cu132 cu134"
             arch: "x86_64"
           - build_cuda_short: "126"
             upload_subfolders: "cu126 cu128 cu129"
             arch: "aarch64"
           - build_cuda_short: "130"
-            upload_subfolders: "cu130"
+            upload_subfolders: "cu130 cu132 cu134"
             arch: "aarch64"
     permissions:
       id-token: write

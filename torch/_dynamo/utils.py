@@ -96,6 +96,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from . import config
 from .graph_utils import _get_flat_args
 
 
@@ -131,8 +132,6 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
-
-    from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
@@ -1445,9 +1444,14 @@ def lazily_unpack(
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    disable_ngb = config.patch(nested_graph_breaks=False)
     while True:
         try:
-            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            # This host-side iteration has no resumable frame. Compute the item
+            # before yielding so the config patch does not leak to the caller.
+            with disable_ngb:
+                item = pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            yield item
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -2622,11 +2626,12 @@ class CleanupHook:
         return CleanupHook(scope, name, token)
 
     @staticmethod
-    def disown(scope: dict[str, Any], name: str) -> None:
+    def disown(scope: dict[str, Any], name: str) -> bool:
         """Invalidate whichever hook currently owns (scope, name), so that if
         its code object outlives this call, firing later is a no-op instead of
-        deleting a binding something else has since taken over."""
-        _cleanup_owners.pop((id(scope), name), None)
+        deleting a binding something else has since taken over. Returns whether
+        a hook owned it."""
+        return _cleanup_owners.pop((id(scope), name), None) is not None
 
 
 class CleanupManager(ExactWeakKeyDictionary):
@@ -5603,6 +5608,59 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:
+    return type.__dict__["__dict__"].__get__(cls, type(cls))
+
+
+def get_type_mro_no_user_code(cls: type) -> tuple[type, ...]:
+    return type.__dict__["__mro__"].__get__(cls, type(cls))
+
+
+def iter_mro_static_dicts(cls: type) -> Iterator[tuple[type, Mapping[str, object]]]:
+    """Yield MRO classes and dictionaries without invoking metaclass hooks."""
+    for base in get_type_mro_no_user_code(cls):
+        yield base, get_type_dict_no_user_code(base)
+
+
+def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
+    """Yield MRO definitions without invoking custom metaclass hooks."""
+    for _, namespace in iter_mro_static_dicts(cls):
+        if name in namespace:
+            yield namespace[name]
+
+
+def find_bound_builtin_method_descriptor(value: object) -> object | None:
+    if not isinstance(value, types.BuiltinMethodType):
+        return None
+
+    receiver = value.__self__
+    receiver_is_type = issubclass(type(receiver), type)
+    owner = cast(type, receiver if receiver_is_type else type(receiver))
+    for descriptor in iter_mro_static_attrs(owner, value.__name__):
+        if type(descriptor) not in (
+            types.BuiltinFunctionType,
+            types.ClassMethodDescriptorType,
+            types.MethodDescriptorType,
+        ):
+            continue
+        descriptor_get = getattr(descriptor, "__get__", None)
+        if descriptor_get is None:
+            if descriptor is value:
+                return descriptor
+            continue
+        try:
+            rebound = (
+                descriptor_get(None, receiver)
+                if receiver_is_type
+                else descriptor_get(receiver, owner)
+            )
+        except (AttributeError, TypeError):
+            continue
+        if rebound == value:
+            return descriptor
+    return None
+
+
 def is_torch_class(cls: type) -> bool:
     """Check if cls is defined in torch or a torch submodule.
 
@@ -5612,8 +5670,10 @@ def is_torch_class(cls: type) -> bool:
     inplace-view-on-input-tensor detection. This helper identifies classes
     whose descriptors should take that path instead of descriptor VTs.
     """
-    module = getattr(cls, "__module__", None)
-    return module is not None and (module == "torch" or module.startswith("torch."))
+    module = type.__dict__["__module__"].__get__(cls, type(cls))
+    return type(module) is str and (
+        module == "torch" or str.startswith(module, "torch.")
+    )
 
 
 def is_torch_function_object(value: object) -> bool:
