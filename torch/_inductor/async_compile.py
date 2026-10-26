@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
+import contextvars
 import functools
 import json
 import logging
@@ -64,6 +66,23 @@ from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
+
+
+# Whether the compiled graph whose cached output code is loading is a backward:
+# loading it runs AsyncCompile.triton with no GraphLowering to say so.
+_loading_graph_is_backward: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_loading_graph_is_backward", default=False
+)
+
+
+@contextlib.contextmanager
+def loading_graph(is_backward: bool) -> Iterator[None]:
+    """Tag the Triton kernels cached output code creates while it loads."""
+    token = _loading_graph_is_backward.set(is_backward)
+    try:
+        yield
+    finally:
+        _loading_graph_is_backward.reset(token)
 
 
 if TYPE_CHECKING:
@@ -563,7 +582,9 @@ class AsyncCompile:
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
-        is_backward = getattr(V.graph, "is_backward", False)
+        is_backward = getattr(V.graph, "is_backward", None)
+        if is_backward is None:
+            is_backward = _loading_graph_is_backward.get()
 
         source_key = CompiledTritonKernels.key(source_code)
         if (kernel := load_triton_kernel(source_key)) is not None:
