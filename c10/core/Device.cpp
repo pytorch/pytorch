@@ -27,6 +27,8 @@ DeviceType parse_type(const std::string& device_string) {
           {"ve", DeviceType::VE},
           {"fpga", DeviceType::FPGA},
           {"maia", DeviceType::MAIA},
+          // TODO: stop parsing "xla" once PyTorch/XLA is archived
+          // (November 15, 2026) in favor of TorchTPU.
           {"xla", DeviceType::XLA},
           {"lazy", DeviceType::Lazy},
           {"vulkan", DeviceType::Vulkan},
@@ -55,7 +57,10 @@ DeviceType parse_type(const std::string& device_string) {
   }
   std::vector<const char*> device_names;
   for (const auto& it : types) {
-    if (it.first) {
+    // "xla" still parses, but PyTorch/XLA is deprecated, so don't suggest it.
+    // TODO: stop parsing "xla" once PyTorch/XLA is archived
+    // (November 15, 2026) in favor of TorchTPU.
+    if (it.first && it.second != DeviceType::XLA) {
       device_names.push_back(it.first);
     }
   }
