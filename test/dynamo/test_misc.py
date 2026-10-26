@@ -20453,7 +20453,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             )
 
     @onlyOn(["cuda", "xpu"])
-    def test_cuda_tensor_is_pinned_constant_false(self, device):
+    def test_device_tensor_is_pinned_constant_false(self, device):
         def pinned_memory_of(arg):
             return arg.is_pinned()
 
