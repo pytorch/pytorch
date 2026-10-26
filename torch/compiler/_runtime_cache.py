@@ -561,7 +561,7 @@ def _launch_probe(kernel: CachingAutotuner) -> CachingAutotuner:
     for result in kernel.compile_results:
         result = copy.copy(result)
         if hasattr(result, "kernel"):
-            result.kernel = copy.copy(result.kernel)
+            result.kernel = copy.copy(result.kernel)  # pyrefly: ignore [bad-assignment]
         probe.compile_results.append(result)
     probe.launchers = list(kernel.launchers)
     return probe
