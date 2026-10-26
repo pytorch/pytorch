@@ -3716,6 +3716,7 @@ class DebugAutotuner(CachingAutotuner):
 
             if self.cached is None:
                 ms = self.bench(launcher, *args, with_profiler=self.with_profiler)
+                self._launched = True
                 num_in_out_ptrs = len(
                     [
                         arg_name

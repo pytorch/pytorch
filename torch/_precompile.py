@@ -420,11 +420,13 @@ class DynamoTracer:
     such as the identity guards every model drops because they cannot be serialized,
     are listed in the artifact rather than refused.
 
-    ``allow_untuned_backward`` covers a backward Triton kernel the capture compiled
-    but no call ran, e.g. a training step's backward whose outputs went unused: by
-    default it is frozen with its first config, tuning off, and reported with a
-    warning and a ``precompile_triton_untuned_kernels`` artifact. Pass False to
-    refuse it like any other kernel that cannot be frozen.
+    ``require_tuned_backward`` covers a backward Triton kernel the capture compiled
+    but no call ran, e.g. in a graph variant whose backward no captured step
+    reached: by default it is refused like any other kernel that cannot be
+    frozen. With ``require_tuned_backward=False`` it is frozen with its first
+    config, tuning off, and reported with a warning and a
+    ``precompile_triton_untuned_kernels`` artifact; serving under
+    ``no_compilation()`` could not tune it anyway.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -432,7 +434,7 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
-    allow_untuned_backward: bool = True
+    require_tuned_backward: bool = True
 
 
 class PrecompiledRunnable:
@@ -714,11 +716,11 @@ class _DynamoCapture(Capture[_P, _R]):
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
-        allow_untuned_backward: bool = True,
+        require_tuned_backward: bool,
     ) -> None:
         super().__init__()
         self._session = session
-        self._allow_untuned_backward = allow_untuned_backward
+        self._require_tuned_backward = require_tuned_backward
         self._artifact_path = artifact_path
         self._cache_path = cache_path
         self._gates = {
@@ -816,7 +818,7 @@ class _DynamoCapture(Capture[_P, _R]):
 
         try:
             freeze_runtime_cache(
-                snapshot, write, allow_untuned_backward=self._allow_untuned_backward
+                snapshot, write, require_tuned_backward=self._require_tuned_backward
             )
         except PrecompileError:
             raise
@@ -3360,9 +3362,7 @@ def capture(
     needs there, since one compiled or launched only before the block is not in
     the cache. Each write also freezes the compiled kernels the serving process
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
-    freeze, except a backward Triton kernel no call ran, which a
-    :class:`DynamoTracer` capture freezes untuned unless
-    ``allow_untuned_backward=False``. That includes kernels launched directly through ``@triton.jit`` and
+    freeze. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
     directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
     you set is not used inside the block, and a JIT kernel or autotuner already
@@ -3371,7 +3371,9 @@ def capture(
     picks, which is what ships and what the process keeps using afterwards, may
     differ from the one picked before the block. Compiled JIT kernel
     specializations and autotuning decisions the block does not produce again
-    are kept afterwards.
+    are kept afterwards. A :class:`DynamoTracer` capture with
+    ``require_tuned_backward=False`` freezes an Inductor backward kernel no call
+    ran untuned instead of raising for it.
     Triton does not cache the decision of an autotuner with ``pre_hook``
     configs, so one that does not prune its configs keeps its earlier decision
     in the block and is benchmarked again on first use in the serving process.
@@ -3481,7 +3483,7 @@ def capture(
         cache_path,
         require_complete=tracer.require_complete,
         require_no_risky_drops=tracer.require_no_risky_drops,
-        allow_untuned_backward=tracer.allow_untuned_backward,
+        require_tuned_backward=tracer.require_tuned_backward,
     )
 
 
