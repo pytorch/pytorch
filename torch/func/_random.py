@@ -393,8 +393,7 @@ def uniform_(
         return torch.ops.aten._philox_uniform_(result, key, low, high)
 
     def wrap_scalar(bound):
-        # A scalar mixed with a tensor bound goes in as float64, so the kernel
-        # rounds it exactly as the scalar overload rounds its double argument.
+        # float64 matches the scalar overload's double rounding.
         if isinstance(bound, torch.Tensor):
             return bound
         return torch.tensor(bound, dtype=torch.float64, device=result.device)
