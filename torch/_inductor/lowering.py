@@ -2425,18 +2425,7 @@ def cat(inputs, dim=0):
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            if ir.ConcatKernel.can_realize_into_without_copy(storage):
-                return False
-            # Copying all of a buffer Inductor computes can fuse into its
-            # producer, which is cheaper than re-reading it in a pointwise cat.
-            return not (
-                config.cat_fuse_computed_input_copies
-                and isinstance(storage.data, ir.ComputedBuffer)
-                and not storage.data.is_no_op()
-                and V.graph.sizevars.statically_known_equals(
-                    x.get_numel(), storage.get_numel()
-                )
-            )
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return should_lower_cat_input(unwrap_tensor(x))
@@ -2445,6 +2434,20 @@ def cat(inputs, dim=0):
             return True
 
         return False
+
+    def copy_fuses_into_producer(x) -> bool:
+        # Copying all of a buffer Inductor computes can fuse into its producer,
+        # which is cheaper than re-reading it in a pointwise cat.
+        if not config.cat_fuse_computed_input_copies or not ir.is_storage_and_layout(x):
+            return False
+        storage, _ = ir.as_storage_and_layout(x, freeze=False)
+        return (
+            isinstance(storage.data, ir.ComputedBuffer)
+            and not storage.data.is_no_op()
+            and V.graph.sizevars.statically_known_equals(
+                x.get_numel(), storage.get_numel()
+            )
+        )
 
     if config.force_pointwise_cat:
         return pointwise_cat(inputs, dim)
@@ -2533,7 +2536,11 @@ def cat(inputs, dim=0):
         has_multi_consumers = any_input_has_multi_consumers()
 
         horizontal_fuse_cat = (
-            all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
+            all(
+                should_lower_cat_input(inp) and not copy_fuses_into_producer(inp)
+                for inp in inputs
+            )
+            and not fusable_reduction
         )
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):

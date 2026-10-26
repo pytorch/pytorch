@@ -2275,7 +2275,12 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         value: CSEVariable,
     ) -> CSEVariable:
         """Reshape the parent-full tile and reduce over the local reduction."""
-        from .triton import triton_type, upcast_acc_dtype, upcast_compute_type
+        from .triton import (
+            low_precision_fp,
+            triton_type,
+            upcast_acc_dtype,
+            upcast_compute_type,
+        )
 
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
@@ -2283,32 +2288,29 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
         self._family.ensure_headers(k)
-        if value.dtype is None:
+        value_dtype = value.dtype
+        if value_dtype is None:
             raise AssertionError("value must have a known dtype")
-        # Like TritonKernel.reduction, [b]float16 always reduces in float32, even
-        # when codegen_upcast_to_fp32 leaves the loaded tile in half precision.
-        acc_dtype = upcast_acc_dtype(src_dtype)
-        if value.dtype in (torch.float16, torch.bfloat16):
+        # As in TritonKernel.reduction, low-precision floats reduce in float32,
+        # also when codegen_upcast_to_fp32 leaves the loaded tile in its dtype,
+        # and the result is handed back in the compute type of its dtype.
+        upcast = low_precision_fp(src_dtype) or low_precision_fp(value_dtype)
+        if upcast and value_dtype != torch.float32:
+            value_dtype = torch.float32
             value = k.cse.generate(
-                k.compute,
-                f"{value}.to(tl.float32)",
-                dtype=torch.float32,
-                shape=value.shape,
+                k.compute, f"{value}.to(tl.float32)", dtype=value_dtype, shape=value.shape
             )
-            acc_dtype = torch.float32
-        reshaped = k.emit_reshape(value, self._layout.reshape_shape, value.dtype)
+        reshaped = k.emit_reshape(value, self._layout.reshape_shape, value_dtype)
         k.num_reduction += 1
         result = k.emit_reduce(
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            acc_dtype,
+            torch.float32 if upcast else upcast_acc_dtype(src_dtype),
             self._layout.output_shape,
         )
-        # As in TritonKernel.reduction, hand the result back in the compute type
-        # of its dtype (half precision when codegen_upcast_to_fp32 is off).
         compute_dtype = upcast_compute_type(dtype)
-        if dtype in (torch.float16, torch.bfloat16) and result.dtype != compute_dtype:
+        if upcast and result.dtype != compute_dtype:
             result = k.cse.generate(
                 k.compute,
                 f"{result}.to({triton_type(compute_dtype)})",

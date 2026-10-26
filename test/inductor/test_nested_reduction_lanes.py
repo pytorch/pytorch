@@ -143,6 +143,8 @@ class NestedLaneTestCase(TestCase):
             "cat_fuse_computed_input_copies": True,
             "force_disable_caches": True,
         }
+        # Tests define fn with the same code object, so drop earlier compiles.
+        torch._dynamo.reset()
         with config.patch({**settings, "triton.nested_reduction": False}):
             expected = torch.compile(fn, fullgraph=True)(x)
         torch._dynamo.reset()
