@@ -609,7 +609,9 @@ class TestCppPortableKey(TestCase):
         from torch._inductor.cpp_builder import CppBuilder, CppTorchDeviceOptions
 
         return CppBuilder(
-            name="o", sources="i", BuildOption=CppTorchDeviceOptions()
+            name="o",
+            sources="i",
+            BuildOption=CppTorchDeviceOptions(device_type="cpu"),
         ).get_command_line()
 
     def test_key_survives_relocating_the_install(self):
