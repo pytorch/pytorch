@@ -232,6 +232,8 @@ def custom_op(
 
     """
 
+    registering_module = _registering_module(inspect.currentframe())
+
     def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
@@ -247,6 +249,7 @@ def custom_op(
 
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
+        result._registering_module = registering_module
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -267,6 +270,21 @@ def custom_op(
     if fn is None:
         return inner
     return inner(fn)
+
+
+def _registering_module(frame: Any) -> str | None:
+    """The module whose import runs a ``custom_op`` call made from ``frame``: the
+    nearest module-level frame on the stack, so a registration made through a helper
+    or a factory that the module calls at import time counts too. ``__main__`` cannot
+    be imported again, so it records nothing.
+    """
+    frame = frame.f_back if frame is not None else None
+    while frame is not None and frame.f_code.co_name != "<module>":
+        frame = frame.f_back
+    if frame is None:
+        return None
+    name = frame.f_globals.get("__name__")
+    return None if name == "__main__" else name
 
 
 class CustomOpDef:
@@ -294,6 +312,8 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
+        # Set by custom_op: the module whose import runs this registration, if any.
+        self._registering_module: str | None = None
 
         self._backend_fns: dict[str | None, Callable] = {}
         self._abstract_fn: Callable | None = None
