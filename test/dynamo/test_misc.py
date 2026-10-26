@@ -6695,6 +6695,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    @parametrize("bind", [False, True])
+    def test_typing_method_descriptor(self, bind):
+        def fn(x):
+            if bind:
+                descriptor = typing.Annotated[int, str.format].__metadata__[0]
+                return x + 1, descriptor.__get__("{}", str)("a")
+            return x + 1, typing.Literal[str.format].__args__[0]
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=bind)
+        x = torch.ones(2)
+        result = opt_fn(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(opt_fn(x), result)
+        if bind:
+            self.assertEqual(counter.frame_count, 1)
+        else:
+            self.assertIs(result[1], str.format)
+
     def test_tying_union_new_syntax(self):
         def fn(x):
             def inner1(y: torch.Tensor | None):
