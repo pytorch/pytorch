@@ -7272,7 +7272,9 @@ def _never_run_kernel(shape, backward=True):
     if shape == "unlaunched":
         kernel.launchers = []
     else:
-        kernel.launchers.append(_static_runtime_kernel(128).launchers[0])
+        other = _static_runtime_kernel(128)
+        kernel.compile_results.append(other.compile_results[0])
+        kernel.launchers.append(other.launchers[0])
     kernel._cached_launcher = None
     kernel.is_backward = backward
     return kernel
@@ -7588,6 +7590,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 "source", [kernel], freeze_never_run_backward=True
             )
         self.assertIs(kernel.compile_results, original_results)
+        self.assertEqual(len(kernel.compile_results), 2)
         self.assertEqual(kernel.launchers, original_launchers)
         self.assertIsNone(kernel._cached_launcher)
         self.assertIn("backward Triton kernel runtime_kernel", logs.output[0])
@@ -7596,6 +7599,9 @@ class TestPrecompileRuntimeCache(TestCase):
         saved = pickle.loads(payload)
         self.assertEqual(saved.cache_key, "source")
         self.assertEqual(saved.kernel.launchers, [])
+        # The record keeps only the selected config.
+        [frozen_result] = saved.kernel.compile_results
+        self.assertEqual(frozen_result.config.kwargs, {"XBLOCK": 32})
         # Serving loads the record with exactly one selected config and builds
         # its launcher from it, so the first launch has nothing left to tune.
         made = []
@@ -7644,6 +7650,39 @@ class TestPrecompileRuntimeCache(TestCase):
         reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
         self.assertEqual(reasons, ["launcher_count_not_one", "never_built_launchers"])
         self.assertEqual(kernel.launchers, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_never_run_source_freezes_a_later_instance_with_launchers(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler import _runtime_cache
+
+        later = _never_run_kernel("ambiguous")
+        later.launchers.reverse()
+        with (
+            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+            self.assertLogs(_runtime_cache.log, "WARNING"),
+        ):
+            payload = _runtime_cache._freeze_triton_kernel(
+                "source",
+                [_never_run_kernel("unlaunched"), later],
+                freeze_never_run_backward=True,
+            )
+        saved = pickle.loads(payload)
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 128})
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_never_run_kernel_whose_plugin_owns_its_config_stays_unresolved(self):
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
+
+        kernel = _never_run_kernel("ambiguous")
+        kernel._plugins = [mock.Mock()]
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
+            _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
+        reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
+        self.assertEqual(reasons, ["launcher_count_not_one", "plugin_owned_config"])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_forward_kernel_stays_unresolved(self):
@@ -7769,18 +7808,37 @@ class TestPrecompileRuntimeCache(TestCase):
         )
         self.assertIn("XBLOCK: 128", rejected[2]["config"])
 
-    def test_capture_scope_rejects_a_conflicting_freeze_flag(self):
+    def test_capture_scope_takes_the_first_stated_freeze_flag(self):
         from torch.compiler._runtime_cache import _active_capture, capture_scope
 
-        with capture_scope(freeze_never_run_backward=True):
-            # A block that has no say joins the open scope.
-            with capture_scope():
-                self.assertTrue(_active_capture().freeze_never_run_backward)
-            with self.assertRaisesRegex(RuntimeError, "disagree"):
-                with capture_scope(freeze_never_run_backward=False):
-                    pass
+        with capture_scope():
+            self.assertIsNone(_active_capture().freeze_never_run_backward)
+            # The first block that states a preference sets it for the scope.
+            with capture_scope(freeze_never_run_backward=True):
+                with capture_scope():
+                    self.assertTrue(_active_capture().freeze_never_run_backward)
+                with self.assertRaisesRegex(RuntimeError, "disagree"):
+                    with capture_scope(freeze_never_run_backward=False):
+                        pass
             self.assertTrue(_active_capture().freeze_never_run_backward)
         self.assertIsNone(_active_capture())
+
+    def test_dynamo_tracer_opts_its_capture_into_the_fallback(self):
+        from torch.compiler._runtime_cache import _active_capture
+
+        for enabled in (False, True):
+            seen = []
+            _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+                tracer=DynamoTracer(
+                    require_no_risky_drops=False, freeze_never_run_backward=enabled
+                ),
+                then=lambda: seen.append(_active_capture().freeze_never_run_backward),
+            )
+            self.assertEqual(seen, [True if enabled else None])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_failure_leaves_live_kernel(self):

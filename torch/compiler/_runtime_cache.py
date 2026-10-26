@@ -496,9 +496,9 @@ def _freeze_never_run_backward(
     built a launcher for each config but never autotuned down to one. The
     configs are semantically equivalent, so take the first launcher's that is
     statically launchable, would not tune on launch and has a binary that can be
-    retained. A kernel with no launchers stays unresolved: either its compile
-    future never resolved, so it skipped the autotune-cache recheck, or a plugin
-    owns its config choice.
+    retained. A kernel with no launchers stays unresolved, since its compile
+    future never resolved and so it skipped the autotune-cache recheck, as does a
+    kernel whose plugins own its config choice.
 
     The record is served to every graph that renders the source, so a source
     with a recorded forward instance is not frozen. Direction is each recorded
@@ -521,6 +521,13 @@ def _freeze_never_run_backward(
             if not count:
                 rejected.append(
                     _triton_export_diagnostic(kernel, "never_built_launchers")
+                )
+                continue
+            # A plugin such as incremental autotuning picks among the launchers
+            # over real runs, which a frozen single launcher would skip.
+            if kernel._active_plugins():
+                rejected.append(
+                    _triton_export_diagnostic(kernel, "plugin_owned_config")
                 )
                 continue
             for index, launcher in enumerate(kernel.launchers, start=1):
@@ -604,7 +611,7 @@ def _pickle_snapshot(
 
 
 class _RuntimeCapture:
-    def __init__(self, freeze_never_run_backward: bool = False) -> None:
+    def __init__(self, freeze_never_run_backward: bool | None = None) -> None:
         self.pid = os.getpid()
         self.freeze_never_run_backward = freeze_never_run_backward
         # The precompile.capture blocks open in this process. Overlapping
@@ -723,15 +730,17 @@ def capture_scope(*, freeze_never_run_backward: bool | None = None) -> Iterator[
 
     ``freeze_never_run_backward`` lets the scope's finalize freeze a backward
     Triton kernel no captured step ran with its first usable config, which is
-    never benchmarked (see ``_freeze_never_run_backward``). The block that opens
-    the scope sets it; a block that joins an open scope must leave it ``None`` or
-    agree with it.
+    never benchmarked (see ``_freeze_never_run_backward``). ``None`` states no
+    preference; the first block that states one sets it for the scope, and a
+    block that states the other raises.
     """
     global _capture
     with _capture_lock:
         owner = _active_capture()
         if owner is None:
-            owner = _capture = _RuntimeCapture(bool(freeze_never_run_backward))
+            owner = _capture = _RuntimeCapture(freeze_never_run_backward)
+        elif owner.freeze_never_run_backward is None:
+            owner.freeze_never_run_backward = freeze_never_run_backward
         elif freeze_never_run_backward not in (
             None,
             owner.freeze_never_run_backward,
@@ -839,7 +848,7 @@ def freeze_runtime_cache(
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
         static_payload = _freeze_triton_kernels(
-            kernels, owner.freeze_never_run_backward
+            kernels, bool(owner.freeze_never_run_backward)
         )
         cpp_payload = _freeze_cpp_kernels(cpp_kernels)
         if cache is not None:
