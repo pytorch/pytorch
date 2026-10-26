@@ -41,6 +41,7 @@ INDEX_DTYPES = {
     torch.int16: Int16,
     torch.uint32: Uint32,
     torch.int32: Int32,
+    torch.int64: Int64,
 }
 
 

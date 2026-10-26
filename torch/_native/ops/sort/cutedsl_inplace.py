@@ -256,7 +256,7 @@ class InplaceSort:
         )
         index_bits = const_expr(self.index_dtype.width)
         index_mask = (
-            Int32(-1) if const_expr(index_bits == 32) else Int32((1 << index_bits) - 1)
+            Int32(-1) if const_expr(index_bits >= 32) else Int32((1 << index_bits) - 1)
         )
         tidx, _, _ = cute.arch.thread_idx()
         row, _, _ = cute.arch.block_idx()

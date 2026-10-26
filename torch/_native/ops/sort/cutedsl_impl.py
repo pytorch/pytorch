@@ -1,11 +1,12 @@
-"""CuTeDSL override of ``aten::sort.values_stable`` for narrow out= indices.
+"""CuTeDSL overrides of ``aten::sort.stable`` and ``aten::sort.values_stable``.
 
-Fires only for the out-variant with an indices tensor of dtype uint8, int8,
+The functional overload (``torch.sort(x)``, ``torch.argsort(x)``) returns int64
+indices; the out-variant also takes an indices tensor of dtype uint8, int8,
 uint16, int16, uint32 or int32 (``torch.sort(x, out=(values, indices))`` and
 ``torch.argsort(x, out=indices)``, which reaches it through ``argsort_out``).
-Functional sort and int64 out= keep the stock path. Every stock CUDA sort leaf
-(see ``policy.py``) has a kernel that mirrors it and is bit-exact with it;
-bool keys and rows of up to 2048 take faster kernels (see ``policy.route``).
+Every stock CUDA sort leaf (see ``policy.py``) has a kernel that mirrors it and
+is bit-exact with it; bool keys and rows of up to 2048 take faster kernels (see
+``policy.route``).
 """
 
 import functools
@@ -15,7 +16,14 @@ import torch
 from torch._prims_common.wrappers import _maybe_resize_out
 
 from ... import cutedsl_utils as cu
-from .policy import INDEX_MAX, jit_pays_off, MAX_NSORT, MAX_ROWS, route
+from .policy import (
+    INDEX_MAX,
+    jit_pays_off,
+    MAX_NSORT,
+    MAX_ROWS,
+    route,
+    stock_leaf,
+)
 
 
 _KEY_DTYPES = frozenset(
@@ -39,6 +47,7 @@ _INDEX_NAMES = {
     torch.int16: "int16",
     torch.uint32: "uint32",
     torch.int32: "int32",
+    torch.int64: "int64",
 }
 
 
@@ -75,6 +84,28 @@ def _launcher(
     return functools.partial(global_sort, descending=descending, arch=arch)
 
 
+def _eligible(self: torch.Tensor, dim: int, index_dtype: torch.dtype) -> bool:
+    if index_dtype not in _INDEX_NAMES or self.dtype not in _KEY_DTYPES:
+        return False
+    if not self.is_cuda or self.dim() == 0 or self.numel() == 0:
+        return False
+    if _arch(self.device.index or 0) < 90:
+        return False
+    nsort = self.size(dim)
+    if nsort - 1 > INDEX_MAX[_INDEX_NAMES[index_dtype]]:
+        return False  # meta raises the user-facing error
+    if nsort > MAX_NSORT:
+        return False
+    nrows = self.numel() // nsort
+    if nrows > MAX_ROWS:
+        return False
+    # TODO: a stock fallback for short int64 calls, whose stock path is one
+    # host-cheap launch; until then every int64 call takes the JIT route.
+    if index_dtype == torch.int64:
+        return True
+    return jit_pays_off(self.numel(), nsort, nrows, self.dtype == torch.bool)
+
+
 def _out_cond(
     self: torch.Tensor,
     *,
@@ -84,13 +115,9 @@ def _out_cond(
     values: torch.Tensor,
     indices: torch.Tensor,
 ) -> bool:
-    if indices.dtype not in _INDEX_NAMES or self.dtype not in _KEY_DTYPES:
-        return False
-    if not self.is_cuda or self.dim() == 0 or self.numel() == 0:
-        return False
     if values.dtype != self.dtype or values.device != self.device:
         return False
-    if indices.device != self.device or _arch(self.device.index or 0) < 90:
+    if indices.device != self.device:
         return False
     # Some leaves read x while writing values, and overlapping outs race; stock
     # copies first (or raises on a partial overlap), so leave any aliasing to it.
@@ -100,15 +127,7 @@ def _out_cond(
         for a, b in ((values, self), (indices, self), (values, indices))
     ):
         return False
-    nsort = self.size(dim)
-    if nsort - 1 > INDEX_MAX[_INDEX_NAMES[indices.dtype]]:
-        return False  # meta raises the user-facing error
-    if nsort > MAX_NSORT:
-        return False
-    nrows = self.numel() // nsort
-    if nrows > MAX_ROWS:
-        return False
-    return jit_pays_off(self.numel(), nsort, nrows, self.dtype == torch.bool)
+    return _eligible(self, dim, indices.dtype)
 
 
 def _out_impl(
@@ -138,10 +157,17 @@ def _out_impl(
     out_values = values.movedim(dim, -1)
     out_indices = indices.movedim(dim, -1)
     values_2d = out_values if out_values.is_contiguous() else torch.empty_like(keys)
+    # The segmented leaf carries the index through every radix pass, so an int64
+    # holder receives a narrow index widened once the sort completes; the other
+    # leaves write int64 directly.
+    index_dtype = indices.dtype
+    segmented = stock_leaf(nsort, keys.numel() // nsort) == "segmented"
+    if index_dtype == torch.int64 and segmented and self.dtype != torch.bool:
+        index_dtype = torch.uint16 if nsort - 1 <= INDEX_MAX["uint16"] else torch.int32
     indices_2d = (
         out_indices
-        if out_indices.is_contiguous()
-        else torch.empty(keys.shape, dtype=indices.dtype, device=keys.device)
+        if out_indices.is_contiguous() and index_dtype == indices.dtype
+        else torch.empty(keys.shape, dtype=index_dtype, device=keys.device)
     )
     rows = keys.view(-1, nsort)
 
@@ -162,12 +188,47 @@ def _out_impl(
     return values, indices
 
 
-def register_to_dispatch() -> None:
-    cu.register_op_override(
-        "aten",
-        "sort.values_stable",
-        "CUDA",
-        cond=_out_cond,
-        impl=_out_impl,
-        allow_multiple_override=True,
+def _cond(
+    self: torch.Tensor,
+    *,
+    stable: bool | None = None,
+    dim: int = -1,
+    descending: bool = False,
+) -> bool:
+    return _eligible(self, dim, torch.int64)
+
+
+def _impl(
+    self: torch.Tensor,
+    *,
+    stable: bool | None = None,
+    dim: int = -1,
+    descending: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # empty_like keeps self's strides when dense and infers dense ones
+    # otherwise, as the sort meta function does.
+    values = torch.empty_like(self)
+    indices = torch.empty_like(self, dtype=torch.int64)
+    return _out_impl(
+        self,
+        stable=stable,
+        dim=dim,
+        descending=descending,
+        values=values,
+        indices=indices,
     )
+
+
+def register_to_dispatch() -> None:
+    for op_symbol, cond, impl in (
+        ("sort.stable", _cond, _impl),
+        ("sort.values_stable", _out_cond, _out_impl),
+    ):
+        cu.register_op_override(
+            "aten",
+            op_symbol,
+            "CUDA",
+            cond=cond,
+            impl=impl,
+            allow_multiple_override=True,
+        )
