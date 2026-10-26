@@ -10119,6 +10119,8 @@ class TestPrecompileCustomOpModules(TestCase):
             'aoti_torch_call_dispatcher("mylib::cpp_fallback", "", args);\n'
             'c10::Dispatcher::singleton().findSchemaOrThrow("mylib::cpp_schema", "");\n'
             '// aoti_torch_call_dispatcher("mylib::commented", "", args);\n'
+            # An op lowered to an extern kernel is named in its size assert.
+            "assert_size_stride(buf3, (4,), (1,), 'torch.ops.mylib.extern.default')\n"
         )
         self.assertEqual(
             _op_names_in_source(source),

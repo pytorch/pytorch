@@ -5586,6 +5586,23 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    def test_disable_a_kernel_registered_after_disable_dynamo(self):
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        def kernel(x):
+            return x + 1
+
+        # Caches kernel.__dynamo_disable, which register_kernel's wrapper must not
+        # copy, or calls would skip the disabled-kernel check.
+        torch._disable_dynamo(kernel)(torch.zeros(1))
+        f.register_kernel("cpu")(kernel)
+        x = torch.zeros(3)
+        self.assertEqual(f(x), x + 1)
+        with f.set_kernel_enabled("cpu", False):
+            self.assertEqual(f(x), x)
+
     def test_register_kernel_errors_name_the_kernel_module(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:

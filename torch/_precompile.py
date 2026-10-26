@@ -1970,11 +1970,15 @@ def _op_names(gm: torch.fx.GraphModule) -> set[str]:
 
 # Python wrapper code calls an op it does not lower as torch.ops.<ns>.<op>; the C++
 # wrapper (cpp_wrapper) names it as a "<ns>::<op>" string to the dispatcher.
-_OP_REFERENCE = re.compile(
+_PYTHON_OP_CALL = re.compile(
     r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?"
-    r"|\b(?:aoti_torch_call_dispatcher|findSchemaOrThrow)\("
+)
+_DISPATCHER_OP_CALL = re.compile(
+    r"\b(?:aoti_torch_call_dispatcher|findSchemaOrThrow)\("
     r"\s*\"(\w+)::(\w+)\"(?:\s*,\s*\"(\w*)\")?"
 )
+# Inductor's assert_size_stride and friends name the node's op in a string.
+_STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 
 
 def _op_name(ns: str, op: str, overload: str | None) -> str:
@@ -1992,14 +1996,16 @@ def _op_names_in_source(source: str) -> set[str]:
     this sees exactly the operators the served code runs: one a decomposition or a
     tensor subclass introduced is here, and one Inductor lowered away is not.
     Comments are skipped: a Triton kernel's origin comments name the nodes it
-    fused, lowered ones included.
+    fused, lowered ones included. So are ``torch.ops`` names in strings, which the
+    size and alignment asserts give for an op lowered to an extern kernel.
     """
     names = set()
     for line in source.splitlines():
         code = line.split("#", 1)[0].split("//", 1)[0]
-        for match in _OP_REFERENCE.finditer(code):
-            groups = match.group(1, 2, 3) if match.group(1) else match.group(4, 5, 6)
-            names.add(_op_name(*groups))
+        for match in _PYTHON_OP_CALL.finditer(_STRING_LITERAL.sub('""', code)):
+            names.add(_op_name(*match.groups()))
+        for match in _DISPATCHER_OP_CALL.finditer(code):
+            names.add(_op_name(*match.groups()))
     return names
 
 
@@ -2055,7 +2061,7 @@ def _backend_op_names(
                     "needs them registered by the first call",
                     half,
                     backend_id,
-                    type(content).__name__,
+                    type(c).__name__,
                 )
     return names | eager_names, eager_names
 
