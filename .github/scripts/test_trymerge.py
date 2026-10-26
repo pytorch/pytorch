@@ -4386,7 +4386,7 @@ def _drci_http_error(code: int, body: bytes) -> HTTPError:
 @mock.patch("trymerge.gh_fetch_url")
 class TestDrciRetries(TestCase):
     def setUp(self) -> None:
-        patcher = mock.patch("trymerge._drci_unavailable", False)
+        patcher = mock.patch("trymerge._drci_failed_at", None)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -4416,8 +4416,9 @@ class TestDrciRetries(TestCase):
             get_drci_classifications(1)
         mock_sleep.assert_not_called()
 
-    def test_outage_pauses_once_per_process_until_a_success(
-        self, mock_fetch: Any, mock_sleep: Any
+    @mock.patch("trymerge.time.monotonic")
+    def test_outage_window_skips_pauses(
+        self, mock_clock: Any, mock_fetch: Any, mock_sleep: Any
     ) -> None:
         attempts = len(DRCI_RETRY_DELAYS_SECONDS) + 1
 
@@ -4425,19 +4426,42 @@ class TestDrciRetries(TestCase):
             raise _drci_http_error(503, b"")
 
         mock_fetch.side_effect = unavailable
+        mock_clock.return_value = 1000.0
         with mock.patch("builtins.print"):
             self.assertIsNone(get_drci_classifications(1))
             self.assertEqual(mock_sleep.call_count, attempts - 1)
+            # The next call in the same merge-loop iteration does not pause.
+            mock_clock.return_value = 1010.0
             self.assertIsNone(get_drci_classifications(1))
             self.assertEqual(mock_sleep.call_count, attempts - 1)
             self.assertEqual(mock_fetch.call_count, 2 * attempts)
-
+            # The next iteration, five minutes later, pauses again.
+            mock_clock.return_value = 1310.0
+            self.assertIsNone(get_drci_classifications(1))
+            self.assertEqual(mock_sleep.call_count, 2 * (attempts - 1))
+            # A success ends the outage at once.
+            mock_clock.return_value = 1320.0
             mock_fetch.side_effect = None
             mock_fetch.return_value = {}
             get_drci_classifications(1)
             mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
             get_drci_classifications(1)
-        self.assertEqual(mock_sleep.call_count, attempts)
+        self.assertEqual(mock_sleep.call_count, 2 * (attempts - 1) + 1)
+
+    def test_timeout_or_504_is_not_retried(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for stalled in (
+            TimeoutError("timed out"),
+            URLError(TimeoutError("timed out")),
+            _drci_http_error(504, b""),
+        ):
+            mock_fetch.reset_mock()
+            mock_fetch.side_effect = [stalled, {}]
+            with mock.patch("builtins.print"):
+                self.assertIsNone(get_drci_classifications(1))
+            self.assertEqual(mock_fetch.call_count, 1)
+        mock_sleep.assert_not_called()
 
     def test_retries_after_a_failure_with_a_pause(
         self, mock_fetch: Any, mock_sleep: Any
@@ -4505,8 +4529,6 @@ class TestDrciRetries(TestCase):
         for dropped in (
             RemoteDisconnected("closed"),
             URLError(ConnectionResetError("reset")),
-            URLError(TimeoutError("timed out")),
-            TimeoutError("timed out"),
             json.JSONDecodeError("cut off", "{", 1),
             _drci_http_error(408, b""),
         ):

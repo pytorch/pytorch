@@ -500,12 +500,14 @@ IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
 # Longest a Dr.CI socket may sit silent. HUD caps the endpoint at 900 s
 # (maxDuration in drci.ts) and sends nothing until it finishes, so only a
-# connection that is truly stuck waits longer.
+# connection that is truly stuck waits longer. A timed-out call is not retried.
 DRCI_TIMEOUT_SECONDS = 960
-# Set when a Dr.CI call has used up every attempt, cleared by the next success.
-# While set, retries do not pause: one merge calls Dr.CI many times, so during an
-# outage the pauses are paid once per process rather than once per call.
-_drci_unavailable = False
+# After a call fails every attempt, calls within this window retry without
+# pausing: one merge-loop iteration calls Dr.CI several times in a row, and during
+# an outage each would otherwise pay the pauses. Shorter than the merge loop's
+# 5-minute wait, so the next iteration pauses again.
+DRCI_OUTAGE_WINDOW_SECONDS = 120
+_drci_failed_at: float | None = None
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -2627,11 +2629,17 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
-    global _drci_unavailable
+    global _drci_failed_at
+    in_outage = (
+        _drci_failed_at is not None
+        and time.monotonic() - _drci_failed_at < DRCI_OUTAGE_WINDOW_SECONDS
+    )
     delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
-    pause = False
+    retry = "now"
     for attempt, delay in enumerate(delays):
-        if pause and not _drci_unavailable:
+        if retry == "stop":
+            break
+        if retry == "pause" and not in_outage:
             time.sleep(delay)
         try:
             failures = gh_fetch_url(
@@ -2646,7 +2654,7 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 reader=json.load,
                 timeout=DRCI_TIMEOUT_SECONDS,
             )
-            _drci_unavailable = False
+            _drci_failed_at = None
             return failures.get(str(pr_num), {}) if failures else {}
         except HTTPError as err:
             # gh_fetch_url has already printed the status. Dr.CI answers 400 for
@@ -2656,39 +2664,37 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed, "
                 f"response body: {_http_error_body(err)}"
             )
-            pause = _drci_retry_may_help(err)
+            retry = _drci_retry_kind(err)
         except Exception as e:
             print(
                 f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed "
                 f'with "{e}"'
             )
-            pause = _drci_retry_may_help(e)
-    _drci_unavailable = True
+            retry = _drci_retry_kind(e)
+    _drci_failed_at = time.monotonic()
     return None
 
 
-def _drci_retry_may_help(err: Exception) -> bool:
-    """A guess from the exception type at whether pausing before the next
-    attempt could help."""
+def _drci_retry_kind(err: Exception) -> str:
+    """How to follow a failed Dr.CI call, guessed from the exception type:
+    "pause" when waiting may clear it, "now" to retry at once, "stop" when
+    another attempt would only wait out the endpoint's time limit again."""
     if isinstance(err, HTTPError):
-        return err.code in (400, 408, 429) or err.code >= 500
+        if err.code == 504:  # HUD ran out its maxDuration
+            return "stop"
+        return "pause" if err.code in (400, 408, 429) or err.code >= 500 else "now"
+    reason = err.reason if isinstance(err, URLError) else err
+    if isinstance(reason, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
+        return "stop"
     if isinstance(err, URLError):
         # urlopen wraps errors raised while connecting and sending. DNS
         # failures, refused connections and no route (as on internal runners)
-        # do not clear by waiting; a connection broken or timed out mid-send
-        # may.
-        return isinstance(
-            err.reason,
-            (
-                ConnectionResetError,
-                ConnectionAbortedError,
-                BrokenPipeError,
-                TimeoutError,
-            ),
-        )
+        # do not clear by waiting; a connection broken mid-send may.
+        broken = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+        return "pause" if isinstance(reason, broken) else "now"
     # Raised while waiting for or reading the response, e.g. RemoteDisconnected,
-    # IncompleteRead, a timeout, or JSONDecodeError on a cut-off body.
-    return True
+    # IncompleteRead, or JSONDecodeError on a cut-off body.
+    return "pause"
 
 
 def _http_error_body(err: HTTPError, limit: int = 500) -> str:
