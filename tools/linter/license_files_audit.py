@@ -27,7 +27,7 @@ LICENSE_GLOBS = (
     ":(icase,glob)LICENSE",
     ":(icase,glob)third_party/**/LICENSE*",
     ":(icase,glob)third_party/**/COPYING*",
-    ":(icase,glob)third_party/nccl-extensions/nccl_ep/ThirdPartyNotices.txt",
+    ":(icase,glob)third_party/nccl_ep/ThirdPartyNotices.txt",
 )
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "license_audit_manifest.toml"
