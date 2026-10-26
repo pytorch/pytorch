@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils._triton import has_triton
 
 
@@ -979,6 +978,9 @@ def xor_words(pairs, maximum, outputs):
     return words
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+@unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not has_triton(), "Requires Triton")
 class TestInlineAsmConcat(TestCase):
     def setUp(self):
         super().setUp()
@@ -1165,51 +1167,8 @@ class TestInlineAsmConcat(TestCase):
                 self.assertIn("tl.store(", kernel)
 
 
-class TestPointwisePackingChoices(TestCase):
-    settings = {
-        "triton.nested_reduction": True,
-        "loop_ordering_after_fusion": True,
-        "cat_fuse_computed_input_copies": True,
-        "emulate_precision_casts": True,
-        "force_disable_caches": True,
-    }
-
-    @parametrize("kind", ["two_word_pack", "float_interleave"])
-    def test_cheap_inputs_keep_one_kernel(self, device, kind):
-        if kind == "two_word_pack":
-
-            def fn(x):
-                first = x[:, 0] | (x[:, 1] << 4)
-                second = x[:, 2] | (x[:, 3] << 4)
-                packed = torch.stack((first, second), -1).reshape(-1)
-                return torch.nn.functional.pad(packed, (0, 5))
-
-            x = (torch.arange(1024, device=device, dtype=torch.int32) % 16).reshape(
-                256, 4
-            )
-        else:
-
-            def fn(x):
-                packed = torch.stack((x + 1, x + 2), -1).flatten(1)
-                return torch.nn.functional.pad(packed, (0, 5))
-
-            x = torch.arange(77, device=device, dtype=torch.float32).reshape(7, 11)
-
-        expected = fn(x)
-        torch._dynamo.reset()
-        metrics.reset()
-        with (
-            config.patch({**self.settings, "triton.multi_kernel": 0}),
-        ):
-            actual = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(actual, expected, atol=0, rtol=0)
-        self.assertEqual(actual.stride(), expected.stride())
-        self.assertEqual(metrics.generated_kernel_count, 1)
-
-
 # The inline asm strings are PTX or AMDGCN.
 instantiate_device_type_tests(TestInlineAsmConcat, globals(), only_for="cuda")
-instantiate_device_type_tests(TestPointwisePackingChoices, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":

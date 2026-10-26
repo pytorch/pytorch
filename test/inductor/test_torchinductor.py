@@ -9613,6 +9613,54 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([4096, 16]),))
 
+    def test_stack_cat_rule_exclusions(self):
+        # The cat rule only reroutes whole computed buffers; a slice of one, a
+        # no-op buffer, and a cat feeding a pointwise use compile as without it.
+        def sliced(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            half = y.shape[0] // 2
+            return torch.stack([y[:half], y[half:]], -1)
+
+        def with_empty(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, torch.empty_like(y)], -1)[:, 0]
+
+        def pointwise_use(x):
+            ys = [sum(x[:, j] * (i + j) for j in range(8)) for i in range(2)]
+            return torch.stack(ys, -1) * 2
+
+        x = torch.randn([4096, 16], device=self.device)
+        for fn in (sliced, with_empty, pointwise_use):
+            codes = []
+            for enabled in (False, True):
+                torch._dynamo.reset()
+                with config.patch(cat_fuse_computed_input_copies=enabled):
+                    _, (code,) = run_and_get_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(codes[0], codes[1], fn.__name__)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_pad_cheap_inputs(self):
+        # Stacks of cheap pointwise inputs stay one pointwise cat kernel.
+        def pack(x):
+            first = x[:, 0] | (x[:, 1] << 4)
+            second = x[:, 2] | (x[:, 3] << 4)
+            return F.pad(torch.stack((first, second), -1).reshape(-1), (0, 5))
+
+        def interleave(x):
+            return F.pad(torch.stack((x + 1, x + 2), -1).flatten(1), (0, 5))
+
+        cases = (
+            (pack, (torch.arange(1024, dtype=torch.int32) % 16).reshape(256, 4)),
+            (interleave, torch.arange(77, dtype=torch.float32).reshape(7, 11)),
+        )
+        for fn, x in cases:
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            self.common(fn, (x,))
+            if self.device != "cpu":
+                assertGeneratedKernelCountEqual(self, 1)
+
     def test_hardtanh(self):
         def fn(x):
             return F.hardtanh(x), F.hardtanh(x + 1), F.hardtanh(x - 1)
