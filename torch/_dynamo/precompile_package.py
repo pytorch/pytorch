@@ -2133,8 +2133,14 @@ class PrecompileSession(Generic[_P, _R]):
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
+        options = None if isinstance(self._backend, str) else self._backend.config
         return _build_multigraph_artifact(
-            self._served_entry()[0], backends, summary, self._backend_name, self._fn
+            self._served_entry()[0],
+            backends,
+            summary,
+            self._backend_name,
+            self._fn,
+            inductor_options=options,
         )
 
 
