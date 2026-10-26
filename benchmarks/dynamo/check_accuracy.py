@@ -50,7 +50,9 @@ def get_field(csv, model_name: str, field: str):
         return None
 
 
-def check_accuracy(actual_csv, expected_csv, expected_filename):
+def check_accuracy(
+    actual_csv, expected_csv, expected_filename, *, require_complete=False
+):
     failed = []
     improved = []
     eager_nondeterministic_models = get_eager_nondeterministic_models(expected_filename)
@@ -86,7 +88,16 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             }
         )
 
-    for model in actual_csv["name"]:
+    models = actual_csv["name"]
+    if require_complete:
+        if expected_csv.empty:
+            raise ValueError("Expected results must contain at least one model")
+        for data in (actual_csv, expected_csv):
+            if data["name"].isna().any() or data["name"].eq("").any():
+                raise ValueError("Every result must have a model name")
+        models = pd.concat([models, expected_csv["name"]]).drop_duplicates()
+
+    for model in models:
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
@@ -157,12 +168,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--actual", type=str, required=True)
     parser.add_argument("--expected", type=str, required=True)
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="Require exactly one result for every expected model (unsharded suites).",
+    )
     args = parser.parse_args()
 
     actual = pd.read_csv(args.actual)
     expected = pd.read_csv(args.expected)
 
-    failed, msg = check_accuracy(actual, expected, args.expected)
+    failed, msg = check_accuracy(
+        actual, expected, args.expected, require_complete=args.require_complete
+    )
     if failed:
         print(msg)
         sys.exit(1)
