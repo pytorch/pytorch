@@ -2,9 +2,7 @@
 
 #include <algorithm>
 #include <condition_variable>
-#include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 // WARNING: Be careful when adding new includes here. This header will be used
@@ -21,15 +19,6 @@ namespace torch::aot_inductor {
 template <typename Model, typename Stream>
 class ModelPool {
  public:
-  struct StreamLock {
-    StreamLock() = default;
-    explicit StreamLock(const std::shared_ptr<std::mutex>& stream_mutex)
-        : stream_mutex_(stream_mutex), lock_(*stream_mutex_) {}
-
-    std::shared_ptr<std::mutex> stream_mutex_;
-    std::unique_lock<std::mutex> lock_;
-  };
-
   // Owns a checked-out model. Dropping the lease returns the model to the
   // available pool, which is right for a run that never reached the device. A
   // run that did reach the device ends with mark_in_flight() instead: its work
@@ -130,7 +119,6 @@ class ModelPool {
     for (auto& slot : slots_) {
       slot.stream = nullptr;
     }
-    reclaim_unused_stream_mutexes();
   }
 
   bool use_stream_affinity() const {
@@ -149,34 +137,12 @@ class ModelPool {
     return slot - slots_.data();
   }
 
-  Lease checkout() {
-    return Lease(*this, get_available_model());
-  }
-
-  Lease checkout(Stream stream) {
-    return Lease(*this, get_available_model(stream));
-  }
-
-  StreamLock acquire_stream_lock(Stream stream) {
-#if defined(USE_CUDA) || defined(USE_XPU)
-    std::shared_ptr<std::mutex> stream_mutex;
-    {
-      std::lock_guard lk(models_mutex_);
-      if (!use_stream_affinity_ || stream == nullptr) {
-        return {};
-      }
-      reclaim_unused_stream_mutexes();
-      auto [it, inserted] = stream_mutexes_.try_emplace(stream, nullptr);
-      if (inserted) {
-        it->second = std::make_shared<std::mutex>();
-      }
-      stream_mutex = it->second;
-    }
-    return StreamLock(stream_mutex);
-#else
-    (void)stream;
-    return {};
-#endif
+  // Checks out a model for a run on `stream`. With stream affinity, calls on
+  // one non-null stream share a model and run one at a time: each waits until
+  // the stream's model is free and its previous run has finished on the
+  // device.
+  Lease checkout(Stream stream = nullptr) {
+    return Lease(*this, acquire(stream));
   }
 
   // For run_single_threaded(), which bypasses the pool's locking entirely.
@@ -210,21 +176,102 @@ class ModelPool {
     uint64_t seq;
   };
 
-  Model* get_available_model() {
+  // Every decision here is made under models_mutex_. Whenever the lock is
+  // released to wait, the next iteration decides again from scratch; the only
+  // thing carried across an unlock is a slot this thread owns as kCheckedOut.
+  Model* acquire(Stream stream) {
     std::unique_lock lk(models_mutex_);
-    return checkout_available_model(lk);
+    while (true) {
+      // Affinity can be reconfigured while this call waits for a model.
+      const bool affine = use_stream_affinity_ && stream != nullptr;
+      if (Slot* bound = affine ? bound_slot(stream) : nullptr) {
+        if (bound->state == State::kAvailable) {
+          transition(*bound, State::kAvailable, State::kCheckedOut);
+          return bound->model.get();
+        }
+        if (bound->state == State::kInFlight) {
+          transition(*bound, State::kInFlight, State::kCheckedOut);
+          lk.unlock();
+          wait_for_device(*bound);
+          return bound->model.get();
+        }
+        // Checked out by an earlier call on this stream, or borrowed by a
+        // checkout that found no unbound model.
+        model_state_changed_.wait(
+            lk, [bound]() { return bound->state != State::kCheckedOut; });
+        continue;
+      }
+
+      // Preserve existing bindings when possible. If every available model is
+      // bound, borrow one; a stream without a binding takes it over.
+      Slot* slot =
+          use_stream_affinity_ ? newest(State::kAvailable, true) : nullptr;
+      if (slot == nullptr) {
+        slot = newest(State::kAvailable);
+      }
+      if (slot != nullptr) {
+        transition(*slot, State::kAvailable, State::kCheckedOut);
+        if (affine) {
+          slot->stream = stream;
+        }
+        return slot->model.get();
+      }
+
+      if (reclaim_finished_runs()) {
+        continue;
+      }
+      Slot* oldest_in_flight = oldest(State::kInFlight);
+      if (oldest_in_flight == nullptr) {
+        // Every model is checked out.
+        model_state_changed_.wait(lk);
+        continue;
+      }
+      // Let's make the schedule simple first. We always wait on the oldest
+      // in-flight run to complete.
+      transition(*oldest_in_flight, State::kInFlight, State::kCheckedOut);
+      lk.unlock();
+      wait_for_device(*oldest_in_flight);
+      lk.lock();
+      transition(*oldest_in_flight, State::kCheckedOut, State::kAvailable);
+      model_state_changed_.notify_all();
+    }
   }
 
-  Model* get_available_model(Stream stream) {
-    std::unique_lock lk(models_mutex_);
-#if defined(USE_CUDA) || defined(USE_XPU)
-    if (use_stream_affinity_ && stream != nullptr) {
-      return get_stream_affine_model(stream, lk);
+  // Waits, without the lock, for the device work of a slot this thread owns.
+  // On a device failure the slot goes back to available, unbound.
+  void wait_for_device(Slot& slot) {
+    try {
+      slot.model->wait_for_completion();
+    } catch (...) {
+      return_model_to_available(slot.model.get());
+      throw;
     }
-#else
-    (void)stream;
-#endif
-    return checkout_available_model(lk);
+  }
+
+  // Moves every finished in-flight run back to available, oldest first, so
+  // the most recently launched one is reused first.
+  bool reclaim_finished_runs() {
+    std::vector<Slot*> in_flight;
+    for (auto& slot : slots_) {
+      if (slot.state == State::kInFlight) {
+        in_flight.push_back(&slot);
+      }
+    }
+    std::sort(
+        in_flight.begin(), in_flight.end(), [](const Slot* a, const Slot* b) {
+          return a->seq < b->seq;
+        });
+    bool reclaimed = false;
+    for (Slot* slot : in_flight) {
+      if (slot->model->is_finished()) {
+        transition(*slot, State::kInFlight, State::kAvailable);
+        reclaimed = true;
+      }
+    }
+    if (reclaimed) {
+      model_state_changed_.notify_all();
+    }
+    return reclaimed;
   }
 
   void return_model_to_available(Model* model) {
@@ -296,145 +343,17 @@ class ModelPool {
     return result;
   }
 
-  Model* checkout_available_model(std::unique_lock<std::mutex>& lk) {
-    return take_available_model(lk, /*prefer_unbound=*/use_stream_affinity_);
-  }
-
-  Model* take_available_model(
-      std::unique_lock<std::mutex>& lk,
-      bool prefer_unbound) {
-    while (oldest(State::kAvailable) == nullptr) {
-      reclaim_finished_models(lk);
-    }
-    // Preserve existing bindings when possible. If every available model is
-    // bound, the caller borrows one while its owning stream waits.
-    Slot* slot = prefer_unbound ? newest(State::kAvailable, true) : nullptr;
-    if (slot == nullptr) {
-      slot = newest(State::kAvailable);
-    }
-    transition(*slot, State::kAvailable, State::kCheckedOut);
-    return slot->model.get();
-  }
-
-  Model* get_stream_affine_model(
-      Stream stream,
-      std::unique_lock<std::mutex>& lk) {
-    while (true) {
-      Slot* slot = bound_slot(stream);
-      if (slot == nullptr) {
-        break;
-      }
-
-      if (slot->state == State::kAvailable) {
-        transition(*slot, State::kAvailable, State::kCheckedOut);
-        return slot->model.get();
-      }
-
-      if (slot->state == State::kInFlight) {
-        transition(*slot, State::kInFlight, State::kCheckedOut);
-        lk.unlock();
-        try {
-          slot->model->wait_for_completion();
-        } catch (...) {
-          return_model_to_available(slot->model.get());
-          throw;
-        }
-        return slot->model.get();
-      }
-
-      // A null-stream checkout or pool reclamation can temporarily borrow a
-      // bound model. Same non-null stream calls serialize before this point.
-      model_state_changed_.wait(
-          lk, [slot]() { return slot->state != State::kCheckedOut; });
-    }
-
-    // Bind an unbound model on a stream's first use. If all model instances are
-    // already bound, reclaim and rebind one for an oversubscribed stream.
-    Model* model = take_available_model(lk, /*prefer_unbound=*/true);
-    Slot* previous = bound_slot(stream);
-    if (previous != nullptr) {
-      previous->stream = nullptr;
-    }
-    slot_of(model).stream = stream;
-    return model;
-  }
-
-  void reclaim_unused_stream_mutexes() {
-    for (auto it = stream_mutexes_.begin(); it != stream_mutexes_.end();) {
-      if (bound_slot(it->first) == nullptr && it->second.use_count() == 1) {
-        it = stream_mutexes_.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-
-  void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
-    // Move every finished run back to available, oldest first, so the most
-    // recently launched one is reused first.
-    std::vector<Slot*> in_flight;
-    for (auto& slot : slots_) {
-      if (slot.state == State::kInFlight) {
-        in_flight.push_back(&slot);
-      }
-    }
-    std::sort(
-        in_flight.begin(), in_flight.end(), [](const Slot* a, const Slot* b) {
-          return a->seq < b->seq;
-        });
-    bool reclaimed = false;
-    for (Slot* slot : in_flight) {
-      if (slot->model->is_finished()) {
-        transition(*slot, State::kInFlight, State::kAvailable);
-        reclaimed = true;
-      }
-    }
-    if (reclaimed) {
-      model_state_changed_.notify_all();
-      return;
-    }
-
-    model_state_changed_.wait(lk, [this]() {
-      return oldest(State::kAvailable) != nullptr ||
-          oldest(State::kInFlight) != nullptr;
-    });
-    if (oldest(State::kAvailable) != nullptr) {
-      return;
-    }
-    // Let's make the schedule simple first. We always wait on the oldest
-    // in-flight model to be complete.
-    Slot* slot = oldest(State::kInFlight);
-    transition(*slot, State::kInFlight, State::kCheckedOut);
-    lk.unlock();
-    try {
-      slot->model->wait_for_completion();
-    } catch (...) {
-      lk.lock();
-      slot->stream = nullptr;
-      transition(*slot, State::kCheckedOut, State::kAvailable);
-      model_state_changed_.notify_all();
-      throw;
-    }
-    lk.lock();
-    transition(*slot, State::kCheckedOut, State::kAvailable);
-    model_state_changed_.notify_all();
-  }
-
   // One slot per model instance, which it owns, in the container's index
   // order. The vector is filled before the pool is shared, so slot pointers
   // stay valid.
   std::vector<Slot> slots_;
   uint64_t next_seq_{0};
 
-  bool use_stream_affinity_{false};
   // Callers enabling affinity must keep bound streams alive to avoid a reused
-  // device handle inheriting an old binding. Unbound mutexes are reclaimed
-  // once no in-flight StreamLock shares ownership.
-  std::unordered_map<Stream, std::shared_ptr<std::mutex>> stream_mutexes_;
+  // device handle inheriting an old binding.
+  bool use_stream_affinity_{false};
 
-  // Protects the slots and the stream mutexes.
   std::mutex models_mutex_;
-
   std::condition_variable model_state_changed_;
 };
 
