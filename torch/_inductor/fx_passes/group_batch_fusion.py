@@ -712,20 +712,6 @@ _STORAGE_SENSITIVE_OPS = OrderedSet(
 )
 
 
-_LAYOUT_SENSITIVE_OPS = _STORAGE_SENSITIVE_OPS | OrderedSet(
-    [
-        "view_as",
-        "view_as_complex",
-        "unsafe_chunk",
-        "unsafe_split",
-        "unsafe_split_with_sizes",
-        "stride",
-        "sym_stride",
-        "is_contiguous",
-        "sym_is_contiguous",
-    ]
-)
-
 # Copy ops, as both aten overload names and Tensor method names.
 _COPY_OPS = OrderedSet(
     [
@@ -781,7 +767,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "cumsum",
         "addmm",
         "baddbmm",
-        "einsum",
         "size",
         "sym_size",
         "dim",
@@ -1141,11 +1126,7 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
     if op is None:
         # Unresolved targets (custom and higher-order ops) may observe layout.
         return True
-    if (
-        name in _LAYOUT_SENSITIVE_OPS
-        or op.is_view
-        or (torch.Tag.maybe_aliasing_or_mutating in op.tags)
-    ):
+    if op.is_view or (torch.Tag.maybe_aliasing_or_mutating in op.tags):
         return True
     return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
 
