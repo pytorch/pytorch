@@ -5,8 +5,15 @@ from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
 
+from torch.utils._triton import get_triton_version
+
 from ..utils import is_rocm
-from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
+from .triton_compat import (
+    ASTSource,
+    CompiledKernel,
+    knobs as triton_knobs,
+    OutOfResources,
+)
 from .triton_helpers import get_constexprs
 
 
@@ -163,6 +170,14 @@ class StaticallyLaunchedTritonKernel:
         # Newer triton versions pass extra scratch parameters to the compiled kernel.
         # pyrefly: ignore [missing-attribute]
         metadata = kernel.metadata
+        tmem_size = getattr(metadata, "tmem_size", None)
+        if tmem_size is not None:
+            arch = getattr(getattr(metadata, "target", None), "arch", None)
+            max_tmem_size = (
+                576 if arch == 107 and get_triton_version() >= (3, 8) else 512
+            )
+            if tmem_size > max_tmem_size:
+                raise OutOfResources(tmem_size, max_tmem_size, "tensor memory")
         self.global_scratch_size = getattr(metadata, "global_scratch_size", None)
         self.global_scratch_align = getattr(metadata, "global_scratch_align", 1) or 1
         if (
