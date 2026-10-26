@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <c10/util/safe_conv.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -1060,7 +1061,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
         .set_paged_attention_v_table(
             page_table_tensor(PAGE_TABLE_V, "page_table_v"))
         // cuDNN derives its maximum KV length from the page-table width.
-        .set_paged_attention_max_seq_len_kv(c10::checked_convert<int>(
+        .set_paged_attention_max_seq_len_kv(c10::safe_conv<int>(
             max_seq_len_kv, "paged attention maximum KV sequence length"));
   } else {
     K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
