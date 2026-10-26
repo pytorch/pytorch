@@ -1155,7 +1155,6 @@ class TestWrapInductorCompiledRegionsDevice(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires GPU")
     def test_hop_codegen_releases_multiple_boxed_inputs_before_dispatch(self, device):
         from torch._higher_order_ops.wrap import (
             inductor_code_side_table,
