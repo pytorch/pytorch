@@ -2026,16 +2026,25 @@ class CudaReproTests(TestCase):
         self.assertEqual(f1_weight_grad, f2_weight_grad, atol=1e-3, rtol=1e-3)
         self.assertEqual(f1_bias_grad, f2_bias_grad, atol=1e-3, rtol=1e-3)
 
-        eager_out, eager_grad, _, _ = run(f1, False)
-        # conv grads are not compared against eager: a pre-existing
-        # compiled-vs-eager bias-grad gap applies to f1 and f2 alike
-        self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
-        self.assertEqual(f1_grad, eager_grad, atol=1e-3, rtol=1e-3)
+        if device_type == "cuda":
+            # The rounding matches cudnn eager, which runs the conv without
+            # bias and then adds the bias to the rounded output; XPU eager
+            # (oneDNN) fuses the bias into the fp32 accumulator instead, so
+            # comparing against eager is only meaningful on CUDA.
+            eager_out, eager_grad, _, _ = run(f1, False)
+            self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
+            self.assertEqual(f1_grad, eager_grad, atol=1e-3, rtol=1e-3)
+            # conv grads are not compared against eager: the compiled bias-grad
+            # can differ from eager by ~1e-1 here while out/input/weight grads
+            # match to ~1e-5; the same gap applies to f1 and f2 alike and is
+            # unrelated to the rounding this test pins down
 
         # The rounding must be emitted even when the numeric checks above
         # cannot see it: fp16 ulps are too small, and conv_offset=0 rounds to
         # identical values either way. Restrict to reduction kernels because
-        # the autocast to_copy kernels round-trip their own stores.
+        # the autocast to_copy kernels round-trip their own stores; the
+        # reduction may be persistent (per_fused) or not (red_fused) depending
+        # on backend and heuristics.
         lowp_name = str(lowp_dtype).removeprefix("torch.")
         opt_fn = torch.compile(f1, backend="inductor", fullgraph=True)
         _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
@@ -2045,9 +2054,110 @@ class CudaReproTests(TestCase):
             "\n".join(
                 kernel
                 for kernel in code.split("def triton_")
-                if kernel.split("(", 1)[0].startswith("per_fused")
+                if kernel.split("(", 1)[0].startswith(("per_fused", "red_fused"))
             ),
         )
+
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
+    @config.patch(
+        emulate_precision_casts=True,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_conv_bias_rounds_before_log_softmax_emulated(self):
+        # With emulate_precision_casts, make_pointwise rounds the bias add via
+        # the node's low_precision_pointwise_barrier; assert that the saved and
+        # unsaved graphs still agree and match eager, i.e. the conv-boundary
+        # rounding is not applied twice.
+        torch.manual_seed(0)
+        conv = nn.Conv2d(48, 48, 3, padding=1).to(device_type)
+        x = torch.randn(8, 48, 16, 16, device=device_type)
+        grad_out = torch.softmax(2 * torch.randn(8, 48, 16, 16, device=device_type), 1)
+
+        def f1(t):
+            with torch.autocast(device_type, dtype=torch.bfloat16):
+                return F.log_softmax(conv(t), dim=1)
+
+        def f2(t):
+            with torch.autocast(device_type, dtype=torch.bfloat16):
+                q = F.log_softmax(conv(t), dim=1)
+            return q + (q - q).detach()  # same values and gradients as f1
+
+        def run(fn, compiled):
+            torch._dynamo.reset()
+            conv.zero_grad()
+            t = x.clone().requires_grad_()
+            if compiled:
+                fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out = fn(t)
+            (-(grad_out * out.float()).sum()).backward()
+            return out.detach(), t.grad
+
+        with torch.no_grad():
+            conv.weight.normal_(0, 0.6)
+            conv.bias.fill_(-1000)
+
+        f1_out, f1_grad = run(f1, True)
+        f2_out, f2_grad = run(f2, True)
+        self.assertEqual(f1_out, f2_out, atol=1e-3, rtol=1e-3)
+        self.assertEqual(f1_grad, f2_grad, atol=1e-3, rtol=1e-3)
+
+        if device_type == "cuda":
+            eager_out, eager_grad = run(f1, False)
+            self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
+            self.assertEqual(f1_grad, eager_grad, atol=1e-3, rtol=1e-3)
+
+        opt_fn = torch.compile(f1, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
+        code = "\n".join(codes)
+        self.assertIn(
+            ".to(tl.bfloat16)",
+            "\n".join(
+                kernel
+                for kernel in code.split("def triton_")
+                if kernel.split("(", 1)[0].startswith(("per_fused", "red_fused"))
+            ),
+        )
+
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
+    @config.patch(
+        emulate_precision_casts=False,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_conv_bias_no_extra_cast_for_fp32(self):
+        # fp32 conv output is not low precision: the peeled bias add must not
+        # gain any cast, and its numerics are unchanged.
+        torch.manual_seed(0)
+        conv = nn.Conv2d(48, 48, 3, padding=1).to(device_type)
+        x = torch.randn(8, 48, 16, 16, device=device_type)
+        grad_out = torch.softmax(2 * torch.randn(8, 48, 16, 16, device=device_type), 1)
+
+        def f(t):
+            return F.log_softmax(conv(t), dim=1)
+
+        def run(fn, compiled):
+            torch._dynamo.reset()
+            conv.zero_grad()
+            t = x.clone().requires_grad_()
+            if compiled:
+                fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out = fn(t)
+            (-(grad_out * out).sum()).backward()
+            return out.detach(), t.grad
+
+        with torch.no_grad():
+            conv.weight.normal_(0, 0.6)
+            conv.bias.fill_(-1000)
+
+        f1_out, f1_grad = run(f, True)
+        eager_out, eager_grad = run(f, False)
+        self.assertEqual(f1_out, eager_out, atol=1e-5, rtol=1e-5)
+        self.assertEqual(f1_grad, eager_grad, atol=1e-5, rtol=1e-5)
+
+        opt_fn = torch.compile(f, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
+        code = "\n".join(codes)
+        self.assertNotIn(".to(tl.bfloat16)", code)
+        self.assertNotIn(".to(tl.float16)", code)
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)

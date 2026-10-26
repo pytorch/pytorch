@@ -16,7 +16,6 @@ import secrets
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from enum import Enum
 from itertools import chain, count
 from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
@@ -58,6 +57,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.namedtuple_helpers import namedtuple_type
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -80,6 +80,7 @@ from ..utils import (
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
+    sanitize_constexpr_for_repr,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -311,20 +312,9 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
 
 
 def _sanitize_for_repr(obj: object) -> object:
-    """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, Enum):
-        return _sanitize_for_repr(obj.value)
-    repr_children = get_constexpr_repr_children(obj)
-    if repr_children is not None:
-        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
-        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
-        # invoke user code, so preserve the original when sanitization is a no-op.
-        if all(
-            child is original for child, original in zip(children, repr_children.values)
-        ):
-            return obj
-        return repr_children.rebuild(children)
-    return obj
+    # Infrastructure NamedTuples such as DeviceProperties must retain their
+    # runtime methods. Only user constexpr constants need structural aliases.
+    return sanitize_constexpr_for_repr(obj, canonicalize_namedtuples=False)
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -607,6 +597,76 @@ def user_defined_kernel_grid_fn_code(
                 writeline(statement, f"if {guards}: return {example_grid}")
 
     return fn_name, output.getvalue()
+
+
+def _collect_namedtuple_types(
+    value: Any, seen: OrderedSet[type] | None = None
+) -> list[type]:
+    """Return NamedTuple types referenced by ``value``, dependencies first.
+
+    Used so generated Triton modules can eval ``triton_meta={...!r}`` when a
+    user passes a NamedTuple as a ``tl.constexpr`` (see #192288).
+    """
+    if seen is None:
+        seen = OrderedSet()
+    result: list[type] = []
+    visited: OrderedSet[int] = OrderedSet()
+
+    def visit(obj: Any) -> None:
+        if id(obj) in visited:
+            return
+        visited.add(id(obj))
+        repr_children = get_constexpr_repr_children(obj)
+        if repr_children is not None:
+            for child in repr_children.values:
+                visit(child)
+        if pytree.is_namedtuple_instance(obj):
+            cls = type(obj)
+            if cls not in seen:
+                seen.add(cls)
+                result.append(cls)
+
+    visit(value)
+    return result
+
+
+def codegen_namedtuple_defs(constants: dict[str, Any]) -> str:
+    """Emit NamedTuple defs so ``repr`` of constexpr constants can eval.
+
+    Always reconstructs via ``namedtuple_helpers.namedtuple_type`` (never
+    ``from user_module import ...``): generated sources are cached and may be
+    reloaded on another machine, and classes defined in
+    ``compile_tasks.<hash>`` are not pickle-safe across compile workers.
+    """
+    types: list[type] = []
+    seen: OrderedSet[type] = OrderedSet()
+    for value in constants.values():
+        types.extend(_collect_namedtuple_types(value, seen))
+
+    if not types:
+        return ""
+
+    buf = IndentedBuffer()
+    lines: list[str] = []
+    emitted: OrderedSet[str] = OrderedSet()
+    for cls in types:
+        name = cls.__name__
+        fields = tuple(cls._fields)
+        alias = namedtuple_type(name, fields).__qualname__
+        if alias in emitted:
+            continue
+        emitted.add(alias)
+        lines.append(f"{alias} = namedtuple_type({name!r}, {fields!r})")
+
+    buf.writeline(
+        "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type"
+    )
+    # Type definitions do not reference each other. Keep source deterministic
+    # even when constexpr values contain sets.
+    for line in sorted(lines):
+        buf.writeline(line)
+    buf.newline()
+    return buf.getvalue()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -915,7 +975,8 @@ def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
 
 
 class _LineIfNamesUsed(DeferredLineBase):
-    """A preamble import or binding that is emitted only if the module uses its names.
+    """A line emitted only if the module uses one of ``names``: by default the names
+    the import or binding on it binds.
 
     Which bindings a graph needs is not known when write_header runs, before anything
     is lowered, and several are only ever emitted by interpolation
@@ -924,27 +985,35 @@ class _LineIfNamesUsed(DeferredLineBase):
     """
 
     def __init__(
-        self, line: str, names: tuple[str, ...], wrapper: PythonWrapperCodegen
+        self,
+        line: str,
+        names: tuple[str, ...],
+        wrapper: PythonWrapperCodegen,
+        binds: bool,
     ) -> None:
         super().__init__(line)
         self.names = names
         self.wrapper = wrapper
+        # Whether ``names`` are the ones the line binds, so only its right-hand side,
+        # not the whole line, is a use.
+        self.binds = binds
 
     def __call__(self) -> str | None:
         if self.wrapper.scanning_for_uses:
-            # Absent from the text being scanned, so that `aten = torch.ops.aten` is
-            # not a use of aten.
+            # Absent from the text being scanned, so that a line is not a use of its
+            # own names: `aten = torch.ops.aten` is not a use of aten.
             return None
         used = self.wrapper.used_names
         return self.line if used is None or not used.isdisjoint(self.names) else None
 
     def _new_line(self, line: str) -> _LineIfNamesUsed:
-        return _LineIfNamesUsed(line, self.names, self.wrapper)
+        return _LineIfNamesUsed(line, self.names, self.wrapper, self.binds)
 
 
 class _OmittedFromScan(DeferredLineBase):
-    """A block of the module that is not looked at for uses of the preamble's names: a
-    module-level kernel, which brings its own imports."""
+    """A block of the module that is not looked at for uses of the preamble's names:
+    a module-level kernel, which brings its own imports, or a subgraph's code, which
+    reported its uses when it was generated."""
 
     def __init__(self, line: str, wrapper: PythonWrapperCodegen) -> None:
         super().__init__(line)
@@ -2241,10 +2310,12 @@ class PythonWrapperCodegen(CodeGen):
         # until _generate scans the module, and until then every such line is emitted.
         self.used_names: OrderedSet[str] | None = None
         self.scanning_for_uses = False
-        # The lines write_if_used wrote; _generate scans only if there are any. The FX
-        # wrapper writes this header too but has its own _generate, which never scans,
-        # so it keeps every line.
+        # The lines write_if_used wrote. The FX wrapper writes this header too but has
+        # its own _generate, which never scans, so it keeps every line.
         self.conditional_lines: list[_LineIfNamesUsed] = []
+        # The names each subgraph uses, which the subgraph's own scan adds, since the
+        # root splices its code in unscanned.
+        self.names_used_unscanned: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -2412,15 +2483,20 @@ class PythonWrapperCodegen(CodeGen):
             "async_compile = AsyncCompile()",
         )
 
-    def write_if_used(self, buf: IndentedBuffer, line: str) -> None:
-        """Write an import or binding that is kept only if the module uses a name it
-        binds."""
-        names = self._names_bound_by(line)
-        if "torch" in names:
-            # The rest of the preamble is written in terms of it.
-            buf.writeline(line)
-            return
-        self.conditional_lines.append(_LineIfNamesUsed(line, names, self))
+    def write_if_used(
+        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
+    ) -> None:
+        """Write a line that is kept only if the module uses a name in ``names``, by
+        default the names the import or binding on it binds. A kept line uses the names
+        it reads: a binding's right-hand side, or all of a line given ``names``."""
+        binds = names is None
+        if names is None:
+            names = self._names_bound_by(line)
+            if "torch" in names:
+                # The rest of the preamble is written in terms of it.
+                buf.writeline(line)
+                return
+        self.conditional_lines.append(_LineIfNamesUsed(line, names, self, binds))
         buf.writeline(self.conditional_lines[-1])
 
     @staticmethod
@@ -2440,7 +2516,7 @@ class PythonWrapperCodegen(CodeGen):
             if len(names) == m.group(2).count(",") + 1:
                 return tuple(names)
         raise AssertionError(
-            f"cannot tell what {line!r} binds; write it in a form _names_bound_by reads"
+            f"cannot tell what {line!r} binds; write it with an explicit `names`"
         )
 
     def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
@@ -2456,8 +2532,12 @@ class PythonWrapperCodegen(CodeGen):
         if text:
             buf.writeline(_OmittedFromScan(text[code_start:], self))
 
-    def scan_for_used_names(self, module: IndentedBuffer) -> None:
-        """Record which names ``module``, the finished wrapper, uses."""
+    def needs_use_scan(self) -> bool:
+        """Whether _generate scans the finished module for uses of the preamble's names."""
+        return bool(self.conditional_lines)
+
+    def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
+        """The names ``module`` uses, leaving out what write_omitted_from_scan wrote."""
         self.scanning_for_uses = True
         try:
             text = module.getvalue()
@@ -2466,22 +2546,30 @@ class PythonWrapperCodegen(CodeGen):
         # Each kernel's provenance comment names its source ops ("Original ATen:
         # [aten.mul, ...]"), so whole-line comments are not uses. Trailing comments and
         # strings still count, which can only keep a line.
-        used = OrderedSet(
+        return OrderedSet(
             word
             for line in text.splitlines()
             if not line.lstrip().startswith("#")
             for word in re.findall(r"\w+", line)
         )
-        # A kept binding uses the names its right-hand side starts from, which another
-        # line may bind: `async_compile = AsyncCompile()`.
-        rhs_words = [
-            (line.names, re.findall(r"(?<![.\w])\w+", line.line.partition(" = ")[2]))
-            for line in self.conditional_lines
-        ]
+
+    def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Record which names ``module``, the finished wrapper, uses."""
+        used = self.names_used_in(module) | self.names_used_unscanned
+        if self.kernel_sources:
+            # Run as a script, the module compiles its module-level kernels, which the
+            # scan leaves out, at async_compile.wait.
+            used.add("async_compile")
+        # A kept line uses the names it reads, which another line may bind:
+        # `async_compile = AsyncCompile()`.
+        reads = []
+        for line in self.conditional_lines:
+            text = line.line.partition(" = ")[2] if line.binds else line.line
+            reads.append((line.names, re.findall(r"(?<![.\w])\w+", text)))
         while (
             new := OrderedSet(
                 word
-                for names, words in rhs_words
+                for names, words in reads
                 if not used.isdisjoint(names)
                 for word in words
             )
@@ -2710,13 +2798,10 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        # None of these lines is a use of async_compile: a module that compiles nothing
+        # has no need of them.
+        for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
+            self.write_if_used(self.prefix, line, ("async_compile",))
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
@@ -3578,7 +3663,7 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
-        if self.conditional_lines:
+        if self.needs_use_scan():
             self.scan_for_used_names(result)
 
         return (
@@ -4534,7 +4619,7 @@ class PythonWrapperCodegen(CodeGen):
         return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
-        self.subgraph_definitions.splice(subgraph_code.value)
+        self.write_omitted_from_scan(self.subgraph_definitions, subgraph_code.value)
 
     @classmethod
     def _get_triton_info_kernel_cls(cls):
@@ -4604,6 +4689,9 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
+                    # Keep NamedTuple constexprs as-is; codegen_namedtuple_defs emits
+                    # their type into the generated module so triton_meta={...!r} evals
+                    # (see #192288). Do not substitute a non-tuple stand-in.
                     constants[arg.name] = kwargs[arg.name]
 
             else:
@@ -4808,6 +4896,11 @@ class PythonWrapperCodegen(CodeGen):
                 arg_names[i] for i in constexprs
             ]
 
+        # Prepare constants before both cache-key construction and type discovery.
+        sanitized_constants = sanitize_constexpr_for_repr(triton_meta["constants"])
+        triton_meta["constants"] = cast(dict[str, Any], sanitized_constants)
+        triton_meta = cast("TritonMeta", _sanitize_for_repr(triton_meta))
+
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
         if len(configs) > 0:
@@ -4847,6 +4940,10 @@ class PythonWrapperCodegen(CodeGen):
 
         compile_wrapper = IndentedBuffer()
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        # NamedTuple tl.constexpr values stringify with stable aliases; emit the
+        # type so triton_meta={triton_meta!r} can eval in this module (#192288).
+        if namedtuple_defs := codegen_namedtuple_defs(triton_meta.get("constants", {})):
+            compile_wrapper.splice(namedtuple_defs)
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
         ):
@@ -4857,14 +4954,12 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
-        # Sanitize triton_meta to convert Enum values for valid Python repr
-        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={sanitized_triton_meta!r},
+                triton_meta={triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
@@ -6585,6 +6680,12 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
+        self.multi_kernel_state = MultiKernelState(parent_wrapper.multi_kernel_state)
+        # Its code goes into the root unscanned, so it reports its own uses. The set is
+        # the root's, as kernel_sources is, so that a nested subgraph reports straight to
+        # the root rather than through each parent; a name reported for code the root
+        # does not splice in can only keep a preamble line, never drop one.
+        self.names_used_unscanned = root.names_used_unscanned
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
@@ -6597,6 +6698,20 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def add_benchmark_harness(self, output):
         pass
+
+    def needs_use_scan(self) -> bool:
+        # The root needs this subgraph's uses even if it writes no conditional line.
+        return True
+
+    def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Add the names ``module``, this subgraph's code, uses to the set shared with
+        the root, which splices that code in unscanned. Unlike the root's scan, it sets
+        no ``used_names``: it keeps or drops no line of its own."""
+        if self.conditional_lines:
+            # Only the root keeps or drops them; this scan never would.
+            name = self.subgraph_name
+            raise AssertionError(f"subgraph {name} wrote a line kept only if used")
+        self.names_used_unscanned |= self.names_used_in(module)
 
     def benchmark_compiled_module(self, output):
         pass

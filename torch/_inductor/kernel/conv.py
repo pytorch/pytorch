@@ -565,8 +565,9 @@ def convolution(
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
         # Eager runs the conv without bias and then adds the bias to the rounded
-        # low-precision output (cudnn/MIOpen order), so fused consumers must see
-        # the rounded sum (https://github.com/pytorch/pytorch/issues/201296).
+        # low-precision output (cudnn order), so fused consumers must see the
+        # rounded sum (https://github.com/pytorch/pytorch/issues/201296); the
+        # rounding is gated on emulate_precision_casts_on_saved_tensors.
         return emulate_lowp_output_cast(result)
 
     x.realize()

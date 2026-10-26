@@ -731,31 +731,41 @@ def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
     return False
 
 
+def _has_lowp_pointwise_barrier(node: torch.fx.Node | None) -> bool:
+    return (
+        node is not None
+        and node.meta is not None
+        and node.meta.get("low_precision_pointwise_barrier", False)
+    )
+
+
 def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
     """Round a low-precision value in registers without materializing it.
 
     A lowering that splits one user-visible low-precision op into several IR
     nodes (e.g. peeling the bias off a convolution) must reproduce the rounding
-    of the op's declared output, otherwise a fused consumer can observe a value
-    eager never produces.
+    of the op's declared output: eager has no intermediate node whose rounding a
+    fused consumer could observe instead.  make_pointwise already rounds this
+    value under the emulate_precision_casts barrier or when it is saved for
+    backward; this covers the remaining unsaved case under the same knob
+    (emulate_precision_casts_on_saved_tensors), so the value no longer depends
+    on whether backward saves it.
     """
     dtype = x.get_dtype()
     if dtype not in (torch.bfloat16, torch.float16):
         return x
 
-    x_loader = x.make_loader()
+    if not config.emulate_precision_casts_on_saved_tensors:
+        # The knob owns the saved-vs-unsaved rounding policy; off means this
+        # rounding is elided for every op, saved or not.
+        return x
 
-    def inner_fn(index):
-        out = x_loader(index)
-        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-        return ops.to_dtype(downcast, dtype)
+    node = getattr(V.graph, "current_node", None) if V.graph is not None else None
+    if _has_lowp_pointwise_barrier(node) or _has_saved_lowp_output_use(node):
+        # make_pointwise already emits the rounding for this value.
+        return x
 
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=x.get_size(),
-    )
+    return make_pointwise(lambda out: out)(x, force_output_cast=True)
 
 
 def make_pointwise(
@@ -771,7 +781,9 @@ def make_pointwise(
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
+    def inner(  # noqa: docstring_linter
+        *inputs: Any, alpha=None, force_output_cast: bool = False
+    ) -> TensorBox | _T:
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
@@ -823,11 +835,7 @@ def make_pointwise(
         current_node = (
             getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
-        emulate_precision_casts = (
-            current_node is not None
-            and current_node.meta is not None
-            and current_node.meta.get("low_precision_pointwise_barrier", False)
-        )
+        emulate_precision_casts = _has_lowp_pointwise_barrier(current_node)
         truncate_saved_output = (
             config.emulate_precision_casts_on_saved_tensors
             and not emulate_precision_casts
@@ -835,7 +843,7 @@ def make_pointwise(
             and _has_saved_lowp_output_use(current_node)
         )
         emulate_output_cast = (
-            emulate_precision_casts or truncate_saved_output
+            emulate_precision_casts or truncate_saved_output or force_output_cast
         ) and dtype in low_pr_fp
 
         def inner_fn(index):
