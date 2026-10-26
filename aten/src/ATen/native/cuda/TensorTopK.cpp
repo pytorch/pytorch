@@ -7,6 +7,8 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cuda/Sort.h>
 
+#include <limits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -36,6 +38,13 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
 
   // Only use full sort for 1D contiguous large arrays
   if (self.numel() < 10000 || self.numel() != self.size(dim)) {
+    return false;
+  }
+
+  // Past INT_MAX a full sort orders the whole input and allocates temporaries to
+  // match. The topk kernels are cheaper: multi-block selection up to UINT32_MAX,
+  // and single-block above it, which still beats sorting the whole input.
+  if (self.size(dim) > std::numeric_limits<int>::max()) {
     return false;
   }
 
