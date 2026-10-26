@@ -26,11 +26,9 @@ struct XPUEvent {
 #ifdef _WIN32
     TORCH_CHECK(false, "XPU IPC events are not supported on Windows.");
 #endif
-    // Events reconstructed from an IPC handle cannot be re-exported via
-    // ipc_handle(). So keep `enable_ipc_` false to avoid confusion.
     auto& device = c10::xpu::get_raw_device(device_index);
-    reusable_ = device.has(sycl::aspect::ext_oneapi_ipc_event) &&
-        device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+    // IPC is only supported for reusable events.
+    reusable_ = device.has(sycl::aspect::ext_oneapi_ipc_event);
     TORCH_CHECK(
         reusable_,
         "XPUEvent reconstructed from an IPC handle must be reusable.");
@@ -105,8 +103,6 @@ struct XPUEvent {
   }
 
   void record(const XPUStream& stream) {
-    namespace syclex = sycl::ext::oneapi::experimental;
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     const bool first_record = !isCreated();
     if (first_record) {
       createEvent(stream.device_index());
@@ -121,14 +117,13 @@ struct XPUEvent {
 
     if (reusable_) {
 #if SYCL_COMPILER_VERSION >= 20260200
-      syclex::enqueue_signal_event(stream.queue(), *event_);
+      sycl::ext::oneapi::experimental::enqueue_signal_event(
+          stream.queue(), *event_);
 #endif
-    } else if (first_record) {
-      assignEvent(stream.queue());
     } else {
-      reassignEvent(stream.queue());
+      assignEvent(stream.queue());
     }
-
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       if (first_record) {
         (*interp)->trace_gpu_event_creation(
@@ -201,7 +196,6 @@ struct XPUEvent {
         enable_ipc_,
         "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
     if (!isCreated()) {
-      namespace syclex = sycl::ext::oneapi::experimental;
       createEvent(c10::xpu::current_device());
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
@@ -210,23 +204,23 @@ struct XPUEvent {
       }
     }
     TORCH_CHECK(reusable_, "XPUEvent must be reusable to support IPC.");
+    // Reject re-exporting an event that was itself imported from an IPC handle.
+    TORCH_CHECK(
+        event().ext_oneapi_ipc_enabled(),
+        "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
     return sycl::ext::oneapi::experimental::ipc::event::get(*event_).data();
   }
 #endif
 
  private:
   void assignEvent(sycl::queue& queue) {
+    event_.reset();
     if (enable_timing_) {
       event_ = std::make_unique<sycl::event>(
           sycl::ext::oneapi::experimental::submit_profiling_tag(queue));
     } else {
       event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
     }
-  }
-
-  void reassignEvent(sycl::queue& queue) {
-    event_.reset();
-    assignEvent(queue);
   }
 
   void createEvent(c10::DeviceIndex device_index) {
@@ -238,29 +232,32 @@ struct XPUEvent {
     TORCH_CHECK(!enable_ipc_, "XPU IPC events are not supported on Windows.");
 #endif
 #if SYCL_COMPILER_VERSION >= 20260200
-    namespace syclex = sycl::ext::oneapi::experimental;
-
-    auto& device = c10::xpu::get_raw_device(device_index_);
     if (enable_ipc_) {
+      auto& device = c10::xpu::get_raw_device(device_index_);
       TORCH_CHECK(
           device.has(sycl::aspect::ext_oneapi_ipc_event),
           "Requires the ext_oneapi_ipc_event extension, "
           "which is not supported on this device. ",
           "Please upgrade to a newer driver.");
     }
-    // Base reusability on per-event profiling support regardless of
-    // enable_timing_, to align with c10::Event behavior.
-    reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+#else
+    TORCH_CHECK(
+        !enable_ipc_, "XPU IPC events require SYCL compiler 2026.2 or later.");
+#endif
+    // Only IPC-enabled events are backed by a reusable sycl::event, which
+    // requires SYCL compiler 2026.2 or later. Reusable events conflict with
+    // SYCL host_task, so we restrict reusability to IPC events to preserve
+    // backward compatibility.
+    reusable_ = enable_ipc_;
+#if SYCL_COMPILER_VERSION >= 20260200
     if (reusable_) {
+      namespace syclex = sycl::ext::oneapi::experimental;
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
           syclex::properties{
               syclex::enable_ipc{enable_ipc_},
               syclex::enable_profiling{enable_timing_}}));
     }
-#else
-    TORCH_CHECK(
-        !enable_ipc_, "XPU IPC events require SYCL compiler 2026.2 or later.");
 #endif
   }
 

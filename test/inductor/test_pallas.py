@@ -12,8 +12,13 @@ import torch._dynamo
 import torch._inductor.async_compile
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
+from torch._inductor.graph import GraphLowering
+from torch._inductor.ir import FallbackKernel
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
@@ -2625,6 +2630,36 @@ class PallasTestsMixin:
         result = compiled(x, y)
         expected = fn(x, y)
         self.assertEqual(result, expected)
+
+
+class PallasLoweringTests(TestCase):
+    def test_low_precision_nextafter_falls_back(self):
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            x = torch.ones(2, dtype=torch.float16)
+            y = torch.full((2,), 2.0, dtype=torch.float16)
+            gm = make_fx(torch.ops.prims.nextafter.default, tracing_mode="fake")(x, y)
+
+        with config.patch(cpu_backend="pallas"), V.set_fake_mode(fake_mode):
+            graph = GraphLowering(gm, example_inputs=[x, y])
+            with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                graph.run(x, y)
+
+        self.assertIsInstance(graph.graph_outputs[0].data, FallbackKernel)
+
+    def test_nextafter_halide_config_does_not_affect_mtia(self):
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            x = torch.ones(2, device="mtia", dtype=torch.float32)
+            y = torch.full((2,), 2.0, device="mtia", dtype=torch.float32)
+            gm = make_fx(torch.ops.prims.nextafter.default, tracing_mode="fake")(x, y)
+
+        with config.patch(cuda_backend="halide"), V.set_fake_mode(fake_mode):
+            graph = GraphLowering(gm, example_inputs=[x, y])
+            with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                graph.run(x, y)
+
+        self.assertNotIsInstance(graph.graph_outputs[0].data, FallbackKernel)
 
 
 if test_torchinductor.RUN_CPU and has_cpu_pallas():

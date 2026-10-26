@@ -29,9 +29,9 @@ if(CXX_AVX2_FOUND)
 
   if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     target_compile_options(Caffe2_perfkernels_avx2
-        PRIVATE "/arch:AVX2"
-        PRIVATE "/D__FMA__"
-        PRIVATE "/D__F16C__")
+        PRIVATE "/arch:AVX2")
+    target_compile_definitions(Caffe2_perfkernels_avx2
+        PRIVATE "__FMA__" "__F16C__")
   else()
     target_compile_options(Caffe2_perfkernels_avx2
         PRIVATE "-mavx2"
