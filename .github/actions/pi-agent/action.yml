@@ -8,7 +8,7 @@ inputs:
     description: Bedrock model ID; must be listed in allowed-models.json next to this file
     required: true
   allow-unlisted-model:
-    description: Skip the allowlist check (model-probing workflows only)
+    description: Skip the allowlist check and permit pi.dev catalog refresh (model-probing workflows only)
     default: "false"
   prompt:
     description: Prompt text, or a path to a prompt file
@@ -19,7 +19,7 @@ inputs:
   tools:
     description: >
       Comma-separated tool allowlist. Enforced per call; read/grep/find/ls are
-      confined to the working directory. Add bash only for trusted input.
+      confined to the working directory; write/edit are always blocked. Add bash only for trusted input.
     default: read,grep,find,ls
   result-schema:
     description: >

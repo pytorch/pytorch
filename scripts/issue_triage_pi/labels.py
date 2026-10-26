@@ -11,6 +11,9 @@ SKILLS = Path(__file__).resolve().parents[2] / ".agents/skills"
 TRIAGE_SKILL = SKILLS / "triaging-issues"
 DISTRIBUTED_SKILL = SKILLS / "distributed-triage"
 DISTRIBUTED = "oncall: distributed"
+# Distributed-bot marker; `bot-triaged` belongs to issue triage, which adds it
+# before handing off.
+PTD_TRIAGED = "ptd-bot-triaged"
 
 # Labels the triage bot must never add: CI controls, release notes, severity,
 # and decisions reserved for human reviewers.
@@ -25,6 +28,7 @@ FORBIDDEN_PATTERNS = [
 ]
 FORBIDDEN_EXACT = {
     "actionable",
+    "high priority",
     "merge blocking",
     "needs design",
     "needs reproduction",

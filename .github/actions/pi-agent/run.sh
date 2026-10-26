@@ -32,7 +32,8 @@ text_or_file "$PI_PROMPT" > "$out/prompt.md"
 
 # tool-guard enforces the tool allowlist per call and confines path tools to
 # the working directory; submit-result adds the schema-validated result tool.
-tools="$PI_TOOLS"
+tools=$(jq -nr --arg tools "$PI_TOOLS" \
+  '$tools | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0)) | join(",")')
 extensions=(-e "$PI_ACTION_PATH/extensions/tool-guard.ts")
 if [[ -n "$PI_RESULT_SCHEMA" ]]; then
   text_or_file "$PI_RESULT_SCHEMA" > "$out/result-schema.json"
@@ -55,15 +56,17 @@ export PI_ALLOWED_TOOLS="$tools"
 # skills, AGENTS.md/CLAUDE.md): only files passed with -e and --skill load.
 isolation=(--no-approve --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files)
 
-# pi only warns on an unknown --model and falls back to another model. Refresh
-# the catalog from pi.dev only when the bundled one lacks the ID.
+# pi only warns on an unknown --model and falls back to another model. Only
+# explicitly opted-in model probes may refresh the catalog from pi.dev.
 known() {
   pi "${isolation[@]}" "${extensions[@]}" --list-models "$PI_MODEL" 2> /dev/null \
     | awk -v m="$PI_MODEL" '$1 == "amazon-bedrock" && $2 == m { f = 1 } END { exit !f }'
 }
 if ! known; then
-  echo "$PI_MODEL is not in pi's bundled catalog; refreshing from pi.dev"
-  PI_OFFLINE=0 pi update --models || true
+  if [[ "$PI_ALLOW_UNLISTED_MODEL" == "true" ]]; then
+    echo "$PI_MODEL is not in pi's bundled catalog; refreshing from pi.dev"
+    PI_OFFLINE=0 pi update --models || true
+  fi
   known || { echo "::error::amazon-bedrock/$PI_MODEL is not in pi's model catalog"; exit 1; }
 fi
 
@@ -74,7 +77,7 @@ pi --mode json "${isolation[@]}" "${extensions[@]}" ${skills[@]+"${skills[@]}"} 
   --session-dir "$out/session" --provider amazon-bedrock --model "$PI_MODEL" \
   --thinking "$PI_THINKING" --tools "$tools" "@$out/prompt.md" 2> "$out/stderr.log" \
   | tee "$out/events.jsonl" \
-  | jq --unbuffered -r 'select(.type == "tool_execution_start") | "→ \(.toolName) \(.args | tostring | .[0:240])"'
+  | jq --unbuffered -Rr 'fromjson? | objects | select(.type == "tool_execution_start") | "→ \(.toolName) \(.args | tostring | .[0:240])"'
 rc=${PIPESTATUS[0]}
 set -e
 duration_ms=$((($(date +%s) - started) * 1000))
@@ -83,6 +86,14 @@ session_file=$(find "$out/session" -name '*.jsonl' -print -quit)
 [[ -z "$session_file" ]] || pi --export "$session_file" "$out/transcript.html" > /dev/null 2>&1 || true
 
 events="$out/events.jsonl"
+events_error=""
+# The live display must drain stdout even on bad JSON. Validate the complete
+# stream before auditing; keep the raw file for diagnosis, but never trust it.
+if ! jq -s 'if all(.[]; type == "object") then empty else error("events must be JSON objects") end' \
+  "$events" > /dev/null 2> "$out/events-error.log"; then
+  events_error="pi emitted invalid JSON events (see events.jsonl and events-error.log)"
+  events=/dev/null
+fi
 jq -s -r '[.[] | select(.type == "message_end" and .message.role == "assistant")] | last
   | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' "$events" > "$out/final.txt" || true
 jq -s '[.[] | select(.type == "message_end" and .message.role == "assistant") | .message] as $m
@@ -96,10 +107,6 @@ jq -s '[.[] | select(.type == "message_end" and .message.role == "assistant") | 
      last_error: ($m | last | .errorMessage // null)}' "$events" > "$out/usage.json" 2> /dev/null \
   || echo '{}' > "$out/usage.json"
 
-# Claude Code execution-file shape, for the review log inspector and usage upload.
-jq -s --arg version "$(pi --version)" --arg model "$PI_MODEL" --argjson duration_ms "$duration_ms" \
-  -f "$PI_ACTION_PATH/claude-execution.jq" "$events" > "$out/execution.json" || rm -f "$out/execution.json"
-
 # Every tool declared to the model or run successfully must be in the allowlist.
 declared=$(jq -r 'select(.type == "message_end" and .message.role == "system") | .message.toolsAdded[]?.name' "$events" | sort -u)
 executed=$(jq -r 'select(.type == "tool_execution_end" and (.isError | not)) | .toolName' "$events" | sort -u)
@@ -112,6 +119,8 @@ last_stop=$(jq -r '.last_stop // ""' "$out/usage.json")
 error=""
 if [[ $rc -ne 0 ]]; then
   error="pi exited with $rc: $(tail -n 3 "$out/stderr.log" | tr '\n' ' ')"
+elif [[ -n "$events_error" ]]; then
+  error="$events_error"
 elif [[ "$last_stop" =~ ^(error|aborted)$ ]]; then
   # pi exits 0 when the provider call fails (auth, throttling, model access).
   error="model call failed: $(jq -r .last_error "$out/usage.json")"
@@ -120,6 +129,11 @@ elif [[ -n "$unexpected" ]]; then
 elif [[ -n "$PI_RESULT_SCHEMA" && ! -s "$out/result.json" ]]; then
   error="model finished without calling submit_result (last stop: $last_stop)"
 fi
+
+# Claude-compatible logs must reflect the action's final outcome, not just pi's.
+jq -s --arg version "$(pi --version)" --arg model "$PI_MODEL" --argjson duration_ms "$duration_ms" \
+  --arg error "$error" -f "$PI_ACTION_PATH/claude-execution.jq" "$events" > "$out/execution.json" \
+  || rm -f "$out/execution.json"
 
 {
   if [[ -z "$error" ]]; then
