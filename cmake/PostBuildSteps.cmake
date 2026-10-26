@@ -126,12 +126,6 @@ if(WIN32 AND BUILD_PYTHON)
         install(FILES ${_dlls} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
       endif()
     endforeach()
-
-    # zlibwapi (needed by some CUDA libraries).
-    if(EXISTS "C:/Windows/System32/zlibwapi.dll")
-      install(FILES "C:/Windows/System32/zlibwapi.dll"
-              DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
   endif()
 
   # Retain the legacy NvToolsExt DLL for existing Windows binaries until its

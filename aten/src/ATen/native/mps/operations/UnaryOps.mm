@@ -21,16 +21,13 @@
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
-#include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/logical_not_native.h>
-#include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
-#include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh_native.h>
 #include <ATen/ops/sqrt_native.h>
@@ -44,136 +41,6 @@ enum class MPSCumulativeOpType : uint8_t {
   CUMSUM = 0,
   CUMPROD = 1,
 };
-
-namespace mps {
-
-typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
-using is_noop_p = std::function<bool(const Tensor&)>;
-
-static bool is_empty_tensor(const Tensor& self) {
-  return self.numel() == 0;
-}
-
-static void unary_op_noresize(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock) {
-  @autoreleasepool {
-    std::string key = op_name + getTensorsStringKey({self, output});
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* castTensor = newCachedGraph->inputTensor_;
-      // Integer input must be cast to float if output is float
-      if (isIntegralType(self.scalar_type(), true) && isFloatingType(output.scalar_type())) {
-        castTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, output.scalar_type());
-      }
-      newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
-    });
-
-    // See https://github.com/pytorch/pytorch/issues/100764
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-}
-
-static void unary_op(const Tensor& self,
-                     const Tensor& output_,
-                     std::string op_name,
-                     UnaryOpBlock unaryBlock,
-                     is_noop_p is_noop = is_empty_tensor) {
-  at::native::resize_output(output_, self.sizes());
-
-  if (is_noop(self)) {
-    output_.copy_(self);
-    return;
-  }
-
-  unary_op_noresize(self, output_, op_name, unaryBlock);
-}
-
-} // namespace mps
-
-TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "signbit_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    MPSGraphTensor* output;
-    // signbit is not implemented for int64 type.
-    // workaround for `Function signbitOp_i64 was not found in the library`
-    if ([inputTensor dataType] == MPSDataTypeInt64) {
-      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-      output = [mpsGraph lessThanWithPrimaryTensor:inputTensor secondaryTensor:zeroTensor name:nil];
-    } else {
-      output = [mpsGraph signbitWithTensor:inputTensor name:nil];
-    }
-    return mps::castMPSTensor(mpsGraph, output, ScalarType::Bool);
-  });
-}
-
-TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
-  TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
-  mps::unary_op(self, output, "frac_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    auto zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-    auto predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor secondaryTensor:zeroTensor name:nil];
-    auto truncTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                       truePredicateTensor:[mpsGraph ceilWithTensor:inputTensor name:nil]
-                                      falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
-                                                      name:nil];
-    return [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:truncTensor name:nil];
-  });
-}
-
-static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string& op_name) {
-  std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
-
-  mps::unary_op(self, output, key, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:inputTensor.dataType];
-    MPSGraphTensor* logitInputTensor;
-
-    if (eps.has_value()) {
-      MPSGraphTensor* lowTensor = [mpsGraph constantWithScalar:eps.value() shape:@[ @1 ] dataType:inputTensor.dataType];
-      MPSGraphTensor* highTensor = [mpsGraph subtractionWithPrimaryTensor:oneTensor secondaryTensor:lowTensor name:nil];
-      // Apply lo last so it wins when eps > 1 - eps, matching the
-      // scalar `x < lo ? lo : (x > hi ? hi : x)` priority.
-      MPSGraphTensor* inputGreaterThanHighTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
-                                                                          secondaryTensor:highTensor
-                                                                                     name:nil];
-      MPSGraphTensor* clampedHighTensor = [mpsGraph selectWithPredicateTensor:inputGreaterThanHighTensor
-                                                          truePredicateTensor:highTensor
-                                                         falsePredicateTensor:inputTensor
-                                                                         name:nil];
-      MPSGraphTensor* inputLessThanLowTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                                   secondaryTensor:lowTensor
-                                                                              name:nil];
-      logitInputTensor = [mpsGraph selectWithPredicateTensor:inputLessThanLowTensor
-                                         truePredicateTensor:lowTensor
-                                        falsePredicateTensor:clampedHighTensor
-                                                        name:nil];
-    } else {
-      logitInputTensor = inputTensor;
-    }
-
-    MPSGraphTensor* oneMinusInputTensor = [mpsGraph subtractionWithPrimaryTensor:oneTensor
-                                                                 secondaryTensor:logitInputTensor
-                                                                            name:nil];
-    MPSGraphTensor* outputTensor = [mpsGraph divisionWithPrimaryTensor:logitInputTensor
-                                                       secondaryTensor:oneMinusInputTensor
-                                                                  name:nil];
-    return [mpsGraph logarithmWithTensor:outputTensor name:nil];
-  });
-}
-
-Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& result) {
-  logit_mps_impl(self, eps, result, "logit_out_mps");
-  return result;
-}
-
-Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
-  auto out_dtype = self.scalar_type();
-  if (c10::isIntegralType(out_dtype, /*includeBool*/ true)) {
-    out_dtype = kFloat;
-  }
-  Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
-  logit_mps_impl(self, eps, result, "logit_mps");
-  return result;
-}
 
 static void cumulative_op_impl(const Tensor& self,
                                int64_t dim,
