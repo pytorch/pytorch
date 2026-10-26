@@ -4022,7 +4022,8 @@ def _resolve_needs_vec_isa(
 
 
 @functools.cache
-def _install_roots() -> tuple[str, ...]:
+def _relocatable_roots() -> tuple[str, ...]:
+    """The torch and Python install roots, which move when a packaged job does."""
     import sysconfig
 
     roots = dict.fromkeys(
@@ -4033,17 +4034,25 @@ def _install_roots() -> tuple[str, ...]:
             sys.base_prefix,
             *sysconfig.get_paths().values(),
         )
-        if root
+        # A relative root would match inside unrelated absolute paths.
+        if root and os.path.isabs(root)
     )
     # Longest first, so a root nested in another is replaced before its parent.
     return tuple(sorted((r for r in roots if len(r) > 1), key=len, reverse=True))
 
 
-def _strip_install_roots(text: str) -> str:
+@functools.cache
+def _root_pattern(roots: tuple[str, ...]) -> re.Pattern[str] | None:
+    if not roots:
+        return None
+    alternatives = "|".join(re.escape(root) for root in roots)
+    return re.compile(f"(?:{alternatives})" + r"(?=[/\\\s\"']|$)")
+
+
+def _strip_relocatable_roots(text: str) -> str:
     """Replace whole install-root path prefixes in ``text`` with a placeholder."""
-    for root in _install_roots():
-        text = re.sub(re.escape(root) + r"(?=[/\\\s\"']|$)", "<install>", text)
-    return text
+    pattern = _root_pattern(_relocatable_roots())
+    return text if pattern is None else pattern.sub("<install>", text)
 
 
 def _portable_cpp_key(compiler: str, *parts: str) -> str:
@@ -4063,7 +4072,7 @@ def _portable_cpp_key(compiler: str, *parts: str) -> str:
         _compiler_version_first_line(compiler),
     )
     hasher = hashlib.sha256()
-    for part in (*identity, *(_strip_install_roots(part) for part in parts)):
+    for part in (*identity, *(_strip_relocatable_roots(part) for part in parts)):
         hasher.update(part.encode())
         hasher.update(b"\0")
     return hasher.hexdigest()
@@ -4201,14 +4210,6 @@ class CppCodeCache:
         key, main_path = write(
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
         )
-        portable_key = _portable_cpp_key(
-            main_build_option.get_compiler(),
-            main_code,
-            optimized_code or "",
-            main_cmd_line,
-            optimized_cmd_line,
-        )
-
         # Don't bother writing if the argument is empty.
         if optimized_code:
             _, optimized_path = write(
@@ -4225,6 +4226,13 @@ class CppCodeCache:
             )
             from torch.utils._filelock import FileLock
 
+            portable_key = _portable_cpp_key(
+                main_build_option.get_compiler(),
+                main_code,
+                optimized_code or "",
+                main_cmd_line,
+                optimized_cmd_line,
+            )
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None

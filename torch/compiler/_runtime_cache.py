@@ -47,8 +47,8 @@ if TYPE_CHECKING:
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
-# Keyed like CppCodeCache: by source and full build command, which includes the
-# producer's absolute include and library paths.
+# Keyed by CppCodeCache's portable key: the source and build command with the
+# torch and Python install roots removed (see _portable_cpp_key).
 _frozen_cpp_kernels: dict[str, bytes] = {}
 _frozen_cpp_kernels_lock = threading.Lock()
 
@@ -491,42 +491,49 @@ def _freeze_never_run_backward(
     """Freeze a backward kernel no captured step ran, with its first usable config.
 
     Opt-in via ``torch.compiler.config.precompile_freeze_never_run_backward``.
-    Such a kernel never autotuned down to one launcher, or never built one. A
-    kernel without launchers builds them now, through the autotuner's own load
-    path, as its first run would: that drops the configs that cannot load on its
-    device. The configs left are semantically equivalent, so take the first that
-    would not tune on launch and whose binary can be retained.
+    Such a kernel never autotuned down to one launcher, or never built one. The
+    record is served to every graph that renders the source, so a source with a
+    forward instance is not frozen. Launchers are built on a private copy of the
+    kernel, through the autotuner's load path, which drops the configs that
+    cannot load on its device. The configs left are semantically equivalent, so
+    take the first that would not tune on launch and whose binary can be
+    retained.
     """
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
-    for kernel in instances:
-        if not getattr(kernel, "is_backward", False):
-            continue
+    forward = [k for k in instances if not getattr(k, "is_backward", False)]
+    for kernel in forward:
         with kernel.lock:
-            if not kernel.launchers:
-                try:
-                    kernel._make_launchers()
-                except RuntimeError as exc:
+            rejected.append(_triton_export_diagnostic(kernel, "forward_never_run"))
+    if forward:
+        return None
+    for kernel in instances:
+        with kernel.lock:
+            probe = _launch_probe(kernel)
+        if not probe.launchers:
+            try:
+                probe._make_launchers()
+            except Exception as exc:
+                with kernel.lock:
                     diagnostic = _triton_export_diagnostic(kernel, "load_failed")
-                    diagnostic["error"] = str(exc)
-                    rejected.append(diagnostic)
-                    continue
-            candidates = [
-                getattr(launcher, "_compile_result", None)
-                for launcher in kernel.launchers
-            ]
+                diagnostic["error"] = str(exc)
+                rejected.append(diagnostic)
+                continue
+        candidates = [
+            getattr(launcher, "_compile_result", None) for launcher in probe.launchers
+        ]
         for index, candidate in enumerate(candidates, start=1):
-            with kernel.lock:
-                if not isinstance(candidate, StaticTritonCompileResult):
-                    reason: str | None = "non_static_compile_result"
-                else:
-                    reason = _tuning_rejection(kernel, candidate)
-                if reason is not None:
-                    rejected.append(_triton_export_diagnostic(kernel, reason))
-                    continue
-                result = cast(StaticTritonCompileResult, candidate)
-                snapshot = _snapshot_kernel(kernel, result)
-            frozen = _pickle_snapshot(key, kernel, snapshot, rejected)
+            if not isinstance(candidate, StaticTritonCompileResult):
+                reason: str | None = "non_static_compile_result"
+            else:
+                reason = _tuning_rejection(probe, candidate)
+            if reason is not None:
+                rejected.append(_triton_export_diagnostic(probe, reason))
+                continue
+            result = cast(StaticTritonCompileResult, candidate)
+            frozen = _pickle_snapshot(
+                key, probe, _snapshot_kernel(probe, result), rejected
+            )
             if frozen is None:
                 continue
             log.warning(
@@ -540,6 +547,24 @@ def _freeze_never_run_backward(
             )
             return frozen
     return None
+
+
+def _launch_probe(kernel: CachingAutotuner) -> CachingAutotuner:
+    """Copy ``kernel`` so it can build launchers; the caller holds ``kernel.lock``.
+
+    Loading a config writes to its compile result, and the live kernel must stay
+    as the capture left it: a live run that finds launchers skips precompile().
+    """
+    probe = type(kernel).__new__(type(kernel))
+    probe.__dict__.update(kernel.__dict__)
+    probe.compile_results = []
+    for result in kernel.compile_results:
+        result = copy.copy(result)
+        if hasattr(result, "kernel"):
+            result.kernel = copy.copy(result.kernel)
+        probe.compile_results.append(result)
+    probe.launchers = list(kernel.launchers)
+    return probe
 
 
 def _snapshot_kernel(

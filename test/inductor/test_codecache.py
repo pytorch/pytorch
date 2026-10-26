@@ -592,7 +592,7 @@ class TestCppPortableKey(TestCase):
 
         real_config_var = sysconfig.get_config_var
         with (
-            mock.patch.object(codecache, "_install_roots", return_value=roots),
+            mock.patch.object(codecache, "_relocatable_roots", return_value=roots),
             mock.patch.object(
                 sysconfig,
                 "get_config_var",
@@ -628,8 +628,8 @@ class TestCppPortableKey(TestCase):
     def test_real_command_line_keeps_no_install_root(self):
         from torch._inductor import codecache
 
-        stripped = codecache._strip_install_roots(self._real_command_line())
-        for root in codecache._install_roots():
+        stripped = codecache._strip_relocatable_roots(self._real_command_line())
+        for root in codecache._relocatable_roots():
             self.assertNotRegex(stripped, re.escape(root) + r"(?=[/\\\s\"']|$)")
 
     def test_key_tracks_paths_outside_install(self):
@@ -639,21 +639,30 @@ class TestCppPortableKey(TestCase):
             self._key("-I/opt/t-cuda/include"), self._key("-I/opt/u-cuda/include")
         )
 
-    def test_key_tracks_source_python_abi_and_compiler(self):
+    def test_key_tracks_torch_source_python_abi_and_compiler(self):
+        from torch._inductor import codecache
+
         base = self._key("src", "cmd")
         self.assertNotEqual(base, self._key("other src", "cmd"))
         self.assertNotEqual(base, self._key("src", "cmd", ext_suffix=".abi3.so"))
         self.assertNotEqual(base, self._key("src", "cmd", version="cc 2"))
+        with mock.patch.object(codecache, "torch_key", return_value=b"other torch"):
+            self.assertNotEqual(base, self._key("src", "cmd"))
 
-    def test_install_roots_are_longest_first(self):
+    def test_relocatable_roots_are_absolute_and_longest_first(self):
         from torch._inductor import codecache
 
-        roots = codecache._install_roots()
+        roots = codecache._relocatable_roots()
         self.assertIn(
             normalize_path_separator(os.path.dirname(os.path.dirname(torch.__file__))),
             roots,
         )
         self.assertEqual(list(roots), sorted(roots, key=len, reverse=True))
+        # A relative PYTHONHOME makes the prefixes relative; they are not roots.
+        with mock.patch.object(sys, "base_prefix", "lib/python3"):
+            roots = codecache._relocatable_roots.__wrapped__()
+        self.assertNotIn("lib/python3", roots)
+        self.assertTrue(all(os.path.isabs(root) for root in roots))
 
 
 class TestPyCodeCache(TestCase):
