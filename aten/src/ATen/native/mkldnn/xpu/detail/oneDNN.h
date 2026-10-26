@@ -97,10 +97,9 @@ TORCH_API void woq_matmul_int4(
     const at::Tensor& mat2_, // quantized weight, [K/8, N]
     const at::Tensor& scale, // [K/group_size, N]
     const at::Tensor& zp, // [k/group_size, N]
-    int64_t group_size,
-    bool pri_cache = true);
+    int64_t group_size);
 
-TORCH_API void matmul_int4_impl(
+TORCH_API void matmul_int4_impl_cache(
     at::Tensor& result,
     const at::Tensor& mat1_,
     const at::Tensor& mat2_,
