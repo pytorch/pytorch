@@ -316,10 +316,7 @@ inline LoadedKernel _createKernel(
   props.pNext = nullptr;
   ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
   // requiredSubgroupSize is the intel_reqd_sub_group_size attribute triton
-  // always emits, and is exactly what the per-launch
-  // sycl::info::kernel_device_specific::compile_sub_group_size query it
-  // replaces returned, down to the default of 32 for a kernel that declares no
-  // required size.
+  // always emits; a kernel that declares no required size runs at 32.
   const uint32_t requiredSimd = props.requiredSubgroupSize;
   const uint32_t threadsPerWarp = requiredSimd != 0 ? requiredSimd : 32;
   // Level Zero reports spillMemSize in bytes per hardware thread, while
@@ -340,7 +337,6 @@ inline LoadedKernel _createKernel(
       {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
   kernel.release();
-  // numKernelArgs is the same value sycl::info::kernel::num_args reports.
   return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
@@ -609,10 +605,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   const LoadedKernel* func = reinterpret_cast<const LoadedKernel*>(
       PyCapsule_GetPointer(kernel_py, "static_xpu_kernel")); // NOLINT
   if (func == nullptr) {
-    // PyCapsule_GetPointer set a Python error; report it as a TORCH_CHECK
-    // failure rather than dereferencing null below.
-    PyErr_Clear();
-    TORCH_CHECK(false, "_launch_kernel was not passed a loaded XPU kernel");
+    return nullptr;
   }
   sycl::queue* queuePtr = reinterpret_cast<sycl::queue*>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
