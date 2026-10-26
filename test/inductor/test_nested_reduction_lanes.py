@@ -65,6 +65,7 @@ class TestRecursiveLaneSplit(TestCase):
         "dtype",
         [
             torch.int16,
+            torch.uint16,
             torch.float16,
             torch.bfloat16,
             torch.float32,
