@@ -146,13 +146,23 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
 
   bool inplace_update = false;
   Tensor self_c;
-  std::tie(inplace_update, self_c) = checkTrilTriuBatchContiguous(self, inplace_op);
+  std::tie(inplace_update, self_c) =
+      checkTrilTriuBatchContiguous(self, inplace_op);
 
+  // apply_triu_tril addresses each batch matrix as b * stride(-3). That
+  // matches a packed batch only. self is made batch-contiguous above, and
+  // in-place already falls back to a temporary when it cannot update in
+  // place. out= is not self, so do the same: write a batch-contiguous
+  // temporary when the batch is not packed, then copy it back. A packed out=
+  // (including non-contiguous matrix rows and cols) is used directly.
   Tensor result_c;
   if (inplace_op && !inplace_update) {
     result_c = at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  } else {
+  } else if (inplace_op) {
     result_c = result;
+  } else {
+    result_c = std::get<1>(
+        checkTrilTriuBatchContiguous(result, /*allow_zero_stride=*/false));
   }
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
@@ -162,11 +172,12 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
       ScalarType::Bool,
       self.scalar_type(),
       Triangle::op_name,
-      [&]{
-        apply_triu_tril<scalar_t>(result_c, self_c, inplace_op && inplace_update, k, Triangle::upper);
+      [&] {
+        apply_triu_tril<scalar_t>(
+            result_c, self_c, inplace_op && inplace_update, k, Triangle::upper);
       });
 
-  if (inplace_op && !inplace_update) {
+  if (!result_c.is_alias_of(result)) {
     result.copy_(result_c);
   }
 }

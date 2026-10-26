@@ -9789,6 +9789,63 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(result_triu_min, expected_triu_min)
         self.assertEqual(result_tril_min, expected_tril_min)
 
+    @dtypes(torch.float32, torch.float64, torch.int64, torch.bool, torch.complex64)
+    @parametrize("fn", [subtest(torch.triu, name="triu"), subtest(torch.tril, name="tril")])
+    @parametrize("diagonal", [-1, 0, 1])
+    @parametrize("layout", ["permute4d", "slice3d", "slice_outer4d", "issue"])
+    def test_triu_tril_out_noncontiguous_batch(self, device, dtype, fn, diagonal, layout):
+        # Regression test for https://github.com/pytorch/pytorch/issues/200542
+        # CPU triu/tril stepped across the flattened batch with only stride(-3).
+        # A permuted or sliced batch in out= then wrote the wrong matrices and
+        # past the end of storage.
+        if layout == "issue":
+            logical = (2, 2, 1, 1)
+        elif layout == "slice3d":
+            logical = (4, 3, 5)
+        else:
+            logical = (2, 3, 4, 5)
+        values = make_tensor(logical, dtype=dtype, device=device)
+
+        def noncontiguous_batch(values):
+            # Same logical values, with a batch that is not a packed stride(-3) walk.
+            if layout in ("permute4d", "issue"):
+                out = values.transpose(0, 1).contiguous().transpose(0, 1)
+                return out, None
+            # slice3d gaps the only batch dim. slice_outer4d keeps stride(-3)
+            # packed and gaps the outer batch dim, which a flattened index
+            # still mis-addresses.
+            backing = make_tensor((values.shape[0] * 2, *values.shape[1:]), dtype=dtype, device=device)
+            gap = backing[1::2].clone()
+            out = backing[::2]
+            out.copy_(values)
+            return out, (backing, gap)
+
+        ref = fn(values, diagonal)
+        out, gap = noncontiguous_batch(values)
+        self.assertEqual(out.shape, values.shape)
+        self.assertFalse(out.is_contiguous())
+        strides = out.stride()
+        result = fn(values, diagonal, out=out)
+        self.assertEqual(result.data_ptr(), out.data_ptr())
+        self.assertEqual(out.stride(), strides)
+        self.assertEqual(out, ref)
+        if gap is not None:
+            backing, gap_before = gap
+            self.assertEqual(backing[1::2], gap_before)
+
+        # In-place on the same non-contiguous batch layout.
+        inplace_src, _ = noncontiguous_batch(values)
+        if fn is torch.triu:
+            inplace_src.triu_(diagonal)
+        else:
+            inplace_src.tril_(diagonal)
+        self.assertEqual(inplace_src, ref)
+
+        # Non-contiguous batch on self, contiguous out.
+        src, _ = noncontiguous_batch(values)
+        out_c = torch.empty(logical, dtype=dtype, device=device)
+        self.assertEqual(fn(src, diagonal, out=out_c), ref)
+
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
     def test_1_sized_with_0_strided(self, device, dtype):
