@@ -5586,6 +5586,24 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    def test_register_kernel_errors_name_the_kernel_module(self):
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        def aliasing_kernel(x):
+            return x
+
+        # Not torch's module, so the message cannot come from the wrapper
+        # register_kernel installs. A triton_op's kernels, which register_kernel
+        # does not wrap, still name torch._library.triton.
+        aliasing_kernel.__module__ = "json"
+        f.register_kernel("cpu")(aliasing_kernel)
+        with self.assertRaisesRegex(
+            RuntimeError, "with implementation in <module 'json'"
+        ):
+            f(torch.randn(3))
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
         @torch.library.custom_op(

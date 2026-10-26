@@ -7459,10 +7459,7 @@ import os
 import sys
 
 phase, directory, module = sys.argv[1:4]
-# "warm" captures again over the cache "capture" filled, so its graphs load from
-# Inductor's caches instead of compiling.
-cache_phase = "capture" if phase == "warm" else phase
-os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, cache_phase, "inductor")
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
 os.environ.pop("TRITON_CACHE_DIR", None)
 os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
 if phase == "replay":
@@ -7471,10 +7468,8 @@ if phase == "replay":
 import torch
 
 pc = torch.compiler.precompile
-# The warm capture only checks detection on cache hits; replay serves the cold one.
-name = "warm_artifact" if phase == "warm" else "artifact"
-artifact = os.path.join(directory, name + ".py")
-cache = os.path.join(directory, name + ".cache")
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
 torch._inductor.config.use_static_cuda_launcher = True
 torch._inductor.config.coordinate_descent_tuning = True
 sys.path.insert(0, directory)
@@ -7498,7 +7493,7 @@ if phase == "strict":
         assert "DynamoTracer(require_tuned_backward=False)" in str(e), e
     else:
         raise AssertionError("a strict capture froze a never-run backward kernel")
-elif phase in ("capture", "warm"):
+elif phase == "capture":
     untuned = []
 
     class Untuned(logging.Handler):
@@ -7759,6 +7754,14 @@ class TestPrecompileRuntimeCache(TestCase):
                 [ambiguous(), ambiguous(backward=False)],
                 require_tuned_backward=False,
             )
+        # One kernel object a forward and then a backward compiled: its record says
+        # why it was refused, though its latest direction is backward.
+        shared = ambiguous()
+        shared._forward_use = True
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
+            _freeze_triton_kernel("source", [shared], require_tuned_backward=False)
+        (record,) = failure.exception.sources[0]["instances"]
+        self.assertEqual((record["forward_use"], record["launched"]), (True, False))
         # The caller asked for every kernel tuned (require_tuned_backward): the
         # error points at the opt-in.
         with self.assertRaisesRegex(
@@ -9447,7 +9450,7 @@ class TestPrecompileRuntimeCache(TestCase):
             module = f"precompile_never_run_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:
                 f.write(_NEVER_RUN_BACKWARD_MODULE)
-            for phase in ("strict", "capture", "replay", "warm"):
+            for phase in ("strict", "capture", "replay"):
                 out = subprocess.run(
                     [
                         sys.executable,
@@ -9855,17 +9858,8 @@ class TestPrecompileCustomOpModules(TestCase):
                 self.assertEqual(_custom_op_modules({f"{ns}::{op}"}), {})
             self.assertIn(f"{ns}::{op}", logs.output[0])
             self.assertIn(reason, logs.output[0])
-        # A torch submodule registers its ops when imported, like any other, and is
-        # used when the module preferred over it (here the fake's) is __main__.
-        op = self._define_op(
-            ns, "torch_submodule", module="torch.nn.functional", fake=False
-        )
-
-        def fake_in_main(x):
-            return torch.empty_like(x)
-
-        fake_in_main.__module__ = "__main__"
-        op.register_fake(fake_in_main)
+        # A torch submodule registers its ops when imported, like any other.
+        self._define_op(ns, "torch_submodule", module="torch.nn.functional")
         self.assertEqual(
             _custom_op_modules({f"{ns}::torch_submodule"}),
             {"torch.nn.functional": (f"{ns}::torch_submodule",)},

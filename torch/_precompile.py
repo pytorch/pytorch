@@ -2073,13 +2073,13 @@ def _custom_op_modules(
     """The importable modules defining the Python custom ops among ``op_names``,
     each with the ops it defines.
 
-    The candidates are the modules defining the function ``torch.library.custom_op``
-    wrapped and the op's fake, which for ``torch.library.triton_op`` is the user's
-    function (torch wrapped it for the custom op). That is where the op registers
-    unless it was built elsewhere (by a factory, say), which the import at load
-    checks. The first candidate a serving process can import by name is used:
-    outside torch first, then a torch submodule (some register their ops only once
-    imported), but never torch's own wrappers (``torch._library``) or ``__main__``.
+    The module is the one defining the function ``torch.library.custom_op``
+    wrapped, or, for ``torch.library.triton_op``, whose function is torch's own
+    wrapper, the one defining the op's fake, the user's function. That is where
+    the op registers unless it was built elsewhere (by a factory, say), which the
+    import at load checks. A serving process must be able to import it by name; a
+    torch submodule counts (some register their ops only once imported), but
+    never torch's own wrappers (``torch._library``) or ``__main__``.
     An op with no such candidate is reported instead; serving then needs it
     registered some other way.
 
@@ -2139,12 +2139,8 @@ def _custom_op_modules(
                 return "not importable by that name"
             return None
 
-        # Outside torch first; then a torch submodule.
-        candidates = sorted(
-            dict.fromkeys(defined_in), key=lambda n: n is None or in_torch(n)
-        )
-        reasons = {n: unusable(n) for n in candidates}
-        name = next((n for n in candidates if reasons[n] is None), None)
+        reasons = {n: unusable(n) for n in dict.fromkeys(defined_in)}
+        name = next((n for n, reason in reasons.items() if reason is None), None)
         if name is None:
             log.warning(
                 "precompile: no module a serving process can import registers custom "
