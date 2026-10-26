@@ -4158,7 +4158,8 @@ class CppCodeCache:
             lambda: get_hash(
                 main_code.strip(),
                 f"{optimized_code} {_relocatable_command_line(main_cmd_line)}",
-            )
+            ),
+            loaded=key in cls.cache,
         )
 
         # Don't bother writing if the argument is empty.
@@ -4301,31 +4302,37 @@ def _relocatable_command_line(cmd: str) -> str:
     replaced as whole path components. The install path also told torch builds
     apart, so torch_key() stands in for it. torch_key() hashes the version and the
     Python sources but not the C++ headers or libraries, which is why this key only
-    names a frozen binary: the binary is built and stored under the key with this
-    host's paths, so no other build ever loads it from the cache dir.
+    names a frozen binary: what this host builds is stored under the key with its
+    own paths. A replay restores a frozen binary to that location too, so the
+    capture and replay hosts must run the same torch build.
 
-    Only these trees move: the Python, compiler, CUDA and other SDK paths stay in
-    the key, even when they sit next to torch, so the hosts must keep those at the
-    same paths, as a packaged job whose torch is extracted per launch next to a
-    fixed interpreter does.
+    Only these trees move, and the cache dir only where an include flag names it:
+    a library in the cache dir that the kernel links against (the Halide runtime,
+    CUTLASS or CK kernels) is recorded by absolute path in the binary, so it stays
+    in the key, as do the Python, compiler, CUDA and other SDK paths, even when they
+    sit next to torch. The hosts must keep those at the same paths, as a packaged
+    job whose torch is extracted per launch next to a fixed interpreter does.
     """
     from torch._inductor import cpp_builder
     from torch.utils import cpp_extension
 
     # get_command_line() normalizes the separators, so normalize the roots the same.
-    roots = {
-        normalize_path_separator(path): "<torch>"
+    torch_trees = {
+        normalize_path_separator(path)
         for path in (cpp_extension._TORCH_PATH, cpp_builder._TORCH_PATH)
     }
-    roots[normalize_path_separator(cache_dir())] = "<inductor_cache_dir>"
-    # Longest first, so a root nested in another is replaced before its parent. A
-    # root starts a path (after a separator, a quote, or a -I or -L flag) and ends a
-    # path component.
-    start = r"(?:^|(?<=[\s'\":;,=])|(?<=-I)|(?<=-L))"
+    # A tree starts a path (after a separator, a quote, or a -I or -L flag) and ends
+    # a path component; the cache dir only starts one after an include flag.
+    anywhere = r"(?:^|(?<=[\s'\":;,=])|(?<=-I)|(?<=-L))"
+    include = r"(?:(?<=-I)|(?<=-I')|(?<=-I\")|(?<=/I \"))"
     end = r"(?=[/\\\s'\":;,=]|$)"
-    for root in sorted(roots, key=len, reverse=True):
-        if len(root) > 1:
-            cmd = re.sub(start + re.escape(root) + end, roots[root], cmd)
+    # Longest first, so a tree nested in another is replaced before its parent.
+    for tree in sorted(torch_trees, key=len, reverse=True):
+        if len(tree) > 1:
+            cmd = re.sub(anywhere + re.escape(tree) + end, "<torch>", cmd)
+    cache = normalize_path_separator(cache_dir())
+    if len(cache) > 1:
+        cmd = re.sub(include + re.escape(cache) + end, "<inductor_cache_dir>", cmd)
     return f"{cmd} torch_key={torch_key().hex()}"
 
 

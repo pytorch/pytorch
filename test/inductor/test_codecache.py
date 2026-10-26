@@ -5846,9 +5846,11 @@ class TestCppCodeCacheKey(TestCase):
 
         torch_dir = normalize_path_separator(cpp_extension._TORCH_PATH)
         parent = os.path.dirname(torch_dir)
+        cache = normalize_path_separator(cache_dir())
         cmd = _relocatable_command_line(
             f"cc -I{torch_dir}/include -I{torch_dir}-ext/inc -I/x{torch_dir}/include "
-            f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include"
+            f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include "
+            f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so"
         )
         self.assertIn("-I<torch>/include", cmd)
         self.assertIn("-L'<torch>/lib'", cmd)
@@ -5856,17 +5858,25 @@ class TestCppCodeCacheKey(TestCase):
         self.assertIn(f"-I/x{torch_dir}/include", cmd)
         # A package installed next to torch (an SDK wheel, say) keeps its path.
         self.assertIn(f"-I{parent}/other_pkg/include", cmd)
+        # The cache dir moves in an include path, but a library in it that the
+        # kernel links against is named by absolute path in the binary.
+        self.assertIn("-I<inductor_cache_dir>/include", cmd)
+        self.assertIn(f" {cache}/halide/libStandaloneHalideRuntime.so", cmd)
 
     def test_no_frozen_key_outside_precompile(self):
         from torch.compiler import _runtime_cache
 
         compute = mock.Mock(return_value="key")
-        self.assertIsNone(_runtime_cache.relocatable_cpp_key(compute))
-        compute.assert_not_called()
-        with _runtime_cache.capture_scope():
-            self.assertEqual(_runtime_cache.relocatable_cpp_key(compute), "key")
+        key = _runtime_cache.relocatable_cpp_key
+        self.assertIsNone(key(compute, loaded=False))
         with mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}):
-            self.assertEqual(_runtime_cache.relocatable_cpp_key(compute), "key")
+            # A kernel this process already loaded needs no frozen binary.
+            self.assertIsNone(key(compute, loaded=True))
+            compute.assert_not_called()
+            self.assertEqual(key(compute, loaded=False), "key")
+        with _runtime_cache.capture_scope():
+            # A capture records every load, memoized or not.
+            self.assertEqual(key(compute, loaded=True), "key")
 
     @unittest.skipIf(
         sys.platform == "win32", "creating symlinks needs extra privileges on Windows"
