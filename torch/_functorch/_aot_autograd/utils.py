@@ -29,7 +29,7 @@ _T = TypeVar("_T")
 if TYPE_CHECKING:
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
-    from .schemas import AOTConfig, ViewAndMutationMeta
+    from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 
 
 KNOWN_TYPES = [
@@ -297,11 +297,30 @@ def is_with_effects(node: torch.fx.Node) -> bool:
     return False
 
 
+def _get_inner_meta(
+    maybe_subclass_meta: "SubclassMeta | None",
+    fw_metadata: "ViewAndMutationMeta",
+) -> "ViewAndMutationMeta":
+    """
+    Metadata of the traced graph: the metadata of the unwrapped inputs when
+    there are tensor-subclass inputs, otherwise fw_metadata itself.
+    """
+    return (
+        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
+    )
+
+
+def shift_static_input_indices(meta: "ViewAndMutationMeta", offset: int) -> None:
+    meta.static_input_indices = [idx + offset for idx in meta.static_input_indices]
+
+
 def unlift_tokens(
     fw_module: torch.fx.GraphModule,
     fw_metadata: "ViewAndMutationMeta",
     aot_config: "AOTConfig",
     bw_module: torch.fx.GraphModule | None = None,
+    *,
+    inner_meta: "ViewAndMutationMeta",
 ) -> None:
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
@@ -370,6 +389,10 @@ def unlift_tokens(
     #     expected_num_erased_outputs == fw_metadata.num_backward_tokens
     num_forward_tokens = len(fw_metadata.tokens)
     num_backward_tokens = fw_metadata.num_backward_tokens
+    if any(idx < num_forward_tokens for idx in inner_meta.static_input_indices):
+        raise AssertionError(
+            f"Static inputs {inner_meta.static_input_indices} overlap {num_forward_tokens} tokens"
+        )
 
     def replace_input_token_with_make_token(
         module: torch.fx.GraphModule, node: torch.fx.Node
@@ -576,6 +599,8 @@ def unlift_tokens(
     # the tokens.
     fw_metadata.tokens = {}
     fw_metadata.num_backward_tokens = 0
+    # Undo the offset handle_effect_tokens_fn applied for the token inputs.
+    shift_static_input_indices(inner_meta, -num_forward_tokens)
 
 
 def root_module_when_exporting_non_strict(
