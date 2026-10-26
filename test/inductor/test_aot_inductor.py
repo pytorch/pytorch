@@ -913,6 +913,115 @@ class AOTInductorTestsTemplate:
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
 
+    def test_failed_inactive_constant_folding_keeps_active_constants(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w1 = torch.randn(8, 8, device=device)
+                self.w2 = torch.randn(8, 8, device=device)
+
+            def forward(self, x):
+                return x @ torch.mm(self.w1, self.w2)
+
+        example_inputs = (torch.randn(4, 8, device=self.device),)
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        # Not legacy_load_runner: its fbcode runner wrapper lacks run_const_fold.
+        runner_cls = getattr(
+            torch._C._aoti, f"AOTIModelContainerRunner{self.device.capitalize()}"
+        )
+        if self.device in ("cpu", "mps"):
+            runner = runner_cls(so_path, 1)
+        else:
+            runner = runner_cls(so_path, 1, self.device)
+        x = torch.randn(4, 8, device=self.device)
+        expected = model(x)
+        self.assertEqual(runner.run([x])[0], expected)
+
+        # A user-managed w1 of the wrong shape makes the inactive buffer's fold
+        # fail inside mm; runs must still use the active buffer afterwards.
+        runner.update_constant_buffer(
+            {
+                "L__self___w1": torch.randn(4, 4, device=self.device),
+                "L__self___w2": model.w2,
+            },
+            use_inactive=True,
+            validate_full_updates=False,
+            user_managed=True,
+        )
+        with self.assertRaises(RuntimeError):
+            runner.run_const_fold(use_inactive=True)
+        self.assertEqual(runner.run([x])[0], expected)
+
+    def test_active_refold_waits_for_inflight_runs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("needs CUDA streams")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(1024, 1024, device=device)
+                self.b = torch.randn(1024, device=device)
+
+            def forward(self, x):
+                return x @ (torch.relu(self.w.t()) + self.b)
+
+        x = torch.randn(64, 1024, device=self.device)
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=(x,),
+            )
+
+        # Not legacy_load_runner: its fbcode runner wrapper lacks run_const_fold.
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        expected = model(x)
+        self.assertEqual(runner.run([x])[0], expected)
+        # Warm up what the sequence below runs. A cudaMalloc or a kernel loaded
+        # lazily there would serialize the streams and hide the race.
+        side = torch.cuda.Stream()
+        with torch.cuda.stream(side):
+            runner.run([x])
+        runner.run_const_fold(use_inactive=False)
+        torch.full((1024, 1024), float("nan"), device=self.device)
+        torch.cuda.synchronize()
+
+        # Queue a run behind a long sleep on the side stream, refold the active
+        # buffer, then overwrite any memory the refold freed. The queued run
+        # must still read the folded constants it was launched with.
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(5e8))
+            output = runner.run([x])[0]
+        runner.run_const_fold(use_inactive=False)
+        junk = [
+            torch.full((1024, 1024), float("nan"), device=self.device) for _ in range(4)
+        ]
+        torch.cuda.synchronize()
+        self.assertEqual(output, expected)
+        del junk
+
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
         if self.device == "mps":
             raise unittest.SkipTest("MPS baseline mismatch")
