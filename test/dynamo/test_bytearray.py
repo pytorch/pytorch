@@ -2,8 +2,6 @@
 """Tests for ByteArrayVariable: bytearray support in Dynamo.
 
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
-Only tests covering operations supported in PR 1 (read-only ops + wiring)
-are included; mutation, methods, and conversions will follow in later PRs.
 """
 
 import torch
@@ -11,7 +9,14 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests
+from torch._dynamo.test_case import run_tests
+from torch.testing._internal.common_utils import make_dynamo_test
+
+
+# CPython's test_translate builds this table with item assignment, so build
+# it once at import time instead.
+_rosetta = bytearray(range(256))
+_rosetta[ord("o")] = ord("e")
 
 
 class Indexable:
@@ -536,6 +541,182 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
             f(x, Items())[1],
+        )
+
+    @make_dynamo_test
+    def test_replace(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a"), b"massassappa")
+        self.assertEqual(b.replace(b"ss", b"x"), b"mixixippi")
+        self.assertEqual(b.replace(b"i", b"a", 2), b"massassippi")
+        self.assertEqual(b.replace(b"i", b"a", Indexable(2)), b"massassippi")
+        self.assertEqual(b.replace(b"i", b"a", 0), b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a", -1), b"massassappa")
+        self.assertEqual(b.replace(b"", b"-"), b"-m-i-s-s-i-s-s-i-p-p-i-")
+        self.assertEqual(b.replace(b"x", b"y"), b"mississippi")
+        self.assertEqual(b.replace(bytearray(b"ss"), b"x"), b"mixixippi")
+        self.assertEqual(b, b"mississippi")
+        self.assertIsInstance(b.replace(b"i", b"a"), self.type2test)
+
+    @make_dynamo_test
+    def test_replace_errors(self):
+        b = self.type2test(b"a b")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(32, b"")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(b"a", 32)
+        with self.assertRaisesRegex(
+            TypeError, "'bytes' object cannot be interpreted as an integer"
+        ):
+            b.replace(b"a", b"b", b"0")
+
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(32, b"", Indexable(b"0"))
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(b"a", 32, Indexable(b"0"))
+
+    @make_dynamo_test
+    def test_translate(self):
+        b = self.type2test(b"hello")
+        self.assertEqual(b.translate(_rosetta), b"helle")
+        self.assertEqual(b.translate(_rosetta, b"l"), b"hee")
+        self.assertEqual(b.translate(_rosetta, delete=b"l"), b"hee")
+        self.assertEqual(b.translate(None, b"e"), b"hllo")
+        self.assertEqual(b, b"hello")
+        self.assertIsInstance(b.translate(_rosetta), self.type2test)
+        with self.assertRaisesRegex(
+            ValueError, "translation table must be 256 characters long"
+        ):
+            b.translate(bytes(range(255)))
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(_rosetta, 1)
+        with self.assertRaises(TypeError):
+            b.translate()
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(None, None)
+
+    def test_replace_translate_single_frame(self):
+        cnt = CompileCounter()
+
+        def f(ba, table, x):
+            x = x + 1
+            return ba.replace(b"a", b"z"), ba.translate(table), x * 2
+
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        table = bytearray(range(256))
+        ba = bytearray(b"ab")
+        expected = f(bytearray(b"ab"), table, torch.ones(1))
+        result = compiled(ba, table, torch.ones(1))
+        self.assertEqual(result, expected)
+        self.assertIsNot(result[0], ba)
+        self.assertIsNot(result[1], ba)
+        self.assertIsNot(result[0], result[1])
+        result[0][0] = ord("q")
+        self.assertEqual(ba, b"ab")
+        self.assertEqual(result[1], b"ab")
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_replace_translate_nonconstant_buffer_graph_break(self):
+        class BytesSubclass(bytes):
+            pass
+
+        for method in ("replace", "translate"):
+            with self.subTest(method=method):
+                torch._dynamo.reset()
+
+                def f(arg, x):
+                    x = x + 1
+                    ba = bytearray(b"ab")
+                    if method == "replace":
+                        result = ba.replace(arg, b"z")
+                    else:
+                        result = ba.translate(arg)
+                    return result, x * 2
+
+                arg = BytesSubclass(b"a" if method == "replace" else _rosetta)
+                x = torch.ones(1)
+                cnt = CompileCounter()
+                torch._dynamo.utils.counters["graph_break"].clear()
+                self.assertEqual(torch.compile(f, backend=cnt)(arg, x), f(arg, x))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 2)
+                self.assertEqual(
+                    sum(torch._dynamo.utils.counters["graph_break"].values()), 1
+                )
+
+    def test_replace_indexable_mutable_buffer(self):
+        class Count:
+            def __init__(self, buffer):
+                self.buffer = buffer
+
+            def __index__(self):
+                self.buffer.append(33)
+                return 1
+
+        for which in ("old", "new"):
+            with self.subTest(buffer=which):
+                torch._dynamo.reset()
+
+                def f(x):
+                    x = x + 1
+                    old = bytearray(b"a") if which == "old" else b"a"
+                    new = bytearray(b"z") if which == "new" else b"z"
+                    buffer = old if which == "old" else new
+                    return bytearray(b"aaa").replace(old, new, Count(buffer)), x * 2
+
+                x = torch.ones(1)
+                compiled = torch.compile(f, backend=CompileCounter())
+                # CPython holds a buffer on old/new while __index__ runs, so a
+                # resize there raises. Dynamo cannot see exports on traced
+                # copies and must decline rather than return a value.
+                with self.assertRaises(BufferError):
+                    f(x)
+                torch._dynamo.utils.counters["graph_break"].clear()
+                with self.assertRaises(BufferError):
+                    compiled(x)
+                self.assertEqual(
+                    sum(torch._dynamo.utils.counters["graph_break"].values()), 1
+                )
+
+    def test_replace_indexable_mutates_receiver(self):
+        class Count:
+            def __init__(self, buffer):
+                self.buffer = buffer
+
+            def __index__(self):
+                self.buffer.append(33)
+                return 1
+
+        def f(x):
+            ba = bytearray(b"aaa")
+            result = ba.replace(b"a", b"z", Count(ba))
+            return result, bytes(ba), x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    def test_replace_symbolic_count_compiles(self):
+        def f(x):
+            ba = bytearray(b"a")
+            return ba.replace(bytearray(b"a"), b"z", x.size(0)), x + 1
+
+        compiled = torch.compile(f, backend="eager", dynamic=True)
+        for n in (1, 2):
+            torch._dynamo.utils.counters["graph_break"].clear()
+            self.assertEqual(compiled(torch.ones(n)), f(torch.ones(n)))
+            self.assertEqual(
+                sum(torch._dynamo.utils.counters["graph_break"].values()), 0
+            )
+
+    def test_input_bytearray_replace_translate(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba, table):
+            return ba.replace(b"a", b"z"), ba.translate(table, b"b")
+
+        self.assertEqual(
+            fn(bytearray(b"ab"), bytearray(range(256))),
+            (bytearray(b"zb"), bytearray(b"a")),
         )
 
     def test_append_extend_arg_mutation(self):
