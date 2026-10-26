@@ -180,7 +180,7 @@ class TORCH_API PyTorchStreamReader final {
   size_t getRecordOffset(const std::string& name);
   size_t getRecordOffsetNoRead(
       size_t cursor,
-      std::string filename,
+      const std::string& filename,
       size_t size,
       uint64_t alignment);
   bool hasRecord(const std::string& name);
@@ -195,14 +195,14 @@ class TORCH_API PyTorchStreamReader final {
   uint64_t version() const {
     return version_;
   }
-  const std::string& serializationId() {
+  const std::string& serializationId() const {
     return serialization_id_;
   }
 
   void setShouldLoadDebugSymbol(bool should_load_debug_symbol) {
     load_debug_symbol_ = should_load_debug_symbol;
   }
-  void setAdditionalReaderSizeThreshold(const size_t& size) {
+  void setAdditionalReaderSizeThreshold(size_t size) {
     additional_reader_size_threshold_ = size;
   }
 
@@ -232,11 +232,11 @@ class TORCH_API PyTorchStreamWriter final {
       bool compute_crc32 = true,
       uint64_t alignment = 64);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)> writer_func,
+      const std::function<size_t(const void*, size_t)>& writer_func,
       bool compute_crc32 = true,
       uint64_t alignment = 64);
 
-  void setMinVersion(const uint64_t version);
+  void setMinVersion(uint64_t version);
 
   void writeRecord(
       const std::string& name,
@@ -251,11 +251,11 @@ class TORCH_API PyTorchStreamWriter final {
     return finalized_;
   }
 
-  const std::string& archiveName() {
+  const std::string& archiveName() const {
     return archive_name_;
   }
 
-  const std::string& serializationId() {
+  const std::string& serializationId() const {
     return serialization_id_;
   }
 
