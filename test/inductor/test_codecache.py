@@ -10,6 +10,7 @@ import os
 import pickle
 import shutil
 import subprocess
+import re
 import sys
 import sysconfig
 import tempfile
@@ -583,13 +584,13 @@ def _custom_empty(*args: object, **kwargs: object) -> None:
 _custom_empty.__name__ = "empty"
 
 
-class TestCppCodeCacheKey(TestCase):
-    def _key(self, command, roots=("/opt/t",), ext_suffix=".so", version="cc 1"):
+class TestCppPortableKey(TestCase):
+    """Precompile freezes C++ kernels under a key that survives relocation."""
+
+    def _key(self, *parts, roots=("/opt/t",), ext_suffix=".so", version="cc 1"):
         from torch._inductor import codecache
 
         real_config_var = sysconfig.get_config_var
-        codecache._build_identity.cache_clear()
-        self.addCleanup(codecache._build_identity.cache_clear)
         with (
             mock.patch.object(codecache, "_install_roots", return_value=roots),
             mock.patch.object(
@@ -600,49 +601,59 @@ class TestCppCodeCacheKey(TestCase):
                 else real_config_var(name),
             ),
             mock.patch.object(
-                codecache, "get_compiler_version_info", return_value=version
+                codecache, "_compiler_version_first_line", return_value=version
             ),
         ):
-            return codecache._install_independent_command_line(command, "g++")
+            return codecache._portable_cpp_key("g++", *parts)
 
-    def test_key_ignores_install_location(self):
+    def _real_command_line(self):
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchDeviceOptions
+
+        return CppBuilder(
+            name="o", sources="i", BuildOption=CppTorchDeviceOptions()
+        ).get_command_line()
+
+    def test_key_survives_relocating_the_install(self):
+        command = self._real_command_line()
+        root = normalize_path_separator(
+            os.path.dirname(os.path.dirname(torch.__file__))
+        )
+        self.assertIn(root, command)
+        moved = "/relocated/install"
+        self.assertEqual(
+            self._key("src", command, roots=(root,)),
+            self._key("src", command.replace(root, moved), roots=(moved,)),
+        )
+
+    def test_real_command_line_keeps_no_install_root(self):
         from torch._inductor import codecache
 
-        def key_for(root):
-            command = f"g++ -I{root}/torch/include -L{root}/torch/lib -o o i"
-            return self._key(command, roots=(root,))
-
-        first = key_for("/dev/shm/seed-a")
-        self.assertEqual(first, key_for("/dev/shm/seed-b"))
-        self.assertNotIn("seed-a", first)
-        self.assertIn(codecache.torch_key().hex(), first)
+        stripped = codecache._strip_install_roots(self._real_command_line())
+        for root in codecache._install_roots():
+            self.assertNotRegex(stripped, re.escape(root) + r"(?=[/\\\s\"']|$)")
 
     def test_key_tracks_paths_outside_install(self):
         self.assertNotEqual(self._key("g++ -I/usr/a"), self._key("g++ -I/usr/b"))
-
-    def test_key_tracks_python_abi(self):
+        # A sibling that merely shares the root's prefix is outside the install.
         self.assertNotEqual(
-            self._key("g++", ext_suffix=".cpython-310-x86_64-linux-gnu.so"),
-            self._key("g++", ext_suffix=".cpython-312-x86_64-linux-gnu.so"),
+            self._key("-I/opt/t-cuda/include"), self._key("-I/opt/u-cuda/include")
         )
 
-    def test_key_tracks_compiler(self):
-        self.assertNotEqual(
-            self._key("g++", version="gcc 11"), self._key("g++", version="gcc 13")
-        )
+    def test_key_tracks_source_python_abi_and_compiler(self):
+        base = self._key("src", "cmd")
+        self.assertNotEqual(base, self._key("other src", "cmd"))
+        self.assertNotEqual(base, self._key("src", "cmd", ext_suffix=".abi3.so"))
+        self.assertNotEqual(base, self._key("src", "cmd", version="cc 2"))
 
-    def test_install_roots_cover_this_install(self):
+    def test_install_roots_are_longest_first(self):
         from torch._inductor import codecache
 
         roots = codecache._install_roots()
-        self.assertIn(os.path.dirname(os.path.dirname(torch.__file__)), roots)
-        self.assertIn(sys.prefix, roots)
-        self.assertEqual(list(roots), sorted(roots, key=len, reverse=True))
-        command = f"g++ -I{sysconfig.get_paths()['include']} -o o i"
-        self.assertNotIn(
-            sysconfig.get_paths()["include"],
-            codecache._install_independent_command_line(command, "g++"),
+        self.assertIn(
+            normalize_path_separator(os.path.dirname(os.path.dirname(torch.__file__))),
+            roots,
         )
+        self.assertEqual(list(roots), sorted(roots, key=len, reverse=True))
 
 
 class TestPyCodeCache(TestCase):

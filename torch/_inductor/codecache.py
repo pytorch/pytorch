@@ -72,6 +72,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
+    _compiler_version_first_line,
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
@@ -4025,43 +4026,47 @@ def _install_roots() -> tuple[str, ...]:
     import sysconfig
 
     roots = dict.fromkeys(
-        (
+        normalize_path_separator(root)
+        for root in (
             os.path.dirname(os.path.dirname(torch.__file__)),
             sys.prefix,
             sys.base_prefix,
             *sysconfig.get_paths().values(),
         )
+        if root
     )
     # Longest first, so a root nested in another is replaced before its parent.
-    return tuple(sorted((r for r in roots if r and len(r) > 1), key=len, reverse=True))
+    return tuple(sorted((r for r in roots if len(r) > 1), key=len, reverse=True))
 
 
-@functools.cache
-def _build_identity(compiler: str) -> str:
+def _strip_install_roots(text: str) -> str:
+    """Replace whole install-root path prefixes in ``text`` with a placeholder."""
+    for root in _install_roots():
+        text = re.sub(re.escape(root) + r"(?=[/\\\s\"']|$)", "<install>", text)
+    return text
+
+
+def _portable_cpp_key(compiler: str, *parts: str) -> str:
+    """Name a C++ build by what it compiles, not by where torch is installed.
+
+    The cache key hashes command lines full of install paths, and a packaged job
+    extracts to a fresh directory on every launch. Precompile artifacts freeze
+    their C++ kernels under this key instead, so a later launch of the same build
+    finds them. It is not used for the shared on-disk cache, where the install
+    path still separates builds that torch_key() cannot tell apart.
+    """
     import sysconfig
 
-    # The install roots carry the Python version (e.g. include/python3.12), so
-    # what they stood for goes back in explicitly.
-    return " ".join(
-        (
-            f"torch_key={torch_key().hex()}",
-            f"abi={sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",
-            f"compiler={get_compiler_version_info(compiler)}",
-        )
+    identity = (
+        torch_key().hex(),
+        f"{sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",
+        _compiler_version_first_line(compiler),
     )
-
-
-def _install_independent_command_line(command_line: str, compiler: str) -> str:
-    """Key a C++ build by what it compiles, not by where this process is installed.
-
-    A packaged job extracts to a fresh directory every launch, so its include and
-    library paths differ between two launches of the same build. Keying on them
-    keeps a precompiled artifact's frozen C++ kernels from ever matching in a
-    later launch.
-    """
-    for root in _install_roots():
-        command_line = command_line.replace(root, "<install>")
-    return f"{command_line} {_build_identity(compiler)}"
+    hasher = hashlib.sha256()
+    for part in (*identity, *(_strip_install_roots(part) for part in parts)):
+        hasher.update(part.encode())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
 
 
 @clear_on_fresh_cache
@@ -4073,6 +4078,9 @@ class CppCodeCache:
     # Shared by subclasses and never cleared: a key hashes the source and build
     # command, and every miss rewrites its entry for the current cache directory.
     _binary_paths: dict[str, str] = {}
+    # Shared by subclasses: the relocation-independent key precompile freezes a
+    # binary under, for each cache key.
+    _portable_keys: dict[str, str] = {}
 
     @staticmethod
     def cache_clear() -> None:
@@ -4183,18 +4191,22 @@ class CppCodeCache:
             """Writing the code to file will calculate a hash, which we need to vary if
             the command line flags change.  This implements a mostly-generic way of
             validating that."""
-            return _install_independent_command_line(
-                CppBuilder(
-                    name="o", sources="i", BuildOption=build_option
-                ).get_command_line(),
-                build_option.get_compiler(),
-            )
+            return CppBuilder(
+                name="o", sources="i", BuildOption=build_option
+            ).get_command_line()
 
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
         key, main_path = write(
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
+        )
+        portable_key = _portable_cpp_key(
+            main_build_option.get_compiler(),
+            main_code,
+            optimized_code or "",
+            main_cmd_line,
+            optimized_cmd_line,
         )
 
         # Don't bother writing if the argument is empty.
@@ -4222,7 +4234,7 @@ class CppCodeCache:
             if (
                 config.cpp_cache_precompile_headers
                 and not _IS_WINDOWS
-                and not has_frozen_cpp_kernel(key)
+                and not has_frozen_cpp_kernel(portable_key)
             ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
@@ -4288,7 +4300,8 @@ class CppCodeCache:
                 )
 
             cls._binary_paths[key] = binary_path
-            restore_cpp_kernel(key, binary_path)
+            cls._portable_keys[key] = portable_key
+            restore_cpp_kernel(portable_key, binary_path)
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -4316,7 +4329,9 @@ class CppCodeCache:
 
         from torch.compiler._runtime_cache import record_cpp_kernel
 
-        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
+        record_cpp_kernel(
+            cls._portable_keys[key], cls._binary_paths[key], cls.cache[key]
+        )
         return cls.cache[key]
 
     @classmethod
