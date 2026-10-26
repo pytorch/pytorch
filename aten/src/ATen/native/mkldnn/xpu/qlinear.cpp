@@ -129,7 +129,6 @@ Tensor& _woq_scaled_block128x128(
   // scale_b_list[0] : [N//128, K//128]. However, oneDNN needs real
   // row-major 2D data, so scale_b is transposed to [K//128, N//128] below.
   Tensor sb = scale_b.t();
-  sb = sb.scalar_type() == kFloat8_e8m0fnu ? sb.to(kFloat) : sb;
   sb = sb.is_contiguous() ? sb : sb.contiguous();
 
   return _woq_scaled_gemm(
@@ -554,24 +553,23 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
   auto scale_recipe_b_enum =
       convert_int_to_enum<ScalingType>(scale_recipe_b_vec);
 
-  Tensor mat_a_ = mat_a.is_contiguous() ? mat_a : mat_a.contiguous();
   ScalingType scaling_choice_b = scale_recipe_b_enum[0];
 
   switch (scaling_choice_b) {
     case ScalingType::TensorWise:
-      _woq_scaled_tensorwise(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      _woq_scaled_tensorwise(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
       break;
     case ScalingType::RowWise:
-      _woq_scaled_rowwise(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      _woq_scaled_rowwise(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
       break;
     case ScalingType::BlockWise128x128:
-      _woq_scaled_block128x128(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      _woq_scaled_block128x128(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
       break;
     case ScalingType::BlockWise1x32:
       if (mat_b.scalar_type() == at::kFloat8_e4m3fn) {
-        _woq_scaled_mxfp8(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+        _woq_scaled_mxfp8(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
       } else if (mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2) {
-        _woq_scaled_mxfp4(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+        _woq_scaled_mxfp4(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
       } else {
         TORCH_CHECK_VALUE(
             false,
