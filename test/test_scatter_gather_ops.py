@@ -899,9 +899,8 @@ class TestScatterAddOverrideConds(TestCase):
         cutedsl_impl.register_to_dispatch()
 
     def _conds(self, self_t, idx, src, dim=0):
-        # _is_*_supported take (self, dim, index, src); they build the
-        # analysis iter internally and pattern-match its strides against
-        # the kernel's expected layout.
+        # _is_*_supported take (self, dim, index, src); they look up the
+        # (cached) layout eligibility and check pointer alignment per call.
         return (
             self.impl._is_tma_supported(self_t, dim, idx, src),
             self.impl._is_vec_scatter_supported(self_t, dim, idx, src),
@@ -922,15 +921,29 @@ class TestScatterAddOverrideConds(TestCase):
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
-    def test_declines_index_larger_than_src(self):
-        # aten raises for this. src's storage is wide enough that as_strided
-        # can't catch it; only the explicit shape check does.
-        self_t = torch.zeros(64, 256, device="cuda")
-        src = torch.randn(32, 256, device="cuda")[:, :128]
-        idx = torch.zeros(32, 256, dtype=torch.int64, device="cuda")
+    @parametrize("narrow", ["self", "src"])
+    def test_declines_index_wider_than_a_view(self, narrow):
+        # aten raises for this. The narrowed operand's storage is wide enough
+        # that as_strided can't catch it; only the explicit shape check does.
+        self_t = torch.zeros(64, 512, device="cuda")
+        src = torch.randn(32, 512, device="cuda")
+        if narrow == "self":
+            self_t = self_t[:, :256]
+        else:
+            src = src[:, :256]
+        idx = _expanded_idx(torch.zeros(32, dtype=torch.int64, device="cuda"), (512,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
         with self.assertRaisesRegex(RuntimeError, "Expected index"):
             self_t.scatter_add_(0, idx, src)
+
+    def test_alignment_is_checked_on_a_cached_layout(self):
+        self_t = torch.zeros(_M_OUT, _D, device="cuda")
+        aligned = torch.randn(_M_SRC, _D, device="cuda")
+        misaligned = _misaligned_view(_M_SRC, _D, torch.float32).normal_()
+        idx = _expanded_idx(torch.zeros(_M_SRC, dtype=torch.int64, device="cuda"), (_D,))
+        self.assertEqual(self._conds(self_t, idx, aligned), (True, True))
+        # Same shape and strides, so eligibility is a cache hit.
+        self.assertEqual(self._conds(self_t, idx, misaligned), (False, False))
 
     @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
     def test_alignment_cond_matrix(self, case):
