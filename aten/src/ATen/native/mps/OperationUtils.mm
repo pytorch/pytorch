@@ -25,7 +25,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
@@ -855,11 +854,6 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
     const std::string& fname,
     id<MTLLibrary> lib) {
-  // Parameterized libraries can expose the same function name in multiple compiled variants.
-  // No current MPS callers use them, but this keeps variants cached separately to preserve the existing API.
-  if (nparams > 0 && !lib) {
-    lib = getLibraryForFunc(fname);
-  }
   auto key = lib ? fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname) : fname;
   {
     std::lock_guard guard(cache_mutex);
@@ -962,8 +956,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 
  protected:
   id<MTLLibrary> getLibrary() override {
-    c10::call_once(libraryInitFlag, [this] {
-      library = loadSection("metal_basic");
+    std::lock_guard guard(cache_mutex);
+    if (C10_UNLIKELY(!library)) {
       const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
 #ifdef CAN_BUILD_METAL_4
           // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
@@ -982,7 +976,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
           }
         }
       }
-    });
+      library = loadSection("metal_basic");
+    }
     return library;
   }
 
@@ -1023,7 +1018,6 @@ class BundledShaderLibrary : public MetalShaderLibrary {
                                 });
   }
 
-  c10::once_flag libraryInitFlag;
   std::unordered_map<std::string, id<MTLLibrary>> variantLibraries;
 };
 

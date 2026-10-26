@@ -958,19 +958,19 @@ if(USE_MPS)
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_32.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.2")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
-            # Shaders whose Metal 4.0 build differs from their 3.1 build: MPP kernels,
-            # atomic_thread_fence (ScanKernel), simdgroup_barrier scope (Quantized).
+            # Shaders whose Metal 4.0 build differs from their 3.2 build: MPP kernels,
+            # simdgroup_barrier scope (Quantized).
             # BundledShaderLibrary takes the kernels kernels_40 defines from it and the
             # rest from kernels_basic, so a shader whose build starts to depend on the
             # Metal version must be added here.
-            set(METAL_40_SHADERS Attention Cholesky Convolution GroupedMM LU Matmul Quantized ScaledMM ScanKernel TriangularSolve)
+            set(METAL_40_SHADERS Attention Cholesky Convolution GroupedMM LU Matmul Quantized ScaledMM TriangularSolve)
             set(SHADER_STEMS)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)

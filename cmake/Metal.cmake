@@ -80,7 +80,7 @@ set(METAL_40_PROBE_CODE "
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
-    execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
+    execute_process(COMMAND xcrun metal -std=metal3.2 bfloat_inc.metal
                     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
                     OUTPUT_VARIABLE XCRUN_OUTPUT
                     ERROR_VARIABLE XCRUN_OUTPUT
