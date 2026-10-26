@@ -13,6 +13,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import socket
 import warnings
 from dataclasses import replace
 from hashlib import sha256
@@ -4393,9 +4394,13 @@ class TestDrciRetries(TestCase):
     def test_no_pause_when_hud_did_not_answer(
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:
-        mock_fetch.side_effect = [URLError(OSError("no route")), {}]
-        with mock.patch("builtins.print"):
-            self.assertEqual(get_drci_classifications(1), {})
+        for unreachable in (
+            URLError(OSError("no route")),
+            URLError(socket.gaierror(socket.EAI_NONAME, "Name or service not known")),
+        ):
+            mock_fetch.side_effect = [unreachable, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
         mock_sleep.assert_not_called()
 
     def test_only_the_previous_failure_decides_the_pause(
@@ -4448,6 +4453,28 @@ class TestDrciRetries(TestCase):
             get_drci_classifications(1)
         self.assertEqual(mock_sleep.call_count, 2 * (attempts - 1) + 1)
 
+    @mock.patch("trymerge.time.monotonic")
+    def test_outage_window_ends_mid_call(
+        self, mock_clock: Any, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [_drci_http_error(503, b"")] * (
+            len(DRCI_RETRY_DELAYS_SECONDS) + 1
+        )
+        mock_clock.return_value = 1000.0
+        with mock.patch("builtins.print"):
+            self.assertIsNone(get_drci_classifications(1))
+        mock_sleep.reset_mock()
+        # Still inside the window before the first pause, past it before the second.
+        mock_clock.side_effect = [1119.0, 1120.0, 1120.0, 1120.0]
+        mock_fetch.side_effect = [
+            _drci_http_error(503, b""),
+            _drci_http_error(503, b""),
+            {},
+        ]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[1])
+
     def test_timeout_or_504_is_not_retried(
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:
@@ -4491,11 +4518,38 @@ class TestDrciRetries(TestCase):
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:
         err = _drci_http_error(400, b"")
-        err.read = mock.Mock(side_effect=TimeoutError("stalled"))  # type: ignore[method-assign]
+        err.read = mock.Mock(side_effect=ConnectionResetError("reset"))  # type: ignore[method-assign]
         mock_fetch.side_effect = [err, {}]
         with mock.patch("builtins.print"):
             self.assertEqual(get_drci_classifications(1), {})
         mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
+    def test_stalled_error_body_is_not_retried(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"")
+        err.read = mock.Mock(side_effect=TimeoutError("stalled"))  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print") as mock_print:
+            self.assertIsNone(get_drci_classifications(1))
+        self.assertEqual(mock_fetch.call_count, 1)
+        mock_sleep.assert_not_called()
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("<body timed out: stalled>", logged)
+
+    def test_unexpected_error_retries_without_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for bug in (
+            AttributeError("'list' object has no attribute 'get'"),
+            KeyError("x"),
+        ):
+            mock_fetch.reset_mock()
+            mock_fetch.side_effect = [bug, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+            self.assertEqual(mock_fetch.call_count, 2)
+        mock_sleep.assert_not_called()
 
     def test_logged_error_body_is_bounded(
         self, mock_fetch: Any, mock_sleep: Any
@@ -4529,6 +4583,7 @@ class TestDrciRetries(TestCase):
         for dropped in (
             RemoteDisconnected("closed"),
             URLError(ConnectionResetError("reset")),
+            URLError(socket.gaierror(socket.EAI_AGAIN, "Temporary failure")),
             json.JSONDecodeError("cut off", "{", 1),
             _drci_http_error(408, b""),
         ):

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
+import socket
 import time
 import traceback
 import urllib.parse
@@ -2630,16 +2632,12 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
     global _drci_failed_at
-    in_outage = (
-        _drci_failed_at is not None
-        and time.monotonic() - _drci_failed_at < DRCI_OUTAGE_WINDOW_SECONDS
-    )
     delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
     retry = "now"
     for attempt, delay in enumerate(delays):
         if retry == "stop":
             break
-        if retry == "pause" and not in_outage:
+        if retry == "pause" and not _drci_recently_exhausted():
             time.sleep(delay)
         try:
             failures = gh_fetch_url(
@@ -2660,11 +2658,14 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
             # gh_fetch_url has already printed the status. Dr.CI answers 400 for
             # any exception it hits while recomputing and names it only in the
             # body.
+            try:
+                body, retry = _http_error_body(err), _drci_retry_kind(err)
+            except TimeoutError as e:  # the body stalled after the headers
+                body, retry = f"<body timed out: {e}>", "stop"
             print(
                 f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed, "
-                f"response body: {_http_error_body(err)}"
+                f"response body: {body}"
             )
-            retry = _drci_retry_kind(err)
         except Exception as e:
             print(
                 f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed "
@@ -2673,6 +2674,13 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
             retry = _drci_retry_kind(e)
     _drci_failed_at = time.monotonic()
     return None
+
+
+def _drci_recently_exhausted() -> bool:
+    return (
+        _drci_failed_at is not None
+        and time.monotonic() - _drci_failed_at < DRCI_OUTAGE_WINDOW_SECONDS
+    )
 
 
 def _drci_retry_kind(err: Exception) -> str:
@@ -2687,19 +2695,31 @@ def _drci_retry_kind(err: Exception) -> str:
     if isinstance(reason, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
         return "stop"
     if isinstance(err, URLError):
-        # urlopen wraps errors raised while connecting and sending. DNS
-        # failures, refused connections and no route (as on internal runners)
-        # do not clear by waiting; a connection broken mid-send may.
+        # urlopen wraps errors raised while connecting and sending. Refused
+        # connections, no route (as on internal runners) and unknown hosts do
+        # not clear by waiting; a temporary DNS failure or a connection broken
+        # mid-send may.
+        if isinstance(reason, socket.gaierror):
+            return "pause" if reason.errno == socket.EAI_AGAIN else "now"
         broken = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
         return "pause" if isinstance(reason, broken) else "now"
     # Raised while waiting for or reading the response, e.g. RemoteDisconnected,
-    # IncompleteRead, or JSONDecodeError on a cut-off body.
-    return "pause"
+    # IncompleteRead, or JSONDecodeError on a cut-off body. Anything else is
+    # most likely a bug, which waiting will not fix.
+    transient = (
+        http.client.HTTPException,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    )
+    return "pause" if isinstance(err, transient) else "now"
 
 
 def _http_error_body(err: HTTPError, limit: int = 500) -> str:
     try:
         return err.read(limit).decode("utf-8", errors="replace")
+    except TimeoutError:
+        raise
     except Exception as e:
         return f"<unreadable body: {e}>"
 
