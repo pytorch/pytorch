@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import cache, partial
 from pathlib import Path
 from re import Pattern
-from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from warnings import warn
 
@@ -496,6 +496,8 @@ IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # Also caps how many gates one merge may skip on an AI CI Advisor verdict -- see
 # categorize_checks.
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+# How long merge() waits between checks of a PR's pending jobs.
+MERGE_RETRY_INTERVAL_SECONDS = 5 * 60
 # Pauses before each retry of a failed Dr.CI call. Back-to-back retries land in the
 # same second and fail together, as on #199675 and #201134, whose merges were then
 # blocked by failures the AI CI Advisor had cleared.
@@ -506,10 +508,12 @@ DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
 DRCI_TIMEOUT_SECONDS = 960
 # After a call fails every attempt, calls within this window retry without
 # pausing: one merge-loop iteration calls Dr.CI several times in a row, and during
-# an outage each would otherwise pay the pauses. Shorter than the merge loop's
-# 5-minute wait, so the next iteration pauses again.
+# an outage each would otherwise pay the pauses. Must stay shorter than
+# MERGE_RETRY_INTERVAL_SECONDS, so the next iteration pauses again.
 DRCI_OUTAGE_WINDOW_SECONDS = 120
 _drci_failed_at: float | None = None
+# What to do after a failed Dr.CI call; see _drci_retry_kind.
+DrciRetry = Literal["pause", "now", "stop"]
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -2624,16 +2628,17 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
     Query HUD API to find similar failures to decide if they are flaky.
 
-    Returns None once every attempt has failed, which get_classifications reads
-    as "Dr.CI unavailable" and answers from the Dr.CI check run summary -- a
-    fallback that drops AI_NOT_RELATED, so a failed call here un-clears every
-    failure the AI CI Advisor cleared.
+    Returns None when every attempt has failed, or after a single attempt that
+    timed out, stalled on its error body or got HTTP 504. get_classifications
+    reads None as "Dr.CI unavailable" and answers from the Dr.CI check run
+    summary -- a fallback that drops AI_NOT_RELATED, so a failed call here
+    un-clears every failure the AI CI Advisor cleared.
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
     global _drci_failed_at
     delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
-    retry = "now"
+    retry: DrciRetry = "now"
     for attempt, delay in enumerate(delays):
         if retry == "stop":
             break
@@ -2683,7 +2688,7 @@ def _drci_recently_exhausted() -> bool:
     )
 
 
-def _drci_retry_kind(err: Exception) -> str:
+def _drci_retry_kind(err: Exception) -> DrciRetry:
     """How to follow a failed Dr.CI call, guessed from the exception type:
     "pause" when waiting may clear it, "now" to retry at once, "stop" when
     another attempt would only wait out the endpoint's time limit again."""
@@ -3728,7 +3733,7 @@ def merge(
                 f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
                 flush=True,
             )
-            time.sleep(5 * 60)
+            time.sleep(MERGE_RETRY_INTERVAL_SECONDS)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"

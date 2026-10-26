@@ -17,7 +17,7 @@ import socket
 import warnings
 from dataclasses import replace
 from hashlib import sha256
-from http.client import RemoteDisconnected
+from http.client import IncompleteRead, RemoteDisconnected
 from io import BytesIO
 from itertools import pairwise
 from types import MethodType
@@ -72,6 +72,7 @@ from trymerge import (
     categorize_checks,
     check_greenlight_reviewed_head_sha,
     DRCI_CHECKRUN_NAME,
+    DRCI_OUTAGE_WINDOW_SECONDS,
     DRCI_RETRY_DELAYS_SECONDS,
     DRCI_TIMEOUT_SECONDS,
     ensure_mergeable_labels,
@@ -103,6 +104,7 @@ from trymerge import (
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
+    MERGE_RETRY_INTERVAL_SECONDS,
     MergeRule,
     MergeRuleFailedError,
     post_starting_merge_comment,
@@ -4396,6 +4398,7 @@ class TestDrciRetries(TestCase):
     ) -> None:
         for unreachable in (
             URLError(OSError("no route")),
+            URLError(ConnectionRefusedError("refused")),
             URLError(socket.gaierror(socket.EAI_NONAME, "Name or service not known")),
         ):
             mock_fetch.side_effect = [unreachable, {}]
@@ -4418,8 +4421,14 @@ class TestDrciRetries(TestCase):
     def test_no_pause_on_auth_failure(self, mock_fetch: Any, mock_sleep: Any) -> None:
         mock_fetch.side_effect = [_drci_http_error(401, b""), {}]
         with mock.patch("builtins.print"):
-            get_drci_classifications(1)
+            self.assertEqual(get_drci_classifications(1), {})
+        self.assertEqual(mock_fetch.call_count, 2)
         mock_sleep.assert_not_called()
+
+    def test_outage_window_ends_before_next_merge_loop_check(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        self.assertLess(DRCI_OUTAGE_WINDOW_SECONDS, MERGE_RETRY_INTERVAL_SECONDS)
 
     @mock.patch("trymerge.time.monotonic")
     def test_outage_window_skips_pauses(
@@ -4584,8 +4593,12 @@ class TestDrciRetries(TestCase):
             RemoteDisconnected("closed"),
             URLError(ConnectionResetError("reset")),
             URLError(socket.gaierror(socket.EAI_AGAIN, "Temporary failure")),
+            IncompleteRead(b"{", 10),
             json.JSONDecodeError("cut off", "{", 1),
+            UnicodeDecodeError("utf-8", b"\xe2", 0, 1, "unexpected end of data"),
             _drci_http_error(408, b""),
+            _drci_http_error(429, b""),
+            _drci_http_error(500, b""),
         ):
             mock_fetch.reset_mock()
             mock_sleep.reset_mock()
