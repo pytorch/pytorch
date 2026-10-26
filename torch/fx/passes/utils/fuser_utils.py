@@ -1,8 +1,13 @@
 import copy
 import heapq
 
+import torch
 import torch.fx
 from torch.fx._compatibility import compatibility
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+)
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -173,6 +178,26 @@ def fuse_as_graphmodule(
             ):
                 external_inputs.append(input_node)
                 external_inputs_set.add(input_node)
+
+    symbol_bindings = None
+    for input_node in list(external_inputs):
+        val = input_node.meta.get("val", input_node.meta.get("example_value"))
+        if not isinstance(val, (torch.Tensor, torch.SymInt)):
+            continue
+        symbols = free_symbols(val)
+        if not symbols:
+            continue
+        if symbol_bindings is None:
+            symbol_bindings = find_symbol_binding_fx_nodes(gm.graph)
+        for symbol in sorted(symbols, key=str):
+            binding = symbol_bindings.get(symbol)
+            if (
+                binding is not None
+                and binding not in partition_lookup_table
+                and binding not in external_inputs_set
+            ):
+                external_inputs.append(binding)
+                external_inputs_set.add(binding)
 
     if external_inputs and all(
         input_node.op == "placeholder" for input_node in external_inputs
