@@ -1026,6 +1026,11 @@ class TestProfiler(TestCase):
                 record_python_gc_info=True,
                 expose_kineto_event_metadata=True,
                 custom_profiler_config="custom_config",
+                # Only custom_profiler_config and trace_only are readable from
+                # Python, so the round trip is checked through them.
+                # __setstate__ reads trace_only from an optional trailing slot
+                # and falls back to false if that slot is missing, so it must
+                # be true here for a wrong index to fail the test.
                 trace_only=True,
             )
             pickled = pickle.dumps(config)
