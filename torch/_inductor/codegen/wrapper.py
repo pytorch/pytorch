@@ -2418,9 +2418,11 @@ class PythonWrapperCodegen(CodeGen):
         # Additional files that are dependent to the wrapper (ex. cubin files)
         self.additional_files = []
 
-        # Precompiled kernel .so paths to link into the JIT cpp_wrapper
-        # (e.g. CUTLASS, ROCm CK). Populated by the scheduling layer when
-        # cpp_wrapper is set and not aot_mode.
+        # Graph-local relocatable objects linked into the AOTI model.
+        self.aot_kernel_objects: OrderedSet[str] = OrderedSet()
+
+        # Precompiled kernel .so paths for JIT C++ wrappers and graph-local
+        # linker flags for AOT objects (e.g. CUTLASS, ROCm CK, FlyDSL).
         self.external_kernel_libs: OrderedSet[str] = OrderedSet()
 
     @staticmethod
@@ -6677,6 +6679,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        self.aot_kernel_objects = root.aot_kernel_objects
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules

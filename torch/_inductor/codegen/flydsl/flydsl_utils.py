@@ -9,8 +9,9 @@ from torch.backends import cuda as _cuda
 
 log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
-# PyTorch validates its vendored gfx950 kernels against FlyDSL 0.4.x.
+# FlyDSL 0.4.1 adds public export metadata required by the AOTI wrapper.
 _FLYDSL_SUPPORTED_RELEASE = (0, 4)
+_FLYDSL_MIN_RELEASE = (0, 4, 1)
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
@@ -36,10 +37,15 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
     flydsl_version = _available_version("flydsl")
     if flydsl_version is None:
         return "missing or invalid FlyDSL version metadata"
-    if flydsl_version.release[:2] != _FLYDSL_SUPPORTED_RELEASE:
-        supported = ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE))
+    if (
+        flydsl_version.release[:2] != _FLYDSL_SUPPORTED_RELEASE
+        or flydsl_version.release < _FLYDSL_MIN_RELEASE
+    ):
+        minimum = ".".join(map(str, _FLYDSL_MIN_RELEASE))
+        major, minor = _FLYDSL_SUPPORTED_RELEASE
         return (
-            f"unsupported FlyDSL version `{flydsl_version}` (expected `{supported}.x`)"
+            f"unsupported FlyDSL version `{flydsl_version}` "
+            f"(expected `>={minimum},<{major}.{minor + 1}`)"
         )
 
     return None

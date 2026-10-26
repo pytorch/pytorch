@@ -47,10 +47,18 @@ class FlyDSLTemplate(KernelTemplate):
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
-        if getattr(V.graph, "cpp_wrapper", False) or getattr(
+        if getattr(V.graph, "aot_mode", False) and self.name != "mm_flydsl":
+            return NotImplementedError(
+                "FlyDSL AOT currently supports the gfx950 MM template only"
+            )
+        if getattr(V.graph, "aot_mode", False) and kwargs.get("IS_MXFP", False):
+            return NotImplementedError(
+                "FlyDSL AOT currently supports gfx950 FP16/BF16 MM only"
+            )
+        if getattr(V.graph, "cpp_wrapper", False) and not getattr(
             V.graph, "aot_mode", False
         ):
-            return NotImplementedError("FlyDSL does not support AOT wrappers")
+            return NotImplementedError("FlyDSL does not support JIT C++ wrappers")
         if not flydsl_utils.runtime_available():
             return NotImplementedError("FlyDSL runtime is unavailable")
         try:
