@@ -1,9 +1,13 @@
+from pathlib import Path
+
 import torch
 from torch.export import Dim
 
 
 # custom op that loads the aot-compiled model
 AOTI_CUSTOM_OP_LIB = "libaoti_custom_class.so"
+if not Path(AOTI_CUSTOM_OP_LIB).is_file():
+    AOTI_CUSTOM_OP_LIB = str(Path(torch.__file__).parent / "lib" / AOTI_CUSTOM_OP_LIB)
 torch.classes.load_library(AOTI_CUSTOM_OP_LIB)
 
 
