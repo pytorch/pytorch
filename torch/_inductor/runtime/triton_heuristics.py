@@ -1536,8 +1536,14 @@ class CachingAutotuner(KernelInterface):
         # control over the kernel code; (ii) there is empirical evidence that
         # for some (complicated) custom Triton kernels, a register-spilling
         # config may yield the best latency.
+        # Wide fused matmuls can trade accumulator spills for better input reuse.
         if (
             not self.custom_kernel
+            and not (
+                self.triton_meta.get("native_matmul")
+                and self.inductor_meta.get("native_matmul_num_dot", 1) > 1
+                and launcher.config.num_warps >= 16
+            )
             and launcher.n_spills is not None
             and launcher.n_spills
             > self.inductor_meta.get("spill_threshold", 32 if torch.version.hip else 16)
@@ -3702,6 +3708,12 @@ def cached_autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    if triton_meta.get("native_matmul") and "GROUP_M" in triton_meta.get(
+        "signature", {}
+    ):
+        configs = copy.deepcopy(configs)
+        for cfg in configs:
+            cfg.kwargs.setdefault("GROUP_M", 8)
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,

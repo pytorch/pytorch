@@ -495,7 +495,7 @@ class TestNativeMatmulCodegen(TestCase):
         FileCheck().check_count(".load([", 2, exactly=True).check("tl.dot").run(code)
         FileCheck().check_not("tl.where(").run(code)
         FileCheck().check("tl.swizzle2d").check(
-            "tl.cdiv(ynumel, YBLOCK), tl.cdiv(xnumel, XBLOCK), 8)"
+            "tl.cdiv(ynumel, YBLOCK), tl.cdiv(xnumel, XBLOCK), GROUP_M)"
         ).run(code)
 
     @inductor_config.patch(

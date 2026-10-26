@@ -39,6 +39,9 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.heuristics.triton_codegen.native_matmul import (
+    native_matmul_configs,
+)
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -104,6 +107,10 @@ def get_autotuned_amd_sqr_kernel():
 
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
+    native_matmul_device = DeviceProperties(
+        type="cuda", index=0, multi_processor_count=132, cc=90, major=9, warp_size=32
+    )
+
     device_type = GPU_TYPE
 
     def test_find_names_ignores_frame_locals(self):
@@ -151,6 +158,39 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    @parametrize("bmm", [False, True])
+    @parametrize("major", [8, 9])
+    @parametrize("dtype", ["*fp16", "*bf16", "*fp32"])
+    def test_native_matmul_config_budget_and_groups(self, bmm, major, dtype):
+        sizes = {"y": 4096, "x": 4096, "r0_": 4096}
+        if bmm:
+            sizes["z"] = 8
+        meta = {
+            "device": self.native_matmul_device._replace(major=major, cc=major * 10),
+            "signature": {"a": dtype, "GROUP_M": "constexpr"},
+        }
+        configs = native_matmul_configs(
+            sizes, {"native_matmul_compact_tensors": True}, meta
+        )
+        self.assertLess(len(configs), 10)
+        self.assertGreater(len({cfg.kwargs["GROUP_M"] for cfg in configs}), 1)
+
+    @parametrize("bmm", [False, True])
+    @parametrize("persistent", [False, True])
+    def test_native_matmul_heuristic_dispatch(self, bmm, persistent):
+        sizes = {"y": 512, "x": 1024, "r0_": 64}
+        if bmm:
+            sizes["z"] = 8
+        meta = {"device": self.native_matmul_device, "native_matmul": True}
+        get_configs = (
+            _persistent_reduction_configs if persistent else _reduction_configs
+        )
+        with patch(
+            "torch._inductor.heuristics.triton_codegen.reduction.native_matmul_configs",
+        ) as heuristic:
+            get_configs(size_hints=sizes, inductor_meta={}, triton_meta=meta)
+            heuristic.assert_called_once()
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
