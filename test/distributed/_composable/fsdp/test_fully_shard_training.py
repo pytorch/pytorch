@@ -3405,6 +3405,19 @@ class TestFullyShardWorldSize1(FSDPTest):
     def world_size(self) -> int:
         return 1
 
+    def test_unsharded_params_view_shards(self):
+        # With one rank, the shard is the whole parameter, so the unsharded
+        # parameter views it instead of copying it (#201858)
+        model = nn.Linear(8, 8, device=device_type)
+        fully_shard(model)
+        model(torch.randn((2, 8), device=device_type))
+        fsdp_params = model._get_fsdp_state()._fsdp_param_group.fsdp_params
+        self.assertEqual(len(fsdp_params), 2)
+        for fsdp_param in fsdp_params:
+            storage = fsdp_param.unsharded_param.untyped_storage()
+            shard_storage = fsdp_param._sharded_param_data.untyped_storage()
+            self.assertEqual(storage.data_ptr(), shard_storage.data_ptr())
+
     def test_train_parity_single_worldsize1(self):
         """
         Tests train parity with DDP for a single FSDP group
