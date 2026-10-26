@@ -277,9 +277,12 @@ class AllGatherInput:
     ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
     of an unevenly sharded parameter to have the padded sharded size, except for
     a parameter sharded on dim 0, where every plain tensor only needs the padded
-    size along dim 0 and its other dims are the payload's own. Return payloads
-    that meet neither requirement, such as scales of a parameter sharded on
-    another dim, as records.
+    size along dim 0 and its other dims are the payload's own. Only dim 0 is
+    checked there, so the other dims must not depend on the rank's unpadded row
+    count; a payload whose other dims do would pass with a different element
+    count per rank and hang in the all-gather instead of raising. Return
+    payloads that meet neither requirement, such as scales of a parameter
+    sharded on another dim, as records.
 
     Attributes:
         tensor (Tensor): Local payload, flattened with ``view(-1)``. Scalars count

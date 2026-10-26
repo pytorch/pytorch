@@ -760,7 +760,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         fully_shard(model)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         inp = torch.randn((2, 16), device=device_type)
-        msg = "weight is unevenly sharded, so its Tensor all-gather inputs must have the padded sharded size (2, 16), but input 0 has size (32,)"
+        msg = "weight is unevenly sharded along dim 0, so each of its Tensor all-gather inputs must have the padded size 2 along dim 0, but input 0 has size (32,)"
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             model(inp)
         # The legacy hook has no outer_size to pad with, so FSDP does not check it
@@ -1294,8 +1294,8 @@ class TestAllGatherInputValidation(TestCase):
                 with self.assertRaisesRegex(ValueError, "must match the size of its"):
                     self._get_layouts([tensor], [torch.empty(16 * ws)], **kwargs)
 
-    def test_uneven_tensor_inputs_keep_padded_size(self):
-        msg = "lin.weight is unevenly sharded, so its Tensor all-gather inputs must have the padded sharded size (4, 4), but input 0 has size (3, 4)"
+    def test_uneven_tensor_inputs_require_padded_size(self):
+        msg = "lin.weight is unevenly sharded along dim 0, so each of its Tensor all-gather inputs must have the padded size 4 along dim 0, but input 0 has size (3, 4)"
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             self._get_layouts([torch.ones(3, 4)], require_padded_size=True)
         self._get_layouts(

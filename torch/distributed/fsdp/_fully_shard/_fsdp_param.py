@@ -1610,11 +1610,15 @@ def _get_all_gather_output_layouts(
                 if not dim0_padded:
                     # NOTE: Inputs with the unpadded local shard's size pass on
                     # ranks whose shard needs no padding, which then hang in
-                    # the collective
-                    if len(inputs) > 1 and shard_dim == 0 and len(size) > 0:
-                        # A payload component (e.g. a scale) can never have
-                        # the parameter's full padded size; name the dim-0
-                        # requirement it actually has to meet
+                    # the collective. For Shard(0) this check cannot catch an
+                    # input whose trailing dims depend on the rank's unpadded
+                    # row count either: it passes with a different numel per
+                    # rank and hangs the same way, since the copy-out derives
+                    # each rank's numel from its own inputs
+                    if shard_dim == 0 and len(size) > 0:
+                        # Only dim 0 has a requirement; name it, since an
+                        # input's other dims need not match the parameter's
+                        # (e.g. a scale's block-reduced dims)
                         raise ValueError(
                             f"{param_name} is unevenly sharded along dim 0, so "
                             "each of its Tensor all-gather inputs must have "
