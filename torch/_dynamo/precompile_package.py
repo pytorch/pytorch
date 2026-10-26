@@ -85,6 +85,12 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
+# The Inductor settings _capture_config pins. The options of capture()'s
+# Inductor wrapper apply inside this patch, so capture() refuses any that
+# override them.
+CAPTURE_INDUCTOR_PATCH = {"bundled_autotune_remote_cache": False}
+
+
 @contextlib.contextmanager
 def _capture_config() -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
@@ -146,7 +152,7 @@ def _capture_config() -> Iterator[None]:
     # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
-        inductor_config.patch(bundled_autotune_remote_cache=False),
+        inductor_config.patch(CAPTURE_INDUCTOR_PATCH),
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
@@ -1753,27 +1759,24 @@ class PrecompileSession(Generic[_P, _R]):
         self,
         fn: Callable[_P, _R],
         *,
-        backend: str = "inductor",
+        backend: str | torch._TorchCompileInductorWrapper = "inductor",
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
-        inductor: torch._TorchCompileInductorWrapper | None = None,
     ) -> None:
-        if inductor is not None and backend != "inductor":
-            raise ValueError(
-                f"an Inductor wrapper compiles with backend='inductor', not {backend!r}."
-            )
         self._fn = fn
         self._backend = backend
-        self._inductor = inductor
+        self._backend_name = (
+            backend if isinstance(backend, str) else backend.compiler_name
+        )
         # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
         # graphs is decided again when it is post-compiled at load. The artifact
         # records the capture's choice, and the capture's calls compile under it.
         # graph_partition is in it because post-compile picks the wrapper for a
         # partitioned graph by it, while the graph was partitioned at compile.
         self._cudagraph_config: dict[str, bool] = {}
-        if backend == "inductor":
+        if self._backend_name == "inductor":
             from torch._inductor import config as inductor_config
 
             self._cudagraph_config = {
@@ -1781,9 +1784,9 @@ class PrecompileSession(Generic[_P, _R]):
                 "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
                 "graph_partition": inductor_config.graph_partition,
             }
-            if inductor is not None:
+            if not isinstance(backend, str):
                 config = self._cudagraph_config
-                config.update((k, v) for k, v in inductor.config.items() if k in config)
+                config.update((k, v) for k, v in backend.config.items() if k in config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -1880,7 +1883,7 @@ class PrecompileSession(Generic[_P, _R]):
         # this process would otherwise serve its existing cache entries, and
         # this package would record nothing.
         self._compiled = torch._dynamo.optimize(
-            self._inductor or self._backend,
+            self._backend,
             package=self._package,
             guard_filter_fn=self._guard_filter_fn,
             dynamic=self._dynamic,
@@ -1950,7 +1953,7 @@ class PrecompileSession(Generic[_P, _R]):
                 # its own, and output_graph short-circuits an empty graph to
                 # noop_graph_call without filing anything under its id, which
                 # the bytecode still names; both are carried as-is.
-                if self._backend == "eager" or backend is noop_graph_call:
+                if self._backend_name == "eager" or backend is noop_graph_call:
                     artifact = EagerCacheArtifact(key=backend_id, content=backend)
             if artifact is None:
                 missing.append(backend_id)
@@ -1960,7 +1963,7 @@ class PrecompileSession(Generic[_P, _R]):
             raise PackageError(
                 f"precompile captured {len(entry.backend_ids)} backend graph(s) but "
                 f"{len(missing)} of them recorded no serializable artifact: "
-                f"{missing}. The {self._backend!r} backend reaches the artifact "
+                f"{missing}. The {self._backend_name!r} backend reaches the artifact "
                 f"through the AOTAutograd cache (bundled_autograd_cache); a graph "
                 f"that cache bypassed cannot be served. Check TORCH_LOGS=+aot for "
                 f"the bypass reason."
@@ -2152,7 +2155,7 @@ class PrecompileSession(Generic[_P, _R]):
             self._served_entry()[0],
             backends,
             summary,
-            self._backend,
+            self._backend_name,
             self._fn,
             self._cudagraph_config,
         )
@@ -2161,12 +2164,11 @@ class PrecompileSession(Generic[_P, _R]):
 def precompile_capture(
     fn: Callable[_P, _R],
     *,
-    backend: str = "inductor",
+    backend: str | torch._TorchCompileInductorWrapper = "inductor",
     guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
-    inductor: torch._TorchCompileInductorWrapper | None = None,
 ) -> PrecompileSession[_P, _R]:
     """Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2204,5 +2206,4 @@ def precompile_capture(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         dynamic=dynamic,
-        inductor=inductor,
     )
