@@ -10,6 +10,7 @@ from functools import partial
 
 import torch
 import torch.library
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     serialTest,
+    skipIfRocm,
     skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
@@ -61,7 +63,6 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
     # of the model, so the parent stops emitting triton_per_ and the
     # persistent-vs-looped contrast the test asserts no longer exists.
@@ -238,7 +239,7 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
-    compile_fn = partial(torch.compile, dynamic=True)
+    compile_fn = staticmethod(partial(torch.compile, dynamic=True))
 
     def setUp(self):
         # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
@@ -780,6 +781,20 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
+
+    @onlyOn(GPU_TYPE)
+    @parametrize("avoid_guards", [False, True])
+    def test_avoid_32bit_indexing_guards(self, device, avoid_guards):
+        def fn(x):
+            return x * 2 + 1
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch(avoid_32bit_indexing_guards=avoid_guards):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertEqual("<= 2147483647" in guards, not avoid_guards)
+        self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
     @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
@@ -1448,6 +1463,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # N + 1 for automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 4)
 
+    @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
         if torch.device(device).type != GPU_TYPE:
 
@@ -1576,6 +1592,34 @@ class TestInductorDynamic(DynamicShapesTestCase):
             expected = f(x)
             actual = compiled_f(x)
             self.assertEqual(actual, expected)
+
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_respects_dtype(self, device, cpp_wrapper):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
+
+        x = torch.tensor(3, device=device)
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_overflow(self, device, cpp_wrapper):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.int8, device=device)
+
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            compiled_f = torch.compile(f, fullgraph=True)
+            valid = torch.tensor(127, device=device)
+            self.assertEqual(compiled_f(valid), f(valid))
+
+            invalid = torch.tensor(300, device=device)
+            overflow_error = r"without overflow|u\d+ <= 127"
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                f(invalid)
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                compiled_f(invalid)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)

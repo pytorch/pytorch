@@ -57,8 +57,6 @@ class _EventType(Enum):
 class _ExperimentalConfig:
     def __init__(
         self,
-        profiler_metrics: list[str] = ...,
-        profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
@@ -73,9 +71,7 @@ class _ExperimentalConfig:
         trace_only: bool = ...,
     ) -> None: ...
     trace_only: bool
-    # Deprecated no-ops; retained only so the Python layer can detect and warn.
-    profiler_metrics: list[str]
-    profiler_measure_per_kernel: bool
+    # Deprecated no-op; retained only so the Python layer can detect and warn.
     adjust_profiler_step: bool
 
 class ProfilerConfig:

@@ -226,6 +226,7 @@ get_current_graph_task_nodes_in_graph();
 TORCH_API bool get_current_graph_task_keep_graph();
 TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
+TORCH_API variable_list get_current_input_grad_buffers(Node* node);
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
 } // namespace torch::autograd

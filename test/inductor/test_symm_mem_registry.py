@@ -7,14 +7,19 @@ This test suite validates the symm_mem argument registration system, which allow
 operators to declare which arguments require symmetric memory allocation.
 """
 
-import unittest
+from unittest import skipIf
 from unittest.mock import patch
 
 import torch
 from torch._library.simple_registry import singleton, SymmMemArgsHolder
 from torch.library import Library  # noqa: SCOPED_LIBRARY
-from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def register_symm_mem_args(op, arg_names):
@@ -37,6 +42,8 @@ def register_symm_mem_args(op, arg_names):
 
 class TestSymmMemRegistry(TestCase):
     """Test suite for SymmMemArgsHolder core functionality."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         """Clear test entries from registry before each test."""
@@ -145,6 +152,8 @@ class TestSymmMemRegistry(TestCase):
 class TestLibraryIntegration(TestCase):
     """Test suite for Library.register_symm_mem_args integration."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         """Clear test entries from registry before each test."""
         super().setUp()
@@ -223,7 +232,9 @@ class TestLibraryIntegration(TestCase):
 
 
 class TestFunctionalOpCompile(TestCase):
-    """Test that functional ops with registered symm_mem_args work with torch.compile."""
+    """Test _maybe_realize_symm_mem_args behavior for registered ops."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -237,84 +248,6 @@ class TestFunctionalOpCompile(TestCase):
             del singleton._data[key]
         torch._dynamo.reset()
         super().tearDown()
-
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA and Triton")
-    def test_functional_op_compiles_with_symm_mem_args(self):
-        """Test that a functional op with registered symm_mem_args compiles and runs."""
-        lib = Library("test_func_symm", "DEF")  # noqa: SCOPED_LIBRARY
-        lib.define("my_functional_op(Tensor input, str group_name) -> Tensor")
-        lib.register_symm_mem_args("my_functional_op", ["input"])
-
-        @torch.library.impl(lib, "my_functional_op", "Meta")
-        def meta_impl(input, group_name):
-            return torch.empty_like(input)
-
-        @torch.library.impl(lib, "my_functional_op", "CUDA")
-        def cuda_impl(input, group_name):
-            return input + 1.0
-
-        def f_eager(x):
-            return torch.ops.test_func_symm.my_functional_op(x, "test_group")
-
-        @torch.compile(backend="inductor", fullgraph=True)
-        def f_compiled(x):
-            return torch.ops.test_func_symm.my_functional_op(x, "test_group")
-
-        x = torch.randn(4, 4, device="cuda")
-
-        eager_result = f_eager(x.clone())
-        compiled_result = f_compiled(x.clone())
-        torch.testing.assert_close(compiled_result, eager_result)
-
-        expected = x + 1.0
-        torch.testing.assert_close(compiled_result, expected)
-
-        # Verify the registration is visible in the registry
-        entry = singleton.find("test_func_symm::my_functional_op")
-        self.assertTrue(entry.symm_mem_args.is_registered())
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
-        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
-
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA and Triton")
-    def test_functional_op_with_multiple_symm_mem_args(self):
-        """Test that multiple symm_mem args are registered and visible during compilation."""
-        lib = Library("test_func_multi", "DEF")  # noqa: SCOPED_LIBRARY
-        lib.define(
-            "my_multi_arg_op(Tensor input, Tensor out, str group_name) -> Tensor"
-        )
-        lib.register_symm_mem_args("my_multi_arg_op", ["input", "out"])
-
-        @torch.library.impl(lib, "my_multi_arg_op", "Meta")
-        def meta_impl(input, out, group_name):
-            return torch.empty_like(input)
-
-        @torch.library.impl(lib, "my_multi_arg_op", "CUDA")
-        def cuda_impl(input, out, group_name):
-            # use both symm_mem args to verify functionality
-            return input + out
-
-        def f_eager(x, y):
-            return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
-
-        @torch.compile(backend="inductor", fullgraph=True)
-        def f_compiled(x, y):
-            return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
-
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
-
-        eager_result = f_eager(x.clone(), y.clone())
-        compiled_result = f_compiled(x.clone(), y.clone())
-        torch.testing.assert_close(compiled_result, eager_result)
-
-        expected = x + y
-        torch.testing.assert_close(compiled_result, expected)
-
-        # Verify both args are registered
-        entry = singleton.find("test_func_multi::my_multi_arg_op")
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("out"))
-        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
 
     def test_unregistered_op_skips_realization(self):
         """Test that _maybe_realize_symm_mem_args returns early for unregistered ops."""
@@ -399,6 +332,114 @@ class TestFunctionalOpCompile(TestCase):
         self.assertEqual(len(realize_log), 1)
         self.assertIn("SYMM_MEM", realize_log[0][0])
         self.assertEqual(realize_log[0][1], "test_group")
+
+
+class TestFunctionalOpCompileDevice(TestCase):
+    """Test that functional ops with registered symm_mem_args compile and run on device."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        test_keys = [k for k in singleton._data if k.startswith("test_")]
+        for key in test_keys:
+            del singleton._data[key]
+
+    def tearDown(self):
+        test_keys = [k for k in singleton._data if k.startswith("test_")]
+        for key in test_keys:
+            del singleton._data[key]
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @skipIf(not HAS_TRITON, "Requires Triton")
+    def test_functional_op_compiles_with_symm_mem_args(self, device):
+        """Test that a functional op with registered symm_mem_args compiles and runs."""
+        ns = f"test_func_symm_{device.replace(':', '_')}"
+        lib = Library(ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define("my_functional_op(Tensor input, str group_name) -> Tensor")
+        lib.register_symm_mem_args("my_functional_op", ["input"])
+
+        @torch.library.impl(lib, "my_functional_op", "Meta")
+        def meta_impl(input, group_name):
+            return torch.empty_like(input)
+
+        @torch.library.register_kernel(
+            f"{ns}::my_functional_op", torch.device(device).type, lib=lib
+        )
+        def device_impl(input, group_name):
+            return input + 1.0
+
+        def f_eager(x):
+            return getattr(torch.ops, ns).my_functional_op(x, "test_group")
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f_compiled(x):
+            return getattr(torch.ops, ns).my_functional_op(x, "test_group")
+
+        x = torch.randn(4, 4, device=device)
+
+        eager_result = f_eager(x.clone())
+        compiled_result = f_compiled(x.clone())
+        torch.testing.assert_close(compiled_result, eager_result)
+
+        expected = x + 1.0
+        torch.testing.assert_close(compiled_result, expected)
+
+        # Verify the registration is visible in the registry
+        entry = singleton.find(f"{ns}::my_functional_op")
+        self.assertTrue(entry.symm_mem_args.is_registered())
+        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
+        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
+
+    @skipIf(not HAS_TRITON, "Requires Triton")
+    def test_functional_op_with_multiple_symm_mem_args(self, device):
+        """Test that multiple symm_mem args are registered and visible during compilation."""
+        ns = f"test_func_multi_{device.replace(':', '_')}"
+        lib = Library(ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define(
+            "my_multi_arg_op(Tensor input, Tensor out, str group_name) -> Tensor"
+        )
+        lib.register_symm_mem_args("my_multi_arg_op", ["input", "out"])
+
+        @torch.library.impl(lib, "my_multi_arg_op", "Meta")
+        def meta_impl(input, out, group_name):
+            return torch.empty_like(input)
+
+        @torch.library.register_kernel(
+            f"{ns}::my_multi_arg_op", torch.device(device).type, lib=lib
+        )
+        def device_impl(input, out, group_name):
+            # use both symm_mem args to verify functionality
+            return input + out
+
+        def f_eager(x, y):
+            return getattr(torch.ops, ns).my_multi_arg_op(x, y, "test_group")
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f_compiled(x, y):
+            return getattr(torch.ops, ns).my_multi_arg_op(x, y, "test_group")
+
+        x = torch.randn(4, 4, device=device)
+        y = torch.randn(4, 4, device=device)
+
+        eager_result = f_eager(x.clone(), y.clone())
+        compiled_result = f_compiled(x.clone(), y.clone())
+        torch.testing.assert_close(compiled_result, eager_result)
+
+        expected = x + y
+        torch.testing.assert_close(compiled_result, expected)
+
+        # Verify both args are registered
+        entry = singleton.find(f"{ns}::my_multi_arg_op")
+        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
+        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("out"))
+        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
+
+
+instantiate_device_type_tests(
+    TestFunctionalOpCompileDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":

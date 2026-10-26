@@ -12,6 +12,7 @@ from torch.testing._internal import (
     fake_config_module_with_implications as implied_config,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
 
 @instantiate_parametrized_tests
 class ConfigTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_config_module(self, name: str):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)

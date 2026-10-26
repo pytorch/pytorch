@@ -285,11 +285,10 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(value, **kwargs)
+        super().__init__(value, source=source, **kwargs)
         self.proxy = proxy
         if isinstance(self.proxy, torch.fx.Proxy):
             self.proxy.node.meta["example_value"] = value
-        self.source = source
         # If the OpaqueObject is sourceless, then this is
         # the constant (args, kwargs) that Dynamo used to construct it.
         self.ctor_args_kwargs = ctor_args_kwargs
@@ -405,11 +404,12 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
             elif is_opaque_constant_type(real_obj_type):
                 return super().tp_getattro_impl(tx, name)
 
-            elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
-                # Special case: __bool__ and __len__ are used for truthiness checks.
-                # If they're not registered and the real object doesn't have them,
-                # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior)
+            elif not hasattr(real_obj, name):
+                # The real object has no such attribute, so the observable
+                # behavior is an AttributeError.  This lets hasattr() and
+                # getattr(obj, name, default) work on unregistered members,
+                # and lets truthiness checks fall back to the Python default
+                # when __bool__/__len__ are absent.
                 raise_observed_exception(AttributeError, tx)
 
             else:
