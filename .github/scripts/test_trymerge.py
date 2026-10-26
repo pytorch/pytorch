@@ -792,6 +792,13 @@ class TestTryMerge(TestCase):
         author = pr.get_author()
         self.assertTrue(author is not None)
 
+    def test_is_dependabot_pr(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        self.assertFalse(pr.is_dependabot_pr())
+        for login in ("dependabot", "dependabot[bot]"):
+            pr.info["author"]["login"] = login
+            self.assertTrue(pr.is_dependabot_pr())
+
     def test_large_diff(self, *args: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73099)
