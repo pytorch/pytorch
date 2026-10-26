@@ -432,7 +432,6 @@ void initPythonBindings(PyObject* module) {
               bool /* verbose */,
               std::vector<std::string> /* performance_events  */,
               bool /* enable_cuda_sync_events */,
-              bool /* adjust_profiler_step */,
               bool /* disable_external_correlation*/,
               bool /* profile_all_threads */,
               bool /* capture_overload_names */,
@@ -449,7 +448,6 @@ void initPythonBindings(PyObject* module) {
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
           "       and currently disabled by default.\n"
-          "    adjust_profiler_step (bool) : DEPRECATED and ignored.\n"
           "    disable_external_correlation (bool) : whether to disable external correlation\n"
           "    profile_all_threads (bool) : whether to profile all threads\n"
           "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
@@ -462,7 +460,6 @@ void initPythonBindings(PyObject* module) {
           py::arg("verbose") = false,
           py::arg("performance_events") = std::vector<std::string>(),
           py::arg("enable_cuda_sync_events") = false,
-          py::arg("adjust_profiler_step") = false,
           py::arg("disable_external_correlation") = false,
           py::arg("profile_all_threads") = false,
           py::arg("capture_overload_names") = false,
@@ -483,7 +480,6 @@ void initPythonBindings(PyObject* module) {
                 p.verbose,
                 py_perf_events,
                 p.enable_cuda_sync_events,
-                p.adjust_profiler_step,
                 p.disable_external_correlation,
                 p.profile_all_threads,
                 p.capture_overload_names,
@@ -494,7 +490,7 @@ void initPythonBindings(PyObject* module) {
                 p.trace_only);
           },
           [](const py::tuple& t) { // __setstate__
-            TORCH_CHECK(t.size() >= 10, "Expected at least 10 values in state");
+            TORCH_CHECK(t.size() >= 9, "Expected at least 9 values in state");
 
             py::list py_perf_events = t[1].cast<py::list>();
             std::vector<std::string> performance_events;
@@ -512,15 +508,10 @@ void initPythonBindings(PyObject* module) {
                 t[5].cast<bool>(),
                 t[6].cast<bool>(),
                 t[7].cast<bool>(),
-                t[8].cast<bool>(),
-                t[9].cast<std::string>(),
-                t.size() > 10 ? t[10].cast<bool>() : false,
-                t.size() > 11 ? t[11].cast<bool>() : false);
+                t[8].cast<std::string>(),
+                t.size() > 9 ? t[9].cast<bool>() : false,
+                t.size() > 10 ? t[10].cast<bool>() : false);
           }))
-      // adjust_profiler_step is a deprecated no-op, exposed read-only so the
-      // Python layer can detect it and warn.
-      .def_readonly(
-          "adjust_profiler_step", &ExperimentalConfig::adjust_profiler_step)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);

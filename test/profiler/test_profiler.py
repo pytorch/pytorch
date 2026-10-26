@@ -1020,31 +1020,25 @@ class TestProfiler(TestCase):
                 verbose=True,
                 performance_events=["event1", "event2"],
                 enable_cuda_sync_events=True,
-                adjust_profiler_step=True,
                 disable_external_correlation=True,
                 profile_all_threads=True,
                 capture_overload_names=True,
                 record_python_gc_info=True,
                 expose_kineto_event_metadata=True,
                 custom_profiler_config="custom_config",
+                trace_only=True,
             )
             pickled = pickle.dumps(config)
             unpickled = pickle.loads(pickled)
             self.assertIsInstance(unpickled, _ExperimentalConfig)
+            self.assertEqual(unpickled.custom_profiler_config, "custom_config")
+            self.assertTrue(unpickled.trace_only)
 
             # Test deepcopy (which uses pickle internally)
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
-
-    def test_adjust_profiler_step_deprecated(self):
-        # adjust_profiler_step is a deprecated no-op: passing it must warn with
-        # FutureWarning and not error.
-        with self.assertWarnsRegex(FutureWarning, "adjust_profiler_step"):
-            with profile(
-                activities=[ProfilerActivity.CPU],
-                experimental_config=_ExperimentalConfig(adjust_profiler_step=True),
-            ):
-                pass
+            self.assertEqual(copied.custom_profiler_config, "custom_config")
+            self.assertTrue(copied.trace_only)
 
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
