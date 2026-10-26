@@ -1955,6 +1955,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
     """The WOQ int8pack fusion allowlist is registry-driven (compile-level)."""
 
+    @skipIfNoDynamoSupport
     def test_int8pack_fusion_gated_by_device_registry(self):
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):

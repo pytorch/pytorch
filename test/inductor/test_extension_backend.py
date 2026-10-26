@@ -26,6 +26,7 @@ except ImportError:
     )
 
 import torch._inductor.config as config
+from torch._dynamo.utils import counters
 from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen.common import (
     device_op_overrides_dict,
@@ -37,6 +38,10 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
+from torch._inductor.fx_passes.quantization import (
+    register_woq_int8pack_fusion_device,
+    unregister_woq_int8pack_fusion_device,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -256,6 +261,52 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionCppWrapperCodegen,
         )
         self.assertTrue(has_cpp_wrapper_for_device(device))
+
+    @xfailIfS390X
+    @skipIfWindows
+    def test_woq_int8pack_fusion_on_registered_device(self):
+        # End-to-end check that a third-party (non-default) device type gains
+        # the WOQ int8pack-mm fusion once it opts in via
+        # register_woq_int8pack_fusion_device(). The PrivateUse1 kernels for
+        # aten.mm and aten._weight_int8pack_mm live in extension_device.cpp.
+        torch.utils.rename_privateuse1_backend("extension_device")
+        torch._register_device_module("extension_device", self.module)
+        register_backend_for_device(
+            "extension_device",
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+            ExtensionCppWrapperCodegen,
+        )
+        register_device_op_overrides("extension_device", ExtensionDeviceOpOverrides())
+        device = self.module.custom_device()
+
+        def fn(x, weight, scales):
+            return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+
+        x_cpu = torch.randn(1, 1, 256, dtype=torch.bfloat16)
+        w_cpu = torch.randint(-128, 127, (12, 256), dtype=torch.int8)
+        s_cpu = torch.randn(12, dtype=torch.bfloat16)
+        ref = fn(x_cpu, w_cpu, s_cpu)
+        x, w, s = x_cpu.to(device), w_cpu.to(device), s_cpu.to(device)
+
+        # Before registration the generic (non-fused) path is used.
+        counters.clear()
+        torch._dynamo.reset()
+        opt_fn = torch.compile()(fn)
+        res = opt_fn(x, w, s)
+        self.assertEqual(counters["inductor"]["woq_matcher_count"], 0)
+        self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+
+        # Registering the device type turns the fusion on.
+        register_woq_int8pack_fusion_device("extension_device")
+        self.addCleanup(unregister_woq_int8pack_fusion_device, "extension_device")
+        counters.clear()
+        torch._dynamo.reset()
+        with config.patch({"fx_graph_cache": False}):
+            opt_fn = torch.compile()(fn)
+            res = opt_fn(x, w, s)
+        self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+        self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)
