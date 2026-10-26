@@ -55,7 +55,7 @@ from schemas import (
     ReviewerSnapshot,
     TRIAGED_LABEL,
 )
-from step_summary import summary_prose
+from step_summary import summary_code, summary_diff, summary_prose
 from trusted_config import load_team_members
 
 
@@ -107,18 +107,23 @@ class TextStyle:
     prose: Callable[[str], str]
     code: Callable[[str], str]
     handle: Callable[[str], str]
-    excerpts: bool
+    excerpt: Callable[[str], list[str]]
 
 
 LOG_STYLE = TextStyle(
     escape_log_fragment,
     lambda value: f"`{escape_log_fragment(value)}`",
     lambda handle: handle,
-    True,
+    lambda excerpt: [
+        f"    {escape_log_fragment(line)}" for line in excerpt.splitlines()
+    ],
 )
 # Summaries show `login` rather than @login, so pasting one never pings anyone.
 SUMMARY_STYLE = TextStyle(
-    summary_prose, summary_prose, lambda handle: f"`{handle.removeprefix('@')}`", False
+    summary_prose,
+    summary_code,
+    lambda handle: f"`{handle.removeprefix('@')}`",
+    lambda excerpt: [f"  {line}" for line in summary_diff(excerpt)],
 )
 
 
@@ -215,15 +220,12 @@ def engagement_reason(*, reviewer: str, reason: EngagementReason) -> str:
 
 
 def evidence_lines(*, evidence: list[dict[str, str]], style: TextStyle) -> list[str]:
-    """Render evidence items, with their diff excerpts when the style shows them."""
+    """Render evidence items, each followed by its diff excerpt."""
 
     lines = []
     for item in evidence:
         lines.append(f"- {style.code(item['file'])}: " + style.prose(item["relevance"]))
-        if style.excerpts:
-            lines.extend(
-                f"    {style.prose(line)}" for line in item["diff_excerpt"].splitlines()
-            )
+        lines.extend(style.excerpt(item["diff_excerpt"]))
     return lines
 
 
@@ -549,6 +551,97 @@ class PlanExplanation:
         }
 
 
+def owner_section(*, owner: str, anchor: str, details: list[str]) -> list[str]:
+    """Render one semantic owner's details under a heading the reviewer table links to."""
+
+    lines = ["", f'<a id="{anchor}"></a>', "", f"### Why `{owner}` owns this"]
+    for line in details:
+        # Excerpt lines are indented under their evidence item; the rest are
+        # list items or paragraphs, which need a blank line to end a list.
+        if line.startswith(("  ", "- ")):
+            lines.append(line)
+        else:
+            lines.extend(["", line])
+    return lines
+
+
+def render_step_summary(
+    *,
+    plan: ActionPlan,
+    why: PlanExplanation,
+    planned: tuple[str, ...],
+    labels: list[str],
+) -> str:
+    """Render who was requested and why, then the plan record, collapsed."""
+
+    handle = SUMMARY_STYLE.handle
+    names = ", ".join(handle(r) for r in planned)
+    heading = f"requests review from {names}" if planned else "no reviewer requested"
+    label_names = ", ".join(f"`{label}`" for label in labels)
+    lines = [
+        f"## Auto PR Triage: {heading}",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| Decision | `{plan.decision}` |",
+        f"| Admission | {admission_text(items=why.admission, style=SUMMARY_STYLE)} |",
+    ]
+    if why.incomplete_reasons:
+        reasons = " ".join(summary_prose(r) for r in why.incomplete_reasons)
+        lines.append(f"| Why this run is incomplete | {reasons} |")
+    lines.append(f"| Intended labels | {label_names or 'none'} |")
+
+    # Codepath owners fit in the reviewer's row; each semantic owner's longer
+    # provenance gets its own section below, linked from the row.
+    sections = []
+    if why.reviewers:
+        lines += [
+            "",
+            "### Reviewers",
+            "",
+            "| Reviewer | Request | Why |",
+            "|---|---|---|",
+        ]
+    for group in why.reviewers:
+        sentences, _ = reviewer_explanation(group=group, style=SUMMARY_STYLE)
+        cell = [" ".join(sentences)]
+        for reason in group.reasons:
+            if not isinstance(reason, OwnerReason):
+                continue
+            details = owner_details(
+                owner=reason.owner, provenance=reason.provenance, style=SUMMARY_STYLE
+            )
+            if reason.provenance["source"] == "codepath":
+                cell.extend(details)
+                continue
+            anchor = f"auto-pr-triage-why-{reason.owner}"
+            cell.append(f"[See why `{reason.owner}` owns this](#{anchor})")
+            sections += owner_section(
+                owner=reason.owner, anchor=anchor, details=details
+            )
+        status = "new request" if group.requested else "no new request"
+        lines.append(f"| {handle(group.reviewer)} | {status} | {'<br>'.join(cell)} |")
+    lines += sections
+
+    reviewer_names = ", ".join(f"`{r.removeprefix('@')}`" for r in planned)
+    unresolved_names = ", ".join(f"`{owner}`" for owner in why.unresolved_owners)
+    uncovered = str(why.has_uncovered_concerns).lower()
+    lines += [
+        "",
+        "<details><summary>Auto PR Triage decision plan</summary>",
+        "",
+        f"- Decision: `{plan.decision}`",
+        f"- Has uncovered concerns: `{uncovered}`",
+        f"- Planned reviewer requests: {reviewer_names or 'none'}",
+        f"- Unresolved owners: {unresolved_names or 'none'}",
+    ]
+    for owner, choice in sorted(why.owner_choices.items()):
+        reviewer = choice["reviewer"].removeprefix("@")
+        lines.append(f"- Owner `{owner}`: `{reviewer}` ({choice['state']})")
+    lines += [f"- Intended labels: {label_names}", "", "</details>", ""]
+    return "\n".join(lines)
+
+
 def log_plan(*, plan: ActionPlan, why: PlanExplanation, summary: Path | None) -> None:
     """Log one deterministic pre-effect plan and write its step summary."""
 
@@ -580,43 +673,11 @@ def log_plan(*, plan: ActionPlan, why: PlanExplanation, summary: Path | None) ->
     )
     if summary is None:
         return
-    reviewer_names = ", ".join(f"`{r.removeprefix('@')}`" for r in planned)
-    unresolved_names = ", ".join(f"`{owner}`" for owner in why.unresolved_owners)
-    uncovered = str(why.has_uncovered_concerns).lower()
     try:
         with summary.open("a", encoding="utf-8") as output:
-            output.write("## Auto PR Triage decision plan\n\n")
-            output.write(f"- Decision: `{plan.decision}`\n")
-            output.write(f"- Has uncovered concerns: `{uncovered}`\n")
-            output.write(f"- Planned reviewer requests: {reviewer_names or 'none'}\n")
-            output.write(f"- Unresolved owners: {unresolved_names or 'none'}\n")
-            for owner, choice in sorted(why.owner_choices.items()):
-                reviewer = choice["reviewer"].removeprefix("@")
-                output.write(f"- Owner `{owner}`: `{reviewer}` ({choice['state']})\n")
-            label_names = ", ".join(f"`{label}`" for label in labels)
-            output.write(f"- Intended labels: {label_names}\n")
-            output.write("\n### Why this PR was admitted\n\n")
             output.write(
-                admission_text(items=why.admission, style=SUMMARY_STYLE) + "\n"
+                render_step_summary(plan=plan, why=why, planned=planned, labels=labels)
             )
-            if why.incomplete_reasons:
-                output.write("\n### Why this run is incomplete\n\n")
-                output.writelines(
-                    f"- {summary_prose(r)}\n" for r in why.incomplete_reasons
-                )
-            if why.reviewers:
-                output.write("\n### Why each reviewer was requested\n\n")
-            for group in why.reviewers:
-                sentences, details = reviewer_explanation(
-                    group=group, style=SUMMARY_STYLE
-                )
-                status = "new request" if group.requested else "no new request"
-                reviewer = SUMMARY_STYLE.handle(group.reviewer)
-                output.write(f"- **{reviewer}** ({status}): {' '.join(sentences)}\n")
-                output.writelines(
-                    f"    - {line[2:]}\n" if line.startswith("- ") else f"  - {line}\n"
-                    for line in details
-                )
     except OSError as exc:
         detail = " ".join(str(exc).split())
         print(

@@ -28,7 +28,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / ".claude" / "hooks" / "claude_code" / "time-budget.sh"
 WORKFLOW = REPO / ".github" / "workflows" / "claude-code.yml"
-SKILL = REPO / ".claude" / "skills" / "pr-review" / "SKILL.md"
+SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
 REUSABLE_WORKFLOW = "pytorch/test-infra/.github/workflows/_claude-code.yml@"
 PROJECT_DIR = "${CLAUDE_PROJECT_DIR}"
 BASH = "/bin/bash"
