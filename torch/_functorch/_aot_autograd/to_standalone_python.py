@@ -913,14 +913,6 @@ def compile_to_python(
             "supported yet."
         )
 
-    if (options or {}).get("freezing"):
-        raise NotImplementedError(
-            "aot_autograd.compile_to_python does not support options={'freezing': "
-            "True}: freezing's forward compiler rewrites the graph (and may drop its "
-            "inputs) before the inner compile this lowering captures, so the captured "
-            "graph would not match the runtime wrappers."
-        )
-
     with _COMPILE_LOCK:
         # Run AOTAutograd ONCE to do two things: (1) produce the dense, decomposed,
         # functionalized inner graph, and (2) codegen its runtime-wrapper chain, which the

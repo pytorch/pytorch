@@ -525,6 +525,7 @@ def _resolve_fake_mode(
 STANDALONE_PYTHON_PINS: dict[str, Any] = {
     "benchmark_harness": False,
     "cpp_wrapper": False,
+    "freezing": False,
     "triton.autotune_at_compile_time": True,
 }
 
@@ -804,8 +805,10 @@ def compile_to_python(
     # applied AFTER the user options so they override any conflicting key:
     # benchmark_harness=False keeps the emitted module runnable (no get_args()/
     # benchmark_compiled_module()/__main__), and cpp_wrapper=False keeps it a python
-    # wrapper (the C++ backend emits a C++ ``call`` we cannot inline). A caller must not
-    # be able to break either.
+    # wrapper (the C++ backend emits a C++ ``call`` we cannot inline). freezing=False
+    # holds for aot_autograd.compile_to_python's AOTAutograd step, whose captured graph
+    # freezing's forward compiler would rewrite under the runtime wrappers. A caller
+    # must not be able to break any of them.
     config_patches: dict[str, Any] = {"keep_static_cubin_raw": True}
     if options is not None:
         config_patches.update(options)
