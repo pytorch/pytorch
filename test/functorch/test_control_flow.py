@@ -13271,6 +13271,40 @@ class <lambda>(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_output_alias_output_raises(self, device, dynamic):
+        # The same check also rejects output-output aliasing: a branch returning one
+        # tensor twice. Covered separately because the two kinds come from different
+        # maps in check_input_alias_and_mutation.
+        def f(pred, x, y):
+            def true_fn(x, y):
+                y.copy_(x * 2.0)
+                out = x + 1.0
+                return out, out
+
+            def false_fn(x, y):
+                y.copy_(x + 1.0)
+                out = x - 1.0
+                return out, out
+
+            return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor(True, device=device)
+        x = torch.ones(5, 5, device=device)
+        y = torch.zeros(5, 5, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_true might be aliasing the input or the output"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)(
+                pred, x, y
+            )
+
+    # https://github.com/pytorch/pytorch/issues/201590
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_input_mutation_without_alias(
         self, device, dynamic
     ):

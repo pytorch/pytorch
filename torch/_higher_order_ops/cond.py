@@ -714,8 +714,8 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         do_auto_functionalize_v2,
     )
     from torch._higher_order_ops.utils import (
+        _check_alias,
         _check_alias_and_mutation,
-        has_potential_input_alias_or_mutation,
         HopInstance,
     )
 
@@ -723,19 +723,16 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
-        # Auto-functionalization supports operand mutation, but a branch output that
-        # aliases an input is still unsupported.  _check_alias_and_mutation below is
-        # skipped on this path, so enforce its aliasing half here.
+        # Auto-functionalization supports operand mutation, but aliasing is still
+        # unsupported: input-input, input-output and output-output alike, matching the
+        # non-auto-functionalized path below. _check_alias_and_mutation is skipped on
+        # this path because it would also reject the mutation, so check aliasing only.
+        # This re-traces both branches; see the PR discussion for why the maps
+        # gen_schema already computed are not reused.
+        unwrapped_inputs = ctx.unwrap_tensors(inputs)
+        pre_dispatch = ctx.mode.pre_dispatch
         for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
-            aliases, _ = has_potential_input_alias_or_mutation(
-                branch,
-                ctx.unwrap_tensors(inputs),
-                pre_dispatch=ctx.mode.pre_dispatch,
-            )
-            if aliases:
-                raise RuntimeError(
-                    f"{branch_name} might be aliasing the input or the output!"
-                )
+            _check_alias(branch, unwrapped_inputs, branch_name, pre_dispatch)
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,

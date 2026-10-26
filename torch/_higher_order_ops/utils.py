@@ -592,6 +592,25 @@ def _collect_fake_inputs(inputs):
     return inputs_fake
 
 
+def _check_alias(
+    graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
+):
+    """Raise if the graph has input-input, input-output or output-output aliasing.
+
+    The aliasing half of :func:`_check_alias_and_mutation`. Auto-functionalization makes
+    input mutation supported, so that path must still reject aliasing but cannot use
+    :func:`_check_alias_and_mutation`, which rejects mutation as well.
+    """
+    aliases, _ = has_potential_input_alias_or_mutation(
+        graph_module,
+        inputs_fake,
+        pre_dispatch=pre_dispatch,
+        allow_input_input_aliasing=allow_input_input_aliasing,
+    )
+    if aliases:
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")
+
+
 def _check_alias_and_mutation(
     graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
 ):

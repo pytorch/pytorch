@@ -396,10 +396,24 @@ def switch_func(ctx, index, branches, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_alias,
+        _check_alias_and_mutation,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(switch_op, index, branches, inputs)
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        # Same as cond_func: auto-functionalization supports operand mutation but not
+        # aliasing, and _check_alias_and_mutation below is skipped on this path.
+        # Dynamo currently rejects aliasing in switch branches before this runs, since
+        # SwitchHigherOrderVariable relaxes supports_input_mutation under no_grad but
+        # not supports_aliasing the way CondHigherOrderVariable does. This keeps the
+        # two HOPs in step regardless of that.
+        unwrapped_inputs = ctx.unwrap_tensors(inputs)
+        pre_dispatch = ctx.mode.pre_dispatch
+        for i, branch in enumerate(branches):
+            _check_alias(branch, unwrapped_inputs, f"switch_branch{i}", pre_dispatch)
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,
