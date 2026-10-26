@@ -1414,7 +1414,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         text = STAGE2.read_text()
         offenders = []
-        for job in ("prepare", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish"):
             lines = job_block(text, job).splitlines()
             starts = [
                 i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)
@@ -1463,7 +1463,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
             self.assertEqual(bots, ['"pytorch-bot[bot]"'], f"step {step_id}")
 
-    def test_stage2_declares_exactly_the_three_jobs_that_were_reviewed(self):
+    def test_stage2_declares_exactly_the_jobs_that_were_reviewed(self):
         """Stage 1 pins its job set; Stage 2 did not.
 
         A fourth job declaring `environment: bedrock`, assuming the publisher
@@ -1474,10 +1474,10 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
         self.assertEqual(
             jobs,
-            ["prepare", "review", "publish"],
+            ["prepare", "announce", "review", "publish"],
             f"Stage 2's jobs are {jobs}. Every role, environment and "
-            "checkout assertion in this file names one of three; a fourth is "
-            "covered by none of them.",
+            "checkout assertion in this file names one of these four; a fifth "
+            "is covered by none of them.",
         )
 
     # The review job's step set, by name and in order. Stage 1 pins jobs,
@@ -2983,13 +2983,14 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         ("prepare", None): "${{ github.sha }}",
         ("review", "trusted"): "${{ github.sha }}",
         ("review", "pr"): "${{ needs.prepare.outputs.head_sha }}",
+        ("announce", None): "${{ github.sha }}",
         ("publish", None): "${{ github.sha }}",
     }
 
     def test_no_job_checks_out_pull_request_code_it_is_not_allowed_to(self):
         text = STAGE2.read_text()
         seen = {}
-        for job in ("prepare", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish"):
             for step in steps_using(job_block(text, job), "actions/checkout"):
                 inputs = mapping_items(with_block(step))
                 key = (job, inputs.get("path"))
@@ -3058,7 +3059,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         self.assertEqual(
             {
                 job: mapping_items(indented_block(job_block(text, job), "permissions:"))
-                for job in ("prepare", "review", "publish")
+                for job in ("prepare", "announce", "review", "publish")
             },
             {
                 "prepare": {
@@ -3067,6 +3068,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
                     "pull-requests": "read",
                     "id-token": "write",
                 },
+                "announce": {"contents": "read", "pull-requests": "write"},
                 "review": {"contents": "read", "id-token": "write"},
                 "publish": {
                     "contents": "read",
@@ -4876,6 +4878,38 @@ class TestPublishMovesNoLabels(unittest.TestCase):
         self.assertNotIn("Labelable", source)
 
 
+class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
+    """`announce` edits one review body with GITHUB_TOKEN and nothing else.
+
+    It runs beside the review job, so it must not become a second publisher: no
+    environment (the publisher role trusts the `bedrock` one), no AWS step, no
+    direct API call, and only post_review.py's `--mark-pending` mode.
+    """
+
+    def setUp(self):
+        self.job = strip_comments(job_block(STAGE2.read_text(), "announce"))
+
+    def test_it_names_no_environment_and_assumes_no_role(self):
+        self.assertNotIn("environment:", self.job)
+        self.assertNotIn("configure-aws-credentials", self.job)
+        self.assertNotIn("id-token", self.job)
+
+    def test_it_only_marks_the_previous_review(self):
+        runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
+        self.assertEqual(
+            runs, ["python3 scripts/pr_review/post_review.py --mark-pending"]
+        )
+        for needle in ("gh api", "gh pr", "/labels"):
+            self.assertNotIn(needle, self.job)
+
+    def test_publish_waits_for_it_and_always_puts_the_review_back(self):
+        publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
+        self.assertIn("needs: [prepare, announce, review]", publish)
+        step = publish.split("- name: Put back the previous review", 1)[1]
+        self.assertIn("if: always()", step.split("run:", 1)[0])
+        self.assertIn("post_review.py --restore-pending", step)
+
+
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
     """A newline in a path component must not split one entry into two.
 
@@ -5813,8 +5847,9 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
         )
 
     def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
-        """`publish` too: it is `always()`, so skipping `review` is not enough."""
-        for job in ("review", "publish"):
+        """`publish` too: it is `always()`, so skipping `review` is not enough.
+        `announce` too: it would mark a review no run will replace."""
+        for job in ("announce", "review", "publish"):
             # `job_if`, not `block.split("runs-on:")[0]`. YAML mappings are
             # unordered, so moving an unchanged `runs-on:` above `if:` emptied
             # that region and red the test — the identical defect already found
