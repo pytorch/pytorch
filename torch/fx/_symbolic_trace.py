@@ -918,6 +918,11 @@ class Tracer(TracerBase):
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
+                # Before anything is patched, so a torch.fx.wrap that resolving them
+                # runs is registered before _patch_wrapped_functions reads the table.
+                _resolve_lazy_imports(patcher, fn_globals)
+                for module in self._autowrap_search:
+                    _resolve_lazy_imports(patcher, module.__dict__)
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(
                     torch.nn.Module,
@@ -1167,6 +1172,8 @@ class _Patcher:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
+        # The patcher of the trace this one is nested in, if any.
+        self.outer: _Patcher | None = None
 
     def patch(
         self,
@@ -1254,6 +1261,7 @@ def _new_patcher() -> Iterator[_Patcher]:
     prior_patcher = CURRENT_PATCHER
     try:
         CURRENT_PATCHER = _Patcher()
+        CURRENT_PATCHER.outer = prior_patcher
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
@@ -1285,12 +1293,12 @@ def _resolve_lazy_imports(
     patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
 ) -> None:
     """Resolve the unresolved lazy imports among ``names`` (default: every global of
-    ``frame_dict``) with ``patcher``'s patches reverted.
+    ``frame_dict``) with the patches of ``patcher``, and of every trace it is nested
+    in, reverted.
 
     Reading an unresolved lazy import runs its module body, which must not see the
     globals FX patches mid-trace. ``importlib.is_lazy_import`` exists only on PEP
-    690-style lazy-import runtimes (e.g. Cinder). Only ``patcher``'s own patches are
-    reverted: an enclosing trace's patcher stays applied.
+    690-style lazy-import runtimes (e.g. Cinder).
     """
     is_lazy_import = getattr(importlib, "is_lazy_import", None)
     if is_lazy_import is None:
@@ -1302,12 +1310,21 @@ def _resolve_lazy_imports(
     ]
     if not lazy_names:
         return
-    patcher.revert_all_patches()
+    # Innermost first: a nested patcher recorded the outer one's wrappers as the
+    # originals it restores.
+    chain = []
+    current: _Patcher | None = patcher
+    while current is not None:
+        chain.append(current)
+        current = current.outer
+    for current in chain:
+        current.revert_all_patches()
     try:
         for name in lazy_names:
             _ = frame_dict[name]
     finally:
-        patcher.reapply_all_patches()
+        for current in reversed(chain):
+            current.reapply_all_patches()
 
 
 def _patch_wrapped_functions(patcher: _Patcher) -> None:
