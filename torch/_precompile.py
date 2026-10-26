@@ -1969,13 +1969,16 @@ def _op_names(gm: torch.fx.GraphModule) -> set[str]:
 
 
 # Python wrapper code calls an op it does not lower as torch.ops.<ns>.<op>; the C++
-# wrapper (cpp_wrapper) names it as a "<ns>::<op>" string to the dispatcher.
+# wrapper (cpp_wrapper) names it as a "<ns>::<op>" string to the dispatcher, or, for
+# a schema the boxed dispatcher cannot take (a list[Tensor] return), looks the
+# Python op up by its "torch.ops.<ns>.<op>" name.
 _PYTHON_OP_CALL = re.compile(
     r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?"
 )
 _DISPATCHER_OP_CALL = re.compile(
     r"\b(?:aoti_torch_call_dispatcher|findSchemaOrThrow)\("
     r"\s*\"(\w+)::(\w+)\"(?:\s*,\s*\"(\w*)\")?"
+    r"|\bPyUnicode_FromString\(\s*\"torch\.ops\.(\w+)\.(\w+)(?:\.(\w+))?\""
 )
 # Inductor's assert_size_stride and friends name the node's op in a string.
 _STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
@@ -2005,7 +2008,8 @@ def _op_names_in_source(source: str) -> set[str]:
         for match in _PYTHON_OP_CALL.finditer(_STRING_LITERAL.sub('""', code)):
             names.add(_op_name(*match.groups()))
         for match in _DISPATCHER_OP_CALL.finditer(code):
-            names.add(_op_name(*match.groups()))
+            groups = match.group(1, 2, 3) if match.group(1) else match.group(4, 5, 6)
+            names.add(_op_name(*groups))
     return names
 
 

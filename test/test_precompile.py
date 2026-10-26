@@ -9553,6 +9553,17 @@ torch.library.define(
 @torch.library.impl("{ns}::doubled.out", "CompositeExplicitAutograd")
 def _(x, *, out):
     return torch.mul(x, 2, out=out)
+
+
+# A list[Tensor] return: cpp_wrapper calls it back through Python.
+@torch.library.custom_op("{ns}::halves", mutates_args=())
+def halves(x: torch.Tensor) -> list[torch.Tensor]:
+    return [x * 0.5, x * 0.5]
+
+
+@halves.register_fake
+def _(x):
+    return [torch.empty_like(x), torch.empty_like(x)]
 """
 
 
@@ -9573,6 +9584,11 @@ def grad_fn(x):
 
 def out_fn(x):
     return torch.ops.{ns}.doubled.default(x.neg()) + 1
+
+
+def list_fn(x):
+    a, b = torch.ops.{ns}.halves.default(x.neg())
+    return a + b + 1
 
 
 class Child(torch.nn.Module):
@@ -9775,6 +9791,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "inductor", "grad_fn", "standalone"),
             ("dynamo", "inductor", "out_fn", "standalone"),
             ("dynamo", "inductor-cpp-wrapper", "fn", "standalone"),
+            ("dynamo", "inductor-cpp-wrapper", "list_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9820,6 +9837,7 @@ class TestPrecompileCustomOpModules(TestCase):
                 "fn": ("lowered", "triple") if backend == "eager" else ("triple",),
                 "grad_fn": ("grad_triple", "triple"),
                 "out_fn": ("doubled.out",),
+                "list_fn": ("halves",),
             }.get(entry, ("triple",))
             modules = {module: tuple(f"{ns}::{op}" for op in ops)}
             self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", python_code.splitlines())
@@ -10119,6 +10137,8 @@ class TestPrecompileCustomOpModules(TestCase):
             'aoti_torch_call_dispatcher("mylib::cpp_fallback", "", args);\n'
             'c10::Dispatcher::singleton().findSchemaOrThrow("mylib::cpp_schema", "");\n'
             '// aoti_torch_call_dispatcher("mylib::commented", "", args);\n'
+            # cpp_wrapper looks up an op with a list[Tensor] return in Python.
+            'PyObject* op = PyUnicode_FromString("torch.ops.mylib.halves.default");\n'
             # An op lowered to an extern kernel is named in its size assert.
             "assert_size_stride(buf3, (4,), (1,), 'torch.ops.mylib.extern.default')\n"
         )
@@ -10130,6 +10150,7 @@ class TestPrecompileCustomOpModules(TestCase):
                 "mylib::packet",
                 "mylib::cpp_fallback",
                 "mylib::cpp_schema",
+                "mylib::halves",
             },
         )
 
