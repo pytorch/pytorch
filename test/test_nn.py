@@ -12659,6 +12659,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[4, 3].item(), -math.log(2), atol=4e-3, rtol=0)
 
     @onlyOn(["cpu", "cuda"])
+    @skipIfTorchDynamo("gradgradcheck's undefined grad check fails under Dynamo for cross_entropy")
     @parametrize_test("num_classes", [3, 50])
     def test_cross_entropy_loss_confident_target_gradgradcheck(self, device, num_classes):
         logits, target = self._confident_cross_entropy_inputs(num_classes, torch.double, device)
