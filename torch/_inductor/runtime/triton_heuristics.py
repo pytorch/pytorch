@@ -1245,7 +1245,7 @@ class CachingAutotuner(KernelInterface):
             self.launchers,
             getattr(self.fn, "_hash_lock", None),
             self.benchmark_failure_reasons,
-            getattr(self, "_launched", False),
+            self._launched,
         )
         self.fn.fn = None
         self.fn.__globals__ = None
@@ -1275,6 +1275,7 @@ class CachingAutotuner(KernelInterface):
             # even if we don't need/have specific values, we do need the
             # _hash_lock to be a valid RLock
             self.fn._hash_lock = threading.RLock()
+            self._launched = False
 
     def prepare_for_caching(self) -> None:
         """
@@ -2614,6 +2615,7 @@ class CachingAutotuner(KernelInterface):
             if (
                 result := plugin.pre_dispatch(self, *args, stream=stream, **kwargs)
             ) is not DEFER:
+                self._launched = True
                 return result
 
         if len(self.launchers) != 1:
@@ -2628,6 +2630,7 @@ class CachingAutotuner(KernelInterface):
                             self, *args, stream=stream, **kwargs
                         )
                     ) is not DEFER:
+                        self._launched = True
                         return result
                 # Re-check: a plugin may have mutated launchers down to one.
                 if len(self.launchers) > 1:

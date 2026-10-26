@@ -419,6 +419,12 @@ class DynamoTracer:
     configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be serialized,
     are listed in the artifact rather than refused.
+
+    ``allow_untuned_backward`` covers a backward Triton kernel the capture compiled
+    but no call ran, e.g. a training step's backward whose outputs went unused: by
+    default it is frozen with its first config, tuning off, and reported with a
+    warning and a ``precompile_triton_untuned_kernels`` artifact. Pass False to
+    refuse it like any other kernel that cannot be frozen.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -426,6 +432,7 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
+    allow_untuned_backward: bool = True
 
 
 class PrecompiledRunnable:
@@ -707,9 +714,11 @@ class _DynamoCapture(Capture[_P, _R]):
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
+        allow_untuned_backward: bool = True,
     ) -> None:
         super().__init__()
         self._session = session
+        self._allow_untuned_backward = allow_untuned_backward
         self._artifact_path = artifact_path
         self._cache_path = cache_path
         self._gates = {
@@ -806,7 +815,9 @@ class _DynamoCapture(Capture[_P, _R]):
                 ) from e
 
         try:
-            freeze_runtime_cache(snapshot, write)
+            freeze_runtime_cache(
+                snapshot, write, allow_untuned_backward=self._allow_untuned_backward
+            )
         except PrecompileError:
             raise
         except Exception as e:
@@ -3349,7 +3360,9 @@ def capture(
     needs there, since one compiled or launched only before the block is not in
     the cache. Each write also freezes the compiled kernels the serving process
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
-    freeze. That includes kernels launched directly through ``@triton.jit`` and
+    freeze, except a backward Triton kernel no call ran, which a
+    :class:`DynamoTracer` capture freezes untuned unless
+    ``allow_untuned_backward=False``. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
     directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
     you set is not used inside the block, and a JIT kernel or autotuner already
@@ -3468,6 +3481,7 @@ def capture(
         cache_path,
         require_complete=tracer.require_complete,
         require_no_risky_drops=tracer.require_no_risky_drops,
+        allow_untuned_backward=tracer.allow_untuned_backward,
     )
 
 
