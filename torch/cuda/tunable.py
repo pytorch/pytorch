@@ -314,7 +314,10 @@ def _nearest_match_enable(val: bool = True) -> None:
 
 
 def _nearest_match_is_enabled() -> bool:
-    r"""Returns whether a nearest-match solution may be borrowed."""
+    r"""Returns the reuse pass's advisory borrow setting, with the env kill
+    switch applied. Not a statement about what LookupNearest will do: it
+    borrows whenever it is called, regardless of this value.
+    """
     return torch._C._cuda_tunableop_nearest_match_is_enabled()  # type: ignore[attr-defined]
 
 
@@ -333,7 +336,10 @@ def _record_borrowed_enable(val: bool = True) -> None:
 
 
 def _record_borrowed_is_enabled() -> bool:
-    r"""Returns whether borrowed results are persisted."""
+    r"""Returns the reuse pass's advisory recording setting, with the env kill
+    switch applied. Not a statement about what RecordBorrowed will do: it
+    records whenever it is called, regardless of this value.
+    """
     return torch._C._cuda_tunableop_record_borrowed_is_enabled()  # type: ignore[attr-defined]
 
 
