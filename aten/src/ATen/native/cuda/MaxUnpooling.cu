@@ -40,7 +40,9 @@ __global__ void max_unpooling2d_forward_kernel(
     const int64_t outputWidth,
     T* output) {
   int64_t outputImageSize = outputHeight * outputWidth;
-  CUDA_KERNEL_LOOP(linearIndex, numInputElements) {
+  // 64-bit loop index: numInputElements can exceed INT_MAX, and an int index
+  // wraps negative and reads/writes out of bounds.
+  CUDA_KERNEL_LOOP_TYPE(linearIndex, numInputElements, int64_t) {
     int c = (linearIndex / inputWidth / inputHeight) % numChannels;
     int n = linearIndex / inputWidth / inputHeight / numChannels;
     output += (n * numChannels + c) * outputHeight * outputWidth;
