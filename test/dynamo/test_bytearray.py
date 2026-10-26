@@ -576,6 +576,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, lambda: b.insert("0", 1))
         self.assertRaises(ValueError, lambda: b.insert(0, 256))
         self.assertRaises(TypeError, lambda: b.insert(0))
+        self.assertRaises(OverflowError, lambda: b.insert(2**64, 1))
         self.assertEqual(b, b"Amississippi")
 
     @make_dynamo_test
@@ -588,6 +589,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertRaises(IndexError, lambda: b.pop(10))
         self.assertRaises(IndexError, lambda: self.type2test().pop())
         self.assertRaises(TypeError, lambda: b.pop("0"))
+        self.assertRaises(OverflowError, lambda: b.pop(2**64))
         self.assertEqual(self.type2test(b"\xff").pop(), 0xFF)
 
     def test_insert_pop_arg_mutation(self):
