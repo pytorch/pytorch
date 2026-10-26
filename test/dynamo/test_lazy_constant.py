@@ -886,6 +886,21 @@ class ComputedLazyConstantTests(TestCase):
                 for a, b in ((6, 3), (12, 12), (10, 20)):
                     self.assertTrue(same(fn(t, a, b), opt_fn(t, a, b)))
 
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_symbolic_float_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("truediv", lambda t, a: t * (a / 2.0)),
+            ("floordiv", lambda t, a: t * (a // 2.0)),
+            ("mod", lambda t, a: t * (a % 2.0)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                for a in (6.5, 13.0, 10.25):
+                    self.assertTrue(same(fn(t, a), opt_fn(t, a)))
+
     def test_operand_type_change_recompiles(self):
         t = torch.ones(2)
 

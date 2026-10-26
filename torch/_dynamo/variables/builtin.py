@@ -296,6 +296,7 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
+# Raising ops need a reject check in ComputedLazyConstantVariable.create, like division
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
     # invert/str excluded: SymNodeVariable lacks nb_invert_impl/tp_repr_impl
     1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_, len, bool]),
