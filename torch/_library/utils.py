@@ -715,6 +715,8 @@ _REGISTRATION_APIS = (
     "torch._library",
     "torch._custom_op",
     "torch._custom_ops",
+    # Vendored libraries, whose registration helpers act for their callers.
+    "torch._vendor",
 )
 
 

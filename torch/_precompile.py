@@ -199,8 +199,9 @@ it.
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: beyond torch, ``python_code`` imports only CUSTOM_OP_MODULES, the
-# modules registering the Python custom ops its graphs call, which must be importable
-# wherever it is served; otherwise it runs on its own -- it inlines the composed graph
+# modules registering the Python custom ops its graphs call (a torch submodule that
+# registers ops as it is imported can be one), which must be importable wherever it
+# is served; otherwise it runs on its own -- it inlines the composed graph
 # module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
 # prelude/epilogue) or the captured graph (eager), plus all calling-convention
 # metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
@@ -2062,7 +2063,9 @@ def _importable(name: str | None) -> str | None:
     return None
 
 
-_TORCH_BUILTIN = "torch builtin"
+# torch registers the op itself; the same value the op registry records for a
+# registration made inside one of torch's functions.
+_TORCH_BUILTIN = "torch"
 
 
 def _custom_op_module(op_name: str, overload: str) -> str | None:
@@ -2084,8 +2087,7 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
         pystub[0] if pystub is not None else None,
         singleton.registering_module(f"{op_name}.{overload}" if overload else op_name),
     ):
-        # A registration inside a torch function, which torch runs itself.
-        if recorded == "torch":
+        if recorded == _TORCH_BUILTIN:
             return _TORCH_BUILTIN
         module = _importable(recorded)
         if module is not None:
@@ -2314,8 +2316,8 @@ def _emit_driver_source(forward_fn_name: str) -> str:
     """Emit the runtime driver as text for inlining into python_code.
 
     The driver lives as real, type-checked code in torch._precompile_driver; here we read
-    it back with inspect.getsource (LAZILY -- only on this emit path; load() never runs
-    it, so a stripped-source environment only affects capture, not reload) and rename the
+    it back with inspect.getsource (LAZILY -- only on this emit path, which load() never
+    runs, so a stripped-source environment only affects capture, not reload) and rename the
     selected forward variant to the public ``forward``. Emitting the TEXT (rather than
     importing the module from the artifact) keeps python_code self-contained and
     version-frozen (Note [precompile programming model], invariant 7)."""
@@ -3568,7 +3570,12 @@ def _runnable_from_pair(
         code_hash=hashlib.sha256(python_code.encode()).hexdigest(),
         strict=strict,
     )
-    _check_custom_op_modules(meta.get("CUSTOM_OP_MODULES", {}))
+    # A multi-graph artifact made under another Python or torch fails its own
+    # version check, which says why; a missing op module would only obscure that.
+    if meta.get("TORCH_VERSION", torch.__version__) == torch.__version__ and tuple(
+        meta.get("_DYNAMO_PYTHON_VERSION", sys.version_info[:2])
+    ) == tuple(sys.version_info[:2]):
+        _check_custom_op_modules(meta.get("CUSTOM_OP_MODULES", {}))
     artifact = blob.get("artifact") if blob is not None else None
     # Only inductor's python_code JITs kernels at load, so other backends run without
     # the artifact. An inductor capture of an uncacheable graph saves no artifact and
@@ -3877,7 +3884,9 @@ def load(
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
+    example, a captured source changed since capture), or if a module in its
+    ``CUSTOM_OP_MODULES`` (registering custom ops its graphs call) is needed but cannot
+    be found, fails to import, or does not register those ops. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """

@@ -12,7 +12,7 @@ would otherwise be invisible inside a string (and drops the wall of ``# noqa: F8
 Keeping python_code self-contained and version-frozen (its behavior is hashed via
 code_hash, invariant 7) still holds: the artifact carries the driver TEXT, it does not
 import it, so there is no torch-version skew. The emit path runs getsource in-process
-where torch source is present; load() never touches this module.
+where torch source is present; load() only imports ``_custom_op_registered`` from it.
 
 The names the emitted bodies read from the artifact's own namespace -- the metadata
 constants, the ``_torch`` / ``_pytree`` import aliases, and the graph's ``call`` -- are
@@ -93,15 +93,24 @@ def _import_custom_op_modules() -> None:
     # are already registered (by another import path, say) is not needed.
     import importlib
 
+    from torch._precompile import PrecompileError as _PrecompileError
+
     for module, ops in CUSTOM_OP_MODULES.items():
         if all(_custom_op_registered(op) for op in ops):
             continue
-        importlib.import_module(module)
+        try:
+            importlib.import_module(module)
+        except Exception as e:
+            raise _PrecompileError(
+                f"precompile: importing {module!r}, which registers "
+                f"{', '.join(ops)} that this artifact's compiled graphs call, "
+                f"failed: {e}"
+            ) from e
         missing = [op for op in ops if not _custom_op_registered(op)]
         if missing:
-            raise ImportError(
-                f"importing {module!r} did not register {', '.join(missing)}, "
-                "which this artifact's compiled graphs call"
+            raise _PrecompileError(
+                f"precompile: importing {module!r} did not register "
+                f"{', '.join(missing)}, which this artifact's compiled graphs call"
             )
 
 

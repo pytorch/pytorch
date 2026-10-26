@@ -1612,6 +1612,8 @@ class _CapturePackage(CompilePackage):
         super()._add_backend_id(backend_id, backend)
 
     def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        """Record the custom ops ``gm`` calls; only the ids the artifact serves are
+        read back (``custom_op_names``), so an id dropped later costs nothing."""
         from torch._precompile import _custom_op_names
 
         self._custom_op_names[backend_id] = _custom_op_names(gm)

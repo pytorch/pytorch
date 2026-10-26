@@ -1417,7 +1417,12 @@ class CompilePackage:
 
     def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
         """Called with each graph registered under ``backend_id``, before its backend
-        compiles it."""
+        compiles it and before ``add_backend_id``.
+
+        The callee must neither mutate nor keep ``gm``: Dynamo and the backend go on
+        to transform it. It can be called for an id that is never registered, or is
+        dropped later (a backend-fallback restart, ``bypass_current_compile``).
+        """
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.

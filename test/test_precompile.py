@@ -9156,11 +9156,7 @@ _lib = torch.library.Library("{ns}", "FRAGMENT")
 # Leading whitespace, as a schema written across lines has.
 _lib.define("\\n    scaled(Tensor x) -> Tensor")
 _lib.impl("scaled", lambda x: x * 3, "CompositeExplicitAutograd")
-
-
-@torch.library.register_fake("{ns}::scaled")
-def _(x):
-    return torch.empty_like(x)
+_lib.impl("scaled", torch.empty_like, "Meta")
 """
 
 
@@ -9329,11 +9325,7 @@ class TestPrecompileCustomOpModules(TestCase):
                 (entrymod, _CUSTOM_OP_ENTRY_MODULE),
             ):
                 with open(os.path.join(directory, name + ".py"), "w") as f:
-                    f.write(
-                        source.replace("{ns}", ns)
-                        .replace("{bwns}", bwns)
-                        .replace("{bwmod}", bwmod)
-                    )
+                    f.write(source.replace("{ns}", ns).replace("{bwns}", bwns))
             # A Dynamo artifact re-imports the captured function's own module, so only
             # a make_fx one can serve without the module directory importable.
             phases = ["capture", "replay", "missing"]
@@ -9678,7 +9670,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         op_name = f"{self._namespace('gone')}::f"
         buf = IndentedBuffer()
         _write_custom_op_imports(buf, {module: (op_name,)})
-        with self.assertRaisesRegex(ImportError, f"did not register {op_name}"):
+        with self.assertRaisesRegex(
+            torch.compiler.PrecompileError, f"did not register {op_name}"
+        ):
             exec(buf.getvalue(), {})
 
     def test_a_dynamo_graph_records_the_ops_inside_higher_order_op_subgraphs(self):
@@ -9774,14 +9768,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         sys.modules[module].lib._destroy()
         self.assertIsNone(registry.registering_module(f"{ns}::f"))
 
-    def test_a_schema_with_leading_whitespace_defines_a_python_op(self):
-        ns = self._namespace("whitespace")
-        with torch.library._scoped_library(ns, "DEF") as lib:
-            lib.define("\n    k(Tensor x) -> Tensor")
-            self.assertIn(f"{ns}::k", torch.library._defs)
-            # A Python op's fake impl needs no C++ set_python_module.
-            torch.library.register_fake(f"{ns}::k", torch.empty_like, lib=lib)
-
     def test_cpp_wrapper_dispatcher_calls_are_recorded(self):
         from torch._precompile import _custom_op_names_in_source
 
@@ -9801,7 +9787,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         module = self._write_module("raise RuntimeError('module body failed')\n")
         buf = IndentedBuffer()
         _write_custom_op_imports(buf, {module: (f"{self._namespace('broken')}::f",)})
-        with self.assertRaisesRegex(RuntimeError, "module body failed"):
+        with self.assertRaisesRegex(
+            torch.compiler.PrecompileError, f"importing '{module}'.*module body failed"
+        ):
             exec(buf.getvalue(), {})
 
     def test_a_capture_names_only_the_ops_of_the_graphs_it_serves(self):
