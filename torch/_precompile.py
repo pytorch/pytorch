@@ -3466,9 +3466,12 @@ def capture(
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated
     inputs, ...) runs without one and logs a cudagraph skip; and a frame served
     eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. A
-    :class:`MakeFxTracer` capture refuses a ``mode`` or ``options`` that turns
-    on ``triton.cudagraphs``, since its standalone module runs outside
-    Inductor's CUDA graph wrapper (it ignores the ambient flag, as before), and
+    :class:`DynamoTracer` capture refuses ``freezing`` and
+    ``force_disable_caches``, whose compiles file no AOTAutograd cache entry
+    for the artifact to ship. A :class:`MakeFxTracer` capture refuses a
+    ``mode`` or ``options`` that turns on ``triton.cudagraphs``, since its
+    standalone module runs outside Inductor's CUDA graph wrapper (it ignores
+    the ambient flag, as before), and
     refuses ``size_asserts`` or ``scalar_asserts`` off: it compiles with
     ``size_asserts`` on, and with ``scalar_asserts`` on for a dynamic capture.
 
@@ -3527,6 +3530,18 @@ def capture(
         # option or a value of the wrong type raises here rather than mid-capture.
         dynamic = tracer.dynamic if isinstance(tracer, DynamoTracer) else None
         inductor = torch._TorchCompileInductorWrapper(mode, options, dynamic)
+        if isinstance(tracer, DynamoTracer):
+            uncached = [
+                k
+                for k in ("freezing", "force_disable_caches")
+                if inductor.config.get(k)
+            ]
+            if uncached:
+                raise PrecompileError(
+                    f"a DynamoTracer capture cannot compile with {uncached} on: the "
+                    "artifact ships each graph's AOTAutograd cache entry, which such "
+                    "a compile never files."
+                )
     if isinstance(tracer, MakeFxTracer):
         inductor_options = inductor.config if inductor is not None else {}
         asserts = (inductor_options.get(k) for k in ("size_asserts", "scalar_asserts"))
