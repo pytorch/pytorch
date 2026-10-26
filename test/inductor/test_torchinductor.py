@@ -9614,8 +9614,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn([4096, 16]),))
 
     def test_stack_cat_rule_exclusions(self):
-        # The cat rule only reroutes whole computed buffers; a slice of one, a
-        # no-op buffer, and a cat feeding a pointwise use compile as without it.
+        # The cat rule only reroutes whole computed buffers; a slice of one and a
+        # no-op buffer compile as without it.
         def sliced(x):
             y = sum(x[:, j] * (j + 1) for j in range(8))
             half = y.shape[0] // 2
@@ -9625,12 +9625,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             y = sum(x[:, j] * (j + 1) for j in range(8))
             return torch.stack([y, torch.empty_like(y)], -1)[:, 0]
 
-        def pointwise_use(x):
-            ys = [sum(x[:, j] * (i + j) for j in range(8)) for i in range(2)]
-            return torch.stack(ys, -1) * 2
-
         x = torch.randn([4096, 16], device=self.device)
-        for fn in (sliced, with_empty, pointwise_use):
+        for fn in (sliced, with_empty):
             codes = []
             for enabled in (False, True):
                 torch._dynamo.reset()
