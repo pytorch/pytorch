@@ -38,21 +38,7 @@ __all__: list[str] = [
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-r"""An enum-like class that contains the different backends for scaled dot product attention.
-    This backend class is designed to be used with the sdpa_kernel context manager.
-
-    The following Enums are available:
-        - ERROR: An error occurred when trying to determine the backend.
-        - MATH: The math backend for scaled dot product attention.
-        - FLASH_ATTENTION: The flash attention backend for scaled dot product attention.
-        - EFFICIENT_ATTENTION: The efficient attention backend for scaled dot product attention.
-        - CUDNN_ATTENTION: The cuDNN backend for scaled dot product attention.
-        - OVERRIDEABLE: The overridable backend for extension.
-
-    See :func:`torch.nn.attention.sdpa_kernel` for more details.
-
-    .. warning:: This class is in beta and subject to change.
-"""
+# SDPBackend is defined and documented in torch/csrc/Module.cpp.
 SDPBackend.__module__ = __name__
 SDPBackend.__name__ = "SDPBackend"
 SDPBackend.__qualname__ = "SDPBackend"

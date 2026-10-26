@@ -46,6 +46,7 @@ from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._C._dynamo import get_type_tp_name
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
 from torch.utils._pytree import is_namedtuple_class
@@ -113,6 +114,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     maybe_reconstruct_decorator_ctx_manager_clone,
@@ -2126,7 +2128,42 @@ class UserMethodVariable(BaseUserFunctionVariable):
         }
 
 
-class WrappedUserMethodVariable(UserMethodVariable):
+class ContextWrappedFunctionMixin(VariableTracker):
+    wrapped: VariableTracker
+    context: "ContextWrappingVariable"
+    _always_trace_context: typing.ClassVar[bool] = False
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if config.nested_graph_breaks or self._always_trace_context:
+            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            return wrapper_fn.call_function(
+                tx, [self.context, self.wrapped] + list(args), kwargs
+            )
+        self.context.enter(tx)
+        result = self._call_function_without_context(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def _call_function_without_context(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().call_function(tx, args, kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
+
+class WrappedUserMethodVariable(ContextWrappedFunctionMixin, UserMethodVariable):
     def __init__(
         self,
         wrapped: UserMethodVariable,
@@ -2139,29 +2176,8 @@ class WrappedUserMethodVariable(UserMethodVariable):
         self.wrapped = wrapped
         self.context = context
 
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
-            return wrapper_fn.call_function(
-                tx, [self.context, self.wrapped] + list(args), kwargs
-            )
-        self.context.enter(tx)
-        result = super().call_function(tx, args, kwargs)
-        self.context.exit(tx)
-        return result
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
-        codegen(self.wrapped)
-        codegen.extend_output(create_call_function(1, False))
-
-
-class WrappedUserFunctionVariable(UserFunctionVariable):
+class WrappedUserFunctionVariable(ContextWrappedFunctionMixin, UserFunctionVariable):
     def __init__(
         self,
         wrapped: UserFunctionVariable,
@@ -2172,27 +2188,6 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
-            return wrapper_fn.call_function(
-                tx, [self.context, self.wrapped] + list(args), kwargs
-            )
-        self.context.enter(tx)
-        result = super().call_function(tx, args, kwargs)
-        self.context.exit(tx)
-        return result
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
-        codegen(self.wrapped)
-        codegen.extend_output(create_call_function(1, False))
 
 
 def invoke_and_store_as_constant(
@@ -2576,7 +2571,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 codegen.store_attr(name)
 
 
-class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
+class WrappedNestedUserFunctionVariable(
+    ContextWrappedFunctionMixin, NestedUserFunctionVariable
+):
     def __init__(
         self,
         wrapped: NestedUserFunctionVariable,
@@ -2603,27 +2600,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         self.annotations = wrapped.annotations
         self.wrapped = wrapped
         self.context = context
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
-            return wrapper_fn.call_function(
-                tx, [self.context, self.wrapped] + list(args), kwargs
-            )
-        self.context.enter(tx)
-        result = super().call_function(tx, args, kwargs)
-        self.context.exit(tx)
-        return result
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))
-        codegen(self.wrapped)
-        codegen.extend_output(create_call_function(1, False))
 
 
 RE_CONSTANT_FOLD_FNS = {
@@ -2679,6 +2655,41 @@ class SkipFunctionVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> Any:
         return self.value
+
+    def get_source(self) -> Source | None:
+        return self.source
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if not isinstance(self.value, types.FunctionType):
+            return None
+        fn_dict = self.value.__dict__
+        if name not in fn_dict:
+            return None
+        source = self.get_source()
+        source = AttrSource(source, name) if source is not None else None
+        if source is not None:
+            return variables.LazyVariableTracker.create(fn_dict[name], source, tx=tx)
+        return VariableTracker.build(tx, fn_dict[name])
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if not is_function(self.value):
+            return None
+        source = self.get_source()
+        if source is not None:
+            install_guard(
+                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            )
+        msg = f"'{type(self.value).__name__}' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
@@ -2993,40 +3004,169 @@ class SkipFunctionVariable(VariableTracker):
             "Python codegen not implemented for sourceless SkipFunctionVariable"
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
-class WrappedSkipFunctionVariable(SkipFunctionVariable):
+
+class _WrappedSkipFunctionMethodDescriptorCommonVariable(ContextWrappedFunctionMixin):
+    _cpython_type = types.FunctionType
+
+    _nonvar_fields = {
+        "value",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def _get_copied_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if not hasattr(self.value, name):
+            return None
+        return self.wrapped.tp_getattro_impl(tx, name)
+
+    # functools.wraps copies these attributes, not the function's backing object.
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: s._get_copied_attr(tx, "__name__"), unmodeled_setter
+        ),
+        "__qualname__": GetSet(
+            lambda s, tx: s._get_copied_attr(tx, "__qualname__"), unmodeled_setter
+        ),
+    }
+    tp_members = {
+        "__module__": Member(
+            lambda s, tx: s._get_copied_attr(tx, "__module__"), unmodeled_setter
+        ),
+        "__doc__": Member(
+            lambda s, tx: s._get_copied_attr(tx, "__doc__"), unmodeled_setter
+        ),
+    }
+
     def __init__(
         self,
-        wrapped: SkipFunctionVariable,
+        value: object,
+        wrapped: VariableTracker,
+        context: "ContextWrappingVariable",
+        **kwargs: Any,
+    ) -> None:
+        kwargs.pop("reason", None)
+        VariableTracker.__init__(self, **kwargs)
+        self.value = value
+        self.wrapped = wrapped
+        self.context = context
+
+    def get_source(self) -> Source | None:
+        wrapped = cast(
+            "SkipFunctionVariable | _WrappedSkipFunctionMethodDescriptorCommonVariable",
+            self.wrapped,
+        )
+        return wrapped.get_source()
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if name == "__wrapped__":
+            return self.wrapped
+        return super().lookup_instance_dict(tx, name)
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        source = self.get_source()
+        if source is not None:
+            install_guard(
+                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            )
+        msg = f"'{self.python_type_name()}' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
+
+    def get_real_python_backed_value(self) -> object:
+        return NO_SUCH_SUBOBJ
+
+    def as_python_constant(self) -> Never:
+        raise AsPythonConstantNotImplementedError(self)
+
+    def python_type(self) -> type:
+        return types.FunctionType
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "__dict__":
+            unimplemented(
+                gb_type="Skipped function wrapper __dict__ access",
+                context=f"{self}",
+                explanation="Dynamo does not model the copied dictionary of this function wrapper.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
+
+
+class WrappedMethodDescriptorVariable(
+    _WrappedSkipFunctionMethodDescriptorCommonVariable
+):
+    # Modeled C-call exceptions need bytecode context cleanup even without NGB.
+    _always_trace_context = True
+
+    def __init__(
+        self,
+        wrapped: "MethodDescriptorVariable | WrappedMethodDescriptorVariable",
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
         kwargs.pop("value", None)
-        kwargs.pop("reason", None)
-        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
-        self.wrapped = wrapped
-        self.context = context
+        value = (
+            wrapped.descriptor
+            if isinstance(wrapped, MethodDescriptorVariable)
+            else wrapped.value
+        )
+        super().__init__(value, wrapped, context, **kwargs)
 
-    def call_function(
+    def get_source(self) -> Source | None:
+        wrapped = cast(
+            "MethodDescriptorVariable | WrappedMethodDescriptorVariable", self.wrapped
+        )
+        if isinstance(wrapped, MethodDescriptorVariable):
+            return wrapped.realize().source
+        return wrapped.get_source()
+
+
+class WrappedSkipFunctionVariable(
+    _WrappedSkipFunctionMethodDescriptorCommonVariable, SkipFunctionVariable
+):
+    _nonvar_fields = {
+        "reason",
+        *_WrappedSkipFunctionMethodDescriptorCommonVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        wrapped: "SkipFunctionVariable",
+        context: "ContextWrappingVariable",
+        **kwargs: Any,
+    ) -> None:
+        kwargs.pop("value", None)
+        super().__init__(wrapped.value, wrapped, context, **kwargs)
+        self.reason = wrapped.reason
+
+    def _call_function_without_context(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
-            return wrapper_fn.call_function(
-                tx, [self.context, self.wrapped] + list(args), kwargs
-            )
-        self.context.enter(tx)
-        result = super().call_function(tx, args, kwargs)
-        self.context.exit(tx)
-        return result
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))
-        codegen(self.wrapped)
-        codegen.extend_output(create_call_function(1, False))
+        return self.wrapped.call_function(tx, args, kwargs)
 
 
 class WrapperUserFunctionVariable(BaseUserFunctionVariable):
@@ -3141,10 +3281,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
+        # Do not resume inside _torchdynamo_inline when the wrapper changes call
+        # semantics. Inner torch.compile preserves options such as fullgraph,
+        # while ScriptFunction must preserve TorchScript semantics.
         # Skip this for recursive calls to the same compiled function
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
@@ -3161,7 +3300,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
         polyfill = (
             polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
+            if (
+                is_inner_torch_compile
+                or isinstance(self.wrapper_obj, torch.jit.ScriptFunction)
+            )
             else polyfills.getattr_and_trace
         )
         return VariableTracker.build(
@@ -3719,6 +3861,9 @@ class FunctoolsPartialVariable(VariableTracker):
             result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -3876,6 +4021,9 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.fn
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class SysFunctionVariable(VariableTracker):
@@ -4730,6 +4878,18 @@ def _check_descriptor_obj_type(
         )
 
 
+def descr_repr(
+    tx: "InstructionTranslatorBase", descr: Any, kind: str
+) -> VariableTracker:
+    # https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L40-L48
+    name, objclass = descr.__name__, descr.__objclass__
+    if sys.version_info >= (3, 15) and objclass is object:
+        return VariableTracker.build(tx, f"<{kind} '{name}'>")
+    return VariableTracker.build(
+        tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
+    )
+
+
 class DescriptorVariable(VariableTracker):
     """Base class for CPython descriptor VTs.
 
@@ -4747,6 +4907,19 @@ class DescriptorVariable(VariableTracker):
             getset_build(lambda s: s.descriptor.__name__), readonly_setter
         ),
     }
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if self.source is not None:
+            install_guard(self.source.make_guard(GuardBuilder.TYPE_MATCH))
+        msg = f"'{self.python_type_name()}' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
 
 
 # descr_members: __objclass__ and __name__ are PyMemberDef on all descriptor
@@ -4782,6 +4955,10 @@ class WrapperDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.owner = owner
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # wrapperdescr_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L71-L76
+        return descr_repr(tx, self.descriptor, "slot wrapper")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -4981,6 +5158,10 @@ class MethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.owner = owner
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
+        return descr_repr(tx, self.descriptor, "method")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -5308,6 +5489,10 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
+        return descr_repr(tx, self.descriptor, "method")
+
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
         return f"ClassMethodDescriptorVariable({cls_name}.{self.descriptor.__name__})"
@@ -5482,6 +5667,9 @@ class StaticMethodVariable(VariableTracker):
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ClassMethodVariable(VariableTracker):
     """classmethod descriptor wrapping a callable.
@@ -5592,6 +5780,9 @@ class ClassMethodVariable(VariableTracker):
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ClassAttrClassMethodVariable(ClassMethodVariable):
     """classmethod found in a class __dict__, built by from_descriptor.
@@ -5638,6 +5829,10 @@ class MemberDescriptorVariable(DescriptorVariable):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # member_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L57-L62
+        return descr_repr(tx, self.descriptor, "member")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -5734,6 +5929,10 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
+        return descr_repr(tx, self.descriptor, "attribute")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -6074,3 +6273,6 @@ class TupleGetterVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
         msg = "can't delete attribute" if value is None else "can't set attribute"
         raise_observed_exception(AttributeError, tx, args=[msg])
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
