@@ -907,7 +907,7 @@ void matmul_int4_impl_cache(
 void woq_matmul_int4(
     Tensor& result, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
-    const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
+    const Tensor& mat2_, // torchao quantized weight, [N, K/8], dtype: uint4x8
     const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16,fp32
     const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
     int64_t group_size) {
