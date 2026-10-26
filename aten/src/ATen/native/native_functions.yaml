@@ -435,8 +435,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: sgn_out
-    MPS: sgn_out_mps
+    CPU, CUDA, MPS, XPU: sgn_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: sgn_sparse_csr_out
   tags: pointwise
@@ -5125,10 +5124,9 @@
 
 - func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _prelu_kernel
+    CPU, CUDA, MPS, XPU: _prelu_kernel
     QuantizedCPU: _prelu_kernel_quantized_cpu
     MkldnnCPU: mkldnn_prelu
-    MPS: prelu_mps
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
@@ -5949,8 +5947,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, XPU: std_mean
-    MPS: std_mean_mps
+    CPU, CUDA, MPS, XPU: std_mean
   autogen: std_mean.correction_out
   tags: reduction
 
@@ -6088,15 +6085,13 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: threshold_out
-    MPS: threshold_out_mps
+    CPU, CUDA, MPS, XPU: threshold_out
 
 - func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: threshold_backward_out
-    MPS: threshold_backward_out_mps
+    CPU, CUDA, MPS, XPU: threshold_backward_out
     SparseCPU, SparseCUDA, SparseXPU: threshold_backward_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: threshold_backward_sparse_compressed_out
 
@@ -6493,8 +6488,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, XPU: var_mean
-    MPS: var_mean_mps
+    CPU, CUDA, MPS, XPU: var_mean
   autogen: var_mean.correction_out
   tags: reduction
 
@@ -9712,8 +9706,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: sign_out
-    MPS: sign_out_mps
+    CPU, CUDA, MPS, XPU: sign_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sign_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: sign_sparse_csr_out
   tags: pointwise
@@ -11803,8 +11796,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_out
-    MPS: mse_loss_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_out
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -15402,7 +15394,7 @@
 
 - func: special_airy_ai.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: special_airy_ai_out
+    CPU, CUDA, MPS, XPU: special_airy_ai_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

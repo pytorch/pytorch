@@ -18,10 +18,11 @@ import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
+from torch._utils import try_import
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
@@ -3607,6 +3608,16 @@ class TestWindowFinalizer(TestCase):
         self.assertIsNone(w._poll_thread)
 
 
+class TestCuspyTraceExport(TestCase):
+    def test_cuspy_zstd_perfetto_rejected(self):
+        prof = profile(activities=[ProfilerActivity.CPU])
+        prof.profiler = MagicMock()
+        prof._use_cuspy = True
+        with self.assertRaisesRegex(ValueError, "only supported for Chrome JSON"):
+            prof.export_chrome_trace("trace.pftrace.zst")
+        prof.profiler.export_chrome_trace.assert_not_called()
+
+
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
 class TestCuspyProfiler(TestCase):
@@ -4019,6 +4030,32 @@ cuspy_core.enable_hes_early()
             prof.export_chrome_trace(trace_path)
             prof.wait_for_exports()
         self.assertIn(str(error), logs.output[0])
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @_isolated
+    def test_cuspy_zstd_export(self):
+        import tempfile
+
+        zstd = try_import("pyzstd") or try_import("zstandard")
+        if zstd is None:
+            self.skipTest("requires zstandard or pyzstd")
+
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                a = torch.randn(128, 128, device="cuda")
+                (a @ a).relu().sum().item()
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(path)
+            self.assertFalse(os.path.exists(path + ".gz"))
+            with zstd.open(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertTrue(any(e.get("cat") == "kernel" for e in trace["traceEvents"]))
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
