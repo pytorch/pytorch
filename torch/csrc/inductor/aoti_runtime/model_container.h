@@ -97,6 +97,7 @@ class AOTInductorModelContainer {
       size_t num_models,
       const std::string& device_str,
       const std::optional<std::string>& cubin_dir = std::nullopt) {
+    AOTI_RUNTIME_CHECK(num_models > 0, "num_models must be positive");
     buffers_[0].map = std::make_shared<ConstantMap>();
     buffers_[0].array = std::make_shared<std::vector<ConstantHandle>>();
 
@@ -126,6 +127,8 @@ class AOTInductorModelContainer {
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.emplace_back(model->output_name(static_cast<int64_t>(i)));
     }
+    // Only this model loads the shared constants, so did_call_load_constants()
+    // and update_constants_from_blob() must go through primary_model() too.
     model->load_constants();
     buffers_[0].blob = model->release_constant_blob();
     buffers_[0].aux_cpu_blob = model->release_aux_cpu_constant_blob();
@@ -162,6 +165,7 @@ class AOTInductorModelContainer {
       const std::string& device_str,
       const std::unordered_map<std::string, AtenTensorHandle>& constants,
       const std::optional<std::string>& cubin_dir = std::nullopt) {
+    AOTI_RUNTIME_CHECK(num_models > 0, "num_models must be positive");
     buffers_[0].map = std::make_shared<ConstantMap>();
     buffers_[0].array = std::make_shared<std::vector<ConstantHandle>>();
 
@@ -492,10 +496,10 @@ class AOTInductorModelContainer {
   }
 
   bool _is_empty_parameter_type(const size_t idx) const {
-    auto constant_type =
-        pool_.primary_model().constant_type(static_cast<int64_t>(idx));
+    const auto& model = pool_.primary_model();
+    auto constant_type = model.constant_type(static_cast<int64_t>(idx));
     auto constant_data_size =
-        pool_.primary_model().constant_data_size(static_cast<int64_t>(idx));
+        model.constant_data_size(static_cast<int64_t>(idx));
     // Empty parameters are skipped and not provided by the upstream services,
     // it is OK to skip.
     return constant_type == ConstantType::Parameter && constant_data_size == 0;
@@ -509,15 +513,15 @@ class AOTInductorModelContainer {
 
   void assert_all_constants(
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
-    auto num_constants = pool_.primary_model().num_constants();
+    const auto& model = pool_.primary_model();
+    auto num_constants = model.num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
-      if (pool_.primary_model().constant_from_folded(
-              static_cast<int64_t>(idx))) {
+      if (model.constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
       }
 
-      auto constant_name = std::string(
-          pool_.primary_model().constant_name(static_cast<int64_t>(idx)));
+      auto constant_name =
+          std::string(model.constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
         if (_is_tensor_constant_or_buffer_type_or_empty_parameter(idx)) {
@@ -541,8 +545,7 @@ class AOTInductorModelContainer {
       std::unordered_map<std::string, AtenTensorHandle>&& constants_map,
       bool use_inactive,
       bool validate_full_update) {
-    AOTI_RUNTIME_CHECK(
-        this->num_models() != 0, "No model available in container!");
+    auto& model = pool_.primary_model();
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
@@ -560,11 +563,11 @@ class AOTInductorModelContainer {
     // On success every consumed slot is null, so the caller's map is discarded
     // without freeing (unchanged semantics). model.so-embedded, so stable C ABI
     // only.
-    auto num_constants = pool_.primary_model().num_constants();
+    auto num_constants = model.num_constants();
     try {
       for (size_t idx = 0; idx < num_constants; idx++) {
-        auto constant_name = std::string(
-            pool_.primary_model().constant_name(static_cast<int64_t>(idx)));
+        auto constant_name =
+            std::string(model.constant_name(static_cast<int64_t>(idx)));
         auto it = constants_map.find(constant_name);
         if (it == constants_map.end() &&
             !(use_inactive && _is_tensor_constant_type(idx))) {
@@ -595,7 +598,7 @@ class AOTInductorModelContainer {
       }
       throw;
     }
-    target.update_array(&pool_.primary_model());
+    target.update_array(&model);
   }
 
   // This function updates the buffer for storing constants.
@@ -613,8 +616,7 @@ class AOTInductorModelContainer {
       bool validate_full_update,
       bool user_managed = false,
       bool allow_h2d_copy = false) {
-    AOTI_RUNTIME_CHECK(
-        this->num_models() != 0, "No model available in container!");
+    auto& model = pool_.primary_model();
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
@@ -623,20 +625,19 @@ class AOTInductorModelContainer {
         "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
 
     int32_t cpu_device_type = aoti_torch_device_type_cpu();
-    auto num_constants = pool_.primary_model().num_constants();
+    auto num_constants = model.num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
-      if (pool_.primary_model().constant_from_folded(
-              static_cast<int64_t>(idx))) {
+      if (model.constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
       }
-      auto constant_name = std::string(
-          pool_.primary_model().constant_name(static_cast<int64_t>(idx)));
+      auto constant_name =
+          std::string(model.constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
         continue;
       }
       int32_t expected_const_device_type =
-          pool_.primary_model().constant_device_type(static_cast<int64_t>(idx));
+          model.constant_device_type(static_cast<int64_t>(idx));
       int32_t tensor_device_type = 0;
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_type(it->second, &tensor_device_type));
@@ -655,7 +656,7 @@ class AOTInductorModelContainer {
       }
     }
 
-    int32_t model_device_type = pool_.primary_model().get_device_type();
+    int32_t model_device_type = model.get_device_type();
 
     auto& target = use_inactive ? inactive() : active();
     auto& source = use_inactive ? active() : inactive();
@@ -678,12 +679,11 @@ class AOTInductorModelContainer {
         "update_constant_buffer: starting copy of " << num_constants
                                                     << " constants");
     for (size_t idx = 0; idx < num_constants; idx++) {
-      if (pool_.primary_model().constant_from_folded(
-              static_cast<int64_t>(idx))) {
+      if (model.constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
       }
       int32_t const_device_type =
-          pool_.primary_model().constant_device_type(static_cast<int64_t>(idx));
+          model.constant_device_type(static_cast<int64_t>(idx));
       bool is_aux_cpu = const_device_type != model_device_type;
 
       size_t this_main_idx = main_blob_idx;
@@ -694,8 +694,8 @@ class AOTInductorModelContainer {
         main_blob_idx++;
       }
 
-      auto constant_name = std::string(
-          pool_.primary_model().constant_name(static_cast<int64_t>(idx)));
+      auto constant_name =
+          std::string(model.constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
           !(use_inactive &&
@@ -730,7 +730,7 @@ class AOTInductorModelContainer {
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_storage_offset(tensor, &offset));
-      auto dtype = pool_.primary_model().constant_dtype(idx);
+      auto dtype = model.constant_dtype(idx);
 
       AtenTensorHandle tensor_handle = nullptr;
 
@@ -745,8 +745,8 @@ class AOTInductorModelContainer {
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
         AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
             internal_constants_ptr,
-            pool_.primary_model().constant_ndim(idx),
-            pool_.primary_model().constant_shape(idx),
+            model.constant_ndim(idx),
+            model.constant_shape(idx),
             stride,
             offset,
             dtype,
@@ -819,11 +819,11 @@ class AOTInductorModelContainer {
         // Generate Tensor from container handled blob.
         // We extract stride and offset from provided Tensor since we do not
         // guarantee that the tensor is contiguous.
-        int device_idx = pool_.primary_model().get_device_idx();
+        int device_idx = model.get_device_idx();
         AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
             internal_constants_ptr,
-            pool_.primary_model().constant_ndim(idx),
-            pool_.primary_model().constant_shape(idx),
+            model.constant_ndim(idx),
+            model.constant_shape(idx),
             stride,
             offset,
             dtype,
@@ -851,7 +851,7 @@ class AOTInductorModelContainer {
                           .count();
     AOTI_LOG_LOADING(
         "update_constant_buffer: copy completed in " << _update_ms << " ms");
-    target.update_array(&pool_.primary_model());
+    target.update_array(&model);
 
 #ifdef USE_CUDA
     // S638065: the GPU constant copies above run on the default stream (raw

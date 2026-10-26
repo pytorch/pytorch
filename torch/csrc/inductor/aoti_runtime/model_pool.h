@@ -48,17 +48,13 @@ class ModelPool {
     return models_.size();
   }
 
-  // Always the first model. The container loads and owns the per-model
-  // constant state (load_constants(), did_call_load_constants(),
-  // update_constants_from_blob()) through it, and it answers for the constant
-  // metadata that every model shares.
+  // The first-added model. Its identity is stable for the pool's lifetime.
+  // The pool must not be empty.
   Model& primary_model() {
-    AOTI_RUNTIME_CHECK(!models_.empty(), "No available models in pool!");
     return *models_.front();
   }
 
   const Model& primary_model() const {
-    AOTI_RUNTIME_CHECK(!models_.empty(), "No available models in pool!");
     return *models_.front();
   }
 
