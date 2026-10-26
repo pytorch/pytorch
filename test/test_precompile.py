@@ -7587,6 +7587,7 @@ class TestPrecompileRuntimeCache(TestCase):
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [])
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_kernel(self):
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
