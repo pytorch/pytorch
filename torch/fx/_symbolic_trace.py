@@ -1264,8 +1264,8 @@ def _new_patcher() -> Iterator[_Patcher]:
 
 
 @contextlib.contextmanager
-def _maybe_revert_all_patches() -> Iterator[None]:
-    current_patcher = CURRENT_PATCHER
+def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]:
+    current_patcher = CURRENT_PATCHER if patcher is None else patcher
     patches_made = None
     patches_removed = None
     try:
@@ -1306,19 +1306,20 @@ def _autowrap_check(
     """
     if patcher.visit_once(frame_dict):
         # Reading an unresolved lazy import runs its module body, which must not
-        # see the torch.fx.wrap'd globals patched mid-trace, so resolve them all
-        # with the patches reverted. importlib.is_lazy_import exists only on
-        # PEP 690-style lazy-import runtimes (e.g. Cinder).
+        # see the torch.fx.wrap'd globals patched mid-trace. The scan below reads
+        # every global in frame_dict, so it would resolve all of this scope's lazy
+        # imports, including ones the traced code never touches; resolve them first
+        # with the patches reverted. A lazy import the traced code itself reads
+        # resolves as any other code it runs, with the patches applied.
+        # importlib.is_lazy_import exists only on PEP 690-style lazy-import runtimes
+        # (e.g. Cinder).
         is_lazy_import = getattr(importlib, "is_lazy_import", None)
         if is_lazy_import is not None:
             lazy_names = [n for n in frame_dict if is_lazy_import(frame_dict, n)]
             if lazy_names:
-                patcher.revert_all_patches()
-                try:
+                with _maybe_revert_all_patches(patcher):
                     for name in lazy_names:
                         _ = frame_dict[name]
-                finally:
-                    patcher.reapply_all_patches()
         for name, value in frame_dict.items():
             if (
                 not name.startswith("_")
