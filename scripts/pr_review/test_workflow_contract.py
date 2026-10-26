@@ -61,7 +61,7 @@ from _suite_manifest import (  # noqa: E402,F401
 
 # Imported, not restated: stage B's schema has to offer the sets the sanitizer
 # actually enforces, or the two drift apart silently.
-from extract_verdict import SEVERITIES, VERDICTS  # noqa: E402
+from extract_verdict import MAX_MESSAGE, SEVERITIES, VERDICTS  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -5281,6 +5281,14 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertEqual(set(item["required"]), {"path", "line", "severity", "message"})
         self.assertFalse(item["additionalProperties"])
         self.assertEqual(set(item["properties"]["severity"]["enum"]), SEVERITIES)
+
+    def test_the_prompt_asks_for_messages_shorter_than_the_cap(self):
+        # 0.8 leaves 300 of 1500 for the escaping neutralize() adds; the prompt
+        # also tells stage B to count `&`, `<` and `>` as five characters.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        m = re.search(r"`message` to at most (\d+) characters", prompt)
+        self.assertIsNotNone(m, "stage B no longer states a message budget")
+        self.assertLessEqual(int(m.group(1)), MAX_MESSAGE * 0.8)
 
     def test_the_findings_file_comes_from_the_structured_output(self):
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
