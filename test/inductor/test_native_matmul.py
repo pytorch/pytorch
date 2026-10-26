@@ -374,8 +374,8 @@ class TestNativeMatmulCodegen(TestCase):
         self.assertNotIn("[:, :, None], [", code)
         self.assertNotIn("[:, :, :, None], [", code)
         if backend == "pointer":
-            self.assertIn("tl.load(in_ptr0 + (tl.squeeze(", code)
-            self.assertIn("tl.load(in_ptr1 + (tl.squeeze(", code)
+            self.assertIn("tl.reshape(tl.load(in_ptr0 + (tl.squeeze(", code)
+            self.assertIn("tl.reshape(tl.load(in_ptr1 + (tl.squeeze(", code)
         else:
             self.assertEqual(code.count(".load(["), 2)
 

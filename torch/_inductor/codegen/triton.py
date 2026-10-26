@@ -5581,9 +5581,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     #   tmp0 = tl.load(in_ptr0 + (r0_2 + 1024*y0),
                     #                  r0_mask & ymask, other=0.0)
                     # becomes:
-                    #   tmp0 = tl.load(in_ptr0 + tl.squeeze(r0_2 + 1024*y0, 1),
+                    #   tmp0 = tl.reshape(tl.load(in_ptr0 + tl.squeeze(r0_2 + 1024*y0, 1),
                     #                  tl.squeeze(r0_mask & ymask, 1),
-                    #                  other=0.0)[:, None, :]
+                    #                  other=0.0), [YBLOCK, 1, R0_BLOCK])
                     # This works for any tile rank, including XR, YXR, and ZYXR.
                     # Only native bmm fixes ZBLOCK=1; its zindex/zmask may be 1D.
                     singletons = ("1", "ZBLOCK") if self.is_native_matmul else ("1",)
@@ -5629,7 +5629,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                                     else f"tl.reshape({mask_str}, [])"
                                 )
                             line = f"tl.load({var} + ({index_str}), {mask_str}{ep}{other}{cachemod})"
-                            line = triton_reshape(line, load_shape, tile_shape)
+                            if self.is_native_matmul:
+                                line = f"tl.reshape({line}, {triton_shape_str(tile_shape)})"
+                            else:
+                                line = triton_reshape(line, load_shape, tile_shape)
                             shape = tile_shape
 
             if (
