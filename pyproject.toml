@@ -5,10 +5,10 @@ requires = [
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    # 1.0 is required for [[tool.dynamic-metadata]], the [tool.scikit-build.env]
-    # table, and native CMAKE_BUILD_TYPE env handling used below. CI pins the
-    # exact patch we test against in .ci/docker/requirements-ci.txt.
-    "scikit-build-core>=1.0",
+    # The floor usually names a minor release; this one needs the patch level
+    # too. CI pins the exact version we test against in
+    # .ci/docker/requirements-ci.txt.
+    "scikit-build-core>=1.1.1",
     # Imported by torchgen at build time (cmake/Codegen.cmake runs
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
@@ -23,8 +23,8 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
-# Track the build-system.requires floor (scikit-build-core>=1.0) so the schema
-# and defaults are pinned to the version we build against.
+# Track the build-system.requires floor so the schema and defaults are pinned
+# to the version we build against.
 minimum-version = "build-system.requires"
 build-dir = "build"
 
@@ -111,8 +111,14 @@ provider = { path = "tools/metadata", module = "dependencies" }
 # plumbing (.ci, .claude, .spin) that no include pattern covers.
 #
 # The flatbuffers/ittapi entries drop unneeded language bindings, which
-# also contain symlinks (#157814) that sdist.resolve-symlinks="all" would
-# otherwise dereference into duplicated content.
+# also contain symlinks (#157814). resolve-symlinks = "error" fails the sdist
+# build if a symlink is still among the included files, naming it, instead of
+# silently copying its target (the "all" default) or storing a link. Every
+# tracked symlink is therefore listed explicitly below (negated here, dropped
+# in exclude); none of them is needed to build from the sdist, and the one
+# whose content matters, docs/requirements.txt, is force-included from its
+# target instead.
+resolve-symlinks = "error"
 include = [
     "third_party/**",
     "aten/src/ATen/native/quantized/cpu/qnnpack/deps/**",
@@ -133,6 +139,11 @@ include = [
     "!third_party/flatbuffers/kotlin/**",
     "!third_party/flatbuffers/docs/source/CONTRIBUTING.md",
     "!third_party/ittapi/rust/**",
+    # Symlinks (see resolve-symlinks above).
+    "!third_party/XNNPACK/tools/xngen",
+    "!third_party/cudnn_frontend/.claude/**",
+    "!third_party/flash-attention/AGENTS.md",
+    "!third_party/flatbuffers/tests/ts/bazel_repository_test_dir/.npmrc",
 ]
 exclude = [
     "**/.github/**",
@@ -144,7 +155,20 @@ exclude = [
     "third_party/flatbuffers/kotlin/**",
     "third_party/flatbuffers/docs/source/CONTRIBUTING.md",
     "third_party/ittapi/rust/**",
+    # Symlinks (see resolve-symlinks above).
+    ".dockerignore",
+    "AGENTS.md",
+    "docs/requirements.txt",
+    "torch/distributed/AGENTS.md",
+    "third_party/XNNPACK/tools/xngen",
+    "third_party/cudnn_frontend/.claude/**",
+    "third_party/flash-attention/AGENTS.md",
+    "third_party/flatbuffers/tests/ts/bazel_repository_test_dir/.npmrc",
 ]
+
+[tool.scikit-build.sdist.force-include]
+# docs/requirements.txt is a symlink into the excluded .ci tree; ship its target.
+".ci/docker/requirements-docs.txt" = "docs/requirements.txt"
 
 [tool.scikit-build.install]
 # scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
@@ -298,14 +322,20 @@ exclude = [
 
 [tool.scikit-build.editable]
 # Editable installs use redirect mode: Python files come from the source tree,
-# CMake-built artifacts from the build tree. Auto-rebuild-on-import is left OFF:
-# scikit-build-core's redirect finder otherwise re-runs cmake/ninja on every
-# import (~7x, ~25s per `import torch` with no source change, plus build chatter
-# on captured stderr). Rebuild explicitly instead; rebuild-on-import can be
-# opted into per-install with SKBUILD_EDITABLE_REBUILD=true (or
-# -C editable.rebuild=true).
+# CMake-built artifacts from a persistent install tree, rebuild-dir, under
+# build/. Installing straight into that tree keeps the artifacts out of the
+# editable wheel, which otherwise had to be zipped and unpacked once per install
+# (several GB and minutes on a debug build, #196619). The tree is keyed by wheel
+# tag so editable installs for several interpreters can share one checkout.
+# Auto-rebuild-on-import is left OFF: scikit-build-core's redirect finder
+# otherwise re-runs cmake/ninja on every import (~7x, ~25s per `import torch`
+# with no source change, plus build chatter on captured stderr). Rebuild
+# explicitly instead; rebuild-on-import can be opted into per-install with
+# SKBUILD_EDITABLE_REBUILD=true (or -C editable.rebuild=true), and
+# `torch.__loader__.rebuild()` refreshes the tree on demand.
 mode = "redirect"
 rebuild = false
+rebuild-dir = "build/install/{wheel_tag}"
 
 [dependency-groups]
 dev = [
@@ -313,7 +343,7 @@ dev = [
     # in PyTorch root until the project fully migrates to pyproject.toml
     # after which this can be removed as it is already specified in the
     # [build-system] section
-    "scikit-build-core>=1.0",
+    "scikit-build-core>=1.1.1",
     "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
     "spin",
     "cmake>=3.27",
@@ -394,8 +424,6 @@ license-files = [
     "third_party/ideep/mkl-dnn/LICENSE",
     "third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD",
     "third_party/ideep/mkl-dnn/third_party/opencl/LICENSE",
-    "third_party/kineto/LICENSE",
-    "third_party/kineto/libkineto/third_party/dynolog_headers/LICENSE",
     "third_party/llvm-openmp/LICENSE.txt",
     "third_party/mimalloc/LICENSE",
     "third_party/miniz-3.0.2/LICENSE",
@@ -416,6 +444,8 @@ license-files = [
     "third_party/tensorpipe/third_party/libnop/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
+    "torch/csrc/profiler/kineto/LICENSE",
+    "torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
