@@ -55,6 +55,10 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
+# Use a certifi CA bundle without the compromised eMudhra roots instead of the one vendored by the base image
+RUN /opt/python/cp312-cp312/bin/python -m pip install "certifi>=2026.10.23" && \
+    ln -sf $(/opt/python/cp312-cp312/bin/python -c 'import certifi; print(certifi.where())') /opt/_internal/certs.pem
+
 # Install Rust toolchain (needed to build the torch._rust extension when building
 # the Python wheels).
 COPY ./common/install_rust.sh install_rust.sh
