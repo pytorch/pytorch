@@ -7306,6 +7306,12 @@ def quantize_tensor(
     Positive and negative axis indices are accepted. The output retains the
     input's logical axis order, with the quantized axis contiguous.
 
+    A swizzled scale layout is modeled as packed ``[1, L]`` over the requested
+    quantization dims, with ``L`` being swizzle-specific.  For example, for an input
+    of shape ``(B, M, K)`` and ``dim=(1, 2)`` and
+    ``swizzle_type=SwizzleType.SWIZZLE_32_4_4``, the output scale shape will be
+    ``(B, 1, ceil_div(M, 128) * ceil_div(K, 128) * 32 * 16)``.
+
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
 
