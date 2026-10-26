@@ -7688,7 +7688,9 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(
             [r["reason"] for r in rejected], ["launcher_count_not_one", "load_failed"]
         )
-        self.assertEqual(rejected[1]["error"], "No valid triton configs")
+        self.assertEqual(
+            rejected[1]["error"], f"{error.__name__}: No valid triton configs"
+        )
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_forward_kernel_stays_unresolved(self):
@@ -7744,17 +7746,14 @@ class TestPrecompileRuntimeCache(TestCase):
             kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
             expected = "combo_autotuning_incomplete"
         with (
-            mock.patch.object(
-                type(kernel),
-                "_make_launchers",
-                autospec=True,
-                side_effect=_build_launchers,
-            ),
+            mock.patch.object(type(kernel), "_make_launchers") as make,
             self.assertRaises(_UnresolvedTritonExport) as failure,
         ):
             _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
         reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
         self.assertEqual(reasons, ["launcher_count_not_one", expected])
+        # A config that would tune is rejected before anything is loaded.
+        make.assert_not_called()
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_fallback_needs_every_rejection_to_be_never_run(self):
@@ -7834,6 +7833,19 @@ class TestPrecompileRuntimeCache(TestCase):
             _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
         reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
         self.assertEqual(reasons, ["launcher_count_not_one", "no_loadable_config"])
+
+    def test_capture_scope_rejects_a_conflicting_freeze_flag(self):
+        from torch.compiler._runtime_cache import _active_capture, capture_scope
+
+        with capture_scope(freeze_never_run_backward=True):
+            # A block that has no say joins the open scope.
+            with capture_scope():
+                self.assertTrue(_active_capture().freeze_never_run_backward)
+            with self.assertRaisesRegex(RuntimeError, "disagree"):
+                with capture_scope(freeze_never_run_backward=False):
+                    pass
+            self.assertTrue(_active_capture().freeze_never_run_backward)
+        self.assertIsNone(_active_capture())
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_failure_leaves_live_kernel(self):
