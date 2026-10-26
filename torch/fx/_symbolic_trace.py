@@ -1167,6 +1167,8 @@ class _Patcher:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
+        # Open _maybe_revert_all_patches windows; only the outermost one reverts.
+        self.revert_depth = 0
 
     def patch(
         self,
@@ -1266,14 +1268,25 @@ def _new_patcher() -> Iterator[_Patcher]:
 @contextlib.contextmanager
 def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]:
     current_patcher = CURRENT_PATCHER if patcher is None else patcher
+    # A nested window, e.g. Dynamo compiling from a lazy import FX resolves, finds
+    # the patches already reverted and leaves reapplying them to the outer one.
+    if current_patcher is not None and current_patcher.revert_depth > 0:
+        current_patcher.revert_depth += 1
+        try:
+            yield
+        finally:
+            current_patcher.revert_depth -= 1
+        return
     patches_made = None
     patches_removed = None
     try:
         if current_patcher is not None:
+            current_patcher.revert_depth += 1
             patches_removed = current_patcher.revert_all_patches()
         yield
     finally:
         if current_patcher is not None:
+            current_patcher.revert_depth -= 1
             patches_made = current_patcher.reapply_all_patches()
         if patches_made != patches_removed:
             raise AssertionError(

@@ -1917,6 +1917,55 @@ class TestFX(JitTestCase):
         )
         self.assertIs(dict.__getitem__(wrap_globals, "wrapped"), wrapped)
 
+    def test_lazy_import_resolution_survives_a_nested_revert(self):
+        from torch.fx._symbolic_trace import (
+            _maybe_revert_all_patches,
+            _orig_module_call,
+        )
+
+        unresolved = object()
+        reverted = []
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # A module body that compiles something: Dynamo reverts the
+                    # patches too, while this file's wrap("len") is among them.
+                    with _maybe_revert_all_patches():
+                        reverted.append(torch.nn.Module.__call__ is _orig_module_call)
+                    reverted.append(torch.nn.Module.__call__ is _orig_module_call)
+                    value = object()
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def m_forward(self, x):
+            return self.sub(x)
+
+        class M(torch.nn.Module):
+            forward = types.FunctionType(
+                m_forward.__code__,
+                Globals(__builtins__=builtins, helper=unresolved),
+                "forward",
+            )
+
+            def __init__(self):
+                super().__init__()
+                self.sub = torch.nn.ReLU()
+
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is unresolved,
+            create=True,
+        ):
+            graph = torch.fx.Tracer().trace(M())
+        self.assertEqual(reverted, [True, True])
+        # Reapplied after the outer window, so the submodule call is still traced.
+        self.assertEqual(
+            [node.target for node in graph.nodes if node.op == "call_module"], ["sub"]
+        )
+
     def test_autowrap_under_a_lazy_import_runtime(self):
         # -L alone is not enough: torch imports under lazy imports only on a runtime
         # set up for them (e.g. a Cinder target with lazy imports enabled), which

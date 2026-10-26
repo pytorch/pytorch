@@ -4317,7 +4317,9 @@ def _relocatable_command_line(cmd: str) -> str:
 
     Only these trees move. The Inductor cache dir stays in the key, since a
     library in it that the kernel links against (the Halide runtime, CUTLASS or CK
-    kernels) is recorded by absolute path in the binary. The Python, compiler, CUDA
+    kernels) is recorded by absolute path in the binary: a replay whose cache dir
+    is at the same path restores the binary, which then needs that library there,
+    and one whose cache dir is elsewhere rebuilds the kernel. The Python, compiler, CUDA
     and other SDK paths stay too, even when they sit next to torch, so the hosts
     must keep those at the same paths, as a packaged job whose torch is extracted
     per launch next to a fixed interpreter does.
