@@ -5,7 +5,7 @@ import inspect
 import re
 import sys
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
@@ -52,8 +52,8 @@ _P = ParamSpec("_P")
 # libraries calling into kernels not intended to be called.
 _impls: set[str] = set()
 _defs: set[str] = set()
-# For each (operator, overload) a Library defined, the module whose import ran the
-# define, if known (see torch._library.custom_ops._registering_module).
+# For each (operator, overload) a live Library defined, the module whose import ran
+# the define, if known (see _registering_module).
 _registering_modules: dict[tuple[str, str], str | None] = {}
 
 # prim is reserved by TorchScript interpreter
@@ -328,15 +328,17 @@ class Library:
 
         self._op_defs.add(qualname)
         _defs.add(qualname)
-        from torch._library.custom_ops import _registering_module
-
         # The name the dispatcher registered: the schema may start with whitespace.
         registered = name.strip()
         if "::" not in registered:
             registered = f"{self.ns}::{registered}"
         op_name, _, overload = registered.partition(".")
-        _registering_modules[(op_name, overload)] = _registering_module(
-            inspect.currentframe()
+        key = (op_name, overload)
+        _registering_modules[key] = _registering_module(inspect.currentframe())
+        self._registration_handles.append(
+            torch._library.utils.RegistrationHandle(
+                lambda: _registering_modules.pop(key, None)
+            )
         )
         return result
 
@@ -656,6 +658,52 @@ def _clear_torch_ops_cache(op_defs):
         delattr(namespace, name)
         if name in namespace._dir:
             namespace._dir.remove(name)
+
+
+# Modules whose functions run on behalf of a registration made elsewhere.
+_REGISTRATION_APIS = (
+    "functools",
+    "torch.library",
+    "torch._library",
+    "torch._custom_op",
+    "torch._custom_ops",
+)
+
+
+def _in_package(name: str | None, packages: Iterable[str]) -> bool:
+    return name is not None and any(
+        name == package or name.startswith(f"{package}.") for package in packages
+    )
+
+
+def _registering_module(frame: Any) -> str | None:
+    """The module whose import runs a registration made from ``frame``, ``"torch"``
+    for one torch makes on first use, or None when that cannot be told.
+
+    Past the registration APIs, the registration is made from a module's top-level
+    code or from a function. A function counts only when it belongs to the module
+    being imported (a helper the module runs at its import), or both are torch's
+    own. A function of torch's run otherwise registers on first use, as torch does
+    for some of its ops. Any other function gives no answer: a factory one module
+    runs at another's import and a library registering on first use look the same.
+    ``__main__`` cannot be imported again, so it gives none either.
+    """
+    frame = frame.f_back if frame is not None else None
+    while frame is not None and _in_package(
+        frame.f_globals.get("__name__"), _REGISTRATION_APIS
+    ):
+        frame = frame.f_back
+    if frame is None:
+        return None
+    caller = frame.f_globals.get("__name__")
+    while frame is not None and frame.f_code.co_name != "<module>":
+        frame = frame.f_back
+    importing = frame.f_globals.get("__name__") if frame is not None else None
+    if caller == importing or (
+        _in_package(caller, ("torch",)) and _in_package(importing, ("torch",))
+    ):
+        return None if importing == "__main__" else importing
+    return "torch" if _in_package(caller, ("torch",)) else None
 
 
 def _del_library(

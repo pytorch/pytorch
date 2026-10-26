@@ -9271,6 +9271,7 @@ else:
     try:
         pc.load(artifact, cache)
     except torch.compiler.PrecompileError as e:
+        assert "neither registered nor importable" in str(e), e
         assert repr(module) in str(e) or repr(bwmod) in str(e), e
     else:
         raise AssertionError("load ran an artifact whose custom op module is missing")
@@ -9352,16 +9353,36 @@ class TestPrecompileCustomOpModules(TestCase):
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 class TestPrecompileCustomOpRecording(TestCase):
+    def _namespace(self, kind):
+        """A fresh op namespace whose registrations are all removed at cleanup."""
+        from torch._custom_op.impl import global_registry
+        from torch._library.custom_ops import OPDEFS
+
+        ns = f"precompile_{kind}_{uuid.uuid4().hex}"
+
+        def clean_up():
+            for name in [n for n in OPDEFS if n.startswith(f"{ns}::")]:
+                OPDEFS.pop(name)._lib._destroy()
+            for name in [n for n in global_registry if n.startswith(f"{ns}::")]:
+                global_registry[name]._destroy()
+            for lib in [lib for lib in torch.library._keep_alive if lib.ns == ns]:
+                torch.library._keep_alive.remove(lib)
+                lib._destroy()
+
+        self.addCleanup(clean_up)
+        return ns
+
     def _op(self, name):
-        ns = f"precompile_recording_{uuid.uuid4().hex}"
+        ns = self._namespace("recording")
 
         @torch.library.custom_op(f"{ns}::{name}", mutates_args=())
         def op(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
+        op.register_fake(torch.empty_like)
         return op, f"{ns}::{name}"
 
-    def _import_module_from_source(self, source):
+    def _write_module(self, source):
         name = f"precompile_recording_mod_{uuid.uuid4().hex}"
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory)
@@ -9370,8 +9391,32 @@ class TestPrecompileCustomOpRecording(TestCase):
         sys.path.insert(0, directory)
         self.addCleanup(sys.path.remove, directory)
         self.addCleanup(sys.modules.pop, name, None)
-        importlib.import_module(name)
         return name
+
+    def _import_module_from_source(self, source):
+        name = self._write_module(source)
+        module = importlib.import_module(name)
+
+        def destroy_libraries():
+            for value in list(vars(module).values()):
+                if isinstance(value, torch.library.Library):
+                    value._destroy()
+
+        self.addCleanup(destroy_libraries)
+        return name
+
+    def _dynamo_graph(self, fn, *args):
+        graphs = []
+
+        def keep_graph(gm, example_inputs):
+            graphs.append(gm)
+            return gm
+
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+        torch.compile(fn, backend=keep_graph, fullgraph=True)(*args)
+        (gm,) = graphs
+        return gm
 
     def _modules_of_graph_calling(self, *ops):
         from torch._precompile import _custom_op_modules, _custom_op_names
@@ -9384,7 +9429,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         return _custom_op_modules(_custom_op_names(torch.fx.symbolic_trace(f)))
 
     def test_an_op_no_importable_module_registers_is_reported_at_capture(self):
-        ns = f"precompile_main_{uuid.uuid4().hex}"
+        ns = self._namespace("main")
         exec(
             f"@torch.library.custom_op('{ns}::f', mutates_args=())\n"
             "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n",
@@ -9398,7 +9443,7 @@ class TestPrecompileCustomOpRecording(TestCase):
 
     def test_an_op_is_recorded_under_the_module_whose_import_registers_it(self):
         impl_ns, wrapped_ns, lib_ns, define_ns, shared_ns = (
-            f"rec_{kind}_{uuid.uuid4().hex}"
+            self._namespace(kind)
             for kind in ("impl", "wrapped", "lib", "define", "shared")
         )
         impl = self._import_module_from_source(
@@ -9484,7 +9529,7 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_an_op_torch_registers_lazily_is_not_recorded_under_the_importer(self):
         from torch._precompile import _custom_op_modules
 
-        op_name = f"precompile_lazy_{uuid.uuid4().hex}::f"
+        op_name = f"{self._namespace('lazy')}::f"
         # A torch module that registers an op on first use, as
         # torch.sparse.semi_structured does.
         torch_module = types.ModuleType(f"torch._precompile_test_{uuid.uuid4().hex}")
@@ -9506,7 +9551,7 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_a_registered_op_needs_the_overload_the_graph_calls(self):
         from torch._precompile import _custom_op_registered
 
-        ns = f"precompile_overload_{uuid.uuid4().hex}"
+        ns = self._namespace("overload")
         with torch.library._scoped_library(ns, "DEF") as lib:
             lib.define("f(Tensor x) -> Tensor")
             self.assertTrue(_custom_op_registered(f"{ns}::f"))
@@ -9518,7 +9563,7 @@ class TestPrecompileCustomOpRecording(TestCase):
 
         # The mock stands in for an extension's C++ library calling
         # m.set_python_module with a module that is imported.
-        ns = f"precompile_pystub_{uuid.uuid4().hex}"
+        ns = self._namespace("pystub")
         with torch.library._scoped_library(ns, "DEF") as lib:
             lib.define("f(Tensor x) -> Tensor")
             with mock.patch.object(
@@ -9531,13 +9576,7 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_a_dynamo_graph_calling_op_packets_records_their_ops(self):
         from torch._precompile import _custom_op_names
 
-        ns = f"precompile_packet_{uuid.uuid4().hex}"
-        graphs = []
-
-        def keep_graph(gm, example_inputs):
-            graphs.append(gm)
-            return gm
-
+        ns = self._namespace("packet")
         with torch.library._scoped_library(ns, "DEF") as lib:
             # Only a named overload: the packet has no default.
             lib.define("f.named(Tensor x) -> Tensor")
@@ -9547,12 +9586,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             def fn(x, y):
                 return op(torch.ops.aten.add(x, y))
 
-            torch._dynamo.reset()
-            self.addCleanup(torch._dynamo.reset)
-            torch.compile(fn, backend=keep_graph, fullgraph=True)(
-                torch.ones(3), torch.ones(3)
-            )
-            (gm,) = graphs
+            gm = self._dynamo_graph(fn, torch.ones(3), torch.ones(3))
             packets = {
                 node.target
                 for node in gm.graph.nodes
@@ -9567,18 +9601,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         from torch._precompile import _aot_custom_op_names
 
-        def artifact(key, forward_code):
+        def compiled(code):
+            return types.SimpleNamespace(result=types.SimpleNamespace(source_code=code))
+
+        def artifact(key, forward_code, backward=None):
             content = object.__new__(BundledAOTAutogradResult)
             content.aot_forward_graph_str = None
-            content.compiled_fw = (
-                None
-                if forward_code is None
-                else types.SimpleNamespace(
-                    result=types.SimpleNamespace(source_code=forward_code)
-                )
-            )
-            content.compiled_bw = None
-            content.serialized_bw_module = None
+            content.aot_backward_graph_str = None
+            content.compiled_fw = compiled(forward_code)
+            content.compiled_bw = backward
             return types.SimpleNamespace(key=key, content=content)
 
         with self.assertNoLogs("torch._precompile", level="WARNING"):
@@ -9591,6 +9622,14 @@ class TestPrecompileCustomOpRecording(TestCase):
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             self.assertEqual(_aot_custom_op_names([artifact("bare", None)]), set())
         self.assertIn("bare", "\n".join(logs.output))
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(
+                _aot_custom_op_names(
+                    [artifact("no_backward", "", backward=compiled(None))]
+                ),
+                set(),
+            )
+        self.assertIn("backward", "\n".join(logs.output))
 
     def test_op_references_in_comments_are_not_recorded(self):
         from torch._precompile import _custom_op_names_in_source
@@ -9604,7 +9643,7 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_an_op_without_a_recorded_module_or_torch_source_is_reported(self):
         from torch._precompile import _custom_op_modules
 
-        ns = f"precompile_unrecorded_{uuid.uuid4().hex}"
+        ns = self._namespace("unrecorded")
         with torch.library._scoped_library(ns, "DEF") as lib:
             lib.define("f(Tensor x) -> Tensor")
             # As for a C++ op outside torch with no set_python_module: no Python
@@ -9619,10 +9658,110 @@ class TestPrecompileCustomOpRecording(TestCase):
         from torch._precompile import _write_custom_op_imports
 
         module = self._import_module_from_source("import torch\n")
-        op_name = f"precompile_gone_{uuid.uuid4().hex}::f"
+        op_name = f"{self._namespace('gone')}::f"
         buf = IndentedBuffer()
         _write_custom_op_imports(buf, {module: (op_name,)})
         with self.assertRaisesRegex(ImportError, f"did not register {op_name}"):
+            exec(buf.getvalue(), {})
+
+    def test_a_dynamo_graph_records_the_ops_inside_higher_order_op_subgraphs(self):
+        from torch._precompile import _custom_op_names
+
+        op, op_name = self._op("in_branch")
+
+        def fn(x):
+            return torch.cond(
+                x.sum() > 0, lambda y: op._opoverload(y), lambda y: y.cos(), (x,)
+            )
+
+        gm = self._dynamo_graph(fn, torch.ones(3))
+        top_level = {node.target for node in gm.graph.nodes}
+        self.assertNotIn(op._opoverload, top_level)
+        self.assertIn((op_name, ""), _custom_op_names(gm))
+
+    def test_a_legacy_custom_op_is_recorded_under_its_module(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = self._namespace("legacy")
+        module = self._import_module_from_source(
+            "import torch\nimport torch._custom_ops\n\n\n"
+            f"@torch._custom_ops.custom_op('{ns}::f')\n"
+            "def f(x: torch.Tensor) -> torch.Tensor:\n    raise NotImplementedError\n"
+        )
+        self.assertEqual(
+            _custom_op_modules({(f"{ns}::f", "")}), {module: (f"{ns}::f",)}
+        )
+
+    def test_a_custom_op_decorator_is_recorded_where_it_is_applied(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = self._namespace("decorator")
+        maker = self._import_module_from_source(
+            f"import torch\n\n\ndec = torch.library.custom_op('{ns}::f', mutates_args=())\n"
+        )
+        user = self._import_module_from_source(
+            f"import torch\nimport {maker}\n\n\n"
+            "def impl(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n\n\n"
+            f"f = {maker}.dec(impl)\n"
+        )
+        self.assertEqual(_custom_op_modules({(f"{ns}::f", "")}), {user: (f"{ns}::f",)})
+
+    def test_an_op_another_module_registers_for_the_importer_is_reported(self):
+        from torch._precompile import _custom_op_modules
+
+        # A factory run at another module's import looks the same as a library
+        # registering on first use, so neither module is recorded.
+        ns = self._namespace("factory")
+        factory = self._import_module_from_source(
+            "import torch\n\n\ndef make(ns, name):\n"
+            "    lib = torch.library.Library(ns, 'FRAGMENT')\n"
+            "    lib.define(name + '(Tensor x) -> Tensor')\n"
+            "    return lib\n"
+        )
+        self._import_module_from_source(
+            f"import {factory}\n\nlib = {factory}.make('{ns}', 'g')\n"
+        )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules({(f"{ns}::g", "")}), {})
+        self.assertIn(f"{ns}::g", "\n".join(logs.output))
+
+    def test_a_dynamo_packet_call_records_only_the_overload_it_calls(self):
+        from torch._precompile import _custom_op_modules, _custom_op_names
+
+        ns = self._namespace("split")
+        first = self._import_module_from_source(
+            f"import torch\n\nlib = torch.library.Library('{ns}', 'FRAGMENT')\n"
+            "lib.define('p(Tensor x) -> Tensor')\n"
+            "lib.impl('p', lambda x: x * 2, 'CompositeImplicitAutograd')\n"
+        )
+        self._import_module_from_source(
+            f"import torch\nimport {first}\n\n"
+            f"lib = torch.library.Library('{ns}', 'FRAGMENT')\n"
+            "lib.define('p.scaled(Tensor x, float s) -> Tensor')\n"
+            "lib.impl('p.scaled', lambda x, s: x * s, 'CompositeImplicitAutograd')\n"
+        )
+        packet = getattr(torch.ops, ns).p
+        gm = self._dynamo_graph(lambda x: packet(x), torch.ones(3))
+        self.assertIn(packet, {node.target for node in gm.graph.nodes})
+        self.assertEqual(
+            _custom_op_modules(_custom_op_names(gm)), {first: (f"{ns}::p",)}
+        )
+
+    def test_a_destroyed_library_drops_its_registering_modules(self):
+        ns = self._namespace("destroyed")
+        with torch.library._scoped_library(ns, "DEF") as lib:
+            lib.define("f(Tensor x) -> Tensor")
+            self.assertIn((f"{ns}::f", ""), torch.library._registering_modules)
+        self.assertNotIn((f"{ns}::f", ""), torch.library._registering_modules)
+
+    def test_serving_surfaces_the_error_of_an_op_module_that_fails_to_import(self):
+        from torch._inductor.utils import IndentedBuffer
+        from torch._precompile import _write_custom_op_imports
+
+        module = self._write_module("raise RuntimeError('module body failed')\n")
+        buf = IndentedBuffer()
+        _write_custom_op_imports(buf, {module: (f"{self._namespace('broken')}::f",)})
+        with self.assertRaisesRegex(RuntimeError, "module body failed"):
             exec(buf.getvalue(), {})
 
     def test_a_capture_names_only_the_ops_of_the_graphs_it_serves(self):

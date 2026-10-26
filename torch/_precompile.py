@@ -1925,25 +1925,39 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
 _BUILTIN_NAMESPACES = ("aten", "prim", "prims")
 
 
-def _op_names(target: object) -> set[tuple[str, str]]:
+def _op_names(
+    target: object, node: torch.fx.Node | None = None
+) -> set[tuple[str, str]]:
     """The ``(ns::op, overload)`` names of ``target`` if it is a non-builtin op.
 
     Dynamo keeps a packet (``torch.ops.ns.op``) as the node target, and a packet
-    need not have a ``default`` overload, so it names every overload it has.
+    need not have a ``default`` overload. When ``node`` calls the packet with
+    arguments whose example values Dynamo recorded, it names the overload that call
+    dispatches to; otherwise every overload the packet has.
     """
     if isinstance(target, torch._ops.OpOverload):
         if target.namespace in _BUILTIN_NAMESPACES:
             return set()
         return {(target._schema.name, target._schema.overload_name)}
-    if isinstance(target, torch._ops.OpOverloadPacket):
-        op_name = target._qualified_op_name
-        if op_name.partition("::")[0] in _BUILTIN_NAMESPACES:
-            return set()
-        return {
-            (op_name, "" if overload == "default" else overload)
-            for overload in target.overloads()
-        }
-    return set()
+    if not isinstance(target, torch._ops.OpOverloadPacket):
+        return set()
+    op_name = target._qualified_op_name
+    if op_name.partition("::")[0] in _BUILTIN_NAMESPACES:
+        return set()
+    overloads = target.overloads()
+    if node is not None and node.target is target and len(overloads) > 1:
+        try:
+            args, kwargs = pytree.tree_map_only(
+                torch.fx.Node,
+                lambda arg: arg.meta["example_value"],
+                (node.args, node.kwargs),
+            )
+            overloads = [torch._C._jit_resolve_packet(op_name, *args, **kwargs)]
+        except (KeyError, RuntimeError):
+            pass
+    return {
+        (op_name, "" if overload == "default" else overload) for overload in overloads
+    }
 
 
 def _custom_op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
@@ -1959,7 +1973,7 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
             if node.op != "call_function":
                 continue
             for target in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
-                names |= _op_names(target)
+                names |= _op_names(target, node)
     return names
 
 
@@ -1986,7 +2000,7 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
     forward (desugaring tensor subclasses, applying decompositions) and a backward,
     and Inductor's passes and lowerings rewrite both; any of them can call ops that
     graph never does. Each is read from what the artifact keeps of it: the printed
-    forward, the serialized backward, and the code Inductor generated.
+    graphs and the code Inductor generated.
     """
     from torch._functorch._aot_autograd.aot_autograd_result import (
         GenericAOTAutogradResult,
@@ -1998,31 +2012,24 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
         # An eager backend's artifact is the Dynamo graph itself, already recorded.
         if not isinstance(content, GenericAOTAutogradResult):
             continue
-        generated = [
-            getattr(getattr(compiled, "result", None), "source_code", None)
-            for compiled in (content.compiled_fw, content.compiled_bw)
-        ]
-        if content.aot_forward_graph_str is None and generated[0] is None:
-            log.warning(
-                "torch.compiler.precompile: backend %s kept neither AOTAutograd's "
-                "forward graph nor its generated code, so the custom ops only its "
-                "lowered forward calls are not recorded",
-                artifact.key,
-            )
-        for source in (content.aot_forward_graph_str, *generated):
-            names |= _custom_op_names_in_source(source)
-        if content.serialized_bw_module is not None:
-            try:
-                backward = content.serialized_bw_module.deserialize()
-            except Exception as e:
+        for kind, printed, compiled in (
+            ("forward", content.aot_forward_graph_str, content.compiled_fw),
+            ("backward", content.aot_backward_graph_str, content.compiled_bw),
+        ):
+            if compiled is None:
+                continue
+            generated = getattr(getattr(compiled, "result", None), "source_code", None)
+            if printed is None and generated is None:
                 log.warning(
-                    "torch.compiler.precompile: could not read backend %s's backward "
-                    "graph (%s), so the custom ops only it calls are not recorded",
+                    "torch.compiler.precompile: backend %s kept neither AOTAutograd's "
+                    "%s graph nor its generated code, so the custom ops only its "
+                    "lowered %s calls are not recorded",
                     artifact.key,
-                    e,
+                    kind,
+                    kind,
                 )
-            else:
-                names |= _custom_op_names(backward)
+            names |= _custom_op_names_in_source(printed)
+            names |= _custom_op_names_in_source(generated)
     return names
 
 
@@ -2054,18 +2061,17 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     op torch registers itself (in its C++, or inside one of its functions), or None
     when neither is known.
 
-    ``torch.library.custom_op`` and ``torch.library.Library.define`` record the module
-    whose import ran them; a C++ op can name its module with ``m.set_python_module``.
+    ``torch.library.Library.define`` (which ``torch.library.custom_op`` and the other
+    Python registration APIs call) records the module whose import ran it, when that
+    can be told (``torch.library._registering_module``); a C++ op can name its
+    module with ``m.set_python_module``.
     """
-    from torch._library.custom_ops import OPDEFS
     from torch.library import _registering_modules
 
-    opdef = OPDEFS.get(op_name)
     pystub = torch._C._dispatch_pystub(op_name, overload)
     # A recorded module that is not importable (a pystub naming a module not yet
     # imported, say) falls through to the next record.
     for recorded in (
-        opdef._registering_module if opdef is not None else None,
         pystub[0] if pystub is not None else None,
         _registering_modules.get((op_name, overload)),
     ):
