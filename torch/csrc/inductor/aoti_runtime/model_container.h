@@ -16,14 +16,16 @@
 #include <torch/csrc/inductor/aoti_runtime/model_pool.h>
 
 namespace torch::aot_inductor {
-// The state transition is done by:
-// (1) NONE state: The default state when created. This state should only exist
-// when model_container is created and no constants are being loaded or updated.
-// (2) INITIALIZED state: This state get set whenever we load the constants into
-// the buffer. This could be done by load_constants or update_constants_buffer.
-// (3) FOLDED state: This state should transition from INITIALIZED after
-// const_fold is being invoked.
-enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED, UNKNOWN };
+// The state of each of the two constant buffers:
+// (1) NONE: holds no usable constants. A new container's inactive buffer starts
+// here, and free_inactive_constant_buffer() returns a buffer to it. An update
+// into a NONE buffer must cover every required constant, because the buffer
+// has no earlier values to keep for the ones left out.
+// (2) INITIALIZED: constants are loaded, by load_constants or
+// update_constant_buffer, but the folded constants are not computed yet. run()
+// folds an INITIALIZED active buffer before using it.
+// (3) FOLDED: ready to run, reached from INITIALIZED by constant folding.
+enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED };
 
 inline std::string toStringConstantState(ConstantState state) {
   switch (state) {
@@ -33,8 +35,6 @@ inline std::string toStringConstantState(ConstantState state) {
       return "ConstantState::INITIALIZED";
     case ConstantState::FOLDED:
       return "ConstantState::FOLDED";
-    case ConstantState::UNKNOWN:
-      return "ConstantState::UNKNOWN";
     default:
       return "Unknown enum class state for ConstantState";
   }
@@ -252,7 +252,7 @@ class AOTInductorModelContainer {
     while (active().fold_state != ConstantState::FOLDED) {
       AOTI_RUNTIME_CHECK(
           active().fold_state == ConstantState::INITIALIZED,
-          "Unknown constant state: " +
+          "Cannot run with the active constant buffer in " +
               toStringConstantState(active().fold_state));
       model_lk.unlock();
       {
@@ -304,7 +304,8 @@ class AOTInductorModelContainer {
     } else {
       AOTI_RUNTIME_CHECK(
           const_folded == ConstantState::FOLDED,
-          "Unknown constant state: " + toStringConstantState(const_folded));
+          "Cannot run with the active constant buffer in " +
+              toStringConstantState(const_folded));
     }
 
     model->run_single_threaded(
@@ -461,7 +462,8 @@ class AOTInductorModelContainer {
   }
 
   void assert_all_constants(
-      const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
+      const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
+      bool warn_on_optional = true) {
     const auto& model = pool_.primary_model();
     auto num_constants = model.num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
@@ -476,9 +478,11 @@ class AOTInductorModelContainer {
         if (_is_tensor_constant_or_buffer_type_or_empty_parameter(idx)) {
           // tracing sometimes creates tensors that are non-existent in
           // original graph. We could skip those and do a direct copy.
-          std::cerr << "[WARNING] Found constant or module state buffer or "
-                    << "empty module state parameter " << constant_name
-                    << " in model, but not provided by user!\n";
+          if (warn_on_optional) {
+            std::cerr << "[WARNING] Found constant or module state buffer or "
+                      << "empty module state parameter " << constant_name
+                      << " in model, but not provided by user!\n";
+          }
           continue;
         }
         AOTI_RUNTIME_CHECK(
@@ -568,6 +572,10 @@ class AOTInductorModelContainer {
     auto& model = pool_.primary_model();
     if (validate_full_update) {
       assert_all_constants(constants_map);
+    } else if (
+        (use_inactive ? inactive() : active()).fold_state ==
+        ConstantState::NONE) {
+      assert_all_constants(constants_map, /*warn_on_optional=*/false);
     }
     AOTI_RUNTIME_CHECK(
         !(allow_h2d_copy && user_managed),
@@ -906,7 +914,11 @@ class AOTInductorModelContainer {
       bool initialization) {
     std::lock_guard fold_lk(fold_mutex_);
     auto& buffer = use_inactive ? inactive() : active();
-    if (!use_inactive) {
+    if (use_inactive) {
+      AOTI_RUNTIME_CHECK(
+          buffer.fold_state != ConstantState::NONE,
+          "run_const_fold: the inactive constant buffer holds no constants");
+    } else {
       // Runs still executing on the device read the active buffer's folded
       // constants, which the update below frees. No run can start meanwhile:
       // the multithreaded callers hold model_exec_mutex_ exclusively.

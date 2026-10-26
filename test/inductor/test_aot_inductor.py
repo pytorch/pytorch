@@ -1104,6 +1104,89 @@ int64_t count_inconsistent_runs(const std::string& so_path, int64_t num_swaps) {
             runner.run_const_fold(use_inactive=True)
         self.assertEqual(runner.run([x])[0], expected)
 
+    def test_update_into_freed_constant_buffer_must_be_complete(self):
+        # Parameters, because an update copies tensor constants and buffers it
+        # leaves out from the active buffer, but not parameters.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w1 = torch.nn.Parameter(torch.randn(16, 8, device=device))
+                self.w2 = torch.nn.Parameter(torch.randn(8, 6, device=device))
+
+            def forward(self, a):
+                return a @ self.w1 @ self.w2
+
+        model = Model(self.device)
+        a = torch.randn(4, 16, device=self.device)
+        with torch.no_grad():
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=(a,),
+            )
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def new_weights():
+            return {
+                "L__self___w1": torch.randn(16, 8, device=self.device),
+                "L__self___w2": torch.randn(8, 6, device=self.device),
+            }
+
+        runner.update_constant_buffer(new_weights(), True, False)
+        runner.swap_constant_buffer()
+        runner.free_inactive_constant_buffer()
+
+        # The freed buffer has no earlier w2 to keep, so leaving it out fails.
+        weights = new_weights()
+        with self.assertRaises(RuntimeError):
+            runner.update_constant_buffer(
+                {"L__self___w1": weights["L__self___w1"]}, True, False
+            )
+
+        runner.update_constant_buffer(weights, True, False)
+        runner.swap_constant_buffer()
+        expected = a @ weights["L__self___w1"] @ weights["L__self___w2"]
+        self.assertEqual(runner.run([a])[0], expected)
+
+    def test_run_const_fold_rejects_empty_inactive_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w1 = torch.randn(8, 8, device=device)
+                self.w2 = torch.randn(8, 8, device=device)
+
+            def forward(self, x):
+                return x @ torch.mm(self.w1, self.w2)
+
+        example_inputs = (torch.randn(4, 8, device=self.device),)
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        # Not legacy_load_runner: its fbcode runner wrapper lacks run_const_fold.
+        runner_cls = getattr(
+            torch._C._aoti, f"AOTIModelContainerRunner{self.device.capitalize()}"
+        )
+        if self.device in ("cpu", "mps"):
+            runner = runner_cls(so_path, 1)
+        else:
+            runner = runner_cls(so_path, 1, self.device)
+        # The inactive buffer has never been loaded.
+        with self.assertRaises(RuntimeError):
+            runner.run_const_fold(use_inactive=True)
+        x = torch.randn(4, 8, device=self.device)
+        self.assertEqual(runner.run([x])[0], model(x))
+
     def test_active_refold_waits_for_inflight_runs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("needs CUDA streams")
