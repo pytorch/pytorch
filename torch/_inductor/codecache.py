@@ -4146,10 +4146,15 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
+        from torch.compiler._runtime_cache import relocatable_cpp_keys
+
+        key_cmd_line = (
+            _relocatable_command_line(main_cmd_line)
+            if relocatable_cpp_keys()
+            else main_cmd_line
+        )
         key, main_path = write(
-            main_code,
-            "main.cpp",
-            extra=f"{optimized_code} {_host_independent_command_line(main_cmd_line)}",
+            main_code, "main.cpp", extra=f"{optimized_code} {key_cmd_line}"
         )
 
         # Don't bother writing if the argument is empty.
@@ -4279,22 +4284,32 @@ class CppCodeCache:
         return cls.load_async(*args, **kwargs)()
 
 
-def _host_independent_command_line(cmd: str) -> str:
-    """Strip this host's torch install and Inductor cache paths from a C++ build
-    command so that a kernel's key matches on hosts that extract them elsewhere,
-    which precompile relies on to find frozen binaries.  The install path also
-    told torch builds apart, so torch_key() takes its place."""
-    roots = (
-        (cache_dir(), "<inductor_cache_dir>"),
-        (
-            os.path.dirname(os.path.dirname(os.path.abspath(torch.__file__))),
-            "<torch_root>",
-        ),
-    )
-    for root, placeholder in sorted(roots, key=lambda r: -len(r[0])):
-        if root and root != os.sep:
-            cmd = cmd.replace(root, placeholder)
-    return f"{cmd} {torch_key().hex()}"
+def _relocatable_command_line(cmd: str) -> str:
+    """Key a C++ build by what it compiles, not by where this host put torch and
+    the Inductor cache.
+
+    A precompile replay looks a frozen binary up by its key on a host that may
+    extract both somewhere else. The torch roots are the parents of the trees the
+    -I and -L flags point into: cpp_extension's, which follows torch_parent, and
+    cpp_builder's, which follows this package, when they differ. A root is only
+    replaced as whole path components. The install path also told torch builds
+    apart, so torch_key() stands in for it. torch_key() hashes the version and the
+    Python sources but not the C++ headers or libraries, which is why only
+    precompile keys drop the paths.
+    """
+    from torch._inductor import cpp_builder
+    from torch.utils import cpp_extension
+
+    roots = {
+        os.path.dirname(cpp_extension._TORCH_PATH): "<torch_root>",
+        os.path.dirname(cpp_builder._TORCH_PATH): "<torch_root>",
+        cache_dir(): "<inductor_cache_dir>",
+    }
+    # Longest first, so a root nested in another is replaced before its parent.
+    for root in sorted(roots, key=len, reverse=True):
+        if len(root) > 1:
+            cmd = re.sub(re.escape(root) + r"(?=[/\\\s'\":;,=]|$)", roots[root], cmd)
+    return f"{cmd} torch_key={torch_key().hex()}"
 
 
 def _worker_compile_cpp(

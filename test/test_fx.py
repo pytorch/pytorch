@@ -1702,6 +1702,37 @@ class TestFX(JitTestCase):
         self.assertIs(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
         self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
 
+    def test_autowrap_reapplies_patches_when_a_lazy_import_fails(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        lazy = object()
+
+        def leaf(x):
+            return x
+
+        def wrapper(x):
+            return x
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name == "sqrt" and dict.__getitem__(self, "sqrt") is lazy:
+                    raise ImportError("lazy import failed")
+                return super().__getitem__(name)
+
+        frame_dict = Globals(sqrt=lazy, leaf=leaf)
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is lazy,
+            create=True,
+        ):
+            with _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", wrapper)
+                with self.assertRaisesRegex(ImportError, "lazy import failed"):
+                    _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
+                self.assertIs(dict.__getitem__(frame_dict, "leaf"), wrapper)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
             return x[0]
