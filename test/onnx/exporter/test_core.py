@@ -13,10 +13,13 @@ import numpy as np
 import torch
 from torch.onnx._internal.exporter import _core
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @common_utils.instantiate_parametrized_tests
 class TorchTensorTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "dtype, np_dtype",
         [
@@ -87,6 +90,8 @@ class TorchTensorTest(common_utils.TestCase):
 
 
 class TorchTensorToFileTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _roundtrip_file(self, tensor: _core.TorchTensor) -> bytes:
         expected = tensor.tobytes()
         # NamedTemporaryFile (binary)

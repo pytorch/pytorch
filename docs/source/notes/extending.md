@@ -136,6 +136,18 @@ the autograd engine.
   to calling backward, and so your code will need to handle such objects as if they were
   tensors filled with zeros. The default value of this setting is True.
 
+When a tensor has multiple forward uses, multiple backward nodes contribute to
+its gradient. Normally, each node returns a separate tensor that the engine adds
+into an ``InputBuffer``. ``ctx.input_grad_buffers``
+lets a custom backward fuse that accumulation into its backward kernel by writing
+directly into an existing partial sum and returning ``None``. See
+{attr}`~torch.autograd.function.FunctionCtx.input_grad_buffers` for more details.
+
+If a leaf tensor has multiple forward uses, it will have an ``InputBuffer``
+during backward in addition to its ``.grad`` field. To fuse accumulation for
+leaf nodes, it is recommended that you retain a reference to the leaf and mutate
+its ``.grad`` field instead of using ``ctx.input_grad_buffers``.
+
 In addition to ``ctx`` methods, the {class}`~Function` class supports the following
 class attributes:
 

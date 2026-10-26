@@ -35,6 +35,7 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
 
@@ -78,6 +79,31 @@ typename traits::ArgsTuple
 dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
+}
+
+template <typename traits, std::size_t... INDEX>
+typename traits::ArgsTuple
+dereference_vec_partial_impl(char* C10_RESTRICT data[],
+                             const typename traits::result_type& opt_scalar,
+                             size_t S,
+                             int64_t i,
+                             [[maybe_unused]] int64_t count,
+                             std::index_sequence<INDEX...> /*unused*/) {
+  using Vec = typename traits::result_type;
+  using scalar_t = typename Vec::value_type;
+  return std::make_tuple(
+      S == INDEX + 1 ?
+      opt_scalar :
+      Vec::loadu(data[INDEX] + i * sizeof(scalar_t), count)...);
+}
+
+// Loads only `count` elements per operand; the lanes beyond `count` are zeroed
+// by Vectorized::loadu, so no memory past the end of the operands is touched.
+template <typename traits>
+typename traits::ArgsTuple
+dereference_vec_partial(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i, int64_t count) {
+  using Indices = std::make_index_sequence<traits::arity>;
+  return dereference_vec_partial_impl<traits>(data, opt_scalar, S, i, count, Indices{});
 }
 
 template <typename func_t,
@@ -194,9 +220,14 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
 // the same type and contiguous with one exception: a single input may be
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
 // is 0, then there are no scalar inputs.
+//
+// The trailing elements are handled with masked loads/stores through `vop` as
+// well, not through `op`: a kernel whose scalar and vectorized lambdas are not
+// numerically identical would otherwise give different results depending on an
+// element's position within the tensor.
 template <typename func_t, typename vec_func_t>
 inline void
-vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
+vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, [[maybe_unused]] func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vectorized<scalar_t>;
@@ -217,12 +248,11 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
-  if (i < n) {
-    int64_t strides[ntensors];
-    for (const auto arg : c10::irange(ntensors)) {
-      strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
-    }
-    basic_loop(data, strides, i, n, std::forward<func_t>(op));
+  for (; i < n; i += Vec::size()) {
+    const int64_t count = std::min(static_cast<int64_t>(Vec::size()), n - i);
+    auto args = dereference_vec_partial<traits>(&data[1], opt_scalar, S, i, count);
+    auto out = std::apply(vop, std::move(args));
+    out.store(data[0] + i * sizeof(scalar_t), count);
   }
 }
 

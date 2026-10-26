@@ -15,6 +15,7 @@ import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic.timer.api import TimerRequest
 from torch.distributed.elastic.timer.local_timer import MultiprocessingRequestQueue
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
@@ -39,6 +40,8 @@ if not INVALID_PLATFORMS:
                 time.sleep(0.2)
 
     class LocalTimerTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self.ctx = mp.get_context("spawn")
@@ -135,6 +138,8 @@ if not INVALID_PLATFORMS:
 if not INVALID_PLATFORMS:
 
     class MultiprocessingRequestQueueTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def test_get(self):
             mp_queue = mp.Queue()
             request_queue = MultiprocessingRequestQueue(mp_queue)
@@ -202,6 +207,8 @@ if not INVALID_PLATFORMS:
 if not INVALID_PLATFORMS:
 
     class LocalTimerServerTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self.mp_queue = mp.Queue()

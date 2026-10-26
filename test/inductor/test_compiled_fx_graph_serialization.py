@@ -17,10 +17,16 @@ retracing), and post_compile deserializes it back on load.
 
 import torch
 from torch._inductor.output_code import CompiledFxGraph
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestCompiledFxGraphSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_gm(self):
         gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         gm.graph.placeholder("x")

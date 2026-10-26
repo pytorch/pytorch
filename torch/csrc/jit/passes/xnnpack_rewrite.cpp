@@ -1,5 +1,5 @@
+#include <ATen/Context.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/native/xnnpack/OpContext.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -86,6 +86,12 @@ void transformConv1dToConv2d(script::Module& module) {
 #ifdef USE_XNNPACK
 
 namespace {
+
+void ensureXNNPACKBackendAvailable() {
+  TORCH_CHECK(
+      at::globalContext().isXNNPACKAvailable(),
+      "XNNPACK mobile optimization requires an XNNPACK provider to be linked");
+}
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   // fuse decomposed linear into aten::linear
@@ -371,11 +377,13 @@ void runCanonicalOptimizations(script::Module& module) {
 } // namespace
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
+  ensureXNNPACKBackendAvailable();
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
 }
 
 void insertPrePackedOps(script::Module& module) {
+  ensureXNNPACKBackendAvailable();
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     insertPrePackedOps(graph);
@@ -386,6 +394,7 @@ void insertPrePackedOps(script::Module& module) {
 }
 
 void fusePrePackedLinearConvWithClamp(script::Module& module) {
+  ensureXNNPACKBackendAvailable();
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     fuseReluWithPackedOps(graph);
@@ -397,6 +406,7 @@ void fusePrePackedLinearConvWithClamp(script::Module& module) {
 }
 
 void FoldPrePackingOps(script::Module& m) {
+  ensureXNNPACKBackendAvailable();
   PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
     return (
         (n->kind() ==
@@ -419,6 +429,7 @@ script::Module optimizeForMobile(
     const script::Module& m,
     const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
+  ensureXNNPACKBackendAvailable();
   auto cloned_module = m.clone();
   cloned_module.eval();
 

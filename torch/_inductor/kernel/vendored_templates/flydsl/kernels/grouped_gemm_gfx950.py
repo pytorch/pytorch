@@ -11,12 +11,12 @@ from flydsl.expr import const_expr, range_constexpr, rocdl
 from .gemm_gfx950 import (
     __barrier,
     __waitcnt,
-    _elem_dtype,
-    _make_gemm_gfx950_tiled_mma,
+    _operand_fragment_dtype,
     BlockSwizzle,
     buffer_load_lds_inline,
     GEMM_DTYPE_FP16,
     GemmGfx950Param,
+    make_gemm_tiled_mma,
 )
 from .grouped_gemm_gfx950_config import GFX950_DMA_BYTES, GFX950_WAVE_SIZE
 
@@ -48,7 +48,7 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
 
 
 def make_grouped_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
-    dtype_str = "fp16" if param.dtype_id == GEMM_DTYPE_FP16 else "bf16"
+    dtype_str = "fp16" if param.in_dtype_id == GEMM_DTYPE_FP16 else "bf16"
     name = (
         f"grouped_gemm_{dtype_str}_"
         f"t{param.block_m}x{param.block_n}x{param.block_k}x{param.stages}"
@@ -162,7 +162,7 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
     block_k = param.block_k
     stages = param.stages
     block_threads = param.block_threads
-    elem_dtype = _elem_dtype(param)
+    elem_dtype = _operand_fragment_dtype(param)
     tid = fx.thread_idx.x
 
     smem_a, smem_b, smem_c = _grouped_gemm_gfx950_allocate_shared_storage(
@@ -201,7 +201,7 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
     thr_mma_cRow = rs.thr_mma.partition_C(row_coords)
     thr_mma_cCol = rs.thr_mma.partition_C(col_coords)
 
-    cshuffle_vec_size = GFX950_DMA_BYTES // param.out_data_bytes
+    cshuffle_vec_size = GFX950_DMA_BYTES // (param.out_data_bits // 8)
     cshuffle_x_threads = block_n // cshuffle_vec_size
     cshuffle_thr_layout = fx.make_layout(
         (block_threads // cshuffle_x_threads, cshuffle_x_threads),
@@ -285,7 +285,7 @@ def _grouped_tile_init(ctx, bid_m, bid_n, m, n, row_base):
 
 def _grouped_tile_store(ctx, thr_gC):
     frag_C_out = ctx.frag_C_out
-    frag_C_out.store(ctx.frag_C.load().to(_elem_dtype(ctx.param)))
+    frag_C_out.store(ctx.frag_C.load().to(_operand_fragment_dtype(ctx.param)))
 
     fx.gpu.barrier()
     for i in range_constexpr(fx.size(frag_C_out.shape).unpack()):
@@ -349,7 +349,7 @@ def _grouped_load_a_tile_async(ctx, row_base, bid_m, m, k, k_tile, stage):
     block_m = param.block_m
     block_k = param.block_k
     async_load_bytes = param.async_load_bytes
-    in_data_bytes = param.in_data_bytes
+    in_data_bytes = param.in_data_bits // 8
     async_load_vec_size = async_load_bytes // in_data_bytes
     ldg_x_threads = param.ldg_x_threads
     block_threads = param.block_threads
@@ -384,7 +384,7 @@ def _grouped_load_b_tile_async(ctx, bid_n, n, k, group_idx, k_tile, stage):
     block_n = param.block_n
     block_k = param.block_k
     async_load_bytes = param.async_load_bytes
-    in_data_bytes = param.in_data_bytes
+    in_data_bytes = param.in_data_bits // 8
     async_load_vec_size = async_load_bytes // in_data_bytes
     block_threads = param.block_threads
     ldg_b_iters = param.ldg_b_iters
@@ -512,13 +512,13 @@ def gemm_hti_gfx950_grouped_kernel(
     half_block_n = block_n // 2
     has_k_tail = param.has_k_tail
     async_load_bytes = param.async_load_bytes
-    in_data_bytes = param.in_data_bytes
+    in_data_bytes = param.in_data_bits // 8
     async_load_vec_size = async_load_bytes // in_data_bytes
     ldg_x_threads = param.ldg_x_threads
     block_threads = param.block_threads
     half_ldg_a_iters = param.ldg_a_iters // 2
     half_ldg_b_iters = param.ldg_b_iters // 2
-    elem_dtype = _elem_dtype(param)
+    elem_dtype = _operand_fragment_dtype(param)
 
     tid = fx.thread_idx.x
     k_tiles = (k - 1) // block_k + 1
@@ -683,7 +683,7 @@ def gemm_hti_gfx950_grouped_kernel(
             fx.make_layout((half_block_m, half_block_n), (n, 1)),
         )
 
-    cshuffle_vec_size = GFX950_DMA_BYTES // param.out_data_bytes
+    cshuffle_vec_size = GFX950_DMA_BYTES // (param.out_data_bits // 8)
     cshuffle_x_threads = half_block_n // cshuffle_vec_size
     cshuffle_thr_layout = fx.make_layout(
         (block_threads // cshuffle_x_threads, cshuffle_x_threads),
@@ -864,7 +864,7 @@ def launch_gemm_gfx950_grouped(
     param: GemmGfx950Param,
     stream: fx.Stream = fx.Stream(None),
 ):
-    tiled_mma = _make_gemm_gfx950_tiled_mma(param)
+    tiled_mma = make_gemm_tiled_mma(param)
     kernel_impl = (
         gemm_hti_gfx950_grouped_kernel
         if param.use_half_tile_interleaved
