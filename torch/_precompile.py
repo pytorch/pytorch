@@ -425,8 +425,9 @@ class DynamoTracer:
     reached: by default it is refused like any other kernel that cannot be
     frozen. With ``require_tuned_backward=False`` it is frozen with its first
     config, tuning off, and reported with a warning and a
-    ``precompile_triton_untuned_kernels`` artifact; serving under
-    ``no_compilation()`` could not tune it anyway.
+    ``precompile_triton_untuned_kernels`` artifact. Every serving process then
+    runs it with that config, without ``no_compilation()`` too, which can cost
+    performance.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -3557,7 +3558,7 @@ def load(
     up to a graph break whose continuation fell back, still ran compiled.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
-    and the Inductor cache's include paths taken out, so they serve a host that
+    taken out, so they serve a host that
     installed the same PyTorch build elsewhere. The Python, compiler, CUDA and
     other SDK paths must still match the producer's, and a kernel that links a
     library from the Inductor cache (the Halide runtime, CUTLASS or CK kernels)

@@ -889,6 +889,37 @@ class TestFxGraphCache(TestCase):
             any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
         )
 
+    @requires_gpu_and_triton
+    @config.patch(
+        fx_graph_cache=True,
+        fx_graph_remote_cache=False,
+        bundle_triton_into_fx_graph_cache=False,
+    )
+    @functorch_config.patch(enable_autograd_cache=False)
+    def test_cache_hit_tags_backward_kernels(self):
+        from torch.compiler import _runtime_cache
+
+        def fn(x):
+            return x.sin() * 2
+
+        x = torch.rand(32, device=GPU_TYPE, requires_grad=True)
+        torch.compile(fn)(x).sum().backward()
+        self.reset()
+        counters.clear()
+        # The cached output code loads with no GraphLowering to tag its kernels.
+        with _runtime_cache.capture_scope():
+            torch.compile(fn)(x).sum().backward()
+            kernels = [
+                kernel
+                for instances in _runtime_cache._capture.triton_kernels.values()
+                for kernel in instances
+            ]
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        self.assertEqual(
+            sorted((k.is_backward, k._forward_use) for k in kernels),
+            [(False, True), (True, False)],
+        )
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -5802,13 +5833,13 @@ class TestCppCodeCacheKey(TestCase):
         ):
             yield
 
-    def test_frozen_key_ignores_install_and_cache_paths(self):
+    def test_frozen_key_ignores_install_path(self):
         from torch.compiler._runtime_cache import capture_scope
 
         keys, paths = [], []
         for root in ("/install/a", "/install/b"):
             with fresh_cache(), self._torch_root(root), capture_scope():
-                keys.append(self._frozen_key((f"-I{cache_dir()}/include",)))
+                keys.append(self._frozen_key())
                 (key,) = CppCodeCache.cache
                 paths.append(CppCodeCache._binary_paths[key])
         self.assertEqual(keys[0], keys[1])
@@ -5850,8 +5881,7 @@ class TestCppCodeCacheKey(TestCase):
         cmd = _relocatable_command_line(
             f"cc -I{torch_dir}/include -I{torch_dir}-ext/inc -I/x{torch_dir}/include "
             f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include "
-            f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so "
-            f'-I{cache}-other/include /I "{cache}/msvc"'
+            f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so"
         )
         self.assertIn("-I<torch>/include", cmd)
         self.assertIn("-L'<torch>/lib'", cmd)
@@ -5859,12 +5889,10 @@ class TestCppCodeCacheKey(TestCase):
         self.assertIn(f"-I/x{torch_dir}/include", cmd)
         # A package installed next to torch (an SDK wheel, say) keeps its path.
         self.assertIn(f"-I{parent}/other_pkg/include", cmd)
-        # The cache dir moves in an include path, but a library in it that the
-        # kernel links against is named by absolute path in the binary.
-        self.assertIn("-I<inductor_cache_dir>/include", cmd)
+        # A library in the cache dir that the kernel links against is named by
+        # absolute path in the binary.
+        self.assertIn(f"-I{cache}/include", cmd)
         self.assertIn(f" {cache}/halide/libStandaloneHalideRuntime.so", cmd)
-        self.assertIn(f"-I{cache}-other/include", cmd)
-        self.assertIn('/I "<inductor_cache_dir>/msvc"', cmd)
 
     def test_no_frozen_key_outside_precompile(self):
         from torch.compiler import _runtime_cache
