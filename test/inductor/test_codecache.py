@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import pickle
-import re
 import shutil
 import subprocess
 import sys
@@ -629,8 +628,8 @@ class TestCppPortableKey(TestCase):
         from torch._inductor import codecache
 
         stripped = codecache._strip_relocatable_roots(self._real_command_line())
-        for root in codecache._relocatable_roots():
-            self.assertNotRegex(stripped, re.escape(root) + r"(?=[/\\\s\"']|$)")
+        pattern = codecache._root_pattern(codecache._relocatable_roots())
+        self.assertIsNone(pattern.search(stripped))
 
     def test_key_tracks_paths_outside_install(self):
         self.assertNotEqual(self._key("g++ -I/usr/a"), self._key("g++ -I/usr/b"))
@@ -638,6 +637,36 @@ class TestCppPortableKey(TestCase):
         self.assertNotEqual(
             self._key("-I/opt/t-cuda/include"), self._key("-I/opt/u-cuda/include")
         )
+
+    def test_key_strips_only_whole_roots(self):
+        # A root in the middle of another path is not that root.
+        self.assertNotEqual(
+            self._key("-I/data/usr/include", roots=("/usr",)),
+            self._key("-I/data/opt/py/include", roots=("/opt/py",)),
+        )
+        self.assertEqual(
+            self._key("-I/usr/include -L/usr/lib", roots=("/usr",)),
+            self._key("-I/opt/py/include -L/opt/py/lib", roots=("/opt/py",)),
+        )
+
+    def test_key_is_computed_only_for_precompile(self):
+        from torch._inductor import codecache
+        from torch.compiler import _runtime_cache
+
+        source = 'extern "C" long portable_key_probe(long x) { return x; }'
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                codecache, "_portable_cpp_key", wraps=codecache._portable_cpp_key
+            ) as portable,
+        ):
+            lib = codecache.CppCodeCache.load(source)
+            portable.assert_not_called()
+            # A hit inside a capture still records the kernel under its key.
+            with _runtime_cache.capture_scope():
+                codecache.CppCodeCache.load(source)
+            portable.assert_called_once()
+            self.assertIn(lib.key, codecache.CppCodeCache._portable_keys)
 
     def test_key_tracks_torch_source_python_abi_and_compiler(self):
         from torch._inductor import codecache

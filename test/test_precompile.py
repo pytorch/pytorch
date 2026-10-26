@@ -7688,7 +7688,9 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(
             [r["reason"] for r in rejected], ["launcher_count_not_one", "load_failed"]
         )
-        self.assertEqual(rejected[1]["error"], "No valid triton configs")
+        self.assertEqual(
+            rejected[1]["error"], f"{error.__name__}: No valid triton configs"
+        )
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_forward_kernel_stays_unresolved(self):
@@ -7744,17 +7746,14 @@ class TestPrecompileRuntimeCache(TestCase):
             kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
             expected = "combo_autotuning_incomplete"
         with (
-            mock.patch.object(
-                type(kernel),
-                "_make_launchers",
-                autospec=True,
-                side_effect=_build_launchers,
-            ),
+            mock.patch.object(type(kernel), "_make_launchers") as make,
             self.assertRaises(_UnresolvedTritonExport) as failure,
         ):
             _freeze_triton_kernel("source", [kernel], freeze_never_run_backward=True)
         reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
         self.assertEqual(reasons, ["launcher_count_not_one", expected])
+        # A config that would tune is rejected before anything is loaded.
+        make.assert_not_called()
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_never_run_fallback_needs_every_rejection_to_be_never_run(self):
@@ -7835,6 +7834,19 @@ class TestPrecompileRuntimeCache(TestCase):
         reasons = [r["reason"] for r in failure.exception.sources[0]["instances"]]
         self.assertEqual(reasons, ["launcher_count_not_one", "no_loadable_config"])
 
+    def test_capture_scope_rejects_a_conflicting_freeze_flag(self):
+        from torch.compiler._runtime_cache import _active_capture, capture_scope
+
+        with capture_scope(freeze_never_run_backward=True):
+            # A block that has no say joins the open scope.
+            with capture_scope():
+                self.assertTrue(_active_capture().freeze_never_run_backward)
+            with self.assertRaisesRegex(RuntimeError, "disagree"):
+                with capture_scope(freeze_never_run_backward=False):
+                    pass
+            self.assertTrue(_active_capture().freeze_never_run_backward)
+        self.assertIsNone(_active_capture())
+
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_failure_leaves_live_kernel(self):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
@@ -7896,6 +7908,8 @@ class TestPrecompileRuntimeCache(TestCase):
         import hashlib
 
         from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.cpp_builder import normalize_path_separator
+        from torch._inductor.runtime.runtime_utils import cache_dir
         from torch._inductor.utils import fresh_cache
         from torch.compiler import _runtime_cache
 
@@ -7904,7 +7918,7 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
         )
-        with fresh_cache():
+        with fresh_cache(), _runtime_cache.capture_scope():
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
                 portable_key = CppCodeCache._portable_keys[lib.key]
@@ -7920,6 +7934,16 @@ class TestPrecompileRuntimeCache(TestCase):
                     kernel = loaded.frozen_cpp_kernel
                     kernel.restype = ctypes.c_long
                     self.assertEqual(kernel(ctypes.c_long(5)), 12)
+                    # The binary is served from its own directory, never from
+                    # the shared cache path this build would compile to.
+                    name = os.path.basename(loaded._name)
+                    copies = [
+                        normalize_path_separator(os.path.join(directory, name))
+                        for directory, _, files in os.walk(cache_dir())
+                        if name in files
+                    ]
+                    self.assertEqual(copies, [loaded._name])
+                    self.assertIn("precompile_cpp", loaded._name)
 
     def test_frozen_cpp_kernel_serves_a_relocated_install(self):
         import ctypes
@@ -7935,7 +7959,7 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long relocated_cpp_kernel(long x) {{ return x + 9; }}'
         )
-        with fresh_cache():
+        with fresh_cache(), _runtime_cache.capture_scope():
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
                 portable_key = CppCodeCache._portable_keys[lib.key]
