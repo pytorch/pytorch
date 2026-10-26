@@ -254,8 +254,7 @@ void philox_distribution_kernel(
   }
 }
 
-// Offsets of two bounds, already broadcast to the output's shape, for each
-// row-major index into the output. Dims are ordered fastest first.
+// Maps a row-major output index to offsets into two bounds broadcast to the output.
 template <typename index_t>
 OffsetCalculator<2, index_t> make_bounds_offset_calculator(
     const Tensor& a, const Tensor& b) {
@@ -273,8 +272,7 @@ OffsetCalculator<2, index_t> make_bounds_offset_calculator(
   return OffsetCalculator<2, index_t>(ndim, sizes.data(), strides);
 }
 
-// One Philox call's raw bits for uniform sampling: double packs the four uint32
-// outputs into two 64-bit values; narrower types take one uint32 each.
+// double packs the four uint32 Philox outputs into two 64-bit values.
 template <typename scalar_t>
 __device__ __forceinline__ auto uniform_sample(uint64_t seed, uint64_t offset) {
   uint4 r = philox_4x32(seed, offset);
@@ -324,13 +322,10 @@ Tensor& _philox_uniform_tensor_cuda_(
     auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
       return uniform_sample<scalar_t>(seed, offset);
     };
-    // Bounds round to the output dtype and are read in place through their
-    // broadcast strides.
     auto lo = low.to(self.scalar_type()).expand(self.sizes());
     auto hi = high.to(self.scalar_type()).expand(self.sizes());
     const scalar_t* lo_ptr = lo.const_data_ptr<scalar_t>();
     const scalar_t* hi_ptr = hi.const_data_ptr<scalar_t>();
-    // Bound offsets are computed per element, so use 32-bit index math when it fits.
     auto index_type = canUse32BitIndexMath(lo) && canUse32BitIndexMath(hi) ? kInt : kLong;
     AT_DISPATCH_INDEX_TYPES(index_type, "_philox_uniform_", [&] {
       using calc_index_t = std::make_unsigned_t<index_t>;
