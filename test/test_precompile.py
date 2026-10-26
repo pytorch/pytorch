@@ -9997,8 +9997,7 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertFalse(_custom_op_registered(f"{ns}::op.v3"))
         # An overload defined next to a custom_op is found through the op.
         self._define_op(ns, "base", module="unittest")
-        lib = torch.library.Library(ns, "FRAGMENT")
-        self.addCleanup(lib._destroy)
+        lib = self.enterContext(torch.library._scoped_library(ns, "FRAGMENT"))
         torch.library.define(
             f"{ns}::base.out",
             "(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
