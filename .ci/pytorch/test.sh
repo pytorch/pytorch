@@ -2200,48 +2200,6 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
-build_xla() {
-  # xla test needs pytorch headers in torch/include
-  pushd ..
-  python -c "import os, torch, shutil; shutil.copytree(os.path.join(os.path.dirname(torch.__file__), 'include'), 'workspace/torch/include', dirs_exist_ok=True)"
-  popd
-
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  XLA_DIR=xla
-  USE_CACHE=1
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "xla/.circleci/common.sh"
-
-  # TODO: The torch pin #73164 is involved in the sev https://github.com/pytorch/pytorch/issues/86093
-  # so this is temporarily removed until XLA fixes the weird logic in https://github.com/pytorch/xla/blob/master/scripts/apply_patches.sh#L17-L18
-  rm "${XLA_DIR}/torch_patches/.torch_pin" || true
-
-  apply_patches
-  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
-  # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
-  assert_git_not_dirty
-}
-
-test_xla() {
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "./xla/.circleci/common.sh"
-  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
-  # Set LD_LIBRARY_PATH for C++ tests
-  export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
-  assert_git_not_dirty
-}
 
 function check_public_api_test_fails {
     test_name=$1
@@ -2643,10 +2601,6 @@ elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *libtorch_agnostic_targetting* ]]; then
   test_libtorch_agnostic_targetting
-elif [[ "${TEST_CONFIG}" == *xla* ]]; then
-  install_torchvision
-  build_xla
-  test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
