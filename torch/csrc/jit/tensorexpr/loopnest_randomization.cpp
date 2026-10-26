@@ -737,7 +737,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   } catch (...) {
     std::cout << "EXCEPTION THROWN!\n";
     std::cout << "SEED: " << seed << '\n';
-    throw std::runtime_error("Random test failed");
+    TORCH_CHECK(false, "Random test failed");
   }
   message = "End of transformations;\n";
   randomization_helper::printHistory(n_transforms, message);

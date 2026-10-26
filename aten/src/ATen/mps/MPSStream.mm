@@ -14,7 +14,31 @@
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
+@interface MPSStreamCommandBuffer : MPSCommandBuffer
+@property(nonatomic) std::function<void()> willCommitAndContinue;
+@end
+@implementation MPSStreamCommandBuffer
+- (void)commitAndContinue {
+  _willCommitAndContinue();
+  [super commitAndContinue];
+}
+@end
+
 namespace at::mps {
+namespace {
+// Returns true if the command buffer failed to execute (e.g. was aborted by the driver)
+bool commandBufferFailed(id<MTLCommandBuffer> cb, bool& is_oom, int32_t& code, std::string& message) {
+  if (cb.status != MTLCommandBufferStatusError) {
+    return false;
+  }
+  NSError* error = cb.error;
+  is_oom = [error.domain isEqualToString:MTLCommandBufferErrorDomain] && error.code == MTLCommandBufferErrorOutOfMemory;
+  code = error ? static_cast<int32_t>(error.code) : 0;
+  message = error ? std::string(error.localizedDescription.UTF8String) : std::string("unknown error");
+  return true;
+}
+} // namespace
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -56,7 +80,9 @@ MPSStream::~MPSStream() {
 
 MPSCommandBuffer* MPSStream::commandBuffer() {
   if (!_commandBuffer) {
-    _commandBuffer = [MPSCommandBuffer commandBufferFromCommandQueue:_commandQueue].retain;
+    auto cb = [[MPSStreamCommandBuffer alloc] initWithCommandBuffer:[_commandQueue commandBuffer]];
+    cb.willCommitAndContinue = [this] { addErrorHandler(); };
+    _commandBuffer = cb;
   }
 
   return _commandBuffer;
@@ -70,8 +96,22 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
+  ++_kernelsSinceCommit;
 
   return _commandEncoder;
+}
+
+void MPSStream::commitIfNeeded() {
+  // Encoded kernels only start running once their command buffer is committed, so commit every kKernelsPerCommit
+  // of them. Metal blocks the creation of a command buffer while its queue has 64 uncompleted ones, which would
+  // stall the caller, so skip the commit while kMaxCommandBuffersInFlight of the stream's own commits are in
+  // flight (MPSGraph's are not counted).
+  constexpr uint32_t kKernelsPerCommit = 16; // See https://github.com/pytorch/pytorch/pull/200181 for the sweep
+  constexpr uint32_t kMaxCommandBuffersInFlight = 32;
+  if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit &&
+      _commandBuffersInFlight < kMaxCommandBuffersInFlight) {
+    synchronize(SyncType::COMMIT);
+  }
 }
 
 void MPSStream::synchronize(SyncType syncType) {
@@ -101,6 +141,7 @@ void MPSStream::synchronize(SyncType syncType) {
 }
 
 void MPSStream::commit() {
+  _kernelsSinceCommit = 0;
   if (_enableCommitAndContinue) {
     [commandBuffer() commitAndContinue];
   } else {
@@ -109,10 +150,15 @@ void MPSStream::commit() {
 }
 
 void MPSStream::commitAndWait() {
+  _kernelsSinceCommit = 0;
   if (_prevCommandBuffer) {
     // the previous command buffer (if exists) has already been committed,
     // so we just wait until it's completed and then dispose it.
     [_prevCommandBuffer waitUntilCompleted];
+    CommandBufferError error;
+    if (commandBufferFailed(_prevCommandBuffer, error.is_oom, error.code, error.message)) {
+      recordCommandBufferError(std::move(error));
+    }
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
     checkLastError();
@@ -121,6 +167,11 @@ void MPSStream::commitAndWait() {
   if (_commandBuffer) {
     [_commandBuffer commit];
     [_commandBuffer waitUntilCompleted];
+    // check the status directly, as the completed handlers may not have run yet
+    CommandBufferError error;
+    if (commandBufferFailed(_commandBuffer, error.is_oom, error.code, error.message)) {
+      recordCommandBufferError(std::move(error));
+    }
     [_commandBuffer release];
     _commandBuffer = nil;
     checkLastError();
@@ -129,6 +180,7 @@ void MPSStream::commitAndWait() {
 
 void MPSStream::commitAndContinue() {
   assert(_commandBuffer);
+  _kernelsSinceCommit = 0;
   [_commandBuffer commitAndContinue];
 }
 
@@ -142,6 +194,7 @@ void MPSStream::endKernelCoalescing() {
 
 void MPSStream::flush() {
   if (_commandBuffer) {
+    addErrorHandler();
     [_commandBuffer commit];
     // if commitAndContinue is disabled (e.g., for Profiler), we keep the command
     // buffer so we could wait on it later, if required.
@@ -151,6 +204,30 @@ void MPSStream::flush() {
       [_commandBuffer release];
     }
     _commandBuffer = nil;
+  }
+}
+
+void MPSStream::addErrorHandler() {
+  // Metal reports execution errors (e.g. when the resources referenced by a command buffer
+  // exceed the working set limit) only once the command buffer completes, and it skips
+  // the whole command buffer, leaving its outputs unwritten. Record the first such error
+  // so that checkLastError() raises it at the next synchronization point, rather than
+  // silently returning garbage, similar to how CUDA reports asynchronous errors.
+  ++_commandBuffersInFlight;
+  [commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+    --_commandBuffersInFlight;
+    CommandBufferError error;
+    if (commandBufferFailed(cb, error.is_oom, error.code, error.message)) {
+      recordCommandBufferError(std::move(error));
+    }
+  }];
+}
+
+void MPSStream::recordCommandBufferError(CommandBufferError error) {
+  std::lock_guard<std::mutex> lock(_commandBufferErrorMutex);
+  // keep the first error, as the subsequent ones are likely caused by it
+  if (!_commandBufferError) {
+    _commandBufferError = std::move(error);
   }
 }
 
@@ -257,6 +334,17 @@ id<MTLBuffer> MPSStream::getErrorBuffer() {
 }
 
 void MPSStream::checkLastError() {
+  std::optional<CommandBufferError> cb_error;
+  {
+    std::lock_guard<std::mutex> lock(_commandBufferErrorMutex);
+    std::swap(cb_error, _commandBufferError);
+  }
+  if (cb_error) {
+    const auto msg = "MPS command buffer execution failed: " + cb_error->message +
+        ". This error may have been asynchronously reported, so the stack trace below might be incorrect.";
+    TORCH_CHECK_WITH(OutOfMemoryError, !cb_error->is_oom, msg);
+    throw c10::AcceleratorError({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, cb_error->code, msg);
+  }
   auto msgs = reinterpret_cast<c10::metal::ErrorMessages*>([_errorBuffer contents]);
   if (!msgs) {
     return;
@@ -357,6 +445,9 @@ void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
   dispatch_sync(queue, ^() {
     try {
       block();
+      if (auto stream = getCurrentMPSStream(); stream->queue() == queue) {
+        stream->commitIfNeeded();
+      }
     } catch (...) {
       block_exception = std::current_exception();
     }
