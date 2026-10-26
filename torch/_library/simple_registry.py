@@ -9,6 +9,7 @@ from .utils import RegistrationHandle
 
 
 __all__ = [
+    "RegisteringModuleHolder",
     "SimpleLibraryRegistry",
     "SimpleOperatorEntry",
     "singleton",
@@ -64,6 +65,9 @@ class SimpleOperatorEntry:
 
         self.effect: EffectHolder = EffectHolder(qualname)
         self.symm_mem_args: SymmMemArgsHolder = SymmMemArgsHolder(qualname)
+        self.registering_module: RegisteringModuleHolder = RegisteringModuleHolder(
+            qualname
+        )
 
     # For compatibility reasons. We can delete this soon.
     @property
@@ -92,6 +96,30 @@ class GenericTorchDispatchRuleHolder:
 
     def find(self, torch_dispatch_class: type) -> Callable[..., Any] | None:
         return self._data.get(torch_dispatch_class, None)
+
+
+class RegisteringModuleHolder:
+    """The module whose import defined the operator, if known (see
+    torch._library.utils.registering_module).
+
+    torch.compiler.precompile reads it to import that module wherever an artifact
+    calling the operator is served.
+    """
+
+    def __init__(self, qualname: str) -> None:
+        self._module: str | None = None
+        self.qualname: str = qualname
+
+    def register(self, module: str | None) -> RegistrationHandle:
+        self._module = module
+
+        def deregister() -> None:
+            self._module = None
+
+        return RegistrationHandle(deregister)
+
+    def get(self) -> str | None:
+        return self._module
 
 
 class SymmMemArgsHolder:

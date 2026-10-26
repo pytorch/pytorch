@@ -1982,13 +1982,20 @@ _OP_REFERENCE = re.compile(
 )
 
 
+# How cpp_wrapper's generated C++ calls an op.
+_DISPATCHER_CALL = re.compile(
+    r'aoti_torch_call_dispatcher\(\s*"([A-Za-z_]\w*)::([A-Za-z_]\w*)",\s*"(\w*)"'
+)
+
+
 def _custom_op_names_in_source(source: str | None) -> set[tuple[str, str]]:
     """The non-builtin operators generated code or a printed graph calls."""
     # Comments quote user source lines, which can name ops the trace never reached.
     code = "\n".join(line.partition("#")[0] for line in (source or "").splitlines())
     return {
         (f"{namespace}::{name}", "" if overload == "default" else overload)
-        for namespace, name, overload in _OP_REFERENCE.findall(code)
+        for pattern in (_OP_REFERENCE, _DISPATCHER_CALL)
+        for namespace, name, overload in pattern.findall(code)
         if namespace not in _BUILTIN_NAMESPACES
     }
 
@@ -2063,17 +2070,18 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
 
     ``torch.library.Library.define`` (which ``torch.library.custom_op`` and the other
     Python registration APIs call) records the module whose import ran it, when that
-    can be told (``torch.library._registering_module``); a C++ op can name its
+    is known (``torch._library.utils.registering_module``); a C++ op can name its
     module with ``m.set_python_module``.
     """
-    from torch.library import _registering_modules
+    from torch._library.simple_registry import singleton
 
     pystub = torch._C._dispatch_pystub(op_name, overload)
+    entry = singleton.get(f"{op_name}.{overload}" if overload else op_name)
     # A recorded module that is not importable (a pystub naming a module not yet
     # imported, say) falls through to the next record.
     for recorded in (
         pystub[0] if pystub is not None else None,
-        _registering_modules.get((op_name, overload)),
+        entry.registering_module.get() if entry is not None else None,
     ):
         # A registration inside a torch function, which torch runs itself.
         if recorded == "torch":

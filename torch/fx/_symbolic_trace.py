@@ -1284,23 +1284,22 @@ def _applied_patchers(patcher: _Patcher | None) -> list[_Patcher]:
 def _suspend_patches(patchers: list[_Patcher]) -> Iterator[None]:
     # Innermost first: a nested patcher recorded the outer one's wrappers as the
     # originals it restores.
-    patches_removed = [patcher.revert_all_patches() for patcher in patchers]
+    for patcher in patchers:
+        patcher.revert_all_patches()
     try:
         yield
     finally:
-        patches_made = [
-            patcher.reapply_all_patches() for patcher in reversed(patchers)
-        ][::-1]
-        if patches_made != patches_removed:
-            raise AssertionError(
-                "CURRENT_PATCHER was changed during a revert_all_patches"
-            )
+        for patcher in reversed(patchers):
+            patcher.reapply_all_patches()
 
 
 @contextlib.contextmanager
 def _maybe_revert_all_patches() -> Iterator[None]:
-    with _suspend_patches(_applied_patchers(CURRENT_PATCHER)):
+    current_patcher = CURRENT_PATCHER
+    with _suspend_patches(_applied_patchers(current_patcher)):
         yield
+    if CURRENT_PATCHER is not current_patcher:
+        raise AssertionError("CURRENT_PATCHER was changed during a revert_all_patches")
 
 
 def _resolve_lazy_imports(
