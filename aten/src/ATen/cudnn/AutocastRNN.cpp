@@ -36,6 +36,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           const std::optional<Tensor>& dropout_state) {
 #if AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+  const auto target_dtype = get_autocast_dtype(at::kCUDA);
 
   for (const auto& t : weight) {
     TORCH_CHECK(weight[0].scalar_type() == t.scalar_type(), "Weight scalar types do not match.");
@@ -65,12 +66,12 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
     weight_buf = *weight_buf_opt;
   }
   bool needs_cast_and_flatten = (weight_buf.defined() ?
-                                 // weight_buf is valid.  Only change it if it's eligible and not already FP16.
-                                 is_eligible(weight_buf) && (weight_buf.scalar_type() != at::kHalf) :
-                                 // weight_buf is not valid.  Only create it if other weights are eligible and not already FP16.
-                                 is_eligible(weight[0]) && (weight[0].scalar_type() != at::kHalf));
+                                 // Only change a valid weight_buf if it needs casting to the target dtype.
+                                 is_eligible(weight_buf) && (weight_buf.scalar_type() != target_dtype) :
+                                 // Otherwise, create it if the other weights need casting.
+                                 is_eligible(weight[0]) && (weight[0].scalar_type() != target_dtype));
   if (needs_cast_and_flatten) {
-    // Casts weight tensors to FP16 and ensures all weights for all layers are views into a large flat buffer,
+    // Casts weights to the target dtype and ensures all layers are views into a large flat buffer,
     // with the right locations and layouts expected by cudnn.
     // This is (and should be) autograd-exposed.
     bool include_bias = true;
@@ -88,19 +89,19 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             num_layers,
             batch_first,
             bidirectional,
-            /*flat_buf_datatype=*/at::native::getCudnnDataTypeFromScalarType(at::kHalf), // could just hardcode CUDNN_DATA_HALF
-            /*flat_buf_options=*/weight[0].options().dtype(at::kHalf),
+            /*flat_buf_datatype=*/at::native::getCudnnDataTypeFromScalarType(target_dtype),
+            /*flat_buf_options=*/weight[0].options().dtype(target_dtype),
             /*set_orig_weights_to_flat_buf=*/false,
             /*allow_type_change=*/true,
             /*include_bias=*/include_bias);
   }
   return at::_cudnn_rnn(
-      cached_cast(at::kHalf, input),
+      cached_cast(target_dtype, input),
       needs_cast_and_flatten ? TensorList(redispatch_weight) : weight,
       weight_stride0,
       needs_cast_and_flatten ? redispatch_weight_buf : weight_buf,
-      cached_cast(at::kHalf, hx),
-      cached_cast(at::kHalf, cx),
+      cached_cast(target_dtype, hx),
+      cached_cast(target_dtype, cx),
       mode,
       hidden_size,
       proj_size,

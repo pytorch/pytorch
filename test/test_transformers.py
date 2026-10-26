@@ -4,6 +4,7 @@ import contextlib
 from functools import partial
 from collections import namedtuple
 import os
+import pickle
 import sys
 import torch
 import torch.nn as nn
@@ -345,6 +346,10 @@ def make_strided_sdpa_input(
 
 class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_sdp_backend_pickle(self):
+        for backend in SDPBackend.__members__.values():
+            self.assertEqual(pickle.loads(pickle.dumps(backend)), backend)
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_encoder_padding_and_src_mask_bool(self):
@@ -1171,6 +1176,28 @@ class TestTransformersAccelerator(NNTestCase):
 
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
+
+    def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
+        # The fused kernel always returns a contiguous tensor, so its meta rule
+        # must not hand back the strides of a non-contiguous src: inductor asserts
+        # the fallback's runtime metadata against them.
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=4,
+            dim_feedforward=64,
+            dropout=0.0,
+            batch_first=True,
+        ).to(device).eval()
+
+        x = torch.rand(4, 64, 16, device=device).transpose(1, 2).contiguous().transpose(1, 2)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+        self.assertEqual(eager_out, compiled_out)
 
 
 
@@ -3608,6 +3635,23 @@ class TestSDPAAccelerator(NNTestCase):
         finally:
             if prev_fa_library is not None:
                 torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_sm107_runtime_version(self, device):
+        unsupported = (
+            torch.cuda.get_device_capability(device) == (10, 7)
+            and torch.backends.cudnn.version() < 92500
+        )
+        query = torch.empty(2, 4, 128, 64, device=device, dtype=torch.float16)
+        key = torch.empty_like(query)
+        value = torch.empty_like(query)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+            self.assertEqual(torch.backends.cuda.can_use_cudnn_attention(params), not unsupported)
+            expected = SDPBackend.MATH if unsupported else SDPBackend.CUDNN_ATTENTION
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), expected.value)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
@@ -6721,6 +6765,39 @@ class TestSDPAAccelerator(NNTestCase):
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors=fudge_factors
             )
+
+    @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
+    def test_mem_eff_backward_outside_capture_after_graph_replay(self, device):
+        # A forward captured in a CUDA graph returns its dropout seed/offset on
+        # device; running backward on them outside capture used to segfault.
+        q, k, v = (torch.randn(2, 4, 128, 64, device=device, dtype=torch.float16) for _ in range(3))
+        fwd = torch.ops.aten._scaled_dot_product_efficient_attention
+        bwd = torch.ops.aten._scaled_dot_product_efficient_attention_backward
+        dropout_p = 0.1
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            fwd(q, k, v, None, True, dropout_p, False)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out, lse, seed, offset = fwd(q, k, v, None, True, dropout_p, False)
+        g.replay()
+        self.assertTrue(seed.is_cuda and offset.is_cuda)
+
+        grad_out = torch.ones_like(out)
+        args = (grad_out, q, k, v, None, out, lse, seed, offset, dropout_p, [True, True, True, False], False)
+        grads = bwd(*args)
+        # Reference: the same backward captured and replayed, which has always
+        # consumed device seed/offset. ROCm backends need device seed/offset,
+        # so a CPU-copy reference is not portable.
+        g_bwd = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g_bwd):
+            grads_ref = bwd(*args)
+        g_bwd.replay()
+        self.assertEqual(grads[:3], grads_ref[:3])
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
