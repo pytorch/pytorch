@@ -2275,12 +2275,7 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         value: CSEVariable,
     ) -> CSEVariable:
         """Reshape the parent-full tile and reduce over the local reduction."""
-        from .triton import (
-            low_precision_fp,
-            triton_type,
-            upcast_acc_dtype,
-            upcast_compute_type,
-        )
+        from .triton import low_precision_fp, triton_type, upcast_compute_type
 
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
@@ -2309,7 +2304,7 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            torch.float32 if upcast else upcast_acc_dtype(src_dtype),
+            torch.float32 if upcast else dtype,
             self._layout.output_shape,
         )
         compute_dtype = upcast_compute_type(dtype)

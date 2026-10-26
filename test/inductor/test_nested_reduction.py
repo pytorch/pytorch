@@ -2683,36 +2683,39 @@ class _NestedReductionBase:
         expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
         self.check_fusion(expected_kernels)
 
-    def test_half_grouped_reduction_bitcast_epilogue(self):
-        # The grouped amin over fp16 reduces in fp32; a bitcast of its result
-        # must see the fp16 value, not the fp32 tile.
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_half_grouped_reduction_bitcast_epilogue(self, dtype):
+        # The grouped amin over half precision reduces in fp32; a bitcast of its
+        # result must see the half-precision value, not the fp32 tile.
         group = 8
 
         def f(x):
             total = x.sum(-1, keepdim=True)
             peak = x.abs().amax(-1, keepdim=True)
             value = (x * x.shape[1] - total) * 2.0**-8 + peak * 0.25
-            value = torch.ops._inductor_test.realize(value.to(torch.float16))
+            value = torch.ops._inductor_test.realize(value.to(dtype))
             return value.view(x.shape[0], -1, group).amin(-1).view(torch.int16) + 1
 
         x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).float() / 8
         self.check_nested_matches_unnested(f, (x,), tol=0)
         self.check_fusion(expected_kernels=None)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("reduction", ["amin", "sum"])
     @inductor_config.patch("triton.codegen_upcast_to_fp32", False)
-    def test_half_grouped_reduction_without_fp32_upcast(self, reduction):
-        # Loaded fp16 values stay fp16, but the grouped reduction still
-        # accumulates in fp32 and hands back fp16, so it matches eager exactly.
+    def test_half_grouped_reduction_without_fp32_upcast(self, reduction, dtype):
+        # Loaded half-precision values stay half precision, but the grouped
+        # reduction still accumulates in fp32 and hands it back, so it matches
+        # eager exactly.
         group = 8
 
         def f(x):
             total = x.sum(-1, keepdim=True)
-            value = torch.ops._inductor_test.realize((x - total).to(torch.float16))
+            value = torch.ops._inductor_test.realize((x - total).to(dtype))
             groups = value.view(x.shape[0], -1, group)
             return getattr(groups, reduction)(-1).view(torch.int16) + 1
 
-        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).half() / 8
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).to(dtype) / 8
         self.assertEqual(torch.compile(f)(x), f(x), atol=0, rtol=0)
         self.check_fusion(expected_kernels=None)
 
