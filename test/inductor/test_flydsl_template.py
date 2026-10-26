@@ -811,12 +811,13 @@ class TestFlyDSLTemplate(TestCase):
             STAGES=2,
             M_WAVES=1,
             N_WAVES=4,
-            GROUP_M=0,
+            GROUP_M=4,
             USE_HALF_TILE_INTERLEAVED=False,
             A_IS_TRANSPOSED=False,
             B_IS_TRANSPOSED=True,
             BLOCK_R=64,
             BLOCK_C=128,
+            NUM_XCD=8,
         )
         source = jinja2.Template(
             load_kernel_template("flydsl_mxfp8_grouped_mm")
@@ -881,7 +882,15 @@ class TestFlyDSLTemplate(TestCase):
             get_output=lambda: "output",
             kernel_name="kernel",
         )
-        namespace = dict(GEMM_K=512, GEMM_N=256, GEMM_G=2, BLOCK_R=64, BLOCK_C=128)
+        namespace = dict(
+            GEMM_K=512,
+            GEMM_N=256,
+            GEMM_G=2,
+            BLOCK_R=64,
+            BLOCK_C=128,
+            NUM_XCD=8,
+            GROUP_M=4,
+        )
         exec(compile(source, "<flydsl scale rows test>", "exec"), namespace)
         namespace["launch_mxfp8_grouped_gemm_gfx950"] = launch = mock.Mock()
         output = torch.empty(256, 256)
@@ -1632,7 +1641,8 @@ class TestFlyDSLTemplate(TestCase):
             **kwargs,
         )
 
-    def test_flydsl_mxfp8_grouped_gemm_config_schema(self):
+    @parametrize("num_cus", (32, 64, 128, 256))
+    def test_flydsl_mxfp8_grouped_gemm_config_schema(self, num_cus):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
         # Non-autotuned selection is the tile the kernel's own heuristic picks,
@@ -1647,20 +1657,39 @@ class TestFlyDSLTemplate(TestCase):
             torch._inductor.config.patch(flydsl_enable_autotuning=False),
         ):
             selected = flydsl_heuristics.get_mxfp8_grouped_gemm_configs(
-                512, 2048, 2048, 8
+                512, 2048, 2048, 8, num_cus
             )
-        self.assertEqual(selected, [{"BLOCK_R": 64, "BLOCK_C": 128}])
+        self.assertEqual(
+            selected, [{"BLOCK_R": 64, "BLOCK_C": 128, "NUM_XCD": 1, "GROUP_M": 1}]
+        )
 
         with (
             mock.patch.object(flydsl_heuristics, "_make_mxfp8_grouped_gemm_param"),
             torch._inductor.config.patch(flydsl_enable_autotuning=True),
         ):
             exhaustive = flydsl_heuristics.get_mxfp8_grouped_gemm_configs(
-                512, 2048, 2048, 8
+                512, 2048, 2048, 8, num_cus
             )
-        self.assertEqual(len(exhaustive), 6)
-        self.assertIn({"BLOCK_R": 256, "BLOCK_C": 256}, exhaustive)
-        self.assertIn({"BLOCK_R": 64, "BLOCK_C": 128}, exhaustive)
+        self.assertEqual(len(exhaustive), 6 if num_cus == 32 else 18)
+        for num_xcd in {1, num_cus // 32}:
+            self.assertIn(
+                {"BLOCK_R": 256, "BLOCK_C": 256, "NUM_XCD": num_xcd, "GROUP_M": 1},
+                exhaustive,
+            )
+            self.assertIn(
+                {"BLOCK_R": 64, "BLOCK_C": 128, "NUM_XCD": num_xcd, "GROUP_M": 1},
+                exhaustive,
+            )
+        if num_cus > 32:
+            self.assertIn(
+                {
+                    "BLOCK_R": 256,
+                    "BLOCK_C": 256,
+                    "NUM_XCD": num_cus // 32,
+                    "GROUP_M": 4,
+                },
+                exhaustive,
+            )
 
     @parametrize(
         "k,n,g,block_r,block_c,expected",
