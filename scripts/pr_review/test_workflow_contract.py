@@ -1466,9 +1466,9 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
     def test_stage2_declares_exactly_the_jobs_that_were_reviewed(self):
         """Stage 1 pins its job set; Stage 2 did not.
 
-        A fourth job declaring `environment: bedrock`, assuming the publisher
-        role and checking out the PR head is green today, because every
-        role-separation test inspects the job literally named `review`.
+        A fifth job declaring `environment: bedrock`, assuming the publisher
+        role and checking out the PR head would be green, because every
+        role-separation test inspects the jobs by name.
         """
         after = strip_comments(STAGE2.read_text()).split("\njobs:", 1)[1]
         jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
@@ -2961,23 +2961,24 @@ class TestEachReviewCheckoutFetchesTheCommitItNames(unittest.TestCase):
 
 
 class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
-    """The review job's two checkouts were pinned. Stage 2 has FOUR.
+    """The review job's two checkouts were pinned. Stage 2 has FIVE.
 
-    `prepare` and `publish` each check this repository out at the workspace
-    root and then run `scripts/pr_review/emit_row.py` from it — `prepare` with
-    GITHUB_TOKEN and the publisher AWS session, `publish` with those plus
-    `pull-requests: write`. Pointing either `ref:` at the
-    pull request's head is one token, and runs pull-request-authored Python
-    with all of it. It is the same mutation the review job's trusted checkout
-    is already pinned against, one job over, where nothing looked.
+    `prepare`, `announce` and `publish` each check this repository out at the
+    workspace root and then run a `scripts/pr_review/` program from it —
+    `prepare` with GITHUB_TOKEN and the publisher AWS session, `announce` with
+    GITHUB_TOKEN and `pull-requests: write`, `publish` with all of those.
+    Pointing any of their `ref:`s at the pull request's head is one token, and
+    runs pull-request-authored Python with all of it. It is the same mutation
+    the review job's trusted checkout is already pinned against, one job over,
+    where nothing looked.
 
-    Every checkout in the file is enumerated, so a fifth one cannot be added
+    Every checkout in the file is enumerated, so a sixth one cannot be added
     unnoticed either.
     """
 
     # (job, path) -> the `ref:` that checkout must fetch. `None` for `path:`
     # means the checkout lands on the workspace root, which is legitimate in
-    # the two jobs that never fetch pull-request code and forbidden in `review`
+    # the three jobs that never fetch pull-request code and forbidden in `review`
     # (see TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot).
     EXPECTED = {
         ("prepare", None): "${{ github.sha }}",
