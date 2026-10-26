@@ -33,8 +33,8 @@
 # match at least one committed path. The fast lintrunner set enforces these
 # rules, declared sections, valid owners, source order, no duplicate or
 # ineffective patterns, and the "# owner:" rules: every "# label:" line is
-# directly followed by one "# owner:" line, and a label list has one owner
-# list.
+# directly followed by one "# owner:" line, a label list has one owner list,
+# and an active rule's handles appear on its block's owner line.
 #
 # Review-surface hierarchy:
 # - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
@@ -75,7 +75,7 @@
 # owner: none
 # /test/compiled_autograd_skips/
 # label: module: aotdispatch
-# owner: @aorenste @bdhirsh
+# owner: @aorenste @bdhirsh @Chillee @ezyang
 # /test/functorch/test_aot_joint_with_descriptors.py
 /test/functorch/test_aotdispatch.py @ezyang @Chillee
 # /test/functorch/test_codegen_backward_epilogue.py
@@ -1282,13 +1282,13 @@
 # /test/onnx/test_fx_type_promotion.py
 # /test/package/package_bc/test_fx_module.pt
 # label: oncall: export
-# owner: @angelayi @avikchaudhuri @tugsbayasgalan @ydwu4 @zhxchen17
+# owner: @angelayi @avikchaudhuri @SherlockNoMad @tugsbayasgalan @ydwu4 @zhxchen17
 # /test/export/
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 # label: module: fx
-# owner: none
+# owner: @zou3519
 # /test/fx/
 # /test/test_dynamic_spec_make_fx.py
 # /test/test_fx.py

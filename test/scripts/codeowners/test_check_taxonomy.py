@@ -77,6 +77,9 @@ class TestFindOwnershipErrors(TestCase):
                 "Label lists with several owner lists": [
                     "module: inductor: @alice | @bob | @dave"
                 ],
+                "Reviewers missing from owner lists": [
+                    "CODEOWNERS:10 /torch/_inductor/codegen/: @carol not on the block's owner line"
+                ],
             },
         )
 
