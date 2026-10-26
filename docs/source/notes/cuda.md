@@ -131,6 +131,17 @@ is overridden to `ieee`.
 
 We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
 
+On NVIDIA GPUs, the convolution kernels that `torch.compile` generates itself (for example with
+`mode="max-autotune"`) use TF32 only if `torch.backends.cudnn.conv.fp32_precision` is `tf32`, like eager cuDNN
+convolutions. When cuDNN is turned off (`torch.backends.cudnn.enabled = False`), they use full FP32. 1x1
+convolutions that `torch.compile` turns into matrix multiplications follow `torch.backends.cuda.matmul.fp32_precision`
+instead. For example, this turns off TF32 for eager convolutions and for the generated convolution kernels:
+
+```python
+torch.backends.cudnn.conv.fp32_precision = "ieee"
+model = torch.compile(model, mode="max-autotune")
+```
+
 ```{warning}
 
   Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
