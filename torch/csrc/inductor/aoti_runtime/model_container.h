@@ -824,6 +824,11 @@ class AOTInductorModelContainer {
 
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
+    // Runs still executing on the device read the buffer this swap makes
+    // inactive, which a later update, fold, or free may overwrite or release
+    // without waiting for them. The exclusive lock keeps new runs from starting
+    // meanwhile.
+    pool_.drain();
 
     active_idx_ = 1 - active_idx_;
 

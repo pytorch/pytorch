@@ -88,9 +88,15 @@ class ModelPool {
     return *slots_.front().model;
   }
 
-  // The caller must keep runs from using the models meanwhile.
+  // Applies fn to every model while none is checked out or in flight, as
+  // after drain() with new runs held off.
   template <typename Fn>
   void for_each_model(Fn&& fn) {
+    std::lock_guard lk(models_mutex_);
+    AOTI_RUNTIME_CHECK(
+        quiescent(),
+        "The models can only be updated together while the model pool is "
+        "quiescent");
     for (auto& slot : slots_) {
       fn(*slot.model);
     }
@@ -103,10 +109,7 @@ class ModelPool {
   void set_use_stream_affinity(bool use_stream_affinity) {
     std::lock_guard lk(models_mutex_);
     AOTI_RUNTIME_CHECK(
-        std::all_of(
-            slots_.begin(),
-            slots_.end(),
-            [](const Slot& slot) { return slot.state == State::kAvailable; }),
+        quiescent(),
         "Stream affinity can only be reconfigured while the model pool is "
         "quiescent");
 #if defined(USE_CUDA) || defined(USE_XPU)
@@ -312,6 +315,12 @@ class ModelPool {
     AOTI_RUNTIME_CHECK(slot.state == from, "Invalid model pool transition");
     slot.state = to;
     slot.seq = next_seq_++;
+  }
+
+  bool quiescent() const {
+    return std::all_of(slots_.begin(), slots_.end(), [](const Slot& slot) {
+      return slot.state == State::kAvailable;
+    });
   }
 
   Slot& slot_of(Model* model) {
