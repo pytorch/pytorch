@@ -139,11 +139,9 @@ class TestMoveConstructorsToGpu(TestCase):
         FileCheck().check_not("triton.jit").run(code[0])
 
     def test_index_put_mask_cpu_scalar_not_moved(self):
-        # Eager index_put_ dispatches to masked_fill_ for a bool or uint8 mask
-        # and a cpu scalar value, so moving the value to the gpu would add a
-        # host-to-device sync (and, for uint8, change behavior: masked_fill_
-        # rejects it). The graph is built by hand rather than traced since
-        # eager rejects index_put_ with a uint8 mask and a cpu scalar.
+        # Eager index_put_ dispatches to masked_fill_ for a bool mask and a
+        # cpu scalar value, so moving the value to the gpu would add a
+        # host-to-device sync.
         from torch._inductor.fx_passes.post_grad import (
             is_index_put_and_requires_h2d_sync_for_gpu_value,
         )
@@ -151,7 +149,6 @@ class TestMoveConstructorsToGpu(TestCase):
 
         for dtype, expected in (
             (torch.bool, True),
-            (torch.uint8, True),
             (torch.int32, False),
             (torch.long, False),
         ):

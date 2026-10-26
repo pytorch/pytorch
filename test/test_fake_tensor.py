@@ -750,7 +750,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             lambda x, index, value: torch.ops.aten._unsafe_index_put(x, [index], value),
         )
         for i, op in enumerate(ops):
-            for dtype in (torch.int8, torch.int16, torch.float):
+            for dtype in (torch.uint8, torch.int8, torch.int16, torch.float):
                 with self.subTest(op=i, dtype=dtype):
                     args = (
                         torch.zeros(4),
@@ -4459,31 +4459,25 @@ class TestFakeTensorDispatchCache(TestCase):
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
 
-            # uint8 is a (deprecated) mask, like bool
-            idx_tensor1 = torch.tensor([1, 1, 0, 1], dtype=torch.uint8)
-            self.assertRaises(
-                DynamicOutputShapeException,
-                lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
-            )
-
-            # int8 is not a valid index dtype; eager raises too
-            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
-            self.assertRaises(
-                IndexError,
-                lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
-            )
+            # int8 is not a valid index dtype, and uint8 masks are no longer
+            # supported; both raise like eager does.
+            for dtype in (torch.int8, torch.uint8):
+                idx_tensor1 = torch.tensor([1, 0, 1, 0], dtype=dtype)
+                self.assertRaises(
+                    IndexError,
+                    lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
+                )
 
         # With a ShapeEnv, indexing with a mask succeeds with an unbacked size,
         # and is not cached because its output shape depends on the mask's data.
         with FakeTensorMode(shape_env=ShapeEnv()):
             x = torch.randn(4, 4, 4)
-            for dtype in (torch.bool, torch.uint8):
-                mask = torch.tensor([1, 1, 0, 1], dtype=dtype)
-                FakeTensorMode.cache_clear()
-                torch.ops.aten.index(x, [None, mask])
-                # Both index and the nonzero it calls on the mask
-                self.assertBypasses("dynamic output shape", 2)
-                self.assertBypasses("unrepresented symbol in output", 0)
+            mask = torch.tensor([True, True, False, True])
+            FakeTensorMode.cache_clear()
+            torch.ops.aten.index(x, [None, mask])
+            # Both index and the nonzero it calls on the mask
+            self.assertBypasses("dynamic output shape", 2)
+            self.assertBypasses("unrepresented symbol in output", 0)
 
     def test_cache_output_synthesis_ignores_proxy_tracing(self):
         shape_env = ShapeEnv()

@@ -14592,36 +14592,47 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(y, torch.ones(size=(10, 10), device=device))
 
     def test_uint8_index(self, device="mps"):
-        # Indexing with a uint8 tensor treats it as a mask, which is deprecated.
+        # Indexing with a uint8 tensor used to treat it as a mask.
         # See https://github.com/pytorch/pytorch/issues/201370
-        v = torch.tensor([True, False, True], dtype=torch.bool, device=device)
-        boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
-        uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
-            self.assertEqual(v[boolIndices], v[uint8Indices])
-            self.assertEqual(v[boolIndices], torch.tensor([True], dtype=torch.bool, device=device))
-            self.assertEqual(len(w), 2)
+        msg = "indexing with dtype torch.uint8 is no longer supported"
 
-        x = torch.arange(0., 16, device=device).view(4, 4)
-        b = torch.ByteTensor([True, False, True, False]).to(device)
-        value = torch.tensor([3., 4., 5., 6.], device=device)
+        def u8(*values):
+            return torch.tensor(values, dtype=torch.uint8, device=device)
 
-        with warnings.catch_warnings(record=True) as w:
-            x[b] = value
-            self.assertEqual(len(w), 1)
-
-        self.assertEqual(x[0], value)
-        self.assertEqual(x[1], torch.arange(4., 8, device=device))
-        self.assertEqual(x[2], value)
-        self.assertEqual(x[3], torch.arange(12., 16, device=device))
+        def setitem(t, index, value):
+            t = t.clone()
+            t[index] = value
+            return t
 
         v = torch.randn(5, 7, 3, device=device)
-        mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[mask].shape, (3, 7, 3))
-            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEqual(len(w), 2)
+        x = torch.arange(16.0, device=device).view(4, 4)
+        b = torch.tensor([True, False, True], device=device)
+        mask, mask2 = u8(1, 0, 1, 1, 0), u8(1, 1, 1)
+        value = torch.randn(3, 7, 3, device=device)
+
+        cases = [
+            lambda: v[mask],
+            lambda: v[mask, :, mask2],
+            lambda: b[u8(1, 0, 0)],
+            lambda: setitem(v, mask, value),
+            # the value broadcasts over the selected rows
+            lambda: setitem(x, u8(1, 0, 1, 0), x[0]),
+            lambda: setitem(v, mask, 1.0),
+            lambda: v.index_put((mask,), value, accumulate=True),
+            # an empty mask, read and written
+            lambda: v[mask * 0],
+            lambda: v.clone().index_put_((mask * 0,), value[:0], accumulate=True),
+        ]
+        for fn in cases:
+            with self.assertRaisesRegex(IndexError, msg):
+                fn()
+
+        scalar = u8(1).squeeze()
+        for t in (v, torch.tensor(1, device=device), torch.tensor(True, device=device)):
+            with self.assertRaisesRegex(IndexError, msg):
+                t[scalar]
+            with self.assertRaisesRegex(IndexError, msg):
+                setitem(t, scalar, 0)
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
@@ -14883,6 +14894,18 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(torch.empty(0, *a.shape), a[false])
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
+
+    def test_bool_tensor_assignment(self, device="mps"):
+        x = torch.arange(0., 16, device=device).view(4, 4)
+        b = torch.tensor([True, False, True, False], device=device)
+        value = torch.tensor([3., 4., 5., 6.], device=device)
+
+        x[b] = value
+
+        self.assertEqual(x[0], value)
+        self.assertEqual(x[1], torch.arange(4., 8, device=device))
+        self.assertEqual(x[2], value)
+        self.assertEqual(x[3], torch.arange(12., 16, device=device))
 
     def test_invalid_index(self, device="mps"):
         x = torch.arange(0, 16, device=device).view(4, 4)

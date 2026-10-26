@@ -5057,7 +5057,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     if (
         values.get_numel() == 1
         and len(indices) == 1
-        and indices[0].get_dtype() in (torch.bool, torch.uint8)
+        and indices[0].get_dtype() == torch.bool
     ):
         mask = indices[0]
         for _ in range(len(mask.get_size()), len(self.get_size())):
@@ -5068,7 +5068,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     if torch.are_deterministic_algorithms_enabled():
         return index_put_fallback(self, indices, values, accumulate)
 
-    # Fallback if there is a boolean index
+    # Fallback if there is a boolean index, or a uint8 one, which eager rejects
     for index in indices:
         if index is not None and index.get_dtype() in (torch.bool, torch.uint8):
             return index_put_fallback(self, indices, values, accumulate)
