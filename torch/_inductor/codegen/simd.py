@@ -2298,7 +2298,10 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         if upcast and value_dtype != torch.float32:
             value_dtype = torch.float32
             value = k.cse.generate(
-                k.compute, f"{value}.to(tl.float32)", dtype=value_dtype, shape=value.shape
+                k.compute,
+                f"{value}.to(tl.float32)",
+                dtype=value_dtype,
+                shape=value.shape,
             )
         reshaped = k.emit_reshape(value, self._layout.reshape_shape, value_dtype)
         k.num_reduction += 1
