@@ -21,6 +21,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -4024,8 +4025,6 @@ def _resolve_needs_vec_isa(
 @functools.cache
 def _relocatable_roots() -> tuple[str, ...]:
     """The torch and Python install roots, which move when a packaged job does."""
-    import sysconfig
-
     roots = dict.fromkeys(
         normalize_path_separator(root)
         for root in (
@@ -4063,9 +4062,12 @@ def _portable_cpp_key(compiler: str, *parts: str) -> str:
     their C++ kernels under this key instead, so a later launch of the same build
     finds them. It is not used for the shared on-disk cache, where the install
     path still separates builds that torch_key() cannot tell apart.
-    """
-    import sysconfig
 
+    The compiler can itself live under a stripped root (a conda or packaged
+    toolchain), so it is named by its first version line instead of its path. A
+    compiler upgrade therefore rebuilds the kernels; a compiler that prints no
+    version contributes an empty line.
+    """
     identity = (
         torch_key().hex(),
         f"{sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",

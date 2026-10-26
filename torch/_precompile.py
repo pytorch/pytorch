@@ -3541,12 +3541,13 @@ def load(
     up to a graph break whose continuation fell back, still ran compiled.
 
     Frozen C++ kernels are keyed by ``torch_key()``, the Python ABI tag, the
-    compiler's version line, and the source and build command with the PyTorch
-    and Python install roots removed, so they still serve after the same build
-    is installed or extracted somewhere else. A kernel whose key differs, for
-    example because its build command names a toolchain or CUDA path outside
-    those roots that differs on this host, is rebuilt, which needs a C++
-    compiler there: :func:`no_compilation` does not gate C++ builds.
+    first line of the compiler's ``--version`` output, and the source and build
+    command with the PyTorch and Python install roots removed, so they still
+    serve after the same build is installed or extracted somewhere else. A
+    kernel whose key differs is rebuilt: for example, when this host's compiler
+    reports a different version, or the build command names a toolchain or CUDA
+    path outside those roots that differs here. A rebuild needs a C++ compiler
+    on this host: :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
