@@ -616,6 +616,11 @@ namespace {
     adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
     TORCH_CHECK(input.dim() == gradOutput_.dim(),
       __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+    for (const auto i : c10::irange(input.dim() - 2)) {
+      TORCH_CHECK(input.size(i) == gradOutput_.size(i),
+        __func__, ": input and gradOutput_ must have the same size at dim ", i,
+        ", but got ", input.size(i), " and ", gradOutput_.size(i));
+    }
 
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
