@@ -419,6 +419,12 @@ class DynamoTracer:
     configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be serialized,
     are listed in the artifact rather than refused.
+
+    ``freeze_never_run_backward`` lets the capture freeze a backward Triton kernel
+    that was compiled but that no call ran, instead of refusing it: a training
+    capture can lower a backward its calls never execute. The kernel is frozen
+    with its first usable config, which was never benchmarked, so serving it can
+    be slower and, for reductions, not bitwise identical to a tuned run.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -426,6 +432,7 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
+    freeze_never_run_backward: bool = False
 
 
 class PrecompiledRunnable:
@@ -707,9 +714,11 @@ class _DynamoCapture(Capture[_P, _R]):
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
+        freeze_never_run_backward: bool = False,
     ) -> None:
         super().__init__()
         self._session = session
+        self._freeze_never_run_backward = freeze_never_run_backward
         self._artifact_path = artifact_path
         self._cache_path = cache_path
         self._gates = {
@@ -806,7 +815,11 @@ class _DynamoCapture(Capture[_P, _R]):
                 ) from e
 
         try:
-            freeze_runtime_cache(snapshot, write)
+            freeze_runtime_cache(
+                snapshot,
+                write,
+                freeze_never_run_backward=self._freeze_never_run_backward,
+            )
         except PrecompileError:
             raise
         except Exception as e:
@@ -3468,6 +3481,7 @@ def capture(
         cache_path,
         require_complete=tracer.require_complete,
         require_no_risky_drops=tracer.require_no_risky_drops,
+        freeze_never_run_backward=tracer.freeze_never_run_backward,
     )
 
 
