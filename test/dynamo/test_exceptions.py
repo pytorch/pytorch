@@ -2142,11 +2142,15 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         [(OSError,), (MyException,), (KeyError, OSError), (MemoryError,)],
         name_fn=lambda bases: "_".join(b.__name__ for b in bases),
     )
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_sourceless_exception_subclass_with_c_new(self, bases):
         # OSError and MemoryError define their own tp_new, so CPython rejects
         # BaseException.__new__(cls) for their subclasses.
         def fn(x):
-            e = type("E", bases, {})()
+            class E(*bases):
+                pass
+
+            e = E()
             return x + 1, isinstance(e, bases), e.__context__, e.__cause__
 
         x = torch.ones(2)
