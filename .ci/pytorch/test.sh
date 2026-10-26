@@ -599,7 +599,7 @@ test_python_smoke_b200() {
   # CuTeDSL runtime does, so they are collected nowhere else.
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # The variants' expectations live outside test_ops too: two xfails in
-  # test_ops_gradients.py and nine TestOperators entries in the shared skip
+  # test_ops_gradients.py and nine TestOperatorsDevice entries in the shared skip
   # tuple. An expectation that never runs rots into an unexpected success
   # without anyone noticing, so collect those suites here as well -- a handful
   # of tests each once restricted to this op.
@@ -1838,7 +1838,7 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 
-  # Kineto's own unit tests, vendored under third_party/kineto. The binaries
+  # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
