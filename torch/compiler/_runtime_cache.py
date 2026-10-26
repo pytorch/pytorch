@@ -545,12 +545,15 @@ def _freeze_triton_kernel(
         and not any(kernel._forward_use for kernel in instances)
         and not any(kernel._launched for kernel in instances)
     )
+    static_by_instance = []
+    for kernel in instances:
+        with kernel.lock:
+            static_by_instance.append(static_results(kernel))
     if never_run_backward and not require_tuned_backward:
-        for kernel in instances:
+        for kernel, static in zip(instances, static_by_instance):
+            if not static:
+                continue
             with kernel.lock:
-                static = static_results(kernel)
-                if not static:
-                    continue
                 saved, saved_result = _detached_for_freeze(kernel, static[0])
                 kernel_name = kernel.inductor_meta.get("kernel_name")
                 compile_id = getattr(kernel, "compile_id", None)
@@ -589,7 +592,7 @@ def _freeze_triton_kernel(
                 # Whether DynamoTracer(require_tuned_backward=False) would freeze it.
                 "untuned_backward_eligible": require_tuned_backward
                 and never_run_backward
-                and any(static_results(kernel) for kernel in instances),
+                and any(static_by_instance),
             }
         ]
     )

@@ -7494,6 +7494,7 @@ if phase == "strict":
             cap(*inputs())
     except torch.compiler.PrecompileError as e:
         assert "no fully resolved static launcher" in str(e), e
+        assert "DynamoTracer(require_tuned_backward=False)" in str(e), e
     else:
         raise AssertionError("a strict capture froze a never-run backward kernel")
 elif phase in ("capture", "warm"):
