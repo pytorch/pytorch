@@ -1973,12 +1973,17 @@ class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
             M().eval(), (x, w, s), lambda: matcher_check(1), atol=0.001, rtol=0.07
         )
 
-        # Unregistering cpu disables the fusion. The FX graph cache is
-        # disabled for the recompiles because the registry is deliberately
-        # not part of the cache key (see register_woq_int8pack_fusion_device).
+        # Unregistering cpu disables the fusion. fx_graph_cache stays off for
+        # the recompiles: the allowlist is hashed into the FX graph cache
+        # key, so the re-registered compile below has the same key as the
+        # first one, and a cache hit would skip re-running the pattern passes
+        # (the matcher counter would not be observed).
         self.ctx_stack.enter_context(config.patch({"fx_graph_cache": False}))
         unregister_woq_int8pack_fusion_device("cpu")
         self.addCleanup(register_woq_int8pack_fusion_device, "cpu")
+        # A device index can never match the device-type check.
+        with self.assertRaises(ValueError):
+            register_woq_int8pack_fusion_device("cuda:0")
         self._test_common(
             M().eval(), (x, w, s), lambda: matcher_check(0), atol=0.001, rtol=0.07
         )

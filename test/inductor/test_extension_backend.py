@@ -288,25 +288,46 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
         s_cpu = torch.randn(12, dtype=torch.bfloat16)
         ref = fn(x_cpu, w_cpu, s_cpu)
         x, w, s = x_cpu.to(device), w_cpu.to(device), s_cpu.to(device)
+        int8pack_calls = self.module.int8pack_mm_call_count()
 
-        # Before registration the generic (non-fused) path is used.
-        counters.clear()
-        torch._dynamo.reset()
-        opt_fn = torch.compile()(fn)
-        res = opt_fn(x, w, s)
-        self.assertEqual(counters["inductor"]["woq_matcher_count"], 0)
-        self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
-
-        # Registering the device type turns the fusion on.
-        register_woq_int8pack_fusion_device("extension_device")
-        self.addCleanup(unregister_woq_int8pack_fusion_device, "extension_device")
-        counters.clear()
-        torch._dynamo.reset()
-        with config.patch({"fx_graph_cache": False}):
+        # fx_graph_cache is enabled on purpose: the allowlist is hashed into
+        # the FX graph cache key (FxGraphHashDetails), so the second compile
+        # below must not reuse the first one's artifact even though the graph
+        # itself is unchanged. The assertions are written so they also hold
+        # when an artifact is reused from a previous run of this test (a
+        # cache hit does not re-run the pattern passes, but the loaded
+        # artifact must still be the one compiled under that allowlist
+        # state).
+        with config.patch({"fx_graph_cache": True}):
+            # Before registration the generic (non-fused) path is used.
+            counters.clear()
+            torch._dynamo.reset()
             opt_fn = torch.compile()(fn)
             res = opt_fn(x, w, s)
-        self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
-        self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], 0)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            # The generic path runs aten.mm on the device, never the fused op.
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls)
+
+            # Registering the device type turns the fusion on.
+            register_woq_int8pack_fusion_device("extension_device")
+            self.addCleanup(unregister_woq_int8pack_fusion_device, "extension_device")
+            counters.clear()
+            torch._dynamo.reset()
+            opt_fn = torch.compile()(fn)
+            res = opt_fn(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            # The fused graph dispatched to the device's own
+            # aten._weight_int8pack_mm kernel.
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 1)
+
+        # Reset the shared op counter so tests that run after this one
+        # (e.g. test_open_device_registration) observe a clean state.
+        self.module.custom_op_called()
+
+        # Values that can never match the device-type check are rejected.
+        with self.assertRaises(ValueError):
+            register_woq_int8pack_fusion_device("extension_device:0")
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)

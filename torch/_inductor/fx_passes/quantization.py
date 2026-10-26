@@ -1146,16 +1146,44 @@ _woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"
 # third-party device type could never reach the check below.
 
 
+def _validate_woq_device_type(device_type: str) -> None:
+    """Reject ``device_type`` values that can never match the fusion check.
+
+    The check in ``_is_valid_woq_optimization_pattern`` compares against
+    ``x.device.type``, so a string carrying a device index (``"cuda:0"``) or
+    the pre-rename ``"privateuseone"`` would silently never match.
+    """
+    if not isinstance(device_type, str):
+        raise ValueError(f"device_type must be a str, got {type(device_type).__name__}")
+    try:
+        parsed = torch.device(device_type).type
+    except RuntimeError as e:
+        raise ValueError(
+            f"unknown device type {device_type!r}: the WOQ fusion check "
+            "compares against x.device.type, so device_type must be parseable "
+            "by torch.device (for a PrivateUse1 backend, register after "
+            "torch.utils.rename_privateuse1_backend)"
+        ) from e
+    if parsed != device_type:
+        raise ValueError(
+            f"expected a bare device type such as 'cuda', got {device_type!r} "
+            f"(torch.device({device_type!r}).type is {parsed!r}): a device "
+            "index or the pre-rename 'privateuseone' never matches the "
+            "device-type comparison in _is_valid_woq_optimization_pattern"
+        )
+
+
 def register_woq_int8pack_fusion_device(device_type: str) -> None:
     """Enable the WOQ int8pack-mm fusion on ``device_type``.
 
     Meant for third-party backends that implement the
     ``aten._weight_int8pack_mm`` operator. Registration is an explicit
-    opt-in; the default allowlist (cpu/cuda/xpu) is unchanged. Must be called
-    before the first compile: the registry is not part of the
-    FX-graph/AOTAutograd cache keys, so artifacts compiled under a different
-    registry state are reused as-is.
+    opt-in; the default allowlist (cpu/cuda/xpu) is unchanged. The allowlist
+    is hashed into the FX-graph cache key (``FxGraphHashDetails``), so
+    compiles observe the allowlist state they were compiled under and
+    changing it produces new cache entries instead of reusing stale ones.
     """
+    _validate_woq_device_type(device_type)
     _woq_int8pack_fusion_devices.add(device_type)
 
 
@@ -1163,9 +1191,10 @@ def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
     """Disable the WOQ int8pack-mm fusion on ``device_type``.
 
     Removes ``device_type`` from the allowlist (e.g. to restore the default
-    state in test teardown). The same caching caveat as
+    state in test teardown). The same cache-key behavior as
     :func:`register_woq_int8pack_fusion_device` applies.
     """
+    _validate_woq_device_type(device_type)
     _woq_int8pack_fusion_devices.discard(device_type)
 
 

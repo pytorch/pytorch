@@ -13,6 +13,7 @@
 
 static uint64_t op_counter = 0;
 static uint64_t last_saved_value = 0;
+static uint64_t int8pack_mm_calls = 0;
 
 // register guard
 namespace at {
@@ -187,6 +188,7 @@ at::Tensor custom_weight_int8pack_mm(
     const at::Tensor& mat2,
     const at::Tensor& scales) {
   op_counter += 1;
+  int8pack_mm_calls += 1;
   return alias_from_cpu(at::_weight_int8pack_mm(
       alias_to_cpu(self), alias_to_cpu(mat2), alias_to_cpu(scales)));
 }
@@ -231,6 +233,10 @@ bool custom_op_called() {
   return called;
 }
 
+uint64_t int8pack_mm_call_count() {
+  return int8pack_mm_calls;
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -238,6 +244,7 @@ bool custom_op_called() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_op_called", &custom_op_called, "check if our custom function was called");
+    m.def("int8pack_mm_call_count", &int8pack_mm_call_count, "number of aten::_weight_int8pack_mm calls");
     m.def("is_available", []() { return true; });
     m.def("device_count", []() { return 1; });
     m.def("current_device", []() { return 0; });
