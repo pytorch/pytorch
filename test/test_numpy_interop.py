@@ -528,6 +528,7 @@ class TestNumPyInterop(TestCase):
             )  # type: ignore[call-overload]
 
     @onlyCPU
+    @skipIfTorchDynamo("NumPy tracing treats integral scalars as 0-D arrays")
     def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
