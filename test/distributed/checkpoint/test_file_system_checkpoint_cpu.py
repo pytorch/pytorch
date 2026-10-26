@@ -285,6 +285,7 @@ class TestFileSystemWriterFlushBehavior(TestCase):
         )
         transform_to.write(b"Hello World")
         transform_to.close()
+        del transform_to  # NoCloseWriter.close() runs on release, as in _write_item
 
         # Extension transformed data is written, but raw stream is not eagerly flushed
         self.assertEqual(raw_stream.flush_count, 0)
