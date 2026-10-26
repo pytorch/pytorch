@@ -3,9 +3,11 @@
 
 A review notifies the PR author and puts findings on their lines.
 
-Input is the terminal row (terminal.json) that emit_row.py already checked.
-Every string is checked again with the sanitizer's predicates; anything that
-fails is dropped, never repaired.
+`--row-file` posts the terminal row (terminal.json) that emit_row.py already
+checked. Every string is checked again with the sanitizer's predicates; anything
+that fails is dropped, never repaired. `--mark-pending` and `--restore-pending`
+take no row: they mark the previous review in progress for RUN_ID, or put it
+back (see Invariants).
 
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,

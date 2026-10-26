@@ -1622,6 +1622,51 @@ class TestAReviewInProgressIsMarked(unittest.TestCase):
         self.assertEqual(post_review.unwrapped(crlf), ORIGINAL)
 
 
+class TestPendingModesReadTheirInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "RUN_ID": "77",
+        "OPT_OUT_LABEL": "skip me",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", flag]),
+            mock.patch.object(post_review, "mark_pending") as mark_,
+            mock.patch.object(post_review, "restore_pending") as restore,
+            redirect_stdout(io.StringIO()) as out,
+        ):
+            rc = post_review.main()
+        return rc, mark_, restore, out.getvalue()
+
+    def test_each_mode_passes_its_inputs(self):
+        rc, mark_, restore, _ = self.main("--mark-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        mark_.assert_called_once()
+        self.assertEqual(mark_.call_args.args[1:], (1, SHA, AUTHOR, "77", "skip me"))
+        restore.assert_not_called()
+        rc, mark_, restore, _ = self.main("--restore-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        restore.assert_called_once()
+        self.assertEqual(restore.call_args.args[1:], (1, AUTHOR, "77"))
+        mark_.assert_not_called()
+
+    def test_a_missing_or_bad_run_id_warns_and_does_nothing(self):
+        missing = {k: v for k, v in self.ENV.items() if k != "RUN_ID"}
+        for flag in ("--mark-pending", "--restore-pending"):
+            for env in (missing, {**self.ENV, "RUN_ID": "77; rm"}):
+                with self.subTest(flag=flag, run_id=env.get("RUN_ID")):
+                    rc, mark_, restore, out = self.main(flag, env)
+                    self.assertEqual(rc, 0)
+                    mark_.assert_not_called()
+                    restore.assert_not_called()
+                    self.assertIn("::warning::automated review not", out)
+
+
 class TestWorkflowWiring(unittest.TestCase):
     def test_publish_job_runs_the_script_on_the_row_with_a_write_token(self):
         text = WORKFLOW.read_text()

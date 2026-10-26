@@ -4902,6 +4902,38 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         for needle in ("gh api", "gh pr", "/labels"):
             self.assertNotIn(needle, self.job)
 
+    def test_each_mode_gets_the_inputs_main_reads(self):
+        """main() turns a missing input into a warning and exit 0, so a dropped
+        `RUN_ID` would leave every restore doing nothing with CI green."""
+        text = strip_comments(STAGE2.read_text())
+        pr = "${{ needs.prepare.outputs.pr_number }}"
+        sha = "${{ needs.prepare.outputs.head_sha }}"
+        run_id = "${{ github.run_id }}"
+        label = "${{ env.OPT_OUT_LABEL }}"
+        expected = {
+            ("announce", "Mark the previous automated review in progress"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
+                "RUN_ID": run_id,
+                "OPT_OUT_LABEL": label,
+            },
+            ("publish", "Post the automated review on the PR"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
+                "OPT_OUT_LABEL": label,
+            },
+            ("publish", "Put back the previous review"): {
+                "PR_NUMBER": pr,
+                "RUN_ID": run_id,
+            },
+        }
+        for (job, name), env in expected.items():
+            step = job_block(text, job).split(f"- name: {name}", 1)[1]
+            step = re.split(r"\n      - ", step, maxsplit=1)[0]
+            for var, value in env.items():
+                with self.subTest(step=name, var=var):
+                    self.assertEqual(env_values(step, var), [value])
+
     def test_publish_waits_for_it_and_always_puts_the_review_back(self):
         publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
         self.assertIn("needs: [prepare, announce, review]", publish)
