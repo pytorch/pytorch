@@ -1002,12 +1002,13 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
               " and ",
               source.scalar_type());
 
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_scatter_ only supports boolean masks, but got mask with dtype ",
+              mask.scalar_type());
+
   if (self.numel() == 0) {
     return self;
   }
-
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_scatter: expected BoolTensor or ByteTensor for mask");
 
   bool was_scalar = self.dim() == 0;
 
