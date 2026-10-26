@@ -19,7 +19,7 @@ from concurrent.futures import (
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -601,7 +601,20 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                future.static_autotuner.set_compile_info(compile_id, is_backward)
                 record_triton_kernel(source_key, future.static_autotuner)
+            elif not is_backward:
+                # A compile still pending for another graph applies only that
+                # graph's direction; record this one's forward use too.
+                pending = future
+
+                def forward_used() -> CachingAutotuner:
+                    kernel = cast("CachingAutotuner", pending.result())
+                    kernel._forward_use = True
+                    return kernel
+
+                underlying = getattr(pending, "future", None)
+                future = LambdaFuture(forward_used, future=underlying)
             if is_parallel:
                 return future
             else:

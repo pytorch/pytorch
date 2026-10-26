@@ -888,30 +888,32 @@ class TestFxGraphCache(TestCase):
         )
 
     @requires_gpu_and_triton
-    @config.patch(
-        fx_graph_cache=True,
-        fx_graph_remote_cache=False,
-        bundle_triton_into_fx_graph_cache=False,
-    )
+    @config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
     @functorch_config.patch(enable_autograd_cache=False)
-    def test_cache_hit_tags_backward_kernels(self):
+    @parametrize("bundle_triton", (False, True))
+    def test_cache_hit_tags_backward_kernels(self, bundle_triton):
         from torch.compiler import _runtime_cache
 
         def fn(x):
             return x.sin() * 2
 
         x = torch.rand(32, device=GPU_TYPE, requires_grad=True)
-        torch.compile(fn)(x).sum().backward()
-        self.reset()
-        counters.clear()
-        # The cached output code loads with no GraphLowering to tag its kernels.
-        with _runtime_cache.capture_scope():
+        with config.patch(
+            bundle_triton_into_fx_graph_cache=bundle_triton,
+            use_static_triton_launcher=bundle_triton,
+        ):
             torch.compile(fn)(x).sum().backward()
-            kernels = [
-                kernel
-                for instances in _runtime_cache._capture.triton_kernels.values()
-                for kernel in instances
-            ]
+            self.reset()
+            counters.clear()
+            # The cached output code loads with no GraphLowering to tag its kernels;
+            # bundled, they come back as statically launchable futures.
+            with _runtime_cache.capture_scope():
+                torch.compile(fn)(x).sum().backward()
+                kernels = [
+                    kernel
+                    for instances in _runtime_cache._capture.triton_kernels.values()
+                    for kernel in instances
+                ]
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
         self.assertEqual(
             sorted((k.is_backward, k._forward_use) for k in kernels),
