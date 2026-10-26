@@ -7,6 +7,8 @@ from collections import namedtuple
 from typing import Dict, List, NamedTuple, Tuple
 
 import torch
+from torch.jit._check import AttributeTypeIsSupportedChecker
+from torch.jit._recursive import get_annotations
 from torch.testing._internal.common_utils import IS_WINDOWS, raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
@@ -14,6 +16,7 @@ from torch.testing._internal.jit_utils import JitTestCase, make_global
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from jit.future_annotations import FutureAnnotatedBase
 
 
 class TestTyping(JitTestCase):
@@ -681,6 +684,39 @@ class TestTyping(JitTestCase):
         mod2 = LowestModule()
         mod_s = torch.jit.script(mod)
         mod2_s = torch.jit.script(mod2)
+
+    def test_annotations_are_read_from_class(self):
+        class Module(FutureAnnotatedBase):
+            state: List[int]
+
+        self.assertEqual(get_annotations(Module()), {"state": List[int]})
+
+    def test_annotations_follow_mro(self):
+        class Root(torch.nn.Module):
+            root: int
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            right: str
+
+        class Module(Left, Right):
+            pass
+
+        self.assertEqual(get_annotations(Module()), {"right": str})
+
+    def test_annotation_checker_reads_class_annotations(self):
+        class Module(FutureAnnotatedBase):
+            values: List[int]
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.values: List[int] = []
+
+        checker = AttributeTypeIsSupportedChecker()
+        checker.check(Module())
+        self.assertIn("values", checker.class_level_annotations)
 
 
 if __name__ == "__main__":

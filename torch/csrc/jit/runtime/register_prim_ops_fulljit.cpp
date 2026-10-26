@@ -423,11 +423,10 @@ at::Tensor interpolate(
     std::optional<bool> align_corners,
     std::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
-    if (align_corners != std::nullopt) {
-      throw std::runtime_error(
-          "align_corners option can only be set with the "
-          "interpolating modes: linear | bilinear | bicubic | trilinear");
-    }
+    TORCH_CHECK(
+        align_corners == std::nullopt,
+        "align_corners option can only be set with the "
+        "interpolating modes: linear | bilinear | bicubic | trilinear");
   } else {
     if (align_corners == std::nullopt) {
       TORCH_WARN(
@@ -533,13 +532,13 @@ at::Tensor interpolate(
         *align_corners,
         std::make_optional(scale_factors_1));
   if (input_dim == dim1d && mode == "bilinear")
-    throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
+    TORCH_CHECK(false, "Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
-    throw std::runtime_error("Got 3D input, but bicubic mode needs 4D input");
+    TORCH_CHECK(false, "Got 3D input, but bicubic mode needs 4D input");
   if (input_dim == dim1d && mode == "trilinear")
-    throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
+    TORCH_CHECK(false, "Got 3D input, but trilinear mode needs 5D input");
   if (input_dim == dim2d && mode == "linear")
-    throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
+    TORCH_CHECK(false, "Got 4D input, but linear mode needs 3D input");
   if (input_dim == dim2d && mode == "bilinear")
     return at::upsample_bilinear2d(
         input,
@@ -555,13 +554,13 @@ at::Tensor interpolate(
         scale_factors_1,
         scale_factors_2);
   if (input_dim == dim2d && mode == "trilinear")
-    throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
+    TORCH_CHECK(false, "Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == dim3d && mode == "linear")
-    throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
+    TORCH_CHECK(false, "Got 5D input, but linear mode needs 3D input");
   if (input_dim == dim3d && mode == "bilinear")
-    throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
+    TORCH_CHECK(false, "Got 5D input, but bilinear mode needs 4D input");
   if (input_dim == dim3d && mode == "bicubic")
-    throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
+    TORCH_CHECK(false, "Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == dim3d && mode == "trilinear")
     return at::upsample_trilinear3d(
         input,
@@ -598,9 +597,7 @@ void interpolate_op(Stack& stack) {
       align_corners,
       recompute_scale_factor,
       antialias);
-  if (antialias) {
-    throw std::runtime_error("Antialias is not yet supported");
-  }
+  TORCH_CHECK(!antialias, "Antialias is not yet supported");
   at::Tensor res = interpolate(
       input,
       size,
@@ -628,7 +625,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
     std::stringstream ss;
     ss << "Expecting optional int or int list arg for scale factor, got"
        << int_ivalue;
-    throw std::runtime_error(std::move(ss).str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   return scale_factor_double;
 }

@@ -2,7 +2,7 @@
 import dataclasses
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import override
 
 import sympy
@@ -20,6 +20,7 @@ from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
+    FlexGemmOutputTransform,
     LOCAL_REDUCE_FINALIZE_NAMES,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
-    """Template-time local-reduce metadata for output and/or feed-main consumers."""
+    """Template-time local-reduce metadata; geometry is in physical accumulator columns."""
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
@@ -46,6 +47,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     combine: str | None = None
     finalize: str | None = None
     finalize_operands: tuple[str, ...] = ()
+    fragment_reduced: bool = False
     store_finalize: str | None = None
     binary_store_finalize: bool = False
     prepass_combine: str | None = None
@@ -62,13 +64,14 @@ class FlexGemmEpilogueLocalReduceConfig:
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.geometry,
+            local_reduce.match.physical_geometry,
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
             source.local_reduce_combine,
             source.local_reduce_finalize,
             source.local_reduce_finalize_operands,
+            source.local_reduce_fragment_reduced,
             source.local_reduce_store_finalize,
             source.local_reduce_binary_store_finalize,
             source.local_reduce_prepass_combine,
@@ -97,6 +100,7 @@ class FlexGemmEpilogueLocalReduceConfig:
             combine=self.combine,
             finalize=callback(self.finalize),
             finalize_operands=self.finalize_operands,
+            fragment_reduced=self.fragment_reduced,
             store_finalize=callback(self.store_finalize),
             binary_store_finalize=self.binary_store_finalize,
             prepass=None if self.prepass_combine is None else resolve(prepass_name),
@@ -116,12 +120,17 @@ class FlexGemmEpilogueConfig:
         gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
+        blockscaled_format: Shared QuACK A/B block-scaled format.
         quack_config: Exact QuACK GemmConfig fields pinned for this choice;
             None only before lowering has selected the candidates.
+        varlen_axis: grouped_mm dimension segmented by the ``[0, *offs]``
+            boundaries in template input 2, or None for dense GEMMs.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
+        output_transform: Lane transform between the accumulator and the main
+            output (``GroupedMainStore`` or ``InterleavedMainStore``), if any.
     """
 
     epilogue_name: str
@@ -129,12 +138,14 @@ class FlexGemmEpilogueConfig:
     gemm_op: FlexGemmOpSpec
     alpha: float
     beta: float
+    blockscaled_format: str | None
     quack_config: QuackConfigKey | None
+    varlen_axis: Literal["m", "k"] | None
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
-    output_contraction: FlexGemmOutputContraction | None
+    output_transform: FlexGemmOutputTransform | None
 
     def epimod(
         self,
@@ -163,7 +174,8 @@ class FlexGemmEpilogueConfig:
             None
             if self.local_reduce is None
             else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
-            self.output_contraction,
+            self.output_transform,
+            varlen_m=self.varlen_axis == "m",
         )
 
 
@@ -207,6 +219,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
                 FlexGemmOutputContraction,
+                FlexGemmOutputExpansion,
                 FlexGemmLocalReduceGeometry,
             )
             from torch._inductor.kernel.flex_gemm import (
@@ -289,6 +302,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             plan += f", finalize={self._callback_reference(local_reduce.finalize)}"
         if local_reduce.finalize_operands:
             plan += f", finalize_operands={local_reduce.finalize_operands!r}"
+        if local_reduce.fragment_reduced:
+            plan += ", fragment_reduced=True"
         if local_reduce.store_finalize is not None:
             plan += (
                 ", store_finalize="
@@ -316,6 +331,13 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if config.quack_config is None:
             raise AssertionError("rendered FlexGEMM choices require a pinned config")
         kwargs = [f", config={config.quack_config!r}"]
+        if config.blockscaled_format is not None:
+            kwargs.append(
+                f", SFA={input_args[2]}, SFB={input_args[3]}, "
+                f"blockscaled_format={config.blockscaled_format!r}"
+            )
+        if config.varlen_axis is not None:
+            kwargs.append(f", cu_seqlens_{config.varlen_axis}={input_args[2]}")
         if epilogue_args:
             kwargs.append(
                 f", epilogue_args=({', '.join(epilogue_args)},), "
@@ -330,8 +352,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                     input_args, config.local_reduce, config.epilogue_name
                 )
             )
-        if config.output_contraction is not None:
-            kwargs.append(f", output_contraction={config.output_contraction!r}")
+        if config.output_transform is not None:
+            kwargs.append(f", output_transform={config.output_transform!r}")
         return "".join(kwargs)
 
 
@@ -339,6 +361,14 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
     def __init__(self, *args: Any, template_kwargs: dict[str, Any], **kwargs: Any):
         super().__init__(*args, template_kwargs=template_kwargs, **kwargs)
         self.config: FlexGemmEpilogueConfig = template_kwargs["config"]
+
+    @override
+    def benchmark(self, *args, out) -> float:
+        # In-process autotuning deduplicates inputs by buffer name, while the
+        # FlexGEMM kernel signature preserves every operand position.
+        input_names = [node.get_name() for node in self.input_nodes]
+        inputs = dict(zip(dict.fromkeys(input_names), args, strict=True))
+        return self.bmreq.benchmark(*(inputs[name] for name in input_names), out=out)
 
     @override
     def output_node(self) -> "TensorBox":
@@ -361,7 +391,7 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         sizevars = V.graph.sizevars
         if fields["swap_ab"]:
             sizevars.check(sympy.Eq(sympy.Mod(n, 8), 0))
-        if config.output_contraction is not None:
+        if isinstance(config.output_transform, FlexGemmOutputContraction):
             sizevars.check_leq(fields["tile_n"], n)
         return super().output_node()
 

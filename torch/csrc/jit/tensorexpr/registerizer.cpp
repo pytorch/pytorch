@@ -186,11 +186,10 @@ void RegisterizerAnalysis::closeAccessIntoScope(
 }
 
 void RegisterizerAnalysis::visit(const ForPtr& v) {
-  if (v->loop_options().is_gpu_block_index() ||
-      v->loop_options().is_gpu_thread_index()) {
-    throw malformed_input(
-        "Registerization must occur after parallelism flattening");
-  }
+  TORCH_CHECK(
+      !v->loop_options().is_gpu_block_index() &&
+          !v->loop_options().is_gpu_thread_index(),
+      "MALFORMED INPUT: Registerization must occur after parallelism flattening");
 
   auto parent = currentScope_;
   currentScope_ = std::make_shared<Scope>(v->body(), parent);

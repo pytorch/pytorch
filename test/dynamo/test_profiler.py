@@ -10,10 +10,15 @@ from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynam
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import ProfilerRecordFunctionContextVariable
 from torch.profiler import record_function
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TemporaryFileName,
+)
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamo_timed_profiling_isolated(self):
         # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):

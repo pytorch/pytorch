@@ -154,8 +154,8 @@ The operator benchmarks are continuously monitored in CI to track performance re
 The [operator_benchmark.yml](../../.github/workflows/operator_benchmark.yml) workflow runs operator benchmarks on CPU devices:
 
 **Devices:**
-- x86_64: `linux.12xlarge` (Intel/AMD CPUs)
-- aarch64: `linux.arm64.m8g.4xlarge` (ARM64 CPUs)
+- x86_64: `mt-l-x86iavx512-48-384` (Intel/AMD CPUs)
+- aarch64: `mt-l-arm64g4-16-62` (ARM64 CPUs)
 
 **Operators Tracked:** All operators in the `pt/` directory with tag: `short`
 
@@ -174,8 +174,8 @@ The [operator_benchmark.yml](../../.github/workflows/operator_benchmark.yml) wor
 The [operator_microbenchmark.yml](../../.github/workflows/operator_microbenchmark.yml) workflow runs operator microbenchmarks on GPU devices:
 
 **CUDA Devices:**
-- H100 GPUs (`linux.aws.h100`) - CUDA 12.8, sm_90
-- A100 GPUs (`linux.aws.a100`) - CUDA 12.8, sm_80
+- H100 GPUs (`mt-l-x86iamx-22-225-h100`) - CUDA 12.8, sm_90
+- A100 GPUs (`mt-l-x86iavx512-11-125-a100`) - CUDA 12.8, sm_80
 - B200 GPUs (`linux.dgx.b200`) - CUDA 12.8, sm_100
 
 **ROCm Devices:**
