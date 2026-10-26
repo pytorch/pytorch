@@ -5932,6 +5932,12 @@ class GetSetDescriptorVariable(DescriptorVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            # descr_repr reads __objclass__.__name__, which a heap type can rename.
+            objclass_source = AttrSource(self.source, "__objclass__")
+            name_source = AttrSource(objclass_source, "__name__")
+            install_guard(name_source.make_guard(GuardBuilder.EQUALS_MATCH))
         return descr_repr(tx, self.descriptor, "attribute")
 
     def __repr__(self) -> str:
