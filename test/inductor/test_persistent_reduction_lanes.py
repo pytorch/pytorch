@@ -256,6 +256,23 @@ class TestPersistentReductionLanes(TestCase):
         self.check(fn, device, group, kernels=None)
         self.assertEqual(metrics.codegen_nested_reduction, 0)
 
+    @config.patch(comprehensive_padding=True, realize_opcount_threshold=1)
+    def test_transposed_internal_read_is_not_forwarded(self, device):
+        # Padding keeps two loop vars in the write of v, so the transposed read
+        # matches it after stride-order normalization but not in loop order.
+        def chain(t):
+            for _ in range(12):
+                t = t * 1.0001 + 0.5
+            return t
+
+        def fn(x):
+            v = chain(x)
+            w = chain(v.permute(1, 2, 0)).contiguous()
+            return w.abs().amax(-1) + w[..., 3], w, v * 2
+
+        x = torch.randn(8, 129, 8, device=device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
 
 instantiate_device_type_tests(
     TestPersistentReductionLanes, globals(), only_for=("cuda",)

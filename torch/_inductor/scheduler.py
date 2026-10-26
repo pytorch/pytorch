@@ -10573,9 +10573,17 @@ class Scheduler:
                 continue
             # TODO: Replace this inherited parent-to-grouped compatibility proof
             # with source-anchored records once they can be rebuilt after fusion.
-            if not (is_nested_stage_read or plan.requires_persistent) or not (
-                self._fusable_read_after_index_equivalence(read, write)
-            ):
+            if is_nested_stage_read:
+                proved = self._fusable_read_after_index_equivalence(read, write)
+            else:
+                # The persistent tile forwards parent values positionally, so the
+                # read must match the write in loop order, not only in layout.
+                proved = (
+                    plan.requires_persistent
+                    and self._memory_dep_supports_index_equivalence(read, write)
+                    and read.normalize() == write.normalize()
+                )
+            if not proved:
                 return None
             matches.add(match)
         return tuple(matches)
