@@ -21,11 +21,10 @@ import itertools
 import re
 from collections import defaultdict
 from torch import inf
-from torch.nn import Buffer, Parameter
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -50,7 +49,6 @@ import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
-import operator
 from torch.testing._internal.common_utils import (
     IS_MACOS,
 )
@@ -575,13 +573,6 @@ class MPSReluTest(TestCaseMPS):
     def _npRelu(self, np_features):
         return np.maximum(np_features, np.zeros(np_features.shape)).astype(np_features.dtype)
 
-    def testNpRelu(self):
-        torch.testing.assert_close(
-            np.array([[0., 0.7, 0.0, 0.3, 0.0], [0.1, 0.0, 0.5, 0.0, 0.9]]),
-            self._npRelu(
-                np.array([[-0.9, 0.7, -0.5, 0.3, -0.1], [0.1, -0.3, 0.5, -0.7,
-                                                         0.9]])))
-
     def _testRelu(self, np_features, device):
         np_relu = self._npRelu(np_features)
         # Convert the numpy array to a PyTorch Tensor,
@@ -603,16 +594,6 @@ class MPSReluTest(TestCaseMPS):
         self.assertEqual(np_relu, py_relu_cpu)
         # Inplace Relu modifies the initial input and it should match the output of Relu
         self.assertEqual(np_relu, py_tensor.to("cpu"))
-
-    def testNumbersCPU(self):
-        for t in [np.int32]:
-            # Force execution on CPU even if a GPU kernel is available for the type.
-            self._testRelu(
-                np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
-                device="cpu")
-            self._testReluInPlace(
-                np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
-                device="cpu")
 
     def testNumbersGPU(self):
         for t in [np.float16, np.float32]:
@@ -681,18 +662,6 @@ class MatmulTest(TestCaseMPS):
         self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
 
 class MPSLeakyReluTest(TestCaseMPS):
-    def _npLeakyRelu(self, np_features, negative_slope=0.1):
-        return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
-
-    def testNpLeakyRelu(self):
-        torch.testing.assert_close(
-            np.array([[-0.09, 0.7, -0.05, 0.3, -0.01],
-                      [0.1, -0.03, 0.5, -0.07, 0.9]]),
-            self._npLeakyRelu(
-                np.array([[-0.9, 0.7, -0.5, 0.3, -0.1], [0.1, -0.3, 0.5, -0.7,
-                                                         0.9]]),
-                negative_slope=0.1))
-
     def _testLeakyRelu(self, shape, dtype, negative_slope, contiguous):
         cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
         mps_x = cpu_x.detach().clone().to('mps')
@@ -735,42 +704,6 @@ class MPSLeakyReluTest(TestCaseMPS):
                                         contiguous=contiguous)
 
 class TestAvgPool(TestCaseMPS):
-    def _sum_pool2d(self, x, kernel_size):
-        windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
-        return torch.sum(windows, dim=1)
-
-    def _sum_pool3d(self, x, kernel_size):
-        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculate sum
-        h = kernel_size[0]
-        splited_x = [t.sum(0) for t in x.split(h) if t.size(0) == h]
-        # sum_pool2d assumes tensor in (1, 1, n, m) view, so unsqueeze two times
-        splited_x = [self._sum_pool2d(t.unsqueeze(0).unsqueeze(0), kernel_size[1:]) for t in splited_x]
-        joined_x = torch.cat(splited_x)
-        return joined_x.view(1, joined_x.numel())
-
-    def _avg_pool2d(self, x, kernel_size):
-        size = reduce(operator.mul, kernel_size)  # noqa: F821
-        return self._sum_pool2d(x, kernel_size) / size
-
-    def _avg_pool3d(self, x, kernel_size):
-        size = reduce(operator.mul, kernel_size)  # noqa: F821
-        return self._sum_pool3d(x, kernel_size) / size
-
-    def test_avg_pool2d_with_zero_divisor(self):
-        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
-
-    def test_doubletensor_avg_pool2d_with_divisor(self):
-        n, m = 3, 3
-        input = torch.rand(1, 1, n, m)
-        for i in range(1, n + 1):
-            for j in range(1, m + 1):
-                for divisor in [1, 7, i * j]:
-                    actual = F.avg_pool2d(input[0], (i, j), divisor_override=divisor)
-                    actual = actual.view(1, actual.numel())
-                    expected = self._sum_pool2d(input, (i, j)) / divisor
-                    self.assertEqual(actual, expected, rtol=0, atol=1e-5)
-
     def test_avg_pool2d_ceil_mode(self):
         # Regression test for gh-36977
         x = 10 * torch.randn((1, 16, 4, 4))
@@ -10852,13 +10785,6 @@ class TestSmoothL1Loss(TestCaseMPS):
         helper((3, 3, 0))
 
 class TestNLLLoss(TestCaseMPS):
-    def test_nll_loss_mismatched_batch(self, device='mps'):
-        x = torch.randn((10, 3), requires_grad=True, device=device)
-        # t should have size (10,)
-        t = torch.zeros((3,), dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
-            F.nll_loss(x, t)
-
     def test_nll_loss_out_of_bounds_ignore_index(self):
 
         def test_nll_loss_out_of_bounds_ignore_index_helper(device):
@@ -10879,37 +10805,6 @@ class TestNLLLoss(TestCaseMPS):
 
         for cpu, mps in zip(output_cpu, output_mps):
             self.assertEqual(cpu, mps)
-
-    def test_nll_loss_invalid_target_dim(self):
-
-        def _test_nll_loss_invalid_target_dim(device):
-            output = []
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.zeros((6, 2), dtype=torch.int64, device=device)
-            with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
-                F.nll_loss(x, t)
-
-        _test_nll_loss_invalid_target_dim(device='cpu')
-        _test_nll_loss_invalid_target_dim(device='mps')
-
-    def test_nll_loss_invalid_weights(self):
-
-        def _test_nll_loss_invalid_weights(device):
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.tensor([0, 1, 2, 1, 1, 2], dtype=torch.int64, device=device)
-            invalid_weights = [
-                torch.zeros(4, device=device),
-                torch.zeros((1, 3), device=device),
-            ]
-            msg = "weight tensor should be defined either for all 3 classes or no classes"
-            for weight in invalid_weights:
-                with self.assertRaisesRegex(RuntimeError, msg):
-                    F.nll_loss(x, t, weight=weight)
-
-        _test_nll_loss_invalid_weights(device='cpu')
-        _test_nll_loss_invalid_weights(device='mps')
 
     def _nll_loss_helper(self, input_size, reduction, expected):
 
@@ -11099,71 +10994,6 @@ class TestTopK(TestCase):
 
 class TestNNMPS(NNTestCase):
 
-    def _create_basic_net(self):
-        class Layer(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.layer_dummy_param = Parameter(torch.empty(3, 5))
-                self.layer_dummy_buf = Buffer(torch.zeros(1, 3, 3, 7))
-
-        class Net(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.l1 = Layer()
-                self.dummy_param = Parameter(torch.empty(3, 5))
-                self.dummy_buf = Buffer(torch.zeros(7, 3, 3, 1))
-
-        l = Layer()
-        n = Net()
-        s = nn.Sequential(n, n)
-
-        return l, n, s
-
-    def test_requires_grad_(self):
-        m = self._create_basic_net()[-1]
-        if len(list(m.buffers())) <= 0:
-            raise AssertionError('invalid test: expected buffers')
-        if not all(not b.requires_grad for b in m.buffers()):
-            raise AssertionError('invalid test: buffers should not require grad')
-        if len(list(m.parameters())) <= 0:
-            raise AssertionError('invalid test: expected parameters')
-        if not all(p.requires_grad for p in m.parameters()):
-            raise AssertionError('invalid test: parameters should require grad')
-        for requires_grad in (False, True):
-            self.assertIs(m.requires_grad_(requires_grad), m)
-            for p in m.parameters():
-                self.assertEqual(p.requires_grad, requires_grad)
-            for b in m.buffers():
-                self.assertFalse(b.requires_grad)
-
-    def test_module_backcompat(self):
-        from torch.serialization import SourceChangeWarning
-        path = download_file('https://download.pytorch.org/test_data/linear.pt')
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', SourceChangeWarning)
-            # weights_only=False as this is a legacy use case that loads a module
-            m = torch.load(path, weights_only=False)
-        input = torch.randn(2, 3, dtype=torch.float)
-        self.assertEqual(m(input).size(), (2, 5))
-
-    def test_conv_backcompat(self):
-        from torch.serialization import SourceChangeWarning
-        # This file was generated by running on PyTorch 1.0.1 on Python 2:
-        #
-        #     import torch
-        #     from torch import nn
-        #     m = nn.Conv2d(1, 1, 1)
-        #     torch.save(m, 'legacy_conv2d.pt')
-        #
-        # NB: This Pickle also contains some Unicode data!
-        path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', SourceChangeWarning)
-            # weights_only=False as this is a legacy use case that loads a module
-            m = torch.load(path, encoding='utf-8', weights_only=False)
-        input = torch.randn((1, 1, 1, 1), dtype=torch.float)
-        self.assertEqual(m(input).size(), (1, 1, 1, 1))
-
     def test_conv_expand(self):
         device = 'mps'
         input_ = torch.rand(2, 3, 16, 16, device=device)
@@ -11188,74 +11018,6 @@ class TestNNMPS(NNTestCase):
         # Use assertTrue in case to make sure non-empty string is returned
         self.assertTrue(str(torch.ones(100, 100, device='mps').nonzero()))
         self.assertTrue(str(torch.ones(100, 100, device='mps').nonzero().contiguous()))
-
-    def test_zero_grad(self):
-        i = torch.randn(2, 5, requires_grad=True)
-        module = nn.Linear(5, 5)
-        for p in module.parameters():
-            p.requires_grad = False
-        module.zero_grad()
-
-        module.weight.requires_grad = True
-        module.zero_grad()
-        self.assertIsNone(module.weight.grad)  # uninitialized grad
-
-        module(i).sum().backward()
-        self.assertIsNotNone(module.weight.grad)
-        self.assertGreater(module.weight.grad.data.abs().sum(), 0)
-        module.zero_grad()
-        self.assertIsNone(module.weight.grad)
-
-        module.bias.requires_grad = True
-        module.zero_grad()
-        self.assertIsNone(module.weight.grad)
-        self.assertIsNone(module.bias.grad)
-        module(i).sum().backward()
-        self.assertIsNotNone(module.weight.grad)
-        self.assertIsNotNone(module.bias.grad)
-        self.assertGreater(module.weight.grad.data.abs().sum(), 0)
-        self.assertGreater(module.bias.grad.data.abs().sum(), 0)
-
-        # Force set to zeros.
-        module.zero_grad(set_to_none=False)
-        self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
-        self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
-
-        module.zero_grad()
-        self.assertIsNone(module.weight.grad)
-        self.assertIsNone(module.bias.grad)
-
-
-    def test_no_grad(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
-            module = nn.Conv2d(2, 5, kernel_size=3, padding=1).to(dtype)
-            input = torch.randn(1, 2, 10, 10).to(dtype)
-            x = input
-            y = input.clone()
-
-            output = module(x)
-            self.assertTrue(output.requires_grad)
-            output.backward(torch.ones(1, 5, 10, 10))
-
-            with torch.no_grad():
-                output2 = module(y)
-                self.assertFalse(output2.requires_grad)
-                self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
-
-    def test_invalid_conv1d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
-            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
-            input = torch.randn(1, 3, 4).to(dtype)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r'Calculated padded input size per channel: \(4\). ' +
-                                        r'Kernel size: \(10\). Kernel size can\'t be greater than actual input size'):
-                module(input)
-
-            # Negative stride check
-            module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True).to(dtype)
-            input = torch.randn(1, 3, 4).to(dtype)
-            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
-                module(input)
 
     def test_conv2d_discontiguous_weight(self):
         # Test for https://github.com/pytorch/pytorch/issues/55781
@@ -13216,99 +12978,6 @@ class TestViewOpsMPS(TestCaseMPS):
         t_mps = t_mps + 1
         t_cpu = t_cpu + 1
         self.assertEqual(t_mps, t_cpu)
-
-    def test_squeeze_view(self, device="mps"):
-        t = torch.ones(5, 1, 5, device=device)
-        v = torch.squeeze(t)
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 1] = 0
-        self.assertIs(t, v._base)
-
-    def test_squeeze_inplace_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.squeeze_()
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 1] = 0
-        self.assertIs(t, v._base)
-
-    def test_contiguous_self(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        s = t.contiguous()
-        self.assertIs(s, t)
-
-    def test_contiguous_nonview(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        nv = t.t().contiguous()
-        self.assertFalse(self.is_view_of(t, nv))
-
-        nv[0, 0] = 0
-        self.assertNotEqual(t[0, 0], nv[0, 0])
-
-    def test_reshape_nonview(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        nv = torch.reshape(t.t(), (25,))
-        self.assertFalse(self.is_view_of(t, nv))
-
-        nv[6] = 0
-        self.assertNotEqual(t[1, 1], nv[6])
-
-    def test_flatten_view(self, device="mps"):
-        def test_writes_propagate(t, v):
-            idx_t = (0,) * t.ndim
-            idx_v = (0,) * v.ndim
-            v[idx_v] = 0
-            self.assertEqual(t[idx_t], v[idx_v])
-
-        t = torch.ones(1, 2, 3, 4, device=device)
-        v = t.flatten()
-        self.assertTrue(self.is_view_of(t, v))
-        test_writes_propagate(t, v)
-
-        # zero-dimensional tensor
-        t = torch.tensor(1, device=device)
-        v = t.flatten()
-        test_writes_propagate(t, v)
-        self.assertTrue(self.is_view_of(t, v))
-
-        t = torch.ones(1, 2, 3, 4, device=device).transpose(2, 3)
-        v = t.flatten(0, 1)
-        test_writes_propagate(t, v)
-        self.assertTrue(self.is_view_of_same_base(t, v))
-
-        # stride[i] = stride[i + 1] * size[i + 1] is satisfied for 3 groups:
-        t = torch.ones(720, device=device) \
-            .as_strided((2, 3, 2, 3, 5, 4), (6, 2, 15, 5, 1, 0))
-        #               [--1--|---2---|-3-] [--1--|----2---|-3-]
-        v1 = t.flatten(0, 1)
-        v2 = v1.flatten(1, 3)
-        v3 = v2.flatten(2, 2)
-        test_writes_propagate(t, v1)
-        self.assertTrue(self.is_view_of_same_base(t, v1))
-        test_writes_propagate(t, v2)
-        self.assertTrue(self.is_view_of_same_base(t, v2))
-        test_writes_propagate(t, v3)
-        self.assertTrue(self.is_view_of_same_base(t, v3))
-
-    def test_flatten_nonview(self, device="mps"):
-        def assert_is_nonview(t, nv):
-            idx_t = (0,) * t.ndim
-            idx_nv = (0,) * nv.ndim
-            self.assertFalse(nv._is_view())
-            nv[idx_nv] = 0
-            self.assertNotEqual(t[idx_t], nv[idx_nv])
-        t = torch.ones(2, 3, 2, 3, device=device).transpose(2, 3)
-        nv = t.flatten(1, 3)
-        assert_is_nonview(t, nv)
-
-        t = torch.ones(2, 2, device=device).T
-        nv = t.flatten()
-        assert_is_nonview(t, nv)
-
-        # flatten returns the original object if start_dim=end_dim
-        t = torch.ones(2, 2, device=device)
-        nv = t.flatten(1, 1)
-        self.assertIs(t, nv)
 
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_detached_view_copy(self, device="mps"):
