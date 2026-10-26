@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+import unittest.mock
 from datetime import timedelta
 
 import torch
@@ -60,6 +61,17 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3) * dist.get_rank()
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_compile_sync_pg_stays_fake(self):
+        # One real rank under a fake default group sized to a larger world must not
+        # attempt a gloo rendezvous with ranks that do not exist.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), "fake")
+            self.assertEqual(pg.size(), 16)
 
     def test_set_timeout(self):
         # FakeProcessGroup used to inherit Backend's default set_timeout, which
