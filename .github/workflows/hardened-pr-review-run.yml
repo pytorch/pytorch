@@ -1216,6 +1216,7 @@ jobs:
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
           OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
+          RUN_ID: ${{ github.run_id }}
         run: python3 scripts/pr_review/post_review.py --row-file terminal.json
 
       - name: Put back the previous review if this run did not replace it

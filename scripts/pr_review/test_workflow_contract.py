@@ -4922,6 +4922,7 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
                 "PR_NUMBER": pr,
                 "REVIEWED_SHA": sha,
                 "OPT_OUT_LABEL": label,
+                "RUN_ID": run_id,
             },
             ("publish", "Put back the previous review"): {
                 "PR_NUMBER": pr,

@@ -29,8 +29,10 @@ Invariants:
 - While a run reviews, the newest visible review is marked in progress, its
   body collapsed under a status line (`--mark-pending`). A run that ends
   without replacing it, failed, skipped or opted out, puts the body back
-  (`--restore-pending`). Another run's mark is left alone, though with no
-  compare-and-set on review edits two runs writing at once can still clash.
+  (`--restore-pending`). Another run's mark is left alone, and an older run
+  that replaces a review a newer run marked passes the mark to its own
+  review; with no compare-and-set on review edits, two runs writing at once
+  can still clash.
 - `@pytorchbot` is escaped in all posted text, because pytorch-bot reads
   commands from review bodies.
 - API errors are warnings. The step fails only when an earlier change request
@@ -1039,7 +1041,9 @@ def opted_out(gh: GitHub, pr: int, opt_out: str) -> bool:
     return any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels)
 
 
-def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> int:
+def run(
+    gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str, run_id=None
+) -> int:
     review = load_review(row)
     current = head_sha(gh, pr)
     if current != sha:
@@ -1055,7 +1059,7 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     verdict, summary, findings = review
     clean = verdict == "ready_for_human_review"
     try:
-        new_id = publish(gh, pr, sha, author, verdict, summary, findings)
+        new_id = publish(gh, pr, sha, author, verdict, summary, findings, run_id)
     except GitHubError as exc:
         if not clean:
             raise
@@ -1071,7 +1075,9 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
         rc = clear_after_clean(gh, pr, sha, author, older_than=new_id)
         # Hide the requests just dismissed; any still standing stay visible.
         try:
-            hide_earlier(gh, pr, author, {"id": new_id, "state": "COMMENTED"})
+            hide_earlier(
+                gh, pr, author, {"id": new_id, "state": "COMMENTED"}, sha, run_id
+            )
         except GitHubError as exc:
             warn(f"could not hide the withdrawn reviews: {exc}")
     backfill(gh, pr, author, new_id)
@@ -1125,7 +1131,7 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
 RETRACTED = object()
 
 
-def publish(gh, pr, sha, author, verdict, summary, findings):
+def publish(gh, pr, sha, author, verdict, summary, findings, run_id=None):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
     findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
@@ -1136,13 +1142,13 @@ def publish(gh, pr, sha, author, verdict, summary, findings):
         return None
     # The id scopes the clean-verdict check, so cleanup errors must not lose it.
     try:
-        return replace_earlier(gh, pr, sha, author, new)
+        return replace_earlier(gh, pr, sha, author, new, run_id)
     except GitHubError as exc:
         warn(f"posted review {new['id']}, but cleanup failed: {exc}")
         return new["id"]
 
 
-def replace_earlier(gh, pr, sha, author, new):
+def replace_earlier(gh, pr, sha, author, new, run_id=None):
     """Hide `new` if the head moved, else hide earlier reviews."""
     # Re-checked after posting: a newer run may already have posted a review
     # with a smaller id, which hiding by id would wrongly take down.
@@ -1151,15 +1157,17 @@ def replace_earlier(gh, pr, sha, author, new):
         print(f"head moved {sha} -> {current} while posting; retracting this review")
         retract(gh, pr, new)
         return RETRACTED
-    hide_earlier(gh, pr, author, new)
+    hide_earlier(gh, pr, author, new, sha, run_id)
     return new["id"]
 
 
-def hide_earlier(gh, pr, author, new):
+def hide_earlier(gh, pr, author, new, sha=None, run_id=None):
     """Hide this workflow's reviews older than `new`.
 
     An earlier change request is hidden only if `new` requests changes too;
-    otherwise it waits until `clear_after_clean` has dismissed it.
+    otherwise it waits until `clear_after_clean` has dismissed it. A hidden
+    review marked in progress by a run newer than `run_id` passes that mark on
+    to `new`, since that run is still reviewing and will replace `new` too.
     """
     listing = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
     # Its state now, not when posted: an overlapping run may have dismissed it.
@@ -1168,12 +1176,40 @@ def hide_earlier(gh, pr, author, new):
     visible, _ = earlier_reviews(gh, pr, author, new["id"], listing)
     visible = [r for r in visible if r.get("state") != "CHANGES_REQUESTED" or replaced]
     comments = pr_comments(gh, pr) if visible else None
+    heir = newer_mark(visible, run_id)
     # Newest first; one failure does not stop the rest.
     for old in sorted(visible, key=lambda r: r["id"], reverse=True):
         try:
             take_down(gh, pr, old, comments)
         except GitHubError as exc:
             warn(f"could not hide review {old['id']}: {exc}")
+    if heir is not None and sha:
+        pass_mark(gh, pr, now, heir, sha)
+
+
+def newer_mark(reviews: list[dict], run_id) -> str | None:
+    """The newest run newer than `run_id` that marked one of `reviews`."""
+    if run_id is None:
+        return None
+    owners = [pending_run(r.get("body") or "") for r in reviews]
+    newer = [int(o) for o in owners if o is not None and int(o) > int(run_id)]
+    return str(max(newer)) if newer else None
+
+
+def pass_mark(gh: GitHub, pr: int, review: dict, owner: str, sha: str) -> None:
+    """Mark `review` in progress for `owner`, unless a run as new already has."""
+    current = pending_run(review.get("body") or "")
+    if current is not None and int(current) >= int(owner):
+        return
+    try:
+        gh.request(
+            "PUT",
+            f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}",
+            {"body": pending(review, owner, sha, gh.repo)},
+        )
+        print(f"passed run {owner}'s in-progress mark to review {review['id']}")
+    except GitHubError as exc:
+        warn(f"could not pass run {owner}'s mark to review {review['id']}: {exc}")
 
 
 def main() -> int:
@@ -1212,6 +1248,7 @@ def main() -> int:
                 restore_pending(gh, pr, author, run_id)
             return 0
         row = json.loads(Path(args.row_file).read_text())
+        run_id = os.environ.get("RUN_ID", "")
         return run(
             gh,
             row if isinstance(row, dict) else {},
@@ -1219,6 +1256,7 @@ def main() -> int:
             os.environ["REVIEWED_SHA"],
             os.environ.get("OPT_OUT_LABEL", "no automated review"),
             os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
+            run_id if run_id.isdigit() else None,
         )
     except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
         what = (
