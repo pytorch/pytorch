@@ -685,21 +685,24 @@ bool Context::ckGemmSupported() {
 #ifdef USE_ROCM
   // TORCH_CK_GEMM_ARCH_LIST is the allowlist this build was compiled for (the
   // same list that drives the ck_gemm build arch filter), so the check stays in
-  // step with the build. It is empty if overridden empty.
-  static const std::vector<std::string> supported_archs =
-      parseArchList(TORCH_CK_GEMM_ARCH_LIST);
-  if (supported_archs.empty()) {
-    return false;
-  }
-  for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
-    if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
-      TORCH_WARN_ONCE(
-          "Attempting to use CK GEMM on an unsupported architecture! Cannot set "
-          "blas backend to CK");
+  // step with the build. It is empty if overridden empty. Cached because the
+  // CK GEMM dispatch calls this on every GEMM.
+  static const bool supported = [] {
+    const auto supported_archs = parseArchList(TORCH_CK_GEMM_ARCH_LIST);
+    if (supported_archs.empty()) {
       return false;
     }
-  }
-  return true;
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
+        TORCH_WARN_ONCE(
+            "Attempting to use CK GEMM on an unsupported architecture! Cannot "
+            "set blas backend to CK");
+        return false;
+      }
+    }
+    return true;
+  }();
+  return supported;
 #else
   return false;
 #endif
