@@ -74,6 +74,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationExisting,
     getset_build,
     Member,
     Method,
@@ -707,8 +708,9 @@ class CellVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
 
 
 class NewGlobalVariable(VariableTracker):
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    @classmethod
+    def create(cls, source: Source) -> "NewGlobalVariable":
+        return cls(source=source, mutation_type=AttributeMutationExisting())
 
 
 def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:

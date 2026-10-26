@@ -938,16 +938,21 @@ class VariableBuilder:
         """Wrap a caller-selected function without applying trace-rule overrides."""
         return UserFunctionVariable(value, source=source, **options)
 
-    @staticmethod
-    def create_internal_polyfilled_function(
-        value: Callable[..., Any],
-        source: Source | None = None,
-        **options: Any,
+    def wrap_polyfilled_function(
+        self, value: Callable[..., Any]
     ) -> PolyfilledFunctionVariable:
-        """Wrap a caller-selected polyfill without changing its guard policy."""
         if not callable(value):
             raise AssertionError(f"Expected callable, got {type(value)}")
-        return PolyfilledFunctionVariable(value, source=source, **options)
+        if inspect.isclass(value):
+            guard_type = GuardBuilder.CLASS_MATCH
+        elif inspect.ismodule(value):
+            guard_type = GuardBuilder.MODULE_MATCH
+        else:
+            guard_type = GuardBuilder.ID_MATCH
+        guards = self.install_guards(guard_type)
+        if guards is None:
+            raise AssertionError("install_guards returned None")
+        return PolyfilledFunctionVariable(value, source=self.source, **guards)
 
     @staticmethod
     def create_internal_skip_function(
@@ -5712,8 +5717,11 @@ class SourcelessBuilder:
         return PyTreeGetNodeTypeFunctionVariable(torch.utils._pytree._get_node_type)
 
     @staticmethod
-    def create_internal_builtin(value: Any) -> BuiltinVariable:
-        """Wrap a compiler-selected builtin without reclassifying it."""
+    def create_internal_builtin(value: Callable[..., Any]) -> BuiltinVariable:
+        r"""Wrap compiler-selected callables as exact BuiltinVariables.
+
+        Includes exception types; no generic reclassification is applied.
+        """
         return BuiltinVariable(value)
 
     @staticmethod
@@ -6052,8 +6060,6 @@ class SourcelessBuilder:
         def method_descriptor_handler(
             tx: "InstructionTranslatorBase", value: types.MethodDescriptorType
         ) -> VariableTracker:
-            if value is str.format:
-                return BuiltinVariable(value)
             # Torch method descriptors (e.g. torch.Tensor.add) keep their
             # trace-rule path.
             if is_torch_class(value.__objclass__):

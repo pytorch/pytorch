@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ban named VariableTracker construction outside variables/builder.py.
+r"""Ban named VariableTracker construction outside variables/builder.py.
 
 Discover VTs from their inheritance in torch/_dynamo/variables, without importing
 torch. Resolve ordinary imports and qualified names in their scopes, but do not
@@ -11,8 +11,10 @@ construct itself in its own static or class method named ``create``.
 An exact class-definition ``# noqa: RAW_VT_CONSTRUCTION`` permits that class,
 without permitting subclasses. Individual calls may use the same directive on
 the callee line, closing line, or immediately preceding standalone comment.
-On a function definition line or immediately preceding standalone comment, the
-directive exempts its body, excluding nested scopes, signatures, and decorators.
+Definition directives may appear inline or in a standalone comment immediately
+before the definition or its first decorator. A function directive exempts its
+body, including comprehensions but excluding nested functions, classes, lambdas,
+signatures, and decorators. Own-``create`` exemptions have the same body scope.
 """
 
 from __future__ import annotations
@@ -59,14 +61,16 @@ class VariableTrackerInventory:
 
 def _module_name(filename: Path, variables_dir: Path) -> str:
     filename = filename.resolve()
+    repo_root = variables_dir.parents[2]
     if filename.is_relative_to(variables_dir):
         parts = [
             _VARIABLES_MODULE,
             *filename.relative_to(variables_dir).with_suffix("").parts,
         ]
+    elif filename.is_relative_to(repo_root):
+        parts = list(filename.relative_to(repo_root).with_suffix("").parts)
     else:
-        parts = list(filename.with_suffix("").parts)
-        parts = parts[parts.index("torch") :] if "torch" in parts else [filename.stem]
+        parts = [filename.stem]
     if parts[-1] == "__init__":
         parts.pop()
     return ".".join(parts)
@@ -170,7 +174,7 @@ def _noqa_comments(source: str) -> dict[int, tokenize.TokenInfo]:
     for token in tokenize.generate_tokens(io.StringIO(source).readline):
         if token.type != tokenize.COMMENT:
             continue
-        match = re.match(r"#\s*noqa:\s*([A-Za-z0-9_, \t]+)", token.string)
+        match = re.search(r"#\s*noqa:\s*([A-Za-z0-9_, \t]+)", token.string)
         if match and LINTER_CODE in re.split(r"[, \t]+", match[1]):
             comments[token.start[0]] = token
     return comments
@@ -183,12 +187,16 @@ def _definition_noqa_line(
 ) -> int | None:
     if node.lineno in comments:
         return node.lineno
-    previous = comments.get(node.lineno - 1)
-    if (
-        previous is not None
-        and not lines[previous.start[0] - 1][: previous.start[1]].strip()
-    ):
-        return previous.start[0]
+    starts = [node.lineno]
+    if node.decorator_list:
+        starts.append(node.decorator_list[0].lineno)
+    for start in starts:
+        previous = comments.get(start - 1)
+        if (
+            previous is not None
+            and not lines[previous.start[0] - 1][: previous.start[1]].strip()
+        ):
+            return previous.start[0]
     return None
 
 
@@ -329,15 +337,13 @@ def check_file(
     }
     comments = _noqa_comments(source)
     lines = source.splitlines()
-    function_noqas = {
-        line
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        if (line := _definition_noqa_line(node, comments, lines)) is not None
-    }
-    call_comments = {
-        line: token for line, token in comments.items() if line not in function_noqas
-    }
+    call_comments = comments.copy()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            while (
+                line := _definition_noqa_line(node, call_comments, lines)
+            ) is not None:
+                del call_comments[line]
     messages = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):

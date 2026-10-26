@@ -112,6 +112,61 @@ class TestRawVTConstructionLinter(unittest.TestCase):
         )
         self.assertEqual([message.line for message in messages], [4])
 
+    def test_decorated_class_noqa_does_not_exempt_other_calls(self) -> None:
+        decorator = "@decorate(ValueVariable(0))\n"
+        directive = "# noqa: RAW_VT_CONSTRUCTION\n"
+        for prefix, suffix, decorator_line in (
+            (decorator, "  # noqa: RAW_VT_CONSTRUCTION", 2),
+            (directive + decorator, "", 3),
+            (decorator + directive, "", 2),
+            (directive + decorator + directive, "  # noqa: RAW_VT_CONSTRUCTION", 3),
+        ):
+            with self.subTest(prefix=prefix, suffix=suffix):
+                path = self.write(
+                    "from .base import ValueVariable\n"
+                    + prefix
+                    + f"class DecoratedVariable(ValueVariable):{suffix}\n"
+                    "    own = ValueVariable(1)\n"
+                    "class DecoratedChild(DecoratedVariable):\n"
+                    "    pass\n"
+                    "DecoratedVariable(2)\n"
+                    "DecoratedChild(3)\n"
+                    "ValueVariable(4)\n",
+                    "torch/_dynamo/variables/decorated.py",
+                )
+                inventory = _discover_variable_tracker_classes(self.variables_dir)
+                messages = check_file(str(path), inventory)
+                definition_line = len(prefix.splitlines()) + 2
+                self.assertEqual(
+                    [message.line for message in messages],
+                    [
+                        decorator_line,
+                        definition_line + 1,
+                        definition_line + 5,
+                        definition_line + 6,
+                    ],
+                )
+
+    def test_relative_imports_under_checkout_named_torch(self) -> None:
+        checkout = "torch/pytorch/"
+        base = self.write(
+            (self.variables_dir / "base.py").read_text(encoding="utf-8"),
+            checkout + "torch/_dynamo/variables/base.py",
+        )
+        inventory = _discover_variable_tracker_classes(base.parent)
+        for relative_path, imports in (
+            (checkout + "torch/_dynamo/callsite.py", "from .variables.base import"),
+            (checkout + "torch/_dynamo/__init__.py", "from .variables.base import"),
+            (checkout + "torch/_dynamo/variables/callsite.py", "from .base import"),
+            ("outside.py", "from torch._dynamo.variables.base import"),
+        ):
+            with self.subTest(relative_path=relative_path):
+                path = self.write(
+                    f"{imports} ValueVariable\nValueVariable(1)\n", relative_path
+                )
+                messages = check_file(str(path), inventory)
+                self.assertEqual([message.line for message in messages], [2])
+
     def test_local_imports_do_not_leak_to_sibling_functions(self) -> None:
         messages = self.check(
             "def plain_fp():\n"
@@ -207,6 +262,8 @@ class TestRawVTConstructionLinter(unittest.TestCase):
             "ValueVariable(  # noqa: RAW_VT_CONSTRUCTION\n    1,\n).call_function()\n",
             "ValueVariable(\n    1,\n)  # noqa: RAW_VT_CONSTRUCTION\n",
             "ValueVariable(1)  # noqa: E123, RAW_VT_CONSTRUCTION\n",
+            "ValueVariable(1)  # type: ignore[arg-type]  # noqa: RAW_VT_CONSTRUCTION\n",
+            "# type: ignore[arg-type]  # noqa: RAW_VT_CONSTRUCTION\nValueVariable(1)\n",
         ):
             with self.subTest(call=call):
                 self.assertEqual(
@@ -232,6 +289,9 @@ class TestRawVTConstructionLinter(unittest.TestCase):
         for call in (
             'ValueVariable("# noqa: RAW_VT_CONSTRUCTION")\n',
             'text = "# noqa: RAW_VT_CONSTRUCTION"\nValueVariable(1)\n',
+            "ValueVariable(1)  # not-noqa: RAW_VT_CONSTRUCTION\n",
+            "ValueVariable(1)  # noqa: RAW_VT_CONSTRUCTION_EXTRA\n",
+            "ValueVariable(1)  # type: ignore[arg-type]\n",
         ):
             with self.subTest(call=call):
                 self.assertEqual(
@@ -271,21 +331,46 @@ class TestRawVTConstructionLinter(unittest.TestCase):
                 )
 
     def test_function_noqa_excludes_signature_and_nested_scopes(self) -> None:
-        messages = self.check(
-            "from torch._dynamo.variables import ValueVariable\n"
-            "@decorate(ValueVariable(0))\n"
-            "def factory(value=ValueVariable(1)) -> ValueVariable(2):  # noqa: RAW_VT_CONSTRUCTION\n"
-            "    direct = ValueVariable(value)\n"
-            "    def nested(value=ValueVariable(3)):\n"
-            "        return ValueVariable(value)\n"
-            "    callback = lambda: ValueVariable(value)\n"
-            "    class Nested:\n"
-            "        own = ValueVariable(value)\n"
-            "    def inner_factory(value):  # noqa: RAW_VT_CONSTRUCTION\n"
-            "        return ValueVariable(value)\n"
-            "    return direct\n"
-        )
-        self.assertEqual([message.line for message in messages], [2, 3, 3, 5, 6, 7, 9])
+        decorator = "@decorate(ValueVariable(0))\n"
+        directive = "# noqa: RAW_VT_CONSTRUCTION\n"
+        for keyword in ("def", "async def"):
+            for prefix, suffix, decorator_line in (
+                (decorator, "  # noqa: RAW_VT_CONSTRUCTION", 2),
+                (directive + decorator, "", 3),
+                (decorator + directive, "", 2),
+            ):
+                with self.subTest(keyword=keyword, prefix=prefix, suffix=suffix):
+                    messages = self.check(
+                        "from torch._dynamo.variables import ValueVariable\n"
+                        + prefix
+                        + f"{keyword} factory(value=ValueVariable(1)) -> ValueVariable(2):{suffix}\n"
+                        "    direct = ValueVariable(value)\n"
+                        "    def nested(value=ValueVariable(3)):\n"
+                        "        return ValueVariable(value)\n"
+                        "    callback = lambda: ValueVariable(value)\n"
+                        "    class Nested:\n"
+                        "        own = ValueVariable(value)\n"
+                        "    def inner_factory(value):  # noqa: RAW_VT_CONSTRUCTION\n"
+                        "        return ValueVariable(value)\n"
+                        "    items = [ValueVariable(item) for item in ValueVariable(value)]\n"
+                        "    items = {ValueVariable(item) for item in ValueVariable(value)}\n"
+                        "    items = {item: ValueVariable(item) for item in ValueVariable(value)}\n"
+                        "    items = (ValueVariable(item) for item in ValueVariable(value))\n"
+                        "    return direct\n"
+                    )
+                    definition_line = len(prefix.splitlines()) + 2
+                    self.assertEqual(
+                        [message.line for message in messages],
+                        [
+                            decorator_line,
+                            definition_line,
+                            definition_line,
+                            definition_line + 2,
+                            definition_line + 3,
+                            definition_line + 4,
+                            definition_line + 6,
+                        ],
+                    )
 
     def test_own_create_body_is_exempt(self) -> None:
         messages = check_file(str(self.variables_dir / "more.py"), self.inventory)
@@ -304,10 +389,12 @@ class TestRawVTConstructionLinter(unittest.TestCase):
                     "        alias = Alias(value)\n"
                     "        base = ValueVariable(value)\n"
                     "        child = StateContextManager(value)\n"
+                    "        items = [StateIterator(item) for item in value]\n"
+                    "        others = [ValueVariable(item) for item in value]\n"
                     "        return own\n",
                     "torch/_dynamo/variables/more.py",
                 )
-                self.assertEqual([message.line for message in messages], [8, 9])
+                self.assertEqual([message.line for message in messages], [8, 9, 11])
 
     def test_nonfactory_methods_are_not_exempt(self) -> None:
         for decorator, method in (
