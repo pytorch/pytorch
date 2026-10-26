@@ -24,6 +24,7 @@ PREV_CSRC_DIRS = [
     ROOT_DIR.parent / "libtorch_agn_2_12_extension" / "csrc",
     ROOT_DIR.parent / "libtorch_agn_2_13_extension" / "csrc",
     ROOT_DIR.parent / "libtorch_agn_2_14_extension" / "csrc",
+    ROOT_DIR.parent / "libtorch_agn_2_15_extension" / "csrc",
 ]
 
 
@@ -47,52 +48,51 @@ class clean(distutils.command.clean.clean):
 
 
 def get_extension():
-    common_cxx = ["-DTORCH_TARGET_VERSION=0x0210000000000000"]
+    extra_compile_args = {
+        "cxx": [
+            "-DTORCH_TARGET_VERSION=0x0210000000000000",
+            "-DSTABLE_LIB_NAME=libtorch_agn_2_16",
+        ],
+    }
     if not IS_WINDOWS:
-        common_cxx.append("-fdiagnostics-color=always")
+        extra_compile_args["cxx"].append("-fdiagnostics-color=always")
 
-    all_csrc_dirs = [CSRC_DIR, *PREV_CSRC_DIRS]
     mps_available = torch.backends.mps.is_available()
 
-    # Op extension (_C): this version's ops + inherited 2.9-2.14 csrc, minus the
-    # interop module (an importable Python module that must not be linked into
-    # the op extension loaded via torch.ops.load_library).
-    op_sources = [
+    sources = [
         s
-        for d in all_csrc_dirs
+        for d in [CSRC_DIR, *PREV_CSRC_DIRS]
         for s in d.glob("**/*.cpp")
         if s.name != "pyobject_interop_module.cpp"
         and (s.parent.name != "mps" or mps_available)
     ]
 
-    op_cxx = common_cxx + ["-DSTABLE_LIB_NAME=libtorch_agn_2_16"]
-    op_extra = {"cxx": op_cxx}
-    op_extension = CppExtension
+    extension = CppExtension
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
-        op_cxx.append("-DLAE_USE_CUDA")
-        op_extra["nvcc"] = [
+        extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
+        extra_compile_args["nvcc"] = [
             "-O2",
             "-DUSE_CUDA",
             "-DTORCH_TARGET_VERSION=0x0210000000000000",
             "-DSTABLE_LIB_NAME=libtorch_agn_2_16",
         ]
-        op_extension = CUDAExtension
-        op_sources.extend(CSRC_DIR.glob("**/*.cu"))
+        extension = CUDAExtension
+        sources.extend(CSRC_DIR.glob("**/*.cu"))
         for prev_dir in PREV_CSRC_DIRS:
-            op_sources.extend(prev_dir.glob("**/*.cu"))
+            sources.extend(prev_dir.glob("**/*.cu"))
 
     if mps_available:
-        op_cxx.append("-DUSE_MPS")
+        extra_compile_args["cxx"].append("-DUSE_MPS")
 
     return [
-        op_extension(
+        extension(
             "libtorch_agn_2_16._C",
-            sources=sorted(str(s) for s in op_sources),
+            sources=sorted(str(s) for s in sources),
             py_limited_api=True,
-            extra_compile_args=op_extra,
+            extra_compile_args=extra_compile_args,
             extra_link_args=[],
-        ),
+        )
     ]
 
 
