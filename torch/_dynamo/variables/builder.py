@@ -919,6 +919,15 @@ def _is_dim_dynamic_from_source_dynamism(
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
+    @staticmethod
+    def create_internal_user_function(
+        value: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
+        source: Source | None = None,
+        **options: Any,
+    ) -> UserFunctionVariable:
+        """Wrap a caller-selected function without applying trace-rule overrides."""
+        return UserFunctionVariable(value, source=source, **options)
+
     def __init__(
         self,
         tx: "InstructionTranslatorBase",
