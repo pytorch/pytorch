@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 
 import yaml
-
 from apply_distributed_plan import plan_effects
 from labels import DISTRIBUTED_SKILL, load_labels, load_templates
 
@@ -17,7 +16,11 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = yaml.safe_load(
     (ROOT / ".github/workflows/claude-distributed-triage-cron.yml").read_text()
 )
-PHASE1 = WORKFLOW["jobs"]["sweep"]["steps"][2]["run"]
+PHASE1 = next(
+    step["run"]
+    for step in WORKFLOW["jobs"]["sweep"]["steps"]
+    if step.get("name", "").startswith("Phase 1:")
+)
 
 
 class CronCompletionTest(unittest.TestCase):

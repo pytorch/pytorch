@@ -155,6 +155,16 @@ class DistributedPlanEffectsTest(unittest.TestCase):
                 self.assertIn("triage review", result.add_labels)
                 self.assertIn(MARKER, result.add_labels)
 
+    def test_parallelisms_completion_requires_a_module_for_every_decision(self):
+        for decision in ("route", "already_classified"):
+            with self.subTest(decision=decision):
+                result = effects(
+                    decision,
+                    ["oncall: distributed parallelisms", "triaged"],
+                )
+                self.assertNotIn("triaged", result.add_labels)
+                self.assertIn("triage review", result.add_labels)
+
     def test_schema_matches_the_templates_and_the_high_priority_decision(self):
         self.assertEqual(set(SCHEMA["templates"]["items"]["enum"]), set(TEMPLATES))
         self.assertIn("high_priority", SCHEMA["decision"]["enum"])

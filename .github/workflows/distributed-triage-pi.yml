@@ -73,8 +73,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
-              --jq '.artifacts[].name' | grep -qx triage-completed-data; then
+          ARTIFACTS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[].name')
+          if ! grep -qx triage-completed-data <<< "$ARTIFACTS"; then
             echo "Run $RUN_ID handed off no issue; nothing to do"
             exit 0
           fi

@@ -105,13 +105,9 @@ class TriageWorkflowContract(unittest.TestCase):
                 )
 
     def test_distributed_apply_serializes_by_issue_without_cancelling_writes(self):
-        for workflow, jobs in CALLERS.items():
-            if workflow == "distributed-triage-pi.yml":
-                concurrency = jobs["apply"]["concurrency"]
-                self.assertIn(
-                    "${{ needs.prepare.outputs.issue }}", concurrency["group"]
-                )
-                self.assertIs(concurrency["cancel-in-progress"], False)
+        concurrency = CALLERS["distributed-triage-pi.yml"]["apply"]["concurrency"]
+        self.assertIn("${{ needs.prepare.outputs.issue }}", concurrency["group"])
+        self.assertIs(concurrency["cancel-in-progress"], False)
 
     def test_model_job_blocks_egress_before_anything_runs(self):
         first = steps(PLAN)[0]

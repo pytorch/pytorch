@@ -88,7 +88,13 @@ def plan_effects(
     if decision == "high_priority" and TRIAGE_REVIEW not in labels:
         labels.append(TRIAGE_REVIEW)
     # Performance describes the issue type, not a distributed module.
-    if decision == "classify" and not any(
+    if (
+        decision == "classify"
+        or (
+            "triaged" in labels
+            and "oncall: distributed parallelisms" in existing_labels | set(labels)
+        )
+    ) and not any(
         label.startswith("module: ") and label != "module: performance"
         for label in (existing_labels | set(labels)) & valid_labels
     ):
