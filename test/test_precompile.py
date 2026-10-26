@@ -5758,21 +5758,28 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("compiled at serve time", out.stdout)
 
     @skipIfCrossRef
-    def test_serve_time_compiles_take_the_capture_options(self):
+    @parametrize("given", ["options", "mode"])
+    def test_serve_time_compiles_take_the_capture_options(self, given):
+        from torch._inductor import list_mode_options
         from torch._precompile import _parse_artifact_metadata
 
-        options = {"max_autotune_gemm_backends": "ATEN"}
+        if given == "options":
+            kwargs = {"options": {"max_autotune_gemm_backends": "ATEN"}}
+            expected = kwargs["options"]
+        else:
+            # The artifact records the mode's expansion, not the mode's name.
+            kwargs = {"mode": "max-autotune-no-cudagraphs"}
+            expected = list_mode_options(kwargs["mode"])
         with (
             torch.no_grad(),
-            self._capture(self.mod.tags_compiled, options=options) as cap,
+            self._capture(self.mod.tags_compiled, **kwargs) as cap,
         ):
             cap(self.model, self.x2)
         with open(self.artifact) as f:
-            self.assertEqual(
-                _parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"], options
-            )
+            recorded = _parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"]
+        self.assertEqual(recorded, expected)
         script = (
-            "import sys, torch\n"
+            "import ast, sys, torch\n"
             "from torch._inductor import compile_fx\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "mod = __import__(sys.argv[4])\n"
@@ -5787,29 +5794,29 @@ class TestPrecompileDynamoCapture(TestCase):
             ")\n"
             "with torch.no_grad():\n"
             "    f(mod.Model(), torch.randn(3, 4))\n"
-            "options = {'max_autotune_gemm_backends': 'ATEN'}\n"
+            "options = ast.literal_eval(sys.argv[5])\n"
             "assert any(p.items() >= options.items() for p in patches), patches\n"
             "print('compiled with the capture options')\n"
         )
-        argv = [self.dir, self.artifact, self.cache, self.module_name]
+        argv = [self.dir, self.artifact, self.cache, self.module_name, repr(expected)]
         cmd = [sys.executable, "-c", script, *argv]
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("compiled with the capture options", out.stdout)
 
+    @skipIfCrossRef
     def test_serve_time_compiles_refuse_options_without_a_literal_form(self):
         from torch._precompile import _parse_artifact_metadata
 
         options = {"post_grad_custom_post_pass": _NoOpPostGradPass()}
-        with (
-            torch.no_grad(),
-            self._capture(self.mod.tags_compiled, options=options) as cap,
-        ):
-            cap(self.model, self.x2)
+        with self._capture(self.mod.tags_compiled, options=options) as cap:
+            y = cap(self.model, self.x2)
         with open(self.artifact) as f:
             self.assertIsNone(_parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"])
         with self.assertRaisesRegex(PrecompileError, "not all Python literals"):
             load(self.artifact, self.cache, allow_serve_time_compiles=True)
+        # The remedy the error names: without the flag the artifact still serves.
+        self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:

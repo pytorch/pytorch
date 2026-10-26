@@ -882,6 +882,7 @@ def compile_to_python(
     from torch._inductor.standalone_compile import (
         _resolve_ignore_shape_env,
         _standalone_context,
+        STANDALONE_PYTHON_PINS,
     )
     from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
@@ -910,6 +911,14 @@ def compile_to_python(
             "aot_autograd.compile_to_python cannot lower this graph to standalone "
             f"source: it contains an effectful op ({effectful}), which is not "
             "supported yet."
+        )
+
+    if (options or {}).get("freezing"):
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python does not support options={'freezing': "
+            "True}: freezing's forward compiler rewrites the graph (and may drop its "
+            "inputs) before the inner compile this lowering captures, so the captured "
+            "graph would not match the runtime wrappers."
         )
 
     with _COMPILE_LOCK:
@@ -960,9 +969,10 @@ def compile_to_python(
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
         # The options cover this step too, which alone runs the pre-grad and
-        # joint-graph passes; _standalone_context's pins, inside them, still win.
+        # joint-graph passes, under the pins step 2 forces over them, so both steps
+        # compile under one config.
         with (
-            patch_compile_options(options),
+            patch_compile_options({**(options or {}), **STANDALONE_PYTHON_PINS}),
             torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),
