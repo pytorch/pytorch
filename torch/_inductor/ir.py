@@ -6738,10 +6738,12 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T],
         template: Any,
         mutated_inputs: Iterable[IRNode] | None = None,
+        template_kwargs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.mutated_inputs = mutated_inputs
+        self.template_kwargs = template_kwargs or {}
         self.outputs: list[Buffer] = [self]
 
         if mutated_inputs is not None:

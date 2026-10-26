@@ -16,7 +16,6 @@ from ..common import KernelTemplate
 from . import flydsl_utils
 from .flydsl_kernel import FlyDSLTemplateKernel
 
-
 log = logging.getLogger(__name__)
 output_code_log = getArtifactLogger(__name__, "output_code")
 
@@ -47,10 +46,10 @@ class FlyDSLTemplate(KernelTemplate):
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
-        if getattr(V.graph, "cpp_wrapper", False) or getattr(
+        if getattr(V.graph, "cpp_wrapper", False) and not getattr(
             V.graph, "aot_mode", False
         ):
-            return NotImplementedError("FlyDSL does not support AOT wrappers")
+            return NotImplementedError("FlyDSL does not support JIT C++ wrappers")
         if not flydsl_utils.runtime_available():
             return NotImplementedError("FlyDSL runtime is unavailable")
         try:
@@ -168,6 +167,7 @@ class FlyDSLTemplateCaller(ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
+        self.template_kwargs = template_kwargs or {}
 
     @staticmethod
     def _build_description(name: str, template_kwargs: dict[str, Any] | None) -> str:
@@ -189,6 +189,7 @@ class FlyDSLTemplateCaller(ChoiceCaller):
             make_kernel_render=self.make_kernel_render,
             template=self.template,
             mutated_inputs=self.mutated_inputs,
+            template_kwargs=self.template_kwargs,
         )
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]

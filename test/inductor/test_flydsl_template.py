@@ -1,7 +1,14 @@
 # Owner(s): ["module: inductor"]
+import hashlib
+import json
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -12,15 +19,34 @@ import sympy
 import torch
 import torch.nn.functional as F
 from torch._inductor import config as inductor_config
+from torch._inductor.codecache import WritableTempFile
+from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.codegen.flydsl import flydsl_utils
+from torch._inductor.codegen.flydsl.flydsl_aot import (
+    _parse_manifest,
+    bind_template_parameters,
+    compile_aot_source,
+    FlyDSLAOTArtifact,
+    FlyDSLAOTBinding,
+    FlyDSLAOTManifest,
+    FlyDSLRuntimeScalar,
+    FlyDSLTensorBinding,
+    generate_aot_kernel_call,
+    register_aot_artifact,
+)
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import (
     _get_flydsl_device_arch,
     FlyDSLScheduling,
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._higher_order_ops.flydsl_program import (
+    FlyDSLCallSpec,
+    FlyDSLProgramSpec,
+)
 from torch._inductor.ir import Buffer, FixedLayout
-from torch._inductor.kernel import mm
+from torch._inductor.kernel import mm, mm_grouped
+from torch._inductor.package import load_package
 from torch._inductor.runtime.flydsl_cache import (
     LazyFlyDSLLauncher,
     precompile_flydsl_template,
@@ -46,6 +72,59 @@ class _CacheParam:
 
     def __cache_signature__(self):
         return (self.key,)
+
+
+def _portable_flydsl_launcher(out, inp, block_size=128):
+    return None
+
+
+def _aot_manifest_dict(arch="gfx950", abi=None):
+    return {
+        "schema_version": {"major": 3, "minor": 0},
+        "min_consumer_schema": {"major": 3, "minor": 0},
+        "producer": {
+            "flydsl_version": "0.4.1",
+            "backend": "rocm",
+            "arch": arch,
+            "host_triple": "x86_64-unknown-linux-gnu",
+            "abi_tag": "lp64",
+        },
+        "symbols": {
+            "entry": "flydsl_aot_test",
+            "metadata": "flydsl_aot_test__metadata",
+            "lifecycle": {
+                "init_symbol": "flydsl_aot_test__module_init",
+                "load_symbol": "flydsl_aot_test__module_load",
+                "unload_symbol": "flydsl_aot_test__module_unload",
+            },
+        },
+        "entry": {
+            "calling_convention": "packed_void_pp",
+            "abi": abi or [],
+            "return_abi": {"kind": "status", "ctype": "int32", "success": 0},
+        },
+        "link": {
+            "libraries": [{"link_name": "libamdhip64.so"}],
+            "options": ["-lamdhip64", "-pthread", "-ldl"],
+        },
+        "specialization": {"fingerprint": "test-fingerprint"},
+        "capabilities": [
+            "async_launch",
+            "multi_device",
+            "self_contained_runtime",
+            "thread_safe_lifecycle",
+        ],
+    }
+
+
+def _test_aot_artifact(abi=None):
+    return FlyDSLAOTArtifact(
+        object_file_path="/tmp/flydsl_aot_test.o",
+        header_file_path="/tmp/flydsl_aot_test.h",
+        manifest_file_path="/tmp/flydsl_aot_test.json",
+        object_sha256="test-object",
+        manifest=_parse_manifest(_aot_manifest_dict(abi=abi)),
+    )
 
 
 @instantiate_parametrized_tests
@@ -101,11 +180,367 @@ class TestFlyDSLTemplate(TestCase):
             mock.patch.object(
                 flydsl_utils,
                 "_available_version",
-                return_value=SimpleNamespace(release=(0, 3, 0)),
+                return_value=SimpleNamespace(release=(0, 4, 1)),
             ),
         ):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIsNone(reason)
+
+    def test_runtime_unavailable_without_public_aot_metadata(self):
+        package_spec = SimpleNamespace(submodule_search_locations=["package"])
+        with (
+            mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+            mock.patch.object(
+                flydsl_utils, "_pathfinder_find_spec", return_value=SimpleNamespace()
+            ),
+            mock.patch.object(
+                flydsl_utils,
+                "_available_version",
+                return_value=SimpleNamespace(release=(0, 4, 0)),
+            ),
+        ):
+            reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIn(">=0.4.1,<0.5", reason)
+
+    def test_portable_program_and_call_specs_round_trip(self):
+        launcher = SimpleNamespace(func=_portable_flydsl_launcher)
+        program = FlyDSLProgramSpec.from_launcher(
+            launcher,
+            mutated_arg_names=("out",),
+        )
+        restored = FlyDSLProgramSpec.from_json(program.to_json())
+        self.assertEqual(restored.digest, program.digest)
+        self.assertIs(restored.resolve(), _portable_flydsl_launcher)
+
+        call = FlyDSLCallSpec.from_values(
+            {
+                2: 128,
+                3: (True, torch.float16),
+            }
+        )
+        restored_call = FlyDSLCallSpec.from_json(call.to_json())
+        self.assertEqual(restored_call.digest, call.digest)
+        self.assertEqual(restored_call.decode(), {2: 128, 3: (True, torch.float16)})
+
+        payload = json.loads(program.to_json())
+        payload["source"] += "\n# tampered"
+        with self.assertRaisesRegex(ValueError, "source hash"):
+            FlyDSLProgramSpec.from_json(json.dumps(payload))
+
+    def test_aot_manifest_validation(self):
+        manifest = _parse_manifest(
+            _aot_manifest_dict(
+                abi=[
+                    {
+                        "arg_index": 0,
+                        "arg_name": "out",
+                        "kind": "tensor_data",
+                        "ctype": "pointer",
+                        "size": 8,
+                        "alignment": 8,
+                    },
+                    {
+                        "arg_index": None,
+                        "arg_name": None,
+                        "kind": "stream",
+                        "ctype": "pointer",
+                        "size": 8,
+                        "alignment": 8,
+                    },
+                ]
+            )
+        )
+
+        self.assertIsInstance(manifest, FlyDSLAOTManifest)
+        self.assertEqual(manifest.arch, "gfx950")
+        self.assertEqual(manifest.linker_flags, ("-lamdhip64", "-pthread", "-ldl"))
+        self.assertEqual(
+            [slot.kind for slot in manifest.abi], ["tensor_data", "stream"]
+        )
+
+    def test_aot_manifest_rejects_non_gfx950(self):
+        with self.assertRaisesRegex(RuntimeError, "supports gfx950"):
+            _parse_manifest(_aot_manifest_dict(arch="gfx1250"))
+
+    def test_aot_template_binding_covers_aliases_scalars_and_flex(self):
+        artifact = _test_aot_artifact()
+        layout = FixedLayout(
+            torch.device("cuda", 0), torch.float32, [2, 3, 4], [12, 4, 1]
+        )
+        output = Buffer(name="output", layout=layout)
+        mat1 = Buffer(name="mat1", layout=layout)
+        mat2 = Buffer(name="mat2", layout=layout)
+        scale_a = Buffer(name="scale_a", layout=layout)
+        scale_b = Buffer(name="scale_b", layout=layout)
+
+        mxfp = bind_template_parameters(
+            artifact,
+            "mm_flydsl",
+            output,
+            {
+                "mat1": mat1,
+                "mat2": mat2,
+                "scale_a": scale_a,
+                "scale_b": scale_b,
+            },
+            {},
+        )
+        self.assertIs(mxfp.values["bias"], output)
+        self.assertIs(mxfp.values["a"], mat1)
+        self.assertIs(mxfp.values["b"], mat2)
+
+        offs = Buffer(name="offs", layout=layout)
+        grouped = bind_template_parameters(
+            artifact,
+            "grouped_gemm_flydsl",
+            output,
+            {"mat1": mat1, "mat2": mat2, "offs": offs},
+            {},
+        )
+        self.assertEqual(grouped.values["group_count"], 2)
+        self.assertEqual(grouped.values["k"], 3)
+        self.assertEqual(grouped.values["n"], 4)
+        self.assertIsInstance(grouped.values["grid_size"], FlyDSLRuntimeScalar)
+
+        query = Buffer(name="query", layout=layout)
+        kv_num_blocks = Buffer(name="kv_num_blocks", layout=layout)
+        flex = bind_template_parameters(
+            artifact,
+            "flex_flydsl_forward",
+            output,
+            {"query": query, "kv_num_blocks": kv_num_blocks},
+            {},
+        )
+        self.assertIs(flex.values["query"], query)
+        self.assertIs(flex.values["output"], output)
+        self.assertIs(flex.values["mask_buffer_3"], kv_num_blocks)
+
+        mxfp_grouped = bind_template_parameters(
+            artifact,
+            "mxfp8_grouped_gemm_flydsl",
+            output,
+            {
+                "mat1": mat1,
+                "mat2": mat2,
+                "scale_a": scale_a,
+                "scale_b": scale_b,
+                "offs": offs,
+            },
+            {"GEMM_N": 128, "BLOCK_C": 64},
+        )
+        self.assertIsInstance(mxfp_grouped.values["A"], FlyDSLTensorBinding)
+        self.assertEqual(mxfp_grouped.values["A"].strides, (1,))
+        self.assertEqual(mxfp_grouped.values["n_c_tiles"], 2)
+        self.assertIsInstance(mxfp_grouped.values["n_blocks"], FlyDSLRuntimeScalar)
+
+    def test_aot_artifact_registration_and_packed_call(self):
+        manifest = _parse_manifest(
+            _aot_manifest_dict(
+                abi=[
+                    {
+                        "arg_index": 0,
+                        "arg_name": "out",
+                        "kind": "tensor_data",
+                        "ctype": "pointer",
+                        "size": 8,
+                        "alignment": 8,
+                    },
+                    {
+                        "arg_index": 0,
+                        "arg_name": "out",
+                        "kind": "tensor_layout",
+                        "ctype": "bytes",
+                        "size": 12,
+                        "alignment": 1,
+                        "layout_entries": [
+                            {
+                                "kind": "shape",
+                                "dim": 0,
+                                "offset": 0,
+                                "bits": 32,
+                                "signed": True,
+                            },
+                            {
+                                "kind": "stride",
+                                "dim": 0,
+                                "offset": 4,
+                                "bits": 64,
+                                "signed": True,
+                            },
+                        ],
+                    },
+                    {
+                        "arg_index": 1,
+                        "arg_name": "inp",
+                        "kind": "tensor_data",
+                        "ctype": "pointer",
+                        "size": 8,
+                        "alignment": 8,
+                    },
+                    {
+                        "arg_index": None,
+                        "arg_name": None,
+                        "kind": "stream",
+                        "ctype": "pointer",
+                        "size": 8,
+                        "alignment": 8,
+                    },
+                ]
+            )
+        )
+        artifact = FlyDSLAOTArtifact(
+            object_file_path="/tmp/flydsl_aot_test.o",
+            header_file_path="/tmp/flydsl_aot_test.h",
+            manifest_file_path="/tmp/flydsl_aot_test.json",
+            object_sha256="test-object",
+            manifest=manifest,
+        )
+        body = IndentedBuffer()
+        wrapper = SimpleNamespace(
+            aot_kernel_objects=OrderedSet(),
+            aot_link_libraries=OrderedSet(),
+            aot_link_options=OrderedSet(),
+            additional_files=[],
+            deferred_aot_call_wrappers={},
+            external_kernel_libs=OrderedSet(),
+            flydsl_aot_artifact_cache={},
+            flydsl_aot_artifacts={},
+            header=IndentedBuffer(),
+            prefix=IndentedBuffer(),
+            include_extra_header=mock.Mock(),
+            writeline=body.writeline,
+            write_get_raw_stream=mock.Mock(return_value="stream0"),
+        )
+        layout = FixedLayout(torch.device("cuda", 0), torch.float32, [2, 3], [3, 1])
+        output = Buffer(name="buf_out", layout=layout)
+        inp = Buffer(name="buf_in", layout=layout)
+        graph = SimpleNamespace(
+            name="graph",
+            scheduler=SimpleNamespace(current_stream_idx=None),
+            sizevars=SimpleNamespace(simplify=lambda value: value),
+        )
+
+        with V.set_graph_handler(graph):
+            register_aot_artifact(wrapper, "kernel", artifact)
+            wrapper.deferred_aot_call_wrappers["kernel"].generate(wrapper)
+            generate_aot_kernel_call(
+                wrapper,
+                "kernel",
+                FlyDSLAOTBinding({"out": output, "inp": inp}),
+                device=layout.device,
+            )
+
+        self.assertEqual(wrapper.aot_kernel_objects, {artifact.object_file_path})
+        self.assertEqual(
+            wrapper.external_kernel_libs,
+            {"-lamdhip64", "-pthread", "-ldl"},
+        )
+        self.assertEqual(wrapper.aot_link_libraries, {"libamdhip64.so"})
+        self.assertEqual(wrapper.aot_link_options, {"-lamdhip64", "-pthread", "-ldl"})
+        prefix = wrapper.prefix.getvalue()
+        self.assertIn('extern "C" int32_t flydsl_aot_test(void**);', prefix)
+        self.assertIn("std::call_once", prefix)
+        code = body.getvalue()
+        self.assertIn("flydsl_aot_test__ensure_loaded()", code)
+        self.assertIn("buf_out.data_ptr()", code)
+        self.assertIn("buf_in.data_ptr()", code)
+        self.assertIn("std::memcpy", code)
+        self.assertIn("reinterpret_cast<void*>(stream0)", code)
+        self.assertIn("flydsl_aot_test(flydsl_packed_0)", code)
+        self.assertIn("throw std::runtime_error", code)
+
+    def test_compile_aot_source_uses_public_flydsl_export(self):
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.runtime.flydsl_cache import (
+            compile_flydsl,
+            is_capturing_flydsl_compiles,
+        )
+
+        compiled = mock.Mock()
+
+        def compile_for_export(*_args, **_kwargs):
+            self.assertNotIn("COMPILE_ONLY", os.environ)
+            self.assertNotIn("FLYDSL_COMPILE_ONLY", os.environ)
+            return compiled
+
+        compiler = mock.Mock(side_effect=compile_for_export)
+        module = SimpleNamespace()
+
+        def main(inp, output, stream):
+            self.assertTrue(is_capturing_flydsl_compiles())
+            compile_flydsl(
+                compiler,
+                "jit_function",
+                "compiled_input",
+                "compiled_output",
+            )
+
+        module.test_kernel_main = main
+        manifest_data = _aot_manifest_dict()
+        manifest_data["symbols"]["entry"] = "flydsl_aot_test_kernel"
+        precompile_metadata = {
+            "flydsl_gpu_arch": "gfx950",
+            "tensor_names": ("inp",),
+            "precompile_shapes": {"inp": [2], "output": [2]},
+            "precompile_strides": {"inp": [1], "output": [1]},
+            "precompile_dtypes": {"inp": "float32", "output": "float32"},
+        }
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch.object(PyCodeCache, "write", return_value=("key", "path")),
+            mock.patch.object(PyCodeCache, "load_by_key_path", return_value=module),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.flydsl_aot._placeholder_tensors",
+                return_value=("input", "output"),
+            ),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.flydsl_aot.cache_dir",
+                return_value=tmpdir,
+            ),
+        ):
+            output_dir = os.path.join(tmpdir, "flydsl_aot")
+            os.makedirs(output_dir)
+            object_path = os.path.join(output_dir, "test_kernel_aot.o")
+            header_path = os.path.join(output_dir, "test_kernel_aot.h")
+            manifest_path = os.path.join(output_dir, "test_kernel_aot.json")
+            object_bytes = b"flydsl-object"
+            with open(object_path, "wb") as file:
+                file.write(object_bytes)
+            with open(header_path, "w") as file:
+                file.write("header")
+            object_sha256 = hashlib.sha256(object_bytes).hexdigest()
+            header_sha256 = hashlib.sha256(b"header").hexdigest()
+            with open(manifest_path, "w") as file:
+                json.dump(
+                    {
+                        "manifest": manifest_data,
+                        "files": {
+                            "object": {"sha256": object_sha256},
+                            "header": {"sha256": header_sha256},
+                        },
+                    },
+                    file,
+                )
+            compiled.export_aot.return_value = SimpleNamespace(
+                object_path=object_path,
+                header_path=header_path,
+                manifest_path=manifest_path,
+                object_sha256=object_sha256,
+                header_sha256=header_sha256,
+                manifest=SimpleNamespace(to_dict=lambda: manifest_data),
+            )
+            artifact = compile_aot_source("test_kernel", "source", precompile_metadata)
+
+        compiler.assert_called_once_with(
+            "jit_function", "compiled_input", "compiled_output"
+        )
+        compiled.export_aot.assert_called_once_with(
+            os.path.join(tmpdir, "flydsl_aot"),
+            "test_kernel_aot",
+            "flydsl_aot_test_kernel",
+        )
+        self.assertEqual(artifact.symbol, "flydsl_aot_test_kernel")
 
     def test_unavailable_runtime_declines_choice(self):
         template_name = f"flydsl_unavailable_test_{id(self)}"
@@ -122,6 +557,36 @@ class TestFlyDSLTemplate(TestCase):
 
         self.assertIsInstance(result, NotImplementedError)
         self.assertEqual(choices, [])
+
+    def test_aot_choice_accepts_dense_and_mxfp_mm(self):
+        graph = SimpleNamespace(aot_mode=True, cpp_wrapper=True)
+        sentinel = object()
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+            mock.patch.object(mm.flydsl_mm_template, "generate", return_value=sentinel),
+            mock.patch.object(
+                mm_grouped.flydsl_mxfp8_grouped_mm_template,
+                "generate",
+                return_value=sentinel,
+            ),
+        ):
+            choices = []
+            result = mm.flydsl_mm_template.maybe_append_choice(choices, IS_MXFP=False)
+            self.assertIsNone(result)
+            self.assertEqual(choices, [sentinel])
+
+            choices = []
+            result = mm.flydsl_mm_template.maybe_append_choice(choices, IS_MXFP=True)
+            self.assertIsNone(result)
+            self.assertEqual(choices, [sentinel])
+
+            choices = []
+            result = mm_grouped.flydsl_mxfp8_grouped_mm_template.maybe_append_choice(
+                choices
+            )
+            self.assertIsNone(result)
+            self.assertEqual(choices, [sentinel])
 
     def test_gen_defines(self):
         kernel = FlyDSLTemplateKernel(
@@ -1044,6 +1509,140 @@ class TestFlyDSLTemplate(TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    @parametrize("package_cpp_only", (False, True))
+    def test_flydsl_gemm_aoti_package(self, package_cpp_only):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("FlyDSL AOT currently supports gfx950 only")
+
+        class Model(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return torch.relu(torch.mm(lhs, rhs.t()))
+
+        lhs = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+        rhs = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        expected = Model()(lhs, rhs)
+        exported = torch.export.export(Model(), (lhs, rhs), strict=False)
+
+        with WritableTempFile(suffix=".pt2") as package_file:
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                package_path=package_file.name,
+                inductor_configs={
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "FLYDSL",
+                    "flydsl_enable_autotuning": False,
+                    "aot_inductor.package_cpp_only": package_cpp_only,
+                },
+            )
+            compiled = load_package(package_path)
+            actual = compiled(lhs, rhs)
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+            with zipfile.ZipFile(package_path) as archive:
+                names = archive.namelist()
+                self.assertFalse(
+                    any(
+                        "fly_jit_runtime" in name or "mlir" in name.lower()
+                        for name in names
+                    )
+                )
+                shared_objects = [name for name in names if name.endswith(".so")]
+                if shared_objects and (
+                    readelf := shutil.which("llvm-readelf") or shutil.which("readelf")
+                ):
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        for shared_object in shared_objects:
+                            archive.extract(shared_object, tmpdir)
+                            result = subprocess.run(
+                                [
+                                    readelf,
+                                    "-d",
+                                    os.path.join(tmpdir, shared_object),
+                                ],
+                                check=True,
+                                capture_output=True,
+                                text=True,
+                            )
+                            self.assertNotIn("libfly_jit_runtime", result.stdout)
+                            self.assertNotIn("libmlir", result.stdout.lower())
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    """
+import importlib.abc
+import sys
+
+import torch
+from torch._inductor.package import load_package
+
+class BlockFlyDSL(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "flydsl" or fullname.startswith("flydsl."):
+            raise ImportError("FlyDSL must not be imported while running an AOTI package")
+        return None
+
+sys.meta_path.insert(0, BlockFlyDSL())
+assert "flydsl" not in sys.modules
+torch.manual_seed(1234)
+lhs = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+rhs = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+expected = torch.relu(torch.mm(lhs, rhs.t()))
+compiled = load_package(sys.argv[1])
+stream = torch.cuda.Stream()
+with torch.cuda.stream(stream):
+    actual = compiled(lhs, rhs)
+stream.synchronize()
+torch.testing.assert_close(actual, expected, atol=3e-2, rtol=3e-2)
+""",
+                    package_path,
+                ],
+                check=True,
+            )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_flydsl_grouped_gemm_aoti_package(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("FlyDSL AOT currently supports gfx950 only")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, offs):
+                return F.grouped_mm(a, b, offs=offs)
+
+        group_sizes = torch.tensor([32, 16, 48], device="cuda", dtype=torch.int32)
+        offs = group_sizes.cumsum(0)
+        a = torch.randn(
+            int(group_sizes.sum()), 128, device="cuda", dtype=torch.bfloat16
+        )
+        b = torch.randn(3, 128, 128, device="cuda", dtype=torch.bfloat16)
+        expected = Model()(a, b, offs)
+        exported = torch.export.export(Model(), (a, b, offs), strict=False)
+        with WritableTempFile(suffix=".pt2") as package_file:
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                package_path=package_file.name,
+                inductor_configs={
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "FLYDSL",
+                    "flydsl_enable_autotuning": False,
+                },
+            )
+            actual = load_package(package_path)(a, b, offs)
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize(
         "layout,dtype,k,tile_size,tile_k,use_half_tile_interleaved",
         (
@@ -1884,6 +2483,51 @@ class TestFlyDSLTemplate(TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_flydsl_mxfp8_grouped_mm_aoti_package(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, a_scale, b_scale, offs):
+                return F.scaled_grouped_mm(
+                    a,
+                    b,
+                    a_scale,
+                    ScalingType.BlockWise1x32,
+                    b_scale,
+                    ScalingType.BlockWise1x32,
+                    swizzle_a=SwizzleType.NO_SWIZZLE,
+                    swizzle_b=SwizzleType.NO_SWIZZLE,
+                    offs=offs,
+                    output_dtype=torch.bfloat16,
+                )
+
+        inputs = self._make_mxfp8_grouped_inputs([64, 32], 512, 128)
+        *args, reference = inputs
+        exported = torch.export.export(Model(), tuple(args), strict=False)
+        with WritableTempFile(suffix=".pt2") as package_file:
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                package_path=package_file.name,
+                inductor_configs={
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "FLYDSL",
+                    "flydsl_enable_autotuning": False,
+                },
+            )
+            actual = load_package(package_path)(*args)
+        rows = int(args[-1][-1])
+        self.assertEqual(
+            actual[:rows].float(),
+            reference[:rows].float(),
+            atol=6e-2,
+            rtol=6e-2,
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
@@ -2269,6 +2913,37 @@ class TestFlyDSLMXFPDevice(TestCase):
         )
         if mxfp_format is not None:
             self.assertIn("_precompile", "\n".join(code))
+
+    def test_mxfp8_aoti_package(self, device):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("FlyDSL AOT currently supports gfx950 only")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, sa, sb):
+                return _scaled_mm_mxfp(
+                    a,
+                    b,
+                    sa,
+                    sb,
+                    out_dtype=torch.bfloat16,
+                )
+
+        inputs, reference = _mxfp_case("mxfp8", (64, 96, 256), device)
+        exported = torch.export.export(Model(), inputs, strict=False)
+        with WritableTempFile(suffix=".pt2") as package_file:
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                package_path=package_file.name,
+                inductor_configs={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "FLYDSL",
+                    "flydsl_enable_autotuning": False,
+                },
+            )
+            actual = load_package(package_path)(*inputs)
+        self.assertEqual(actual, reference.to(torch.bfloat16), atol=3e-2, rtol=2e-2)
 
 
 instantiate_device_type_tests(TestFlyDSLMXFPDevice, globals(), only_for="cuda")

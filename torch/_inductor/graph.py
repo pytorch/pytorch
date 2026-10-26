@@ -3044,6 +3044,15 @@ class GraphLowering(torch.fx.Interpreter):
                 device_type=device_type,
                 num_outputs=len(self.graph_outputs),
                 kernel_code=kernel_source,
+                extra_flags=(
+                    *self.wrapper_code.aot_kernel_objects,
+                    *self.wrapper_code.external_kernel_libs,
+                    *self.wrapper_code.aot_link_options,
+                    *(
+                        f"-l:{library}"
+                        for library in self.wrapper_code.aot_link_libraries
+                    ),
+                ),
             )
 
         input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
