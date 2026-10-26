@@ -31,12 +31,16 @@ export default function (pi: ExtensionAPI) {
   const root = realpathSync(process.cwd());
 
   function insideRoot(path: string): boolean {
+    // pi strips @, expands file URLs, and normalizes these spaces before opening.
+    // Reject aliases rather than validating a different path from the tool.
+    if (/^[@~]|^file:\/\/|[\u00a0\u2000-\u200a\u202f\u205f\u3000]/i.test(path)) return false;
     const target = resolve(root, path);
     let real: string;
     try {
       real = realpathSync(target);
     } catch {
-      real = target; // nonexistent paths fail in the tool itself; still check the lexical path
+      // read also tries alternate Unicode spellings when a path is missing.
+      return false;
     }
     const rel = relative(root, real);
     return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
@@ -49,7 +53,7 @@ export default function (pi: ExtensionAPI) {
     if (PATH_TOOLS.has(event.toolName)) {
       const input = event.input as { path?: unknown; pattern?: unknown; glob?: unknown };
       const escapes =
-        (typeof input.path === "string" && (input.path.startsWith("~") || !insideRoot(input.path))) ||
+        (typeof input.path === "string" && !insideRoot(input.path)) ||
         // find's pattern and grep's glob are globs; keep them relative and inside the root.
         [event.toolName === "find" ? input.pattern : undefined, input.glob].some(
           (glob) => typeof glob === "string" && /(^[/~]|(^|[/\\])\.\.([/\\]|$))/.test(glob),
