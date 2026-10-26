@@ -16,8 +16,9 @@ on by default; set `USE_KINETO=0` to turn it off.
 
 The backend follows the PyTorch build: CUPTI for CUDA, rocprofiler-sdk for
 ROCm, XPUPTI for XPU (when `XPU_ENABLE_KINETO` is set), and CPU-only otherwise.
-Its dependencies (fmt, googletest, nlohmann_json) come from PyTorch's
-`third_party`. See the Kineto section of `cmake/Dependencies.cmake` for details.
+Its dependencies (Dynolog IPC headers, fmt, googletest, nlohmann_json) come
+from PyTorch's `third_party`. See the Kineto section of `cmake/Dependencies.cmake`
+for details.
 
 ## How Libkineto works
 

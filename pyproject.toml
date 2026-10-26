@@ -403,6 +403,7 @@ license-files = [
     "third_party/cudnn_frontend/LICENSE.txt",
     "third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0",
     "third_party/cutlass/LICENSE.txt",
+    "third_party/dynolog_headers/LICENSE",
     "third_party/fbgemm/LICENSE",
     "third_party/fbgemm/external/asmjit/LICENSE.md",
     "third_party/fbgemm/external/composable_kernel/LICENSE",
@@ -445,7 +446,6 @@ license-files = [
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
     "torch/csrc/profiler/kineto/LICENSE",
-    "torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
