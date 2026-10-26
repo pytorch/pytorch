@@ -16,6 +16,7 @@ import os
 import warnings
 from dataclasses import replace
 from hashlib import sha256
+from io import BytesIO
 from itertools import pairwise
 from types import MethodType
 from typing import Any, TYPE_CHECKING
@@ -69,6 +70,7 @@ from trymerge import (
     categorize_checks,
     check_greenlight_reviewed_head_sha,
     DRCI_CHECKRUN_NAME,
+    DRCI_RETRY_DELAYS_SECONDS,
     ensure_mergeable_labels,
     find_matching_merge_rule,
     format_failure_comment,
@@ -4366,6 +4368,76 @@ class TestMainStatusTags(NoNetworkTestCase):
             )
         )
         self.merge.assert_not_called()
+
+
+def _drci_http_error(code: int, body: bytes) -> HTTPError:
+    return HTTPError(
+        "https://hud.pytorch.org/api/drci/drci?prNumber=1",
+        code,
+        "Bad Request",
+        {},  # type: ignore[arg-type]
+        BytesIO(body),
+    )
+
+
+@mock.patch("trymerge.time.sleep")
+@mock.patch("trymerge.gh_fetch_url")
+class TestDrciRetries(TestCase):
+    def test_retries_after_a_failure_with_a_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b'{"error": "boom"}'),
+            {"1": {"AI_NOT_RELATED": []}},
+        ]
+        with mock.patch("builtins.print") as mock_print:
+            self.assertEqual(get_drci_classifications(1), {"AI_NOT_RELATED": []})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+        self.assertEqual(mock_fetch.call_count, 2)
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("HTTP 400", logged)
+        self.assertIn('{"error": "boom"}', logged)
+
+    def test_first_success_does_not_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.return_value = {"1": {"FLAKY": []}}
+        self.assertEqual(get_drci_classifications(1), {"FLAKY": []})
+        mock_sleep.assert_not_called()
+        self.assertEqual(mock_fetch.call_count, 1)
+
+    def test_logged_error_body_is_bounded(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"x" * 2000)
+        err.read = mock.Mock(wraps=err.read)  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print") as mock_print:
+            get_drci_classifications(1)
+        err.read.assert_called_once_with(500)
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("x" * 500, logged)
+        self.assertNotIn("x" * 501, logged)
+
+    def test_returns_none_once_every_attempt_fails(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b"{}")
+            for _ in range(len(DRCI_RETRY_DELAYS_SECONDS) + 1)
+        ]
+        with mock.patch("builtins.print"):
+            self.assertIsNone(get_drci_classifications(1))
+        self.assertEqual(mock_fetch.call_count, len(DRCI_RETRY_DELAYS_SECONDS) + 1)
+        self.assertEqual(
+            [c.args[0] for c in mock_sleep.call_args_list],
+            list(DRCI_RETRY_DELAYS_SECONDS),
+        )
+
+    def test_any_exception_is_retried(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        mock_fetch.side_effect = [TimeoutError("slow"), {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
 
 
 if __name__ == "__main__":

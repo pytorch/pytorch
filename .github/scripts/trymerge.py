@@ -16,6 +16,7 @@ from functools import cache, partial
 from pathlib import Path
 from re import Pattern
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from urllib.error import HTTPError
 from warnings import warn
 
 import yaml
@@ -493,6 +494,10 @@ IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # Also caps how many gates one merge may skip on an AI CI Advisor verdict -- see
 # categorize_checks.
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+# Pauses before each retry of a failed Dr.CI call. Back-to-back retries land in the
+# same second and fail together, as on #199675 and #201134, whose merges were then
+# blocked by failures the AI CI Advisor had cleared.
+DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -2603,26 +2608,50 @@ def save_merge_record(
         json.dump(data, f)
 
 
-@retries_decorator()
 def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
-    Query HUD API to find similar failures to decide if they are flaky
+    Query HUD API to find similar failures to decide if they are flaky.
+
+    Returns None once every attempt has failed, which get_classifications reads
+    as "Dr.CI unavailable" and answers from the Dr.CI check run summary -- a
+    fallback that drops AI_NOT_RELATED, so a failed call here un-clears every
+    failure the AI CI Advisor cleared.
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
-    failures = gh_fetch_url(
-        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
-        data=f"repo={project}",
-        headers={
-            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
-            "Accept": "application/vnd.github.v3+json",
-            "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
-        },
-        method="POST",
-        reader=json.load,
-    )
+    for attempt, delay in enumerate((0, *DRCI_RETRY_DELAYS_SECONDS)):
+        if delay:
+            time.sleep(delay)
+        try:
+            failures = gh_fetch_url(
+                f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+                data=f"repo={project}",
+                headers={
+                    "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+                    "Accept": "application/vnd.github.v3+json",
+                    "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
+                },
+                method="POST",
+                reader=json.load,
+            )
+            return failures.get(str(pr_num), {}) if failures else {}
+        except HTTPError as err:
+            # Dr.CI answers 400 for any exception it hits while recomputing and
+            # names it only in the body, so the status line alone says nothing.
+            print(
+                f"Attempt {attempt} to call Dr.CI failed with HTTP {err.code}: "
+                f"{_http_error_body(err)}"
+            )
+        except Exception as e:
+            print(f'Attempt {attempt} to call Dr.CI failed with "{e}"')
+    return None
 
-    return failures.get(str(pr_num), {}) if failures else {}
+
+def _http_error_body(err: HTTPError, limit: int = 500) -> str:
+    try:
+        return err.read(limit).decode("utf-8", errors="replace")
+    except Exception as e:
+        return f"<unreadable body: {e}>"
 
 
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
