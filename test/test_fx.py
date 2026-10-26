@@ -686,7 +686,7 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_via_decorator", m.code)
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_wrapped_via_decorator_and_transformed(self):
         self.assertEqual(wrapped_via_decorator(0), 1)
@@ -698,13 +698,13 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_via_decorator", m.code)
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
         transformed = torch.fx.Transformer(m).transform()
         self.assertIn("wrapped_via_decorator", transformed.code)
         self.assertEqual(transformed(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_wrap_with_submodule(self):
         class M(torch.nn.Module):
@@ -734,6 +734,18 @@ class TestFX(JitTestCase):
         retraced = symbolic_trace(m)
         self.assertIn("wrapped_via_decorator", retraced.code)
         self.assertEqual(retraced(0), 1)
+
+    def test_wrapped_trace_while_already_patched(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        with torch.fx._symbolic_trace._Patcher() as patcher:
+            torch.fx._symbolic_trace._patch_wrapped_functions(patcher)
+            m = symbolic_trace(to_trace)
+
+        targets = [n.target for n in m.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [real_wrapped_via_decorator])
+        self.assertEqual(m(0), 1)
 
     def test_wrap_decorated_function(self):
         def to_trace(y):
@@ -3814,7 +3826,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertIn("wrapped_via_decorator", traced.code)
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_ast_rewriter_wrapped_via_decorator_and_transformed(self):
         self.assertEqual(wrapped_via_decorator(0), 1)
@@ -3829,13 +3841,13 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertIn("wrapped_via_decorator", traced.code)
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
         transformed = torch.fx.Transformer(traced).transform()
         self.assertIn("wrapped_via_decorator", transformed.code)
         self.assertEqual(transformed(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_ast_rewriter_wrap_with_submodule(self):
         class M(torch.nn.Module):

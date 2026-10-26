@@ -1589,7 +1589,12 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_args,
         outputs,
     ):
-        if self._emit_stream_op_inline(python_kernel_name, list(get_args())):
+        # get_args() emits temporary tensor handle declarations as a side effect, so
+        # only call it for stream ops; handles from a discarded call are never freed.
+        if (
+            python_kernel_name in AOTI_SUPPORTED_STREAM_OP_NAMES
+            or python_kernel_name in AOTI_UNSUPPORTED_STREAM_OP_REASONS
+        ) and self._emit_stream_op_inline(python_kernel_name, list(get_args())):
             if V.extern_kernel_nodes:
                 V.extern_kernel_nodes.pop()
             return
