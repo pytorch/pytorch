@@ -7950,30 +7950,54 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertEqual(copies, [loaded._name])
                     self.assertIn("precompile_cpp", loaded._name)
 
-    def test_frozen_cpp_kernel_serves_a_relocated_install(self):
+    @parametrize("kind", ("ctypes", "pybinding"))
+    def test_frozen_cpp_kernel_serves_a_relocated_install(self, kind):
         import ctypes
         import hashlib
 
         from torch._inductor import codecache
-        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.codecache import CppCodeCache, CppPythonBindingsCodeCache
         from torch._inductor.cpp_builder import CppBuilder, normalize_path_separator
         from torch._inductor.utils import fresh_cache
         from torch.compiler import _runtime_cache
 
         export = "__declspec(dllexport) " if IS_WINDOWS else ""
-        source = (
-            f'extern "C" {export}long relocated_cpp_kernel(long x) {{ return x + 9; }}'
-        )
+        cache = CppCodeCache if kind == "ctypes" else CppPythonBindingsCodeCache
+
+        def load_and_run(submit_fn=None):
+            if kind == "ctypes":
+                lib = CppCodeCache.load_async(
+                    f'extern "C" {export}long relocated(long x) {{ return x + 9; }}',
+                    submit_fn=submit_fn,
+                )()
+                lib.relocated.restype = ctypes.c_long
+                return lib.relocated(ctypes.c_long(5))
+            # Inductor's CPU kernels: a wrapper linked to kernel code built apart.
+            entry = CppPythonBindingsCodeCache.load_pybinding(
+                ["int64_t*", "int64_t"],
+                "#include <cstdint>\n"
+                'extern "C" void add9(int64_t* out, int64_t x);\n'
+                'extern "C" void kernel(int64_t* out, int64_t x) { add9(out, x); }\n',
+                device_type="cpu",
+                submit_fn=submit_fn,
+                kernel_code="#include <cstdint>\n"
+                'extern "C" void add9(int64_t* out, int64_t x) { *out = x + 9; }\n',
+            )
+            out = torch.zeros(1, dtype=torch.int64)
+            entry(out, 5)
+            return out.item()
+
         with fresh_cache(), _runtime_cache.capture_scope():
-            lib = CppCodeCache.load(source)
-            with open(lib._name, "rb") as binary:
-                portable_key = CppCodeCache._portable_keys[lib.key]
+            self.assertEqual(load_and_run(), 14)
+            [key] = cache.cache
+            portable_key = CppCodeCache._portable_keys[key]
+            with open(CppCodeCache._binary_paths[key], "rb") as binary:
                 payload = pickle.dumps({portable_key: binary.read()})
         artifact = _runtime_cache.InductorCppCacheArtifact(
             hashlib.sha256(payload).hexdigest(), payload
         )
         # The serving launch runs the same build extracted somewhere else, so
-        # every include and library path in its build command moved.
+        # every include and library path in its build commands moved.
         root = normalize_path_separator(
             os.path.dirname(os.path.dirname(torch.__file__))
         )
@@ -7998,14 +8022,14 @@ class TestPrecompileRuntimeCache(TestCase):
             torch.compiler.precompile.no_compilation(),
         ):
             artifact.populate_cache()
-            loaded = CppCodeCache.load_async(
-                source, submit_fn=lambda fn: self.fail("compiled a frozen C++ kernel")
-            )()
-            self.assertNotEqual(loaded.key, lib.key)
-            self.assertEqual(CppCodeCache._portable_keys[loaded.key], portable_key)
-            kernel = loaded.relocated_cpp_kernel
-            kernel.restype = ctypes.c_long
-            self.assertEqual(kernel(ctypes.c_long(5)), 14)
+            served = load_and_run(
+                submit_fn=lambda fn: self.fail("compiled a frozen C++ kernel")
+            )
+            [served_key] = cache.cache
+            self.assertNotEqual(served_key, key)
+            self.assertEqual(CppCodeCache._portable_keys[served_key], portable_key)
+            self.assertIn("precompile_cpp", CppCodeCache._binary_paths[served_key])
+            self.assertEqual(served, 14)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_freezes_cpp_kernel_binaries(self):

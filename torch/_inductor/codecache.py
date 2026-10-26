@@ -4063,7 +4063,7 @@ def _strip_relocatable_roots(text: str) -> str:
     return text if pattern is None else pattern.sub("<install>", text)
 
 
-def _portable_cpp_key(*parts: str) -> str:
+def _portable_cpp_key(sources: Sequence[str], command_lines: Sequence[str]) -> str:
     """Name a C++ build by what it compiles, not by where torch is installed.
 
     The cache key hashes command lines full of install paths, and a packaged job
@@ -4071,6 +4071,10 @@ def _portable_cpp_key(*parts: str) -> str:
     their C++ kernels under this key instead, so a later launch of the same build
     finds them. It is not used for the shared on-disk cache, where the install
     path still separates builds that torch_key() cannot tell apart.
+
+    Only the command lines lose their install roots: their paths matter only at
+    build time. A path in a source is compiled into the binary, so the sources
+    are hashed as they are.
 
     The compiler is named by its path in the command line, as in the cache key,
     not by the serving host's compiler version. The command line still carries
@@ -4082,7 +4086,8 @@ def _portable_cpp_key(*parts: str) -> str:
         f"{sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",
     )
     hasher = hashlib.sha256()
-    for part in (*identity, *(_strip_relocatable_roots(part) for part in parts)):
+    stripped = (_strip_relocatable_roots(line) for line in command_lines)
+    for part in (*identity, *sources, *stripped):
         hasher.update(part.encode())
         hasher.update(b"\0")
     return hasher.hexdigest()
@@ -4233,10 +4238,8 @@ class CppCodeCache:
             # Only precompile reads it, so it is computed on demand.
             if key not in cls._portable_keys:
                 cls._portable_keys[key] = _portable_cpp_key(
-                    main_code,
-                    optimized_code or "",
-                    main_cmd_line,
-                    optimized_cmd_line,
+                    (main_code, optimized_code or ""),
+                    (main_cmd_line, optimized_cmd_line),
                 )
             return cls._portable_keys[key]
 

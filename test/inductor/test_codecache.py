@@ -586,7 +586,7 @@ _custom_empty.__name__ = "empty"
 class TestCppPortableKey(TestCase):
     """Precompile freezes C++ kernels under a key that survives relocation."""
 
-    def _key(self, *parts, roots=("/opt/t",), ext_suffix=".so"):
+    def _key(self, *command_lines, source="src", roots=("/opt/t",), ext_suffix=".so"):
         from torch._inductor import codecache
 
         real_config_var = sysconfig.get_config_var
@@ -600,7 +600,7 @@ class TestCppPortableKey(TestCase):
                 else real_config_var(name),
             ),
         ):
-            return codecache._portable_cpp_key(*parts)
+            return codecache._portable_cpp_key((source,), command_lines)
 
     def _real_command_line(self):
         from torch._inductor.cpp_builder import CppBuilder, CppTorchDeviceOptions
@@ -619,8 +619,8 @@ class TestCppPortableKey(TestCase):
         self.assertIn(root, command)
         moved = "/relocated/install"
         self.assertEqual(
-            self._key("src", command, roots=(root,)),
-            self._key("src", command.replace(root, moved), roots=(moved,)),
+            self._key(command, roots=(root,)),
+            self._key(command.replace(root, moved), roots=(moved,)),
         )
 
     def test_real_command_line_keeps_no_install_root(self):
@@ -636,6 +636,17 @@ class TestCppPortableKey(TestCase):
         self.assertNotEqual(
             self._key("-I/opt/t-cuda/include", roots=("/opt/t",)),
             self._key("-I/opt/u-cuda/include", roots=("/opt/u",)),
+        )
+
+    def test_key_keeps_install_paths_in_the_source(self):
+        # A path in the source is compiled into the binary, so it is not portable.
+        self.assertNotEqual(
+            self._key(
+                "cmd", source='const char* p = "/opt/a/data";', roots=("/opt/a",)
+            ),
+            self._key(
+                "cmd", source='const char* p = "/srv/b/data";', roots=("/srv/b",)
+            ),
         )
 
     def test_key_strips_only_whole_roots(self):
@@ -684,11 +695,11 @@ class TestCppPortableKey(TestCase):
     def test_key_tracks_torch_source_and_python_abi(self):
         from torch._inductor import codecache
 
-        base = self._key("src", "cmd")
-        self.assertNotEqual(base, self._key("other src", "cmd"))
-        self.assertNotEqual(base, self._key("src", "cmd", ext_suffix=".abi3.so"))
+        base = self._key("cmd")
+        self.assertNotEqual(base, self._key("cmd", source="other src"))
+        self.assertNotEqual(base, self._key("cmd", ext_suffix=".abi3.so"))
         with mock.patch.object(codecache, "torch_key", return_value=b"other torch"):
-            self.assertNotEqual(base, self._key("src", "cmd"))
+            self.assertNotEqual(base, self._key("cmd"))
 
     def test_system_prefixes_are_not_relocatable_roots(self):
         from torch._inductor import codecache

@@ -3555,10 +3555,13 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by ``torch_key()``, the Python ABI tag, and the
-    source and build command with the PyTorch and Python install roots removed,
-    so they still serve without being rebuilt after the same build is installed
-    or extracted somewhere else. Loading one still resolves the C++ compiler and
+    Frozen C++ kernels are keyed by the torch version and a hash of the installed
+    torch sources, the Python ABI tag, the kernel source, and the build command
+    with the PyTorch and Python install roots removed, so they still serve
+    without being rebuilt after the same build is installed or extracted
+    somewhere else. Files under those roots are compared by relative path only:
+    a different compiler, OpenMP or CUDA under the same layout of a Python
+    environment is not detected. Loading one still resolves the C++ compiler and
     the CPU's vector ISA to form that build command, which outside fbcode needs
     a compiler on this host. A kernel whose key differs is rebuilt: for example,
     when this host resolves a different vector ISA, or the build command names a
