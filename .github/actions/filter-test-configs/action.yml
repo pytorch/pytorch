@@ -28,6 +28,14 @@ inputs:
     type: string
     required: false
     default: ""
+  lf-runners:
+    type: string
+    required: false
+    default: ""
+    description: |
+      Comma-separated ARC runners allowed on LF (ci-infra#1081); forwarded
+      verbatim to filter_test_configs.py's --lf-runners. Empty string means
+      unrestricted.
 
 outputs:
   test-matrix:
@@ -138,6 +146,7 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         SCHEDULE: ${{ github.event.schedule }}
         HEAD_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+        LF_RUNNERS: ${{ inputs.lf-runners }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -155,7 +164,8 @@ runs:
           --tag "${TAG}" \
           --event-name "${EVENT_NAME}" \
           --schedule "${SCHEDULE}" \
-          --branch "${HEAD_BRANCH}"
+          --branch "${HEAD_BRANCH}" \
+          --lf-runners "${LF_RUNNERS}"
 
     - name: Print the filtered test matrix
       shell: bash

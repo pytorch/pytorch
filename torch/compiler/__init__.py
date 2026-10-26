@@ -6,22 +6,22 @@ from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
-from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-
-# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
-# plus an acceleration cache. Re-exported from the private impl module, whose
-# ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
-# ``torch.compile`` guard-serialization caching mode), despite the shared word.
-# ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
-# conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
-# forced to "torch.compiler" in the impl module, matching this public location.
-from torch._precompile import (
-    precompile as precompile,
-    PrecompileError as PrecompileError,
+from torch._higher_order_ops.invoke_subgraph import (
+    _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS,
+    NestedCompileRegionOptions,
 )
 
-from . import config
+# ``torch.compiler.precompile`` is the prototype ahead-of-time capture API: a submodule
+# (torch/compiler/precompile.py) that re-exports its public types from the private impl
+# modules and re-homes their ``__module__`` to itself. Distinct from
+# ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` guard-serialization
+# caching mode), despite the shared word. ``PrecompileError`` is re-exported here as
+# ``torch.compiler.PrecompileError`` so the conventional ``except`` spelling works; its
+# ``__module__`` is set to "torch.compiler" in the impl module to match. The order of
+# these two imports is not load-bearing: the submodule imports torch._precompile itself.
+from torch._precompile import PrecompileError as PrecompileError
+
+from . import config, precompile
 from ._cache import CacheInfo
 
 
@@ -949,7 +949,13 @@ def nested_compile_region(
 
     Args:
         fn: The function to wrap
-        options: Optional backend to use for compiling the subgraph.
+        options: Optional compilation options for the subgraph. Construct them
+            with ``get_invoke_subgraph_compile_options`` from
+            ``torch._higher_order_ops.invoke_subgraph``. Its
+            ``fw_inductor_config_patches`` argument is stored as
+            ``inductor_config_patches``; its ``bw_inductor_config_patches``
+            argument retains the same name. Both mappings accept only the
+            Inductor config keys {supported_config_keys}.
             Warning: this is an experimental feature under development and
             not ready for use yet.
         max_reuse_entries: Maximum number of reuse cache entries per function
@@ -985,6 +991,15 @@ def nested_compile_region(
     )
 
 
+if nested_compile_region.__doc__:
+    nested_compile_region.__doc__ = nested_compile_region.__doc__.format(
+        supported_config_keys=", ".join(
+            f"``{key}``"
+            for key in sorted(_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS)
+        )
+    )
+
+
 def load_compiled_function(
     file: io.IOBase,
     *,
@@ -998,9 +1013,59 @@ def load_compiled_function(
 
         This API is currently experimental and subject to change.
 
+    When ``f_globals`` is passed and a global is itself the source of a kept
+    guard, the returned callable re-reads that global from it before every call,
+    so it is not safe to share between threads that rebind such a global
+    concurrently, with or without the GIL; load the artifact once per thread
+    instead.
+
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
+        f_globals: Optional live global scope enclosing the compiled function,
+                   and the scope its kept guards resolve globals against,
+                   symbolic-shape guards included: whether one installs as a
+                   Python lambda (the default) or as a C++ guard under
+                   ``enable_cpp_symbolic_shape_guards``, its global operands
+                   resolve here. When a kept guard reads a global -- which,
+                   beyond a symbolic-shape guard on a global with a dynamic
+                   dim, takes a ``guard_filter_fn`` that keeps global guards,
+                   since the default drops them all -- pass ``vars(mod)`` for
+                   the module ``mod`` that DEFINED the original function rather
+                   than a dict of a few extra names: every global a kept guard
+                   reads has to be bound here with a value that satisfies it,
+                   or else the call raises ``RuntimeError: GuardManager check
+                   failed`` rather than recompiling. Under the default filter
+                   no other kept guard reads a global, so this dict only widens
+                   what the bytecode merges over (below) with nothing checking
+                   it; pass only the names the load cannot otherwise resolve,
+                   if any. Passing ``{}`` is
+                   an empty guard scope, not the same as omitting the argument,
+                   which resolves the guards against the scope rebuilt from the
+                   artifact instead. The
+                   dict is held by reference and written into: the load may
+                   add the Dynamo-generated globals a kept guard is rooted at,
+                   and ``__builtins__`` when it has to build the builtins dict
+                   one of those names holds, never overwriting a key it already
+                   binds, and a global rebound in it afterwards is what the
+                   guards check on the next call. The compiled bytecode reads a
+                   load-time snapshot of this dict merged over the globals
+                   serialized with the artifact, so a name this dict omits
+                   still resolves there; on top of that, a global that is
+                   itself the source of a kept guard is re-read from this dict
+                   on every call, so a rebind the guards ACCEPT -- a
+                   same-metadata swap under a kept ``TENSOR_MATCH``, which
+                   checks metadata, not values -- is what the call computes
+                   with, and a store the compiled function itself makes to
+                   such a global does not carry over to its next call. A
+                   global that is not itself a kept guard's source keeps its
+                   load-time value -- one only a symbolic-shape guard reads
+                   included -- and so does a container a guard reaches only
+                   through a sub-path such as ``D['a']``, whose other members
+                   nothing certifies: a rebind of either is not seen, even
+                   when the guard on ``D['a']`` passes. The re-read is not
+                   atomic with the guard check before it, and it writes into
+                   the loaded callable's own globals, shared by every call of
+                   it; the user guide covers both.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
@@ -1011,4 +1076,6 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(
+        data, f_globals, external_data, guard_globals=f_globals
+    )
