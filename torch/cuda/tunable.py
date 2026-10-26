@@ -291,8 +291,10 @@ def wildcard_fallback_is_enabled() -> bool:
 
 
 # The four helpers below drive the compile-time two-phase flow and are private:
-# the setters are called only by Inductor orchestration, the queries only by
-# tests. They are deliberately absent from __all__ and from
+# the setters are called only by Inductor orchestration, and these Python
+# queries only by tests. The value they carry is read back on the C++ side
+# through TuningContext::IsNearestMatchEnabled/IsRecordBorrowedEnabled, not
+# through these. They are deliberately absent from __all__ and from
 # docs/source/cuda.tunable.md -- promoting them would commit us to a supported
 # contract for what is an internal compile-time mechanism.
 def _nearest_match_enable(val: bool = True) -> None:

@@ -268,10 +268,11 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
-    // Policy for the compile-time reuse pass, read by the pass itself. Not
-    // consulted by TuningResultsManager or TunableOp dispatch. Runtime-settable
-    // because the pass and the execution that follows it share a process and
-    // need opposite values.
+    // Policy for the compile-time reuse pass: set from Python, read back by
+    // the pass through these C++ accessors (the Python query helpers exist
+    // only for tests). Not consulted by TuningResultsManager or TunableOp
+    // dispatch. Runtime-settable because the pass and the execution that
+    // follows it share a process and need opposite values.
     void EnableNearestMatch(bool value);
     bool IsNearestMatchEnabled() const;
 
