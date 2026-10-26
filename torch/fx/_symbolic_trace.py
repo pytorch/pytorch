@@ -1311,8 +1311,9 @@ def _resolve_lazy_imports(
 
     Reading an unresolved lazy import runs its module body, which must not see the
     globals FX patches mid-trace, nor FX's tracing flag. A ``torch.fx.wrap`` that
-    body runs is patched for this trace, as it would be had the module been
-    imported eagerly.
+    body runs is patched by the outermost applied trace, so from then on it applies
+    to that trace and every trace nested in it, as it would had the module been
+    imported eagerly, and it outlives the exit of the trace that scanned the scope.
 
     Only the scopes FX itself scans get this: a lazy name first read inside some
     other function the trace calls still resolves with the patches applied.
