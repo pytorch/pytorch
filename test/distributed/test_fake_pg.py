@@ -77,6 +77,39 @@ class TestFakePG(TestCase):
             self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
             self.assertEqual(pg.size(), 16)
 
+    def test_compile_sync_pg_stays_fake_for_a_device_qualified_backend(self):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(
+            backend="cpu:fake", rank=0, world_size=16, store=FakeStore()
+        )
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+        ):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+
+    def test_cache_sync_primes_the_fake_group_without_gloo(self):
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch import config as functorch_config
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+            functorch_config.patch(
+                _sync_cache_decision_cross_ranks=False, _sync_decision_cross_ranks=True
+            ),
+        ):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            pg = dynamo_distributed._COMPILE_SYNC_PG
+            self.assertIsNotNone(pg)
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+
     def test_compile_sync_decisions_stay_local(self):
         # Over a fake world, the compile time syncs return this rank's own
         # decisions instead of waiting on ranks that do not exist.
