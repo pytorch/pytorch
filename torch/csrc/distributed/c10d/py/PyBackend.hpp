@@ -303,6 +303,11 @@ class PyBackend : public Backend {
   c10::intrusive_ptr<Options> getBackendOptions() override {
     pybind11::gil_scoped_acquire gil;
     if (auto o = getPropertyOverride("options")) {
+      // None means no backend-specific options; callers such as
+      // ProcessGroup::splitGroup dereference the result.
+      if (o->is_none()) {
+        return c10::make_intrusive<Options>(getBackendName());
+      }
       return o->cast<c10::intrusive_ptr<Options>>();
     }
     return Backend::getBackendOptions();
