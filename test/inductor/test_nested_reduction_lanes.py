@@ -11,6 +11,7 @@ from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.triton import TritonCSE, TritonCSEVariable, TritonKernel
 from torch._inductor.utils import (
     IndentedBuffer,
+    is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
     TRITON_FLOAT8_DTYPES,
@@ -71,6 +72,8 @@ class TestRecursiveLaneSplit(TestCase):
         ],
     )
     def test_storage_bits(self, device, rank, factor, dtype, persistent):
+        if not is_triton_fp8_dtype_supported(dtype, device):
+            self.skipTest(f"Triton does not support {dtype} on this device")
         prefix = (4,) if rank == 2 else (2, 2)
         shape = (*prefix, factor)
         count = 4 * factor
