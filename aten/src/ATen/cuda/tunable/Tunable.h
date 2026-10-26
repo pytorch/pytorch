@@ -105,6 +105,14 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     // can tell a measured hit from a borrow, which is expected to be validated.
     // Unconditional: TunableOp dispatch never calls this, so calling it is the
     // opt-in and there is no flag to consult.
+    //
+    // Caller contract: benchmark the returned solution and reject it unless
+    // Call() reports OK. The match is made on the params signature, which does
+    // not carry the batched strides, so a donor can be one the backend refuses
+    // for this shape -- it returns FAIL and the caller silently runs its own
+    // non-tunable path. A caller that skipped the check would time that
+    // fallback under the borrowed key and record a solution that fails on
+    // every later call.
     ResultEntry LookupNearest(const std::string& op_signature,
         const std::string& params_signature);
 
