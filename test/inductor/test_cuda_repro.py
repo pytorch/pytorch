@@ -121,18 +121,6 @@ def _make_conv(dtype=None):
     return conv, x
 
 
-def _conv_reduction_kernel_code(codes: list[str], lowp_name: str) -> str:
-    """Forward reduction-kernel code, filtered to depend on a fixed
-    descriptive_names value so the kernel names stay predictable."""
-    code = "\n".join(codes)
-    assert config.triton.descriptive_names == "original_aten"
-    return "\n".join(
-        kernel
-        for kernel in code.split("def triton_")
-        if kernel.split("(", 1)[0].startswith(("per_fused", "red_fused"))
-    )
-
-
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = device_type
@@ -2061,7 +2049,12 @@ class CudaReproTests(TestCase):
         with config.patch(emulate_precision_casts=emulate_precision_casts):
             opt_fn = torch.compile(f1, backend="inductor", fullgraph=True)
             _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
-        filtered = _conv_reduction_kernel_code(codes, lowp_name)
+        self.assertEqual(config.triton.descriptive_names, "original_aten")
+        filtered = "\n".join(
+            kernel
+            for kernel in "\n".join(codes).split("def triton_")
+            if kernel.split("(", 1)[0].startswith(("per_fused", "red_fused"))
+        )
         self.assertIn(f".to(tl.{lowp_name})", filtered)
         if not emulate_precision_casts:
             # one forced cast; a duplicate would push the count to 2 (under
@@ -2123,7 +2116,12 @@ class CudaReproTests(TestCase):
             _, codes = run_and_get_code(
                 torch.compile(f, backend="inductor", fullgraph=True), x
             )
-        filtered = _conv_reduction_kernel_code(codes, lowp_name)
+        self.assertEqual(config.triton.descriptive_names, "original_aten")
+        filtered = "\n".join(
+            kernel
+            for kernel in "\n".join(codes).split("def triton_")
+            if kernel.split("(", 1)[0].startswith(("per_fused", "red_fused"))
+        )
         self.assertEqual(filtered.count(f".to(tl.{lowp_name})"), 1)
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
