@@ -9998,18 +9998,19 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertFalse(_custom_op_registered(f"{ns}::op.v3"))
         # An overload defined next to a custom_op is found through the op.
         self._define_op(ns, "base", module="unittest")
-        lib = self.enterContext(torch.library._scoped_library(ns, "FRAGMENT"))
-        torch.library.define(
-            f"{ns}::base.out",
-            "(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
-            tags=(torch.Tag.out,),
-            lib=lib,
-        )
-        self.assertEqual(
-            _custom_op_modules({f"{ns}::base.out"}), {"unittest": (f"{ns}::base.out",)}
-        )
-        self.assertTrue(_custom_op_registered(f"{ns}::base.out"))
-        self.assertFalse(_custom_op_registered(f"{ns}::base.v2"))
+        with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+            torch.library.define(
+                f"{ns}::base.out",
+                "(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+                tags=(torch.Tag.out,),
+                lib=lib,
+            )
+            self.assertEqual(
+                _custom_op_modules({f"{ns}::base.out"}),
+                {"unittest": (f"{ns}::base.out",)},
+            )
+            self.assertTrue(_custom_op_registered(f"{ns}::base.out"))
+            self.assertFalse(_custom_op_registered(f"{ns}::base.v2"))
         graph = torch.fx.Graph()
         graph.output(graph.call_function(op._opoverload, (graph.placeholder("x"),)))
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
