@@ -134,6 +134,13 @@ def get_ema_avg_fn(decay=0.999):
     Args:
         decay (float): Decay rate for EMA. Must be in the range [0, 1]. Default: 0.999
 
+    Note:
+        For matching dense floating-point or complex tensors supported by
+        :func:`torch.lerp` and ``0 < decay < 1``, the update uses interpolation,
+        as in :func:`get_ema_multi_avg_fn`. Its rounding, overflow, and non-finite
+        behavior can differ from the weighted-sum formula. Other inputs, tensor
+        overrides, and decay endpoints retain the weighted-sum update.
+
     Returns:
         Callable: A function that updates EMA parameters given current model parameters
     """
@@ -145,6 +152,27 @@ def get_ema_avg_fn(decay=0.999):
 
     @torch.no_grad()
     def ema_update(ema_param: Tensor, current_param: Tensor, num_averaged):
+        if (
+            isinstance(decay, (float, int))
+            and 0 < decay < 1
+            and not torch.overrides.has_torch_function((ema_param, current_param))
+            and ema_param.dtype == current_param.dtype
+            and ema_param.dtype
+            in (
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+                torch.complex64,
+                torch.complex128,
+            )
+            and ema_param.device == current_param.device
+            and ema_param.layout == current_param.layout == torch.strided
+            and not ema_param.is_nested
+            and not current_param.is_nested
+        ):
+            # Match the interpolation used by get_ema_multi_avg_fn.
+            return torch.lerp(ema_param, current_param, 1 - decay)
         return decay * ema_param + (1 - decay) * current_param
 
     return ema_update
