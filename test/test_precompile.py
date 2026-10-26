@@ -4961,19 +4961,18 @@ class TestPrecompileDynamoCapture(TestCase):
             cudagraphs = {"triton.cudagraphs": True}
             with self.assertRaisesRegex(PrecompileError, f"{reason}.*Drop triton"):
                 self._capture(single, tracer=tracer, options=cudagraphs)
-        for key in ("freezing", "force_disable_caches"):
+        for key in ("freezing", "force_disable_caches", "fx_wrapper"):
             with self.assertRaisesRegex(PrecompileError, f"'{key}'.*never files"):
                 self._capture(single, options={key: True})
         remote = {"bundled_autotune_remote_cache": True}
         with self.assertRaisesRegex(PrecompileError, "remote autotune cache miss"):
             self._capture(single, options=remote)
-        with self.assertRaisesRegex(PrecompileError, "cannot compile with freezing"):
-            self._capture(single, tracer=make_fx, options={"freezing": True})
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
             "cpp_wrapper": True,
             "benchmark-harness": True,
+            "freezing": True,
             "triton.autotune_at_compile_time": False,
         }
         for key, value in pinned.items():
