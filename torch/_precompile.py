@@ -1942,16 +1942,12 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
-def _is_custom_op(name: str) -> bool:
-    # The namespaces torch._library.utils.is_builtin treats as builtin.
-    return name.split("::", 1)[0] not in ("aten", "prim", "prims")
-
-
-def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
-    """The ``ns::op`` names of the non-ATen operators ``gm`` and its subgraphs call.
+def _op_names(gm: torch.fx.GraphModule) -> set[str]:
+    """The ``ns::op`` names of the operators ``gm`` and its subgraphs call;
+    :func:`_custom_op_modules` picks out the custom ones.
 
     For a graph served as-is (the eager backend); a compiled graph's operators are
-    read from its generated code instead, by :func:`_custom_op_names_in_source`.
+    read from its generated code instead, by :func:`_op_names_in_source`.
     """
     names: set[str] = set()
     for module in gm.modules():
@@ -1969,7 +1965,7 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
                     names.add(_op_name(ns, op, target._schema.overload_name))
                 elif isinstance(target, torch._ops.OpOverloadPacket):
                     names.add(target._qualified_op_name)
-    return {name for name in names if _is_custom_op(name)}
+    return names
 
 
 # Python wrapper code calls an op it does not lower as torch.ops.<ns>.<op>; the C++
@@ -1989,8 +1985,8 @@ def _op_name(ns: str, op: str, overload: str | None) -> str:
     return f"{ns}::{op}"
 
 
-def _custom_op_names_in_source(source: str) -> set[str]:
-    """The ``ns::op`` names of the non-ATen operators generated code calls.
+def _op_names_in_source(source: str) -> set[str]:
+    """The ``ns::op`` names of the operators generated code calls.
 
     Inductor and AOTAutograd emit a call for each operator they do not lower, so
     this sees exactly the operators the served code runs: one a decomposition or a
@@ -2004,13 +2000,13 @@ def _custom_op_names_in_source(source: str) -> set[str]:
         for match in _OP_REFERENCE.finditer(code):
             groups = match.group(1, 2, 3) if match.group(1) else match.group(4, 5, 6)
             names.add(_op_name(*groups))
-    return {name for name in names if _is_custom_op(name)}
+    return names
 
 
-def _backend_custom_op_names(
+def _backend_op_names(
     backends: Mapping[str, Any],
 ) -> tuple[set[str], set[str]]:
-    """The custom ops the backend artifacts of a multi-graph capture call, and
+    """The operators the backend artifacts of a multi-graph capture call, and
     those among them an eager graph calls.
 
     A backend whose served code cannot be read is logged: the artifact records
@@ -2030,7 +2026,7 @@ def _backend_custom_op_names(
             content, "__self__", content
         )
         if isinstance(gm, torch.fx.GraphModule):
-            eager_names |= _custom_op_names(gm)
+            eager_names |= _op_names(gm)
             continue
         compiled = {
             half: c
@@ -2051,7 +2047,7 @@ def _backend_custom_op_names(
         for half, c in compiled.items():
             source = getattr(getattr(c, "result", None), "source_code", None)
             if isinstance(source, str):
-                names |= _custom_op_names_in_source(source)
+                names |= _op_names_in_source(source)
             else:
                 log.warning(
                     "precompile: cannot read the %s code backend %s serves (%s), so "
@@ -2244,7 +2240,7 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
-    _write_custom_op_imports(buf, _custom_op_names_in_source(graph_python))
+    _write_custom_op_imports(buf, _op_names_in_source(graph_python))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2300,7 +2296,7 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
-    op_names = _custom_op_names(gm)
+    op_names = _op_names(gm)
     _write_custom_op_imports(buf, op_names, eager_op_names=op_names)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
@@ -2629,7 +2625,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    op_names, eager_op_names = _backend_custom_op_names(backends)
+    op_names, eager_op_names = _backend_op_names(backends)
     _write_custom_op_imports(
         buf,
         op_names,

@@ -7863,6 +7863,23 @@ class TestPrecompileRuntimeCache(TestCase):
         # The opt-in was already on, so the error does not suggest it.
         self.assertFalse(source["untuned_backward_eligible"])
         self.assertNotIn("require_tuned_backward", str(failure.exception))
+        # Under the strict policy, a kernel the opt-in could not carry either is
+        # not offered it.
+        ambiguous = _never_run(_static_runtime_kernel(64))
+        ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
+        for launcher in ambiguous.launchers:
+            launcher._compile_result.kernel.cubin_raw = None
+        with (
+            mock.patch.object(
+                StaticTritonCompileResult,
+                "reload_cubin_path",
+                side_effect=RuntimeError("missing binary"),
+            ),
+            self.assertRaises(_UnresolvedTritonExport) as failure,
+        ):
+            _freeze_triton_kernel("source", [ambiguous], require_tuned_backward=True)
+        self.assertFalse(failure.exception.sources[0]["untuned_backward_eligible"])
+        self.assertNotIn("require_tuned_backward", str(failure.exception))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_untuned_triton_kernels_are_traced(self):
@@ -9726,6 +9743,15 @@ print("custom op phase ok:", phase)
 """
 
 
+def _undefine_custom_op(qualname):
+    from torch._library import custom_ops
+
+    lib = custom_ops.OPDEF_TO_LIB.pop(qualname, None)
+    if lib is not None:
+        lib._destroy()
+    custom_ops.OPDEFS.pop(qualname, None)
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileCustomOpModules(TestCase):
@@ -9802,12 +9828,13 @@ class TestPrecompileCustomOpModules(TestCase):
         if module is not None:
             body.__module__ = fake_body.__module__ = module
         op = torch.library.custom_op(f"{ns}::{name}", mutates_args=())(body)
+        self.addCleanup(_undefine_custom_op, f"{ns}::{name}")
         if fake:
             op.register_fake(fake_body)
         return op
 
     def test_custom_op_names_cover_higher_order_args_subgraphs_and_packets(self):
-        from torch._precompile import _custom_op_names
+        from torch._precompile import _op_names
 
         ns = f"precompile_names_{uuid.uuid4().hex}"
         for name in ("wrapped", "packet", "inner"):
@@ -9826,8 +9853,11 @@ class TestPrecompileCustomOpModules(TestCase):
         )
         y = outer.call_function(ops.packet, (x,))
         outer.output(outer.call_function(torch.ops.aten.sin.default, (y,)))
-        names = _custom_op_names(torch.fx.GraphModule(root, outer))
-        self.assertEqual(names, {f"{ns}::{n}" for n in ("wrapped", "packet", "inner")})
+        names = _op_names(torch.fx.GraphModule(root, outer))
+        self.assertEqual(
+            names,
+            {f"{ns}::{n}" for n in ("wrapped", "packet", "inner")} | {"aten::sin"},
+        )
 
     def test_custom_op_modules_warn_for_an_unimportable_definition(self):
         import importlib.util
@@ -9947,16 +9977,13 @@ class TestPrecompileCustomOpModules(TestCase):
         # As for a function exec'd with globals that have no __name__.
         body.__module__ = None
         torch.library.custom_op(f"{ns}::nameless", mutates_args=())(body)
+        self.addCleanup(_undefine_custom_op, f"{ns}::nameless")
         with self.assertLogs("torch._precompile", "WARNING") as logs:
             self.assertEqual(_custom_op_modules({f"{ns}::nameless"}), {})
         self.assertIn("no __module__", logs.output[0])
 
     def test_custom_ops_registered_under_an_overload_name(self):
-        from torch._precompile import (
-            _custom_op_modules,
-            _custom_op_names,
-            _custom_op_names_in_source,
-        )
+        from torch._precompile import _custom_op_modules, _op_names, _op_names_in_source
         from torch._precompile_driver import _custom_op_registered
 
         ns = f"precompile_overload_{uuid.uuid4().hex}"
@@ -9970,10 +9997,13 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertFalse(_custom_op_registered(f"{ns}::op.v3"))
         # An overload defined next to a custom_op is found through the op.
         self._define_op(ns, "base", module="unittest")
+        lib = torch.library.Library(ns, "FRAGMENT")
+        self.addCleanup(lib._destroy)
         torch.library.define(
             f"{ns}::base.out",
             "(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
             tags=(torch.Tag.out,),
+            lib=lib,
         )
         self.assertEqual(
             _custom_op_modules({f"{ns}::base.out"}), {"unittest": (f"{ns}::base.out",)}
@@ -9983,9 +10013,9 @@ class TestPrecompileCustomOpModules(TestCase):
         graph = torch.fx.Graph()
         graph.output(graph.call_function(op._opoverload, (graph.placeholder("x"),)))
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
-        self.assertEqual(_custom_op_names(gm), {name})
+        self.assertEqual(_op_names(gm), {name})
         self.assertEqual(
-            _custom_op_names_in_source(
+            _op_names_in_source(
                 f"buf0 = torch.ops.{ns}.op.v2(x)\n"
                 f'aoti_torch_call_dispatcher("{ns}::op", "v2", args);\n'
             ),
@@ -10062,7 +10092,7 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertNotIn("import importlib", source)
 
     def test_custom_op_names_in_source(self):
-        from torch._precompile import _custom_op_names_in_source
+        from torch._precompile import _op_names_in_source
 
         source = (
             "aten = torch.ops.aten\n"
@@ -10077,9 +10107,10 @@ class TestPrecompileCustomOpModules(TestCase):
             '// aoti_torch_call_dispatcher("mylib::commented", "", args);\n'
         )
         self.assertEqual(
-            _custom_op_names_in_source(source),
+            _op_names_in_source(source),
             {
                 "mylib::triple",
+                "prims::convert_element_type",
                 "mylib::packet",
                 "mylib::cpp_fallback",
                 "mylib::cpp_schema",
@@ -10088,7 +10119,7 @@ class TestPrecompileCustomOpModules(TestCase):
 
     def test_backend_custom_op_names(self):
         from torch._dynamo.output_graph import noop_graph_call
-        from torch._precompile import _backend_custom_op_names
+        from torch._precompile import _backend_op_names
 
         ns = f"precompile_backends_{uuid.uuid4().hex}"
         op = self._define_op(ns, "eager")
@@ -10117,13 +10148,13 @@ class TestPrecompileCustomOpModules(TestCase):
             "noop": artifact(noop_graph_call),
         }
         self.assertEqual(
-            _backend_custom_op_names(backends),
+            _backend_op_names(backends),
             ({f"{ns}::eager", "mylib::fw", "mylib::bw"}, {f"{ns}::eager"}),
         )
         # Served code it cannot read (RegionalOutputCode, say) is reported.
         unreadable = {"regional": artifact(types.SimpleNamespace(compiled_fw=object()))}
         with self.assertLogs("torch._precompile", "WARNING") as logs:
-            self.assertEqual(_backend_custom_op_names(unreadable), (set(), set()))
+            self.assertEqual(_backend_op_names(unreadable), (set(), set()))
         self.assertIn("regional", logs.output[0])
         # Only the half it cannot read is reported; the other's ops are recorded.
         half_readable = {
@@ -10135,9 +10166,7 @@ class TestPrecompileCustomOpModules(TestCase):
             )
         }
         with self.assertLogs("torch._precompile", "WARNING") as logs:
-            self.assertEqual(
-                _backend_custom_op_names(half_readable), ({"mylib::fw"}, set())
-            )
+            self.assertEqual(_backend_op_names(half_readable), ({"mylib::fw"}, set()))
         self.assertEqual(len(logs.output), 1)
         self.assertIn("backward", logs.output[0])
 

@@ -5595,8 +5595,8 @@ Please use `add.register_fake` to add an fake impl.""",
             return x
 
         # Not torch's module, so the message cannot come from the wrapper
-        # register_kernel installs. A triton_op's kernels, which register_kernel
-        # does not wrap, still name torch._library.triton.
+        # register_kernel installs. A triton_op registers its own backend_fn, so its
+        # kernel errors name torch._library.triton.
         aliasing_kernel.__module__ = "json"
         f.register_kernel("cpu")(aliasing_kernel)
         with self.assertRaisesRegex(
