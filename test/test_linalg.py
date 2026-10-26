@@ -9699,7 +9699,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipIfRocm
     @skipIfNoLapack
     @onlyCUDA
-    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     def test_linalg_ldl_factor_edge_cases(self, device, dtype):
         # Empty inputs, in the matrix, the batch, or both
@@ -9716,8 +9715,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         def compare_with_cpu(A):
             LD, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
             LD_ref, pivots_ref, info_ref = torch.linalg.ldl_factor_ex(A.cpu(), hermitian=True)
-            # The kernel leaves working values in the upper triangle, which ldl_solve ignores
-            self.assertEqual(LD.tril(), LD_ref.tril())
+            self.assertEqual(LD, LD_ref)
             self.assertEqual(pivots, pivots_ref)
             self.assertEqual(info, info_ref)
 

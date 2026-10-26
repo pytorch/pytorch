@@ -18,7 +18,7 @@
 #include <cooperative_groups.h>
 
 /*
-  The following file contains implementation for a batched LU-factorization with partial pivoting.
+  Batched LU-factorization with partial pivoting.
   The approach is a recursive panel factorization with trailing matrix updates delegated to GEMMs/TRSMs.
   NOTE: meant as a temporary kernel before/when cuCUSOLVER/cuBLAS catches up (meant for very small matrices).
 
@@ -1501,6 +1501,10 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
   for (const auto i : c10::irange(batch_size)) {
     ldl_factor_blas3_single(LD_3d[i], pivots_2d[i], info_1d[i], hermitian);
   }
+
+  // ldl solver does not read the upper triangular part of the LD tensor.
+  // However, to be consistent with LAPACK/CUSOLVER, we zero it out.
+  LD.tril_();
 }
 
 } // at::native
