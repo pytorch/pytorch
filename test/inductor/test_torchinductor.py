@@ -9595,6 +9595,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Each input reads x eight times, so it is realized before stack, and
         # its unsqueeze view freezes it. The copy into the stack output should
         # fuse into the producer instead of a separate pointwise cat.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
         def fn(x):
             return torch.stack(
                 [sum(x[:, j] * (i + j) for j in range(8)) for i in range(3)], -1
@@ -9606,16 +9609,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(cat_fuse_computed_input_copies=True)
     def test_stack_realized_input_twice(self):
-        # One realized buffer copied into two slices, plus another reader.
+        # One realized buffer copied into two slices, plus another reader; both
+        # copies fuse into the producer (two kernels with the flag off).
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
         def fn(x):
             y = sum(x[:, j] * (j + 1) for j in range(8))
             return torch.stack([y, y], -1), y[None, :] + 1
 
+        torch._inductor.metrics.reset()
         self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_stack_cat_rule_exclusions(self):
         # The cat rule only reroutes whole computed buffers; a slice of one and a
         # no-op buffer compile as without it.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
         def sliced(x):
             y = sum(x[:, j] * (j + 1) for j in range(8))
             half = y.shape[0] // 2
@@ -9638,6 +9650,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @config.patch(cat_fuse_computed_input_copies=True)
     def test_stack_pad_cheap_inputs(self):
         # Stacks of cheap pointwise inputs stay one pointwise cat kernel.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
         def pack(x):
             first = x[:, 0] | (x[:, 1] << 4)
             second = x[:, 2] | (x[:, 3] << 4)
@@ -9654,8 +9669,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
             self.common(fn, (x,))
-            if self.device != "cpu":
-                assertGeneratedKernelCountEqual(self, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_hardtanh(self):
         def fn(x):
