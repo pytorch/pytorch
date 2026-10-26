@@ -49,6 +49,10 @@ class CppWrapperAssertTests(InductorTestCase):
             def get_op_name():
                 return "torch.ops.aten.set_.source_Tensor"
 
+            @staticmethod
+            def is_zero_elements():
+                return False
+
         class RecordingWrapper:
             comment = "//"
 

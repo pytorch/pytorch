@@ -8327,7 +8327,7 @@ class ExternKernel(InputsKernel):
         # Preserve the existing Python-wrapper behavior for inplace-view
         # results. Only cpp_wrapper needs get_assert_name() to spell the check
         # with the mutated input handle because its shim declares no output.
-        if config.alignment_asserts:
+        if config.alignment_asserts and not self.is_zero_elements():
             name = self.get_assert_name()
             # For cpp_wrapper inplace-view ops, `name` is the mutated input
             # variable used to spell the runtime check, while self.get_name()

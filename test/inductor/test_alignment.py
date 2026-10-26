@@ -89,6 +89,17 @@ class CommonTemplate:
         self.common(fn, (x,), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True)
+    def test_fallback_undefined_output(self):
+        def fn(q, qkv_weight, qkv_bias, proj_weight, proj_bias):
+            return torch._native_multi_head_attention(
+                q, q, q, 6, 2, qkv_weight, qkv_bias, proj_weight, proj_bias, None, False
+            )
+
+        mk = lambda *s: torch.randn(*s, device=self.device)  # noqa: E731
+        args = (mk(1, 3, 6), mk(18, 6), mk(18), mk(6, 6), mk(6))
+        self.common(fn, args, check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
     def test_no_align_for_custom_op(self):
         def slice1d(x):
             return (3 * x)[1:-15]
