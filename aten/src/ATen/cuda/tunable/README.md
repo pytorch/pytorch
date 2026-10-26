@@ -157,7 +157,7 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE | Default (or < 0) is to query L2 cache size. Set to 0 to disable. Otherwise, set to the number of MiB to use for the pool of operator parameters. For example, setting this to the size of your device's memory cache will guarantee that every tuning iteration will use a cold cache. |
 | PYTORCH_TUNABLEOP_BLAS_LOG | Default is 0. Set to 1 to enable. Write BLAS parameters to tuning CSV file. |
 | PYTORCH_TUNABLEOP_NEAREST_MATCH | Kill switch for compile-time nearest-match borrowing, which is off by default and only ever enabled by a compile-time reuse pass. Note the inverted sense: set to 0 to force borrowing off for the whole process, overriding anything the reuse pass asks for. Any other value, including 1, is ignored and leaves the decision to the pass -- unlike PYTORCH_TUNABLEOP_RECORD_UNTUNED, where 1 force-enables. Read once at startup. |
-| PYTORCH_TUNABLEOP_RECORD_BORROWED | Kill switch for persisting the results a compile-time reuse pass borrowed. Same inverted sense as above: set to 0 to force it off for the whole process; any other value is ignored. Read once at startup. |
+| PYTORCH_TUNABLEOP_RECORD_BORROWED | Kill switch for recording the verdicts a compile-time reuse pass reached. Suppresses the record entirely, in memory as well as in the results file, so a shape the pass decided is not an exact hit afterwards. Same inverted sense as above: set to 0 to force it off for the whole process; any other value is ignored. Read once at startup. |
 
 ### Python Interface
 All python APIs exist in the `torch.cuda.tunable` module.
