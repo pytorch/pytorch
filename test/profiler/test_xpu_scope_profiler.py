@@ -219,8 +219,8 @@ class XpuScopeProfilerTest(TestCase):
                 self.assertIsInstance(name, str)
                 self.assertTrue(name)
 
-        with self.assertRaisesRegex(RuntimeError, "does not support metrics"):
-            torch._C._profiler._xpu_available_scope_profiler_metrics(bytes(16))
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch._C._xpu_availableScopeProfilerMetrics(torch.xpu.device_count())
 
         if not self.required_paranoid_settings():
             self.skipTest("paranoid settings missing")

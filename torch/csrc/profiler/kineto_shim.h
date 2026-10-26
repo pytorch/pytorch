@@ -1,11 +1,7 @@
 #pragma once
 
-#include <array>
-#include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
-#include <vector>
 
 // Skip Kineto dependency on mobile unless explicitly asked for.
 // When is it explicitly asked for?
@@ -140,11 +136,6 @@ void logInvariantViolation(
     const std::string& error,
     const std::string& profile_id,
     const std::string& group_profile_id);
-
-#if defined(USE_KINETO) && defined(HAS_XPUPTI)
-TORCH_API std::vector<std::pair<std::string, std::vector<std::string>>>
-xpuAvailableMetrics(const std::array<uint8_t, 16>& deviceUuid);
-#endif
 
 } // namespace impl::kineto
 

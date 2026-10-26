@@ -23,13 +23,12 @@ __all__ = ["available_scope_profiler_metrics"]
 def _available_scope_profiler_metrics(
     device_index: int,
 ) -> Mapping[str, tuple[str, ...]]:
-    if not hasattr(torch._C._profiler, "_xpu_available_scope_profiler_metrics"):
+    if not hasattr(torch._C, "_xpu_availableScopeProfilerMetrics"):
         raise RuntimeError(
             "XPU metric queries require a PyTorch build with XPU profiling support"
         )
-    uuid = bytes(torch.xpu.get_device_properties(device_index).uuid.bytes)
     groups: dict[str, tuple[str, ...]] = {}
-    for name, metrics in torch._C._profiler._xpu_available_scope_profiler_metrics(uuid):
+    for name, metrics in torch._C._xpu_availableScopeProfilerMetrics(device_index):
         # PTI resolves scope groups by name and uses the first match.
         groups.setdefault(name, tuple(metrics))
     return MappingProxyType(groups)

@@ -9,13 +9,9 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/cuspy/cuspy_python.h>
-#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
-
-#include <algorithm>
-#include <array>
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPCapturedTraceback {
@@ -730,23 +726,6 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-#if defined(USE_KINETO) && defined(HAS_XPUPTI)
-  m.def(
-      "_xpu_available_scope_profiler_metrics",
-      [](const py::bytes& device_uuid) {
-        const std::string uuid_str = device_uuid;
-        std::array<uint8_t, 16> uuid{};
-        TORCH_CHECK(
-            uuid_str.size() == uuid.size(),
-            "Expected a ",
-            uuid.size(),
-            "-byte XPU device UUID, got ",
-            uuid_str.size(),
-            " bytes");
-        std::copy(uuid_str.begin(), uuid_str.end(), uuid.begin());
-        return torch::profiler::impl::kineto::xpuAvailableMetrics(uuid);
-      });
-#endif
   initCuspyBindings(m);
   TORCH_CHECK_PYTHON(PyModule_AddType(m.ptr(), &THPCapturedTracebackType) >= 0);
   m.def(
