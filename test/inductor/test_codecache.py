@@ -5825,12 +5825,30 @@ class TestCppCodeCacheKey(TestCase):
                 self.assertNotEqual(self._key(), key)
 
     def test_relocation_replaces_whole_path_components(self):
+        from torch._inductor.cpp_builder import normalize_path_separator
         from torch.utils import cpp_extension
 
-        root = os.path.dirname(cpp_extension._TORCH_PATH)
-        cmd = _relocatable_command_line(f"cc -I{root}/torch/include -I{root}-ext/inc")
+        root = normalize_path_separator(os.path.dirname(cpp_extension._TORCH_PATH))
+        cmd = _relocatable_command_line(
+            f"cc -I{root}/torch/include -I{root}-ext/inc -I/x{root}/torch/include "
+            f"-L'{root}/torch/lib'"
+        )
         self.assertIn("-I<torch_root>/torch/include", cmd)
+        self.assertIn("-L'<torch_root>/torch/lib'", cmd)
         self.assertIn(f"-I{root}-ext/inc", cmd)
+        self.assertIn(f"-I/x{root}/torch/include", cmd)
+
+    def test_unrelated_compiles_keep_their_paths_after_a_replay(self):
+        from torch.compiler import _runtime_cache
+
+        with fresh_cache():
+            key = self._key()
+        # A replay installed a frozen binary for some other kernel.
+        with (
+            fresh_cache(),
+            mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}),
+        ):
+            self.assertEqual(self._key(), key)
 
     @unittest.skipIf(
         sys.platform == "win32", "creating symlinks needs extra privileges on Windows"

@@ -240,6 +240,17 @@ class ProfilerTree:
         # whole operand type list rather than ending in an argument list.
         name = re.sub(r"^(at::native::xpu::\w+)<.+>$", r"\1<...>", name)
 
+        # An XPU kernel ported to the SYCL free function kernel extension is
+        # enqueued through a wrapper type that takes the kernel as a template
+        # argument, so the profiled name is the wrapper rather than the kernel.
+        # Name the kernel, so that porting a kernel does not rewrite the tree.
+        name = re.sub(
+            r"^sycl::\w+::ext::oneapi::experimental::detail::"
+            r"NdRangeFreeFunctionKernelWrapper<&\(\w+ (at::native::xpu::\w+)<.+>$",
+            r"\1<...>",
+            name,
+        )
+
         # HACK: this patches around the fact that PyBind11 improperly sets the
         # __qualname__ attribute on functions and methods; see
         # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
@@ -1222,7 +1233,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                     urEnqueueUSMMemcpy
                       Memcpy H2D (Host (Driver Allocated) -> Device)
                     urEnqueueKernelLaunchWithArgsExp
-                      at::native::xpu::MultiTensorApplyKernelFunctor<...>
+                      at::native::xpu::multi_tensor_apply_kernel<...>
                     aten::empty
                       [memory]
                     aten::empty
