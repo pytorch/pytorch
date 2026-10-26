@@ -50,6 +50,7 @@ from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
+from ..masked_value_propagation import MaskedValuePropagationOpsHandler
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -656,6 +657,65 @@ class BlockDescriptorOptions:
     def has_rmask(self) -> bool:
         return self.has_rindex()
 
+    def is_reduction_mask_covered(self, tree: IterationRangesRoot) -> bool:
+        """Check whether physical bounds cover every logical R tail lane.
+
+        TMA fills accesses outside descriptor.shape with zero. The logical
+        r0_mask is separate, so repeating valid source values can leave the
+        logical tail nonzero. For a.repeat(1, 9) @ b with K=72, generated load
+        expressions (layout conversions omitted) are:
+
+            r0_mask = r0_index < r0_numel
+            tmp0 = tma_descriptor0.load([yoffset, (r0_offset % 8)])
+            tmp2 = tma_descriptor1.load([r0_offset, xoffset])
+
+        Descriptor shapes are [33, 8] and [72, 136]. Broadcast/reshape repeats
+        tmp0's eight columns across the R tile. At logical r=72, tmp0 reuses
+        valid source column 0 while tmp2 reads an OOB row and gets zero. We
+        return False for tmp0 and True for tmp2: tmp0 still needs an R-mask
+        where before dot, since an Inf source value would produce Inf * 0=NaN.
+
+        We check for a retained physical dimension with a positive integer S:
+
+            shape = K / S
+            block_shape = ceil(RBLOCK / S)
+            offset = floor(roffset / S)
+
+        Its leading quotient makes r >= K imply a physical coordinate outside
+        shape. S=1 covers direct R indexing; larger S covers aligned ND splits.
+        Broadcasting inner dimensions preserves this zero, but removing the
+        leading dimension for stride-0 repetition loses the boundary. Offsets
+        stay symbolic so a repeat cannot pass by matching only the first tile.
+        BlockPtr also requires this dimension in the actual boundary_check.
+        """
+        sizevars = V.graph.sizevars
+        numel = sizevars.remove_precomputed_replacements(tree.numel)
+        block = TritonSymbols.get_block_size(tree)
+        offset = TritonSymbols.get_block_offset(tree)
+        for dim, (shape, block_shape, block_offset) in enumerate(
+            zip(self.shape, self.block_shape, self.offsets, strict=True)
+        ):
+            if isinstance(self, BlockPtrOptions) and dim not in self.boundary_check():
+                continue
+            shape = sizevars.remove_precomputed_replacements(shape)
+            if not sizevars.statically_known_gt(shape, 0):
+                continue
+            if not sizevars.statically_known_multiple_of(numel, shape):
+                continue
+            divisor = sizevars.simplify(numel / shape)
+            if not sizevars.statically_known_gt(divisor, 0):
+                continue
+            # A retained leading quotient preserves the logical R boundary.
+            if sizevars.statically_known_equals(
+                sizevars.remove_precomputed_replacements(block_shape),
+                CeilDiv(block, divisor),
+            ) and sizevars.statically_known_equals(
+                sizevars.remove_precomputed_replacements(block_offset),
+                FloorDiv(offset, divisor),
+            ):
+                return True
+        return False
+
     def has_tmpmask(self) -> bool:
         return False  # block_ptr can't do indirect indexing
 
@@ -686,6 +746,9 @@ class BlockDescriptorOptions:
             - First broadcast the value to self.broadcast_shape (strides are descending)
             - Then transpose the value so that dimensions no longer have descending strides
             - Finally reshape the block to the final kernel tile shape
+
+        For implicit load broadcasts, transpose the loaded dimensions before
+        restoring singleton axes.
         """
         current_shape: Sequence[sympy.Expr | int | str] = initial_shape
 
@@ -712,12 +775,45 @@ class BlockDescriptorOptions:
             broadcast_shape = self.stride_sorter.revert(self.broadcast_shape)
             broadcasting_dims = self.stride_sorter.revert(self.broadcasting_dims)
 
+        if (
+            allow_implicit
+            and not for_store
+            and V.kernel.is_native_matmul
+            and len(broadcast_shape) != len(final_shape)
+        ):
+            # An index like ids[z, r % 8] only uses z and r. With R0_BLOCK=16:
+            #
+            # Previously:
+            #   tmp = tl.broadcast_to(tmp, [ZBLOCK, 8, YBLOCK, XBLOCK, 2])
+            #   tmp = tl.reshape(tl.trans(tmp, [0, 2, 3, 4, 1]),
+            #                    [ZBLOCK, YBLOCK, XBLOCK, 16])
+            #
+            # Now:
+            #   tmp = tl.broadcast_to(tmp, [ZBLOCK, 8, 1, 1, 2])
+            #   tmp = tl.reshape(tl.trans(tmp, [0, 2, 3, 4, 1]), [ZBLOCK, 1, 1, 16])
+            #
+            # Expand r to its full size, but keep y/x at size 1. Otherwise the
+            # right input of tl.dot would have a y axis, which it cannot use.
+            used_symbols = OrderedSet(
+                symbol
+                for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
+                if not is_broadcasting
+                for symbol in dim.free_symbols
+            )
+            broadcast_shape = [
+                dim if used_symbols.intersection(dim.free_symbols) else sympy.S.One
+                for dim in broadcast_shape
+            ]
+            final_shape = [
+                dim if used_symbols.intersection(dim.free_symbols) else sympy.S.One
+                for dim in final_shape
+            ]
+
         # Reshape to add singletons.
         pre_broadcast_shape = [
             sympy.S.One if is_broadcasting else dim
             for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
         ]
-        value = apply_reshape(value, initial_shape, pre_broadcast_shape)
 
         implicit_broadcast_shape = pre_broadcast_shape
         if (
@@ -745,13 +841,48 @@ class BlockDescriptorOptions:
             )
         )
 
+        if supports_implicit_broadcast and not for_store:
+            # Descriptors load A[Y, R] and B[R, X] for a [Y, X, R] tile.
+            # Previously:
+            #   tmp0 = tl.trans(in_ptr0.load([yoffset, r0_offset])[:, :, None], [0, 2, 1])
+            #   tmp2 = tl.trans(in_ptr1.load([r0_offset, xoffset])[:, :, None], [2, 1, 0])
+            # Now:
+            #   tmp0 = in_ptr0.load([yoffset, r0_offset])[:, None, :]
+            #   tmp2 = tl.trans(in_ptr1.load([r0_offset, xoffset]), [1, 0])[None, :, :]
+            # For bmm's [Z, Y, X, R] tile:
+            #   tmp0 = in_ptr0.load([zoffset, yoffset, r0_offset])[:, :, None, :]
+            #   tmp2 = tl.trans(in_ptr1.load([zoffset, r0_offset, xoffset]),
+            #                   [0, 2, 1])[:, None, :, :]
+            # Keep singleton broadcast axes out of Triton's transpose layout.
+            if not self.stride_sorter.is_identity:
+                loaded_dims = {
+                    dim: i
+                    for i, dim in enumerate(
+                        dim
+                        for dim, broadcasting in enumerate(broadcasting_dims)
+                        if not broadcasting
+                    )
+                }
+                permute_dims = [
+                    loaded_dims[dim]
+                    for dim in self.stride_sorter.revert_sort_idx
+                    if dim in loaded_dims
+                ]
+                if permute_dims != list(range(len(initial_shape))):
+                    value = f"tl.trans({value}, {permute_dims})"
+                    current_shape = [current_shape[i] for i in permute_dims]
+            value = apply_reshape(value, current_shape, implicit_broadcast_shape)
+            return value, current_shape
+
+        value = apply_reshape(value, initial_shape, pre_broadcast_shape)
+
         if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = (
                 f"tl.broadcast_to({value}, {V.kernel.index_to_str(broadcast_shape)})"
             )
             current_shape = broadcast_shape
 
-        old_shape = self.broadcast_shape
+        old_shape = self.broadcast_shape if for_store else broadcast_shape
         if not self.stride_sorter.is_identity:
             # if for_store the transform is
             #   (non-descending strides) broadcasted kernel tile shape
@@ -769,7 +900,7 @@ class BlockDescriptorOptions:
             old_shape = (
                 self.broadcast_shape
                 if for_store
-                else self.stride_sorter.revert(self.broadcast_shape)
+                else self.stride_sorter.revert(broadcast_shape)
             )
 
         # Reshape to the final shape.
@@ -900,12 +1031,17 @@ def triton_reshape(
 
     if old_shape_str == new_shape_str:
         return value
-    if [s for s in new_shape_str if s != "1"] != old_shape_str:
+    if [s for s in old_shape_str if s != "1"] != [s for s in new_shape_str if s != "1"]:
         return f"tl.reshape({value}, [{', '.join(new_shape_str)}])"
-    # rewrite to [:, None] syntax, which is less buggy
+
+    # Use squeeze/None for singleton changes to preserve the tile layout.
     idx = 0
     expand = []
+    squeeze = []
     for size in new_shape_str:
+        while idx < len(old_shape_str) and old_shape_str[idx] == "1" and size != "1":
+            squeeze.append(idx)
+            idx += 1
         if idx < len(old_shape_str) and size == old_shape_str[idx]:
             expand.append(":")
             idx += 1
@@ -913,11 +1049,12 @@ def triton_reshape(
             if size != "1":
                 raise AssertionError(f"expected size '1', got {size!r}")
             expand.append("None")
-    if idx != len(old_shape_str):
-        raise AssertionError(
-            f"expected idx == len(old_shape_str), got {idx} != {len(old_shape_str)}"
-        )
-    return f"{value}[{', '.join(expand)}]"
+    squeeze.extend(range(idx, len(old_shape_str)))
+    for dim in reversed(squeeze):
+        value = f"tl.squeeze({value}, {dim})"
+    if "None" in expand:
+        value = f"{value}[{', '.join(expand)}]"
+    return value
 
 
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
@@ -1690,11 +1827,8 @@ class TritonOverrides(OpOverrides):
                 return False
 
             # Skip if the variable is already zeroed outside the mask
-            # (e.g., from tl.load(..., other=0.0))
-            # TODO : track the value of outside of mask region with cse
-            for k, v in V.kernel.cse._cache.items():
-                if v == var and "tl.load" in k and "other=0.0" in k:
-                    return False
+            if var.masked_value is not None and var.masked_value.item() == 0:
+                return False
 
             return True
 
@@ -1731,8 +1865,8 @@ class TritonOverrides(OpOverrides):
 
         def reshape_transpose_broadcast_for_dot(
             value,
-            initial_shape: Sequence[sympy.Expr],
-            final_shape: Sequence[sympy.Expr],
+            initial_shape: Sequence[str],
+            final_shape: Sequence[str],
         ) -> str:
             """
             Generate a reshape, transpose, and broadcast for the tl.dot.
@@ -1741,15 +1875,15 @@ class TritonOverrides(OpOverrides):
             it needs to be reshaped to meet the requirement.
 
             This is done by three steps.
-            1. remove the empty dimension (dim with size 1) and make it 2d with tl.reshape
+            1. remove singleton dimensions with tl.squeeze to make it 2d
             2. permute the dimension if needed (e.g., (X,R) -> (R,X)) with tl.trans
             3. broadcast if needed with broadcast_to.
                 - This shows up when matmul operand is broadcasted with torch.expand/repeat.
                 - e.g., torch.rand((16,)).expand(16,16) @ B
 
-            e.g., (Y,1,R), (Y,R) -> tl.reshape(var, (Y,R))
-            e.g., (1,X,R), (R,X) -> tl.trans(tl.reshape(var, (X,R)))
-            e.g., (1,X,1), (R,X) -> tl.broadcast_to(tl.trans(tl.reshape(var, (X,1))), (R,X))
+            e.g., (Y,1,R), (Y,R) -> tl.squeeze(var, 1)
+            e.g., (1,X,R), (R,X) -> tl.trans(tl.squeeze(var, 0))
+            e.g., (1,X,1), (R,X) -> tl.broadcast_to(tl.trans(tl.squeeze(var, 0)), (R,X))
 
             TODO : eventually we want to remove this function when lazy broadcasting arrives
             """
@@ -1812,14 +1946,18 @@ class TritonOverrides(OpOverrides):
 
         a = V.kernel.cse.generate(
             V.kernel.compute,
-            reshape_transpose_broadcast_for_dot(a, list(a.shape), [YBLOCK, RBLOCK]),
+            reshape_transpose_broadcast_for_dot(
+                a, triton_shape_dims(a.shape), [YBLOCK, RBLOCK]
+            ),
             dtype=a.dtype,
             shape=(YBLOCK, RBLOCK),
         )
 
         b = V.kernel.cse.generate(
             V.kernel.compute,
-            reshape_transpose_broadcast_for_dot(b, list(b.shape), [RBLOCK, XBLOCK]),
+            reshape_transpose_broadcast_for_dot(
+                b, triton_shape_dims(b.shape), [RBLOCK, XBLOCK]
+            ),
             dtype=b.dtype,
             shape=(RBLOCK, XBLOCK),
         )
@@ -5289,6 +5427,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
+        reduction_trees = [
+            tree for tree in self.active_range_trees() if tree.is_reduction
+        ]
+        reduction_range = (
+            reduction_trees[0]
+            if len(reduction_trees) == 1
+            and not self.cooperative_reduction
+            and not self.mix_order_reduction
+            and not isinstance(reduction_trees[0], DerivedIterationRangesRoot)
+            else None
+        )
+        zero_is_proven = False
 
         # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
         #  1) We are doing broadcasting
@@ -5374,8 +5524,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         else:
             if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+                zero_fill = bool(other) and not self._load_other
                 block_descriptor, other = self.codegen_block_ptr(
                     name, var, indexing, other
+                )
+                # Require physical bounds to cover the R tail with zero fill.
+                zero_is_proven = (
+                    reduction_range is not None
+                    and (isinstance(indexing, TensorDescriptorOptions) or zero_fill)
+                    and indexing.is_reduction_mask_covered(reduction_range)
                 )
                 if isinstance(indexing, BlockPtrOptions):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
@@ -5400,6 +5557,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self._host_tma_non_materializable.add(var)
                 self._discard_host_tma_descriptor(var)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
+                # A pointer load needs the actual R predicate and other=0.
+                zero_is_proven = (
+                    reduction_range is not None
+                    and reduction_range.mask_name() in indexing.mask_vars
+                    and bool(other)
+                    and not self._load_other
+                )
 
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
@@ -5409,6 +5573,67 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     shape = indexing.expand_shape
                 else:
                     shape = TritonSymbols.get_block_shape(indexing.index)
+
+                if shape:
+                    # Singleton axes carry no data, but affect Triton's load layout.
+                    # Load the compact tile, then restore the shape for consumers.
+                    # For an A load with shape [YBLOCK, 1, R0_BLOCK]:
+                    #   tmp0 = tl.load(in_ptr0 + (r0_2 + 1024*y0),
+                    #                  r0_mask & ymask, other=0.0)
+                    # becomes:
+                    #   tmp0 = tl.reshape(tl.load(in_ptr0 + tl.squeeze(r0_2 + 1024*y0, 1),
+                    #                  tl.squeeze(r0_mask & ymask, 1),
+                    #                  other=0.0), [YBLOCK, 1, R0_BLOCK])
+                    # This works for any tile rank, including XR, YXR, and ZYXR.
+                    # Only native bmm fixes ZBLOCK=1; its zindex/zmask may be 1D.
+                    singletons = ("1", "ZBLOCK") if self.is_native_matmul else ("1",)
+                    tile_shape = [
+                        1 if dim in singletons else dim
+                        for dim in triton_shape_dims(shape)
+                    ]
+                    mask_shape = self._broadcast_shape_with_masks(
+                        (), indexing.mask_vars
+                    )
+                    if mask_shape is not None:
+                        mask_shape = [
+                            1 if dim in singletons else dim
+                            for dim in triton_shape_dims(mask_shape)
+                        ]
+                        # A mask varying in X cannot be squeezed out of [Y, 1, R].
+                        if get_broadcasted_shape(tile_shape, mask_shape) == tuple(
+                            tile_shape
+                        ):
+                            load_shape = [dim for dim in tile_shape if dim != 1]
+                            index_str = (
+                                triton_reshape(
+                                    indexing.index_str, tile_shape, load_shape
+                                )
+                                if load_shape
+                                else f"tl.reshape({indexing.index_str}, [])"
+                            )
+                            mask_str = indexing.mask_str
+                            if mask_shape:
+                                padded_mask = [1] * (
+                                    len(tile_shape) - len(mask_shape)
+                                ) + mask_shape
+                                load_mask_shape = [
+                                    mask_dim
+                                    for dim, mask_dim in zip(tile_shape, padded_mask)
+                                    if dim != 1
+                                ]
+                                mask_str = (
+                                    triton_reshape(
+                                        mask_str, mask_shape, load_mask_shape
+                                    )
+                                    if any(dim != 1 for dim in mask_shape)
+                                    else f"tl.reshape({mask_str}, [])"
+                                )
+                            line = f"tl.load({var} + ({index_str}), {mask_str}{ep}{other}{cachemod})"
+                            if self.is_native_matmul:
+                                line = f"tl.reshape({line}, {triton_shape_str(tile_shape)})"
+                            else:
+                                line = triton_reshape(line, load_shape, tile_shape)
+                            shape = tile_shape
 
             if (
                 dtype in (torch.float16, torch.bfloat16)
@@ -5473,6 +5698,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         result_var.shape, indexing.mask_vars
                     ),
                 )
+                # The broadcast's where must zero the R tail; bool defaults to True.
+                zero_is_proven = (
+                    reduction_range is not None
+                    and reduction_range.mask_name() in indexing.mask_vars
+                    and not self._load_other
+                    and dtype != torch.bool
+                )
+
+        result_var.masked_value = MaskedValuePropagationOpsHandler.load(
+            name, index, zero_is_proven=zero_is_proven, dtype=result_var.dtype
+        )
 
         # Only CSE values emitted outside the loop remain valid after it closes.
         if not self.inside_reduction or load_buffer is self.body:
@@ -8512,6 +8748,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def max_block(self, prefix: str) -> int:
+        if self.is_native_matmul and prefix == "z":
+            return 1
         block = f"{prefix.upper()}BLOCK"
         if self.fixed_config and block in self.fixed_config:
             return self.fixed_config[block]
@@ -8680,6 +8918,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants[name] = line
         self._named_constant_defs.writeline(line)
 
+    @override
     def iteration_ranges_codegen_header(
         self,
         entry: IterationRangesRoot,
@@ -8722,9 +8961,44 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             block_size = (
                 f"{x.upper()}BLOCK" if not self.mix_order_reduction else "RSPLIT_SIZE"
             )
+            pid = self.iteration_ranges_get_pid(entry)
+            if self.is_native_matmul and x in ("y", "x"):
+                # Y is emitted before X; group eight Y tiles to reuse data in L2.
+                if x == "y":
+                    x_entry = next(t for t in self.range_trees if t.prefix == "x")
+                    y_pid = pid
+                    x_pid = self.iteration_ranges_get_pid(x_entry)
+                    y_tiles = "tl.cdiv(ynumel, YBLOCK)"
+                    if self.needs_yz_grid_overflow(entry):
+                        # Swizzle the full launch grid, including padded Y tiles.
+                        y_tiles = (
+                            f"tl.num_programs({entry.grid_dim}) * "
+                            f"tl.num_programs({entry.grid_dim + 1})"
+                        )
+                    if self.triton_tensor_ndim() == 4:
+                        # For each batch, Y advances before X in the launch grid.
+                        code.writeline(f"pid_mn = {x_pid} * {y_tiles} + {y_pid}")
+                        y_pid = "pid_mn // tl.cdiv(xnumel, XBLOCK)"
+                        x_pid = "pid_mn % tl.cdiv(xnumel, XBLOCK)"
+                    # TODO(nullplay): Tune GROUP_M; currently fixed at 8.
+                    swizzle = (
+                        f"pid_y, pid_x = tl.swizzle2d({y_pid}, {x_pid}, "
+                        f"{y_tiles}, tl.cdiv(xnumel, XBLOCK), 8)"
+                    )
+                    if self.is_combo_kernel and not self.per_subkernel_blocks:
+                        # Shared combo grids can include masked tiles outside this matmul.
+                        code.writeline(f"pid_y, pid_x = {y_pid}, {x_pid}")
+                        code.writeline(
+                            f"if pid_y < {y_tiles} and pid_x < tl.cdiv(xnumel, XBLOCK):"
+                        )
+                        with code.indent():
+                            code.writeline(swizzle)
+                    else:
+                        code.writeline(swizzle)
+                pid = f"pid_{x}"
             code.writelines(
                 [
-                    f"{x}offset = {self.iteration_ranges_get_pid(entry)} * {block_size}",
+                    f"{x}offset = {pid} * {block_size}",
                     f"{entry.name} = {line}",
                 ]
             )
