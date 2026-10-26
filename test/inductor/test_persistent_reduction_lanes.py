@@ -165,6 +165,56 @@ class TestPersistentReductionLanes(TestCase):
             self.check(fn, device, kernels=None)
         self.assertEqual(metrics.codegen_nested_reduction, 0)
 
+    @config.patch({"triton.multi_kernel": 0})
+    def test_declined_persistence_keeps_stored_source_separate(self, device):
+        # The transposed read makes the hint non-INNER, so the backend declines
+        # a persistent kernel for 128 lanes. The stored value then cannot be
+        # read at a lane by the kernel that stores it.
+        def fn(x, z):
+            value = (x.float() * z.t().float()).to(torch.bfloat16)
+            return value, value.float().abs().amax(-1) + value[:, 7].float()
+
+        x = torch.randn(256, 128, device=device)
+        z = torch.randn(128, 256, device=device)
+        expected = fn(x, z)
+        torch._dynamo.reset()
+        metrics.reset()
+        actual = torch.compile(fn, fullgraph=True)(x, z)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_looped_consumer_keeps_persistent_lane_group(self, device):
+        # Alone, out2 plans as a looped stage over x. Joining it to the
+        # persistent {w, maximum, out1} group would demote out1's lane read of w.
+        def fn(x, y):
+            x = x.view(-1, 32)
+            w = (x - y.view(-1, 32)).to(torch.bfloat16)
+            maximum = (w.float().abs() + x.abs()).amax(-1)
+            out1 = maximum + w[:, 7].float()
+            out2 = x[:, 0::2] + x[:, 1::2] + maximum[:, None]
+            return w, out1, out2
+
+        self.check(fn, device, kernels=2)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+
+    def test_reduction_pair_keeps_persistent_lane_group(self, device):
+        # Merging {v, a1, out1} with the looped sub-parent group {a2, out2} as a
+        # reduction pair would re-plan both as looped and demote out1's lane read.
+        def fn(x, y, z):
+            v = (x * y).to(torch.bfloat16)
+            a1 = v.float().abs().amax(-1)
+            a2 = z.abs().amax(-1)
+            out2 = z[:, 0::2] + z[:, 1::2] + a2[:, None] + a1[:, None]
+            return v, a1 + v[:, 7].float(), out2
+
+        inputs = [torch.randn(256, 32, device=device) for _ in range(3)]
+        expected = fn(*inputs)
+        torch._dynamo.reset()
+        metrics.reset()
+        actual = torch.compile(fn, fullgraph=True)(*inputs)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(metrics.codegen_nested_reduction, 2)
+
     def test_single_group_is_not_forwarded(self, device):
         def fn(x):
             value = (x.float() * 1.5).to(torch.bfloat16).view(-1, 32)

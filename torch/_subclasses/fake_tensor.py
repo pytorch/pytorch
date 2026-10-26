@@ -864,6 +864,11 @@ class FakeTensorConverter:
         ):
             out.grad_dtype = inner_t.grad_dtype
 
+        # Propagate backend-specific metadata (e.g. PrivateUse1 BackendMeta) from
+        # the (unwrapped) real tensor onto the fake tensor. for_fake lets the
+        # backend drop data that is invalid on a fake; a no-op when there is none.
+        torch._utils.copy_backend_meta(inner_t, out, for_fake=True)
+
         from torch._dynamo.source import RandomValueSource
 
         value = None
@@ -911,7 +916,7 @@ class FakeTensorConverter:
             # you've done it right, this is a good test:
             #
             #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
-            #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
+            #   TestReductionsDeviceCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
             and (source is None or not isinstance(source, RandomValueSource))
             # In Dynamo, shape_env is never none (even with static shapes).
             # However, FakeTensorMode can be used by hand and in some cases
