@@ -14,7 +14,7 @@ from itertools import product
 
 import torch
 import torch.nn.functional as F
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity, supported_activities
 
 from torch.quantization._quantized_conversions import (
     pack_int4_to_int8,
@@ -1419,6 +1419,9 @@ class TestMatmulCuda(InductorTestCase):
     # Fails with triton 3.7
     @parametrize("backend", ["ck", "ck_tile"])
     def test_grouped_gemm_rocm_ck_flag(self, backend):
+        if ProfilerActivity.CUDA not in supported_activities():
+            self.skipTest("CUDA profiling is not supported")
+
         # env var that enables the backend, and a substring of its kernel name for both equal and unequal K
         env_var, CK_EQUAL_K_HINT, CK_UNEQUAL_K_HINT = {
             "ck": ("ROCM_ALLOW_GROUP_GEMM_CK", "kernel_grouped_gemm_xdl_splitk", "kernel_grouped_gemm_xdl_splitk"),
