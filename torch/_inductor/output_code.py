@@ -1054,7 +1054,7 @@ class CompiledFxGraph(OutputCode):
                     "PyCodeCache.load_by_key_path",
                     log_pt2_compile_event=True,
                 ),
-                loading_graph(bool(self.fx_kwargs.get("is_backward"))),
+                loading_graph(self.fx_kwargs["is_backward"]),
             ):
                 code_cache = PyCodeCache.load_by_key_path(
                     self.cache_key,

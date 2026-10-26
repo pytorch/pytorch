@@ -1701,6 +1701,16 @@ class TestCachingAutotunerLaunched(TestCase):
         autotuner.restore_after_unpickle(None)
         self.assertFalse(autotuner._launched)
 
+    def test_forward_use_survives_a_backward_compile(self):
+        autotuner = self._make_autotuner()
+        self.assertFalse(autotuner._forward_use)
+        autotuner.set_compile_info(None, is_backward=True)
+        self.assertFalse(autotuner._forward_use)
+        autotuner.set_compile_info(None, is_backward=False)
+        autotuner.set_compile_info(None, is_backward=True)
+        self.assertTrue(autotuner.is_backward)
+        self.assertTrue(autotuner._forward_use)
+
 
 class TestFastLauncherDeviceSupport(TestCase):
     @staticmethod
