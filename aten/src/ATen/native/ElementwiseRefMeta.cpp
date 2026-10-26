@@ -174,7 +174,7 @@ void python_sort(std::vector<int64_t>& a, Lt lt) {
       ++run;
     }
   }
-  for (size_t start = run; start < n; ++start) {
+  for (const auto start : c10::irange(run, n)) {
     const int64_t pivot = a[start];
     size_t l = 0;
     size_t r = start;

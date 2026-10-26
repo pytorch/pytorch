@@ -398,13 +398,13 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
 
     if (force_default) {
         // find default alg
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].algorithm == (miopenConvAlgorithm_t)DEFAULT_ALGO) {
                 return solutions[i];
             }
         }
         // default algo was not found, select first algo without workspace requirement
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].workspace_size == 0) {
                 return solutions[i];
             }
@@ -471,13 +471,13 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
 
     if (force_default) {
         // find default alg
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].algorithm == (miopenConvAlgorithm_t)DEFAULT_ALGO) {
                 return solutions[i];
             }
         }
         // default algo was not found, select first algo without workspace requirement
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].workspace_size == 0) {
                 return solutions[i];
             }
@@ -544,13 +544,13 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
 
     if (force_default) {
         // find default alg
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].algorithm == (miopenConvAlgorithm_t)DEFAULT_ALGO) {
                 return solutions[i];
             }
         }
         // default algo was not found, select first algo without workspace requirement
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].workspace_size == 0) {
                 return solutions[i];
             }
