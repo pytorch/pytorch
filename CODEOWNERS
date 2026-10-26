@@ -5,12 +5,13 @@
 
 # CODEOWNERS semantics:
 # - GitHub uses the last matching pattern for each path.
-# - Active rules name who gets review requests. A commented rule means no one
-#   is notified for that path; it says nothing about ownership.
-# - An "# owner:" line names the group accountable for the paths below it, up
-#   to the next "# owner:" or "# label:" line or the end of the section: it
-#   fixes broken tests, owns CI cost, and receives triaged issues. "none" means
-#   no group owns those paths yet.
+# - Active rules name who gets review requests. A commented rule adds no
+#   notification of its own; the path follows the last matching active rule,
+#   if there is one. Commenting a rule says nothing about ownership.
+# - An "# owner:" line records the group meant to own the paths below it, up
+#   to the next "# owner:" or "# label:" line or the end of the section. These
+#   lines are informational: nothing consumes them yet, and they don't change
+#   who is notified. "none" means no owning group is recorded yet.
 # - Sections are ordered from broad defaults to narrower overrides.
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
@@ -57,7 +58,7 @@
 #
 # [functorch]
 # label: module: functorch
-# owner: @chillee @kshitij12345 @zou3519
+# owner: @Chillee @kshitij12345 @zou3519
 # /aten/src/ATen/functorch/
 # /functorch/
 # /test/functorch/
@@ -174,9 +175,6 @@
 # /aten/src/ATen/SparseCsrTensorUtils.h
 /aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
 # /aten/src/ATen/SparseTensorImpl.h
-# label: oncall: quantization
-# owner: @digantdesai @jianyuh @salilsdesai
-/aten/src/ATen/native/ao_sparse/ @salilsdesai @digantdesai @jianyuh
 #
 # [core_aten_optimizers]
 # label: module: mta
@@ -643,6 +641,7 @@
 # /test/test_view_ops.py
 # /test/test_weak.py
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
+#
 # [backend_device_runtime]
 # /test/custom_backend/
 # /torch/backends/
@@ -971,6 +970,7 @@
 /aten/src/ATen/native/quantized/cpu/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cuda/ @jerryzh168
 /aten/src/ATen/native/quantized/cudnn/ @jerryzh168
+/aten/src/ATen/native/ao_sparse/ @salilsdesai @digantdesai @jianyuh
 #
 # [profiler]
 # label: oncall: profiler
