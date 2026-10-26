@@ -50,22 +50,12 @@ TEST_F(ContextTest, Basic) {
 
   context.increment_refcount();
 
-  {
-    // This is in a sub-scope because this call to decrement_refcount
-    // is expected to give us a shared lock.
-    auto result = context.decrement_refcount();
-    ASSERT_THAT(
-        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
-            result),
-        testing::IsTrue());
-    ASSERT_THAT(delete_count(), testing::Eq(0));
-  }
+  ASSERT_THAT(context.decrement_refcount().get(), testing::IsNull());
+  ASSERT_THAT(delete_count(), testing::Eq(0));
 
   {
     auto result = context.decrement_refcount();
-    ASSERT_THAT(
-        std::holds_alternative<cow::COWDeleterContext::LastReference>(result),
-        testing::IsTrue());
+    ASSERT_THAT(result.get(), testing::NotNull());
     // Result holds the DeleteTracker.
     ASSERT_THAT(delete_count(), testing::Eq(0));
   }
@@ -79,7 +69,7 @@ TEST_F(ContextTest, cow_deleter) {
   auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::cow_deleter(&context);
+  cow::cow_deleter(new cow::COWReference(&context));
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
@@ -155,7 +145,8 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/
+          new cow::COWReference(new cow::COWDeleterContext(std::move(data))),
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -199,7 +190,8 @@ TEST(materialize_test, copy_on_write_single_reference) {
       /*size_bytes=*/4,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/
+          new cow::COWReference(new cow::COWDeleterContext(std::move(data))),
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -239,8 +231,8 @@ TEST(materialize_test, copy_on_write) {
   auto new_storage = cow::lazy_clone_storage(original_storage);
   ASSERT_THAT(new_storage, testing::NotNull());
 
-  auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
-      cow::cow_deleter);
+  auto context =
+      new_storage->data_ptr().cast_context<cow::COWReference>(cow::cow_deleter);
   ASSERT_THAT(context, testing::NotNull());
 
   // Materialized storage has new copy of data.
@@ -269,6 +261,50 @@ TEST(lazy_clone_storage_test, sets_materializer) {
   ASSERT_TRUE(new_storage->has_materializer());
 }
 
+class FailingAllocator final : public Allocator {
+ public:
+  DataPtr allocate(size_t n) override {
+    TORCH_CHECK(!fail, "injected allocation failure");
+    return GetDefaultCPUAllocator()->allocate(n);
+  }
+
+  void copy_data(void* dest, const void* src, size_t count) const override {
+    default_copy_data(dest, src, count);
+  }
+
+  bool fail = false;
+};
+
+TEST(materialize_test, allocation_failure_keeps_storage_valid) {
+  FailingAllocator allocator;
+  StorageImpl source({}, 4, &allocator, false);
+  std::memcpy(source.mutable_data(), "abcd", 4);
+  auto clone = cow::lazy_clone_storage(source);
+
+  allocator.fail = true;
+  ASSERT_ANY_THROW(clone->mutable_data());
+  ASSERT_THAT(*clone, is_copy_on_write());
+  ASSERT_THAT(source, is_copy_on_write());
+  ASSERT_EQ(clone->data(), source.data());
+
+  allocator.fail = false;
+  ASSERT_NE(clone->mutable_data(), source.data());
+  ASSERT_TRUE(buffers_are_equal(clone->data(), source.data(), 4));
+  allocator.fail = true;
+  const auto* ptr = source.data();
+  ASSERT_EQ(source.mutable_data(), ptr);
+}
+
+TEST(lazy_clone_storage_test, cuda_without_allocator_is_rejected) {
+  StorageImpl storage(
+      {}, 4, DataPtr(nullptr, Device(DeviceType::CUDA, 0)), nullptr, false);
+  EXPECT_THAT(
+      [&] { cow::lazy_clone_storage(storage); },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("without an allocator")));
+  EXPECT_FALSE(storage.has_materializer());
+}
+
 TEST(materialize_test, one_shot_materializer) {
   StorageImpl original_storage(
       {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
@@ -293,6 +329,8 @@ TEST(materialize_test, read_does_not_materialize_cow) {
   ASSERT_THAT(new_storage, testing::NotNull());
   ASSERT_TRUE(new_storage->has_materializer());
 
+  cow::record_done(original_storage);
+  cow::record_done(*new_storage);
   // Read-only access should NOT trigger COW materialization.
   (void)new_storage->data();
   ASSERT_TRUE(new_storage->has_materializer());
@@ -332,6 +370,32 @@ TEST(materialize_test, swap_data_ptr_materializes_both) {
   clone_a->swap_data_ptr(*clone_b);
   ASSERT_FALSE(clone_a->has_materializer());
   ASSERT_FALSE(clone_b->has_materializer());
+}
+
+TEST(materialize_test, replacing_data_ptr_clears_materializer) {
+  StorageImpl source(
+      {}, /*size_bytes=*/4, GetDefaultCPUAllocator(), /*resizable=*/false);
+  std::memcpy(source.mutable_data(), "abcd", 4);
+  auto clone = cow::lazy_clone_storage(source);
+  auto replacement = GetDefaultCPUAllocator()->clone("wxyz", 4);
+  const auto* ptr = replacement.get();
+  clone->set_data_ptr_noswap(std::move(replacement));
+  EXPECT_FALSE(clone->has_materializer());
+  EXPECT_EQ(clone->data(), ptr);
+  EXPECT_EQ(clone->mutable_data(), ptr);
+  EXPECT_TRUE(buffers_are_equal(clone->data(), "wxyz", 4));
+  EXPECT_TRUE(buffers_are_equal(source.data(), "abcd", 4));
+  EXPECT_NE(cow::lazy_clone_storage(*clone), nullptr);
+}
+
+TEST(materialize_test, reset_clears_materializer) {
+  StorageImpl source(
+      {}, /*size_bytes=*/4, GetDefaultCPUAllocator(), /*resizable=*/false);
+  auto clone = cow::lazy_clone_storage(source);
+  clone->reset();
+  EXPECT_FALSE(clone->has_materializer());
+  EXPECT_EQ(clone->data(), nullptr);
+  EXPECT_EQ(clone->mutable_data(), nullptr);
 }
 
 } // namespace

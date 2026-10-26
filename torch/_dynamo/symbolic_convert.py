@@ -1935,6 +1935,9 @@ class InstructionTranslatorBase(
                     )
                 e.skip_frame = True
                 raise
+            # Nested fallback would retain a caller resume on each loop iteration.
+            if self.parent is not None and self.parent.maybe_has_backedge():
+                self.raise_loop_graph_break(self.f_code, e)
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -3508,17 +3511,15 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
-        obj = self.pop()
         if sys.version_info >= (3, 13):
-            self.push(obj)
+            self._load_attr(inst.argval)
             self.PUSH_NULL(inst)
         elif sys.version_info >= (3, 11):
-            # always follow the NULL + fn convention, since if obj
-            # is actually a method, self is already bound to it, so it
-            # doesn't need to be passed in as an arg.
+            obj = self.pop()
+            # Push NULL before lookup so nested graph breaks preserve the call stack.
             self.PUSH_NULL(inst)
             self.push(obj)
+            self._load_attr(inst.argval)
         else:
             raise AssertionError(
                 "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
@@ -5609,7 +5610,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def raise_loop_graph_break(
-        code: types.CodeType, exc: Unsupported | UserError
+        code: types.CodeType, exc: Unsupported | UserError | StepUnsupported
     ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
