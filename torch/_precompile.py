@@ -1922,12 +1922,34 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+_BUILTIN_NAMESPACES = ("aten", "prim", "prims")
+
+
+def _op_names(target: object) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of ``target`` if it is a non-builtin op.
+
+    Dynamo keeps a packet (``torch.ops.ns.op``) as the node target, and a packet
+    need not have a ``default`` overload, so it names every overload it has.
+    """
+    if isinstance(target, torch._ops.OpOverload):
+        if target.namespace in _BUILTIN_NAMESPACES:
+            return set()
+        return {(target._schema.name, target._schema.overload_name)}
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        op_name = target._qualified_op_name
+        if op_name.partition("::")[0] in _BUILTIN_NAMESPACES:
+            return set()
+        return {
+            (op_name, "" if overload == "default" else overload)
+            for overload in target.overloads()
+        }
+    return set()
+
+
 def _custom_op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
     """The ``(ns::op, overload)`` names of the non-builtin operators ``gm`` and its
     subgraphs call, including ops a higher-order op (auto_functionalized,
     with_effects, ...) takes as an argument."""
-    from torch._library.utils import is_builtin
-
     names: set[tuple[str, str]] = set()
     for module in gm.modules():
         graph = getattr(module, "graph", None)
@@ -1937,10 +1959,7 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
             if node.op != "call_function":
                 continue
             for target in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
-                if isinstance(target, torch._ops.OpOverloadPacket):
-                    target = target.default
-                if isinstance(target, torch._ops.OpOverload) and not is_builtin(target):
-                    names.add((target._schema.name, target._schema.overload_name))
+                names |= _op_names(target)
     return names
 
 
@@ -1954,7 +1973,7 @@ def _custom_op_names_in_source(source: str | None) -> set[tuple[str, str]]:
     return {
         (f"{namespace}::{name}", "" if overload == "default" else overload)
         for namespace, name, overload in _OP_REFERENCE.findall(source or "")
-        if namespace not in ("aten", "prim", "prims")
+        if namespace not in _BUILTIN_NAMESPACES
     }
 
 
@@ -1963,7 +1982,9 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
 
     A Dynamo capture sees only its own forward graph. AOTAutograd lowers a dense
     forward (desugaring tensor subclasses, applying decompositions) and a backward,
-    either of which can call ops that graph never does.
+    and Inductor's passes and lowerings rewrite both; any of them can call ops that
+    graph never does. Each is read from what the artifact keeps of it: the printed
+    forward, the serialized backward, and the code Inductor generated.
     """
     from torch._functorch._aot_autograd.aot_autograd_result import (
         GenericAOTAutogradResult,
@@ -1975,15 +1996,32 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
         # An eager backend's artifact is the Dynamo graph itself, already recorded.
         if not isinstance(content, GenericAOTAutogradResult):
             continue
-        # The printed forward exists only when AOTAutograd logged it.
-        names |= _custom_op_names_in_source(content.aot_forward_graph_str)
+        generated = [
+            getattr(getattr(compiled, "result", None), "source_code", None)
+            for compiled in (content.compiled_fw, content.compiled_bw)
+        ]
+        if content.aot_forward_graph_str is None and generated[0] is None:
+            log.warning(
+                "torch.compiler.precompile: backend %s kept neither AOTAutograd's "
+                "forward graph nor its generated code, so the custom ops only its "
+                "lowered forward calls are not recorded",
+                artifact.key,
+            )
+        for source in (content.aot_forward_graph_str, *generated):
+            names |= _custom_op_names_in_source(source)
         if content.serialized_bw_module is not None:
             names |= _custom_op_names(content.serialized_bw_module.deserialize())
     return names
 
 
 # Where an operator's schema was registered, for ops no Python registration
-# recorded: torch's own C++ registrations live in its C++ sources.
+# recorded: torch's own C++ registrations live in its C++ sources. This is a
+# heuristic, for want of a dispatcher record of the registering library. It reads
+# the __FILE__ the registration was compiled with, so a build that strips error
+# messages (STRIP_ERROR_MESSAGES) leaves it nothing to read, and torch's C++ ops
+# then fall into the "no importable module" warning; an extension whose source
+# path contains one of these segments is taken for torch and gets neither an
+# import nor a warning.
 _REGISTERED_AT = re.compile(r"registered at (.*):\d+$")
 _TORCH_CPP_SOURCES = ("/torch/csrc/", "/aten/src/", "/c10/")
 
@@ -2046,9 +2084,9 @@ def _custom_op_modules(
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
             "importable module is known to register (a registration run from "
-            "__main__ or through a torch.library helper such as "
-            "torch.library.define, or a C++ op without set_python_module); the "
-            "artifact serves only where something else registers them first",
+            "__main__ or from a module missing from sys.modules, or a C++ op "
+            "without set_python_module); the artifact serves only where something "
+            "else registers them first",
             ", ".join(sorted(unrecorded)),
         )
     return {module: tuple(sorted(ops)) for module, ops in sorted(modules.items())}
@@ -2090,6 +2128,11 @@ def _write_custom_op_imports(buf: Any, modules: dict[str, tuple[str, ...]]) -> N
     buf.writeline("")
 
 
+def _is_op_name(op: str) -> bool:
+    namespace, sep, name = op.partition("::")
+    return bool(sep and namespace and name) and "::" not in name
+
+
 def _check_custom_op_modules(modules: object) -> None:
     """Refuse, before running the artifact, one whose custom ops are neither
     registered nor importable."""
@@ -2098,7 +2141,7 @@ def _check_custom_op_modules(modules: object) -> None:
     if not isinstance(modules, dict) or not all(
         isinstance(module, str)
         and isinstance(ops, (tuple, list))
-        and all(isinstance(op, str) and "::" in op for op in ops)
+        and all(isinstance(op, str) and _is_op_name(op) for op in ops)
         for module, ops in modules.items()
     ):
         raise PrecompileError(

@@ -9423,7 +9423,16 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_load_rejects_a_malformed_custom_op_module_mapping(self):
         from torch._precompile import _check_custom_op_modules
 
-        for value in (5, ("mod",), {"mod": "ns::op"}, {"mod": (1,)}, {"mod": ("op",)}):
+        for value in (
+            5,
+            ("mod",),
+            {"mod": "ns::op"},
+            {"mod": (1,)},
+            {"mod": ("op",)},
+            {"mod": ("a::b::c",)},
+            {"mod": ("::op",)},
+            {"mod": ("ns::",)},
+        ):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(
                     torch.compiler.PrecompileError, "CUSTOM_OP_MODULES"
@@ -9451,6 +9460,94 @@ class TestPrecompileCustomOpRecording(TestCase):
                 lambda name, overload: ("json", "ctx") if name == f"{ns}::f" else None,
             ):
                 self.assertEqual(_custom_op_module(f"{ns}::f", ""), "json")
+
+    def test_a_dynamo_graph_calling_op_packets_records_their_ops(self):
+        from torch._precompile import _custom_op_names
+
+        ns = f"precompile_packet_{uuid.uuid4().hex}"
+        graphs = []
+
+        def keep_graph(gm, example_inputs):
+            graphs.append(gm)
+            return gm
+
+        with torch.library._scoped_library(ns, "DEF") as lib:
+            # Only a named overload: the packet has no default.
+            lib.define("f.named(Tensor x) -> Tensor")
+            lib.impl("f.named", lambda x: x * 2, "CompositeImplicitAutograd")
+            op = getattr(torch.ops, ns).f
+
+            def fn(x, y):
+                return op(torch.ops.aten.add(x, y))
+
+            torch._dynamo.reset()
+            self.addCleanup(torch._dynamo.reset)
+            torch.compile(fn, backend=keep_graph, fullgraph=True)(
+                torch.ones(3), torch.ones(3)
+            )
+            (gm,) = graphs
+            packets = {
+                node.target
+                for node in gm.graph.nodes
+                if isinstance(node.target, torch._ops.OpOverloadPacket)
+            }
+            self.assertEqual(packets, {op, torch.ops.aten.add})
+            self.assertEqual(_custom_op_names(gm), {(f"{ns}::f", "named")})
+
+    def test_aot_op_names_read_inductor_code_and_warn_without_a_forward(self):
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            BundledAOTAutogradResult,
+        )
+        from torch._precompile import _aot_custom_op_names
+
+        def artifact(key, forward_code):
+            content = object.__new__(BundledAOTAutogradResult)
+            content.aot_forward_graph_str = None
+            content.compiled_fw = (
+                None
+                if forward_code is None
+                else types.SimpleNamespace(
+                    result=types.SimpleNamespace(source_code=forward_code)
+                )
+            )
+            content.compiled_bw = None
+            content.serialized_bw_module = None
+            return types.SimpleNamespace(key=key, content=content)
+
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            self.assertEqual(
+                _aot_custom_op_names(
+                    [artifact("lowered", "buf0 = torch.ops.ns.post_pass.default(x)")]
+                ),
+                {("ns::post_pass", "")},
+            )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_aot_custom_op_names([artifact("bare", None)]), set())
+        self.assertIn("bare", "\n".join(logs.output))
+
+    def test_an_op_without_a_recorded_module_or_torch_source_is_reported(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = f"precompile_unrecorded_{uuid.uuid4().hex}"
+        with torch.library._scoped_library(ns, "DEF") as lib:
+            lib.define("f(Tensor x) -> Tensor")
+            # As for a C++ op outside torch with no set_python_module: no Python
+            # registration recorded it, and its source is not torch's.
+            with mock.patch.dict(torch.library._registering_modules, clear=True):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self.assertEqual(_custom_op_modules({(f"{ns}::f", "")}), {})
+        self.assertIn(f"{ns}::f", "\n".join(logs.output))
+
+    def test_serving_fails_when_an_op_module_no_longer_registers_its_op(self):
+        from torch._inductor.utils import IndentedBuffer
+        from torch._precompile import _write_custom_op_imports
+
+        module = self._import_module_from_source("import torch\n")
+        op_name = f"precompile_gone_{uuid.uuid4().hex}::f"
+        buf = IndentedBuffer()
+        _write_custom_op_imports(buf, {module: (op_name,)})
+        with self.assertRaisesRegex(ImportError, f"did not register {op_name}"):
+            exec(buf.getvalue(), {})
 
     def test_a_capture_names_only_the_ops_of_the_graphs_it_serves(self):
         from torch._dynamo.precompile_package import _CapturePackage
