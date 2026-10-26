@@ -153,37 +153,11 @@ def _quantize_mxfp8_reference_nd(
     return qdata.permute(inverse), scales.permute(inverse)
 
 
-def _quantize_mxfp8_tma(
-    input: torch.Tensor,
-    dim: tuple[int, int] | None,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-):
-    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-        _blockscaled_tma_impl,
-    )
-
-    return _blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled)
-
-
-def _quantize_mxfp8_tma_dual(
-    input: torch.Tensor,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-):
-    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-        _blockscaled_tma_impl_dual,
-    )
-
-    return _blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled)
-
-
 _NVIDIA_SM100_OR_LATER = torch.version.rocm is None and bool(SM100OrLater)
 
 
 _MXFP8_IMPLEMENTATIONS = (
     subtest(_quantize_mxfp8_reference_nd, name="reference"),
-    subtest(_quantize_mxfp8_tma, name="tma", decorators=[skipIfNoCuteDSL]),
     subtest(F.quantize_tensor, name="public", decorators=[skipIfNoCuteDSL]),
 )
 _MXFP8_KWARGS = {
@@ -297,7 +271,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-2, -1), False, swizzled
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (-2, -1), False, swizzled)
+        qdata, scales = F.quantize_tensor(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=swizzle_type
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales, scales_ref)
@@ -331,7 +307,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), False, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": (-1, -2)},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(qdata.shape, shape)
         self.assertEqual(qdata.stride(), qdata_ref.stride())
@@ -356,7 +336,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), False, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": (-1, -2)},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+        )
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(scales, scales_ref)
 
@@ -378,8 +362,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
         )
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
+        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
         )
         M, K = shape[-2:]
         m_blocks, k_blocks = (M + 127) // 128, (K + 127) // 128
@@ -434,7 +418,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
             data_hp = data_hp.transpose(-2, -1)
         dim = (-1, -2) if transposed else (-2, -1)
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(data_hp, dim, True, True)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, True, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": dim},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+            scaling_type_use_square_block_size=True,
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
         if len(shape) == 3:
@@ -449,7 +438,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
         data_hp = torch.randn(64, 64, device=device, dtype=input_dtype)
         data_hp[0, 0] = float("nan")
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (-2, -1), True, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **_MXFP8_KWARGS,
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+            scaling_type_use_square_block_size=True,
+        )
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(scales, scales_ref)
         expected_nan = torch.zeros((64, 64), device=device, dtype=torch.bool)
@@ -489,7 +483,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, dim, False, is_scale_swizzled
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, is_scale_swizzled)
+        swizzle_type = (
+            SwizzleType.SWIZZLE_32_4_4 if is_scale_swizzled else SwizzleType.NO_SWIZZLE
+        )
+        qdata, scales = F.quantize_tensor(
+            data_hp, **{**_MXFP8_KWARGS, "dim": dim}, swizzle_type=swizzle_type
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
         self.assertEqual(qdata.shape, data_hp.shape)
@@ -528,8 +527,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
         )
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
+        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
         )
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(qdata_m, qdata_m_ref)
@@ -560,7 +559,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device).t()
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp.t())
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), True, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": (-1, -2)},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+            scaling_type_use_square_block_size=True,
+        )
         self.assertEqual(qdata, qdata_ref.t())
         self.assertEqual(scales, scales_ref.t())
         self.assertEqual(scales.shape, (scales.numel(), 1))
@@ -674,7 +678,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, dim, square, swizzled
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, square, swizzled)
+        swizzle_type = (
+            SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
+        )
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": dim},
+            swizzle_type=swizzle_type,
+            scaling_type_use_square_block_size=square,
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
         self.assertEqual(qdata.shape, data_hp.shape)
@@ -742,18 +754,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 2, 3, 64, 128, dtype=torch.bfloat16, device=device
             ).permute(0, 2, 3, 1)
             axes = (1, 2)
-        from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-            _blockscaled_tma_impl_dual,
-        )
-
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
             data_hp, axes, False, True
         )
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
             data_hp, axes[::-1], False, True
         )
-        qdata_k, scales_k, qdata_m, scales_m = _blockscaled_tma_impl_dual(
-            data_hp, False, True, dim=(axes, axes[::-1])
+        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": axes},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
         )
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(scales_k, scales_k_ref)
@@ -772,7 +782,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-2, -1), False, True
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (-2, -1), False, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
 
@@ -786,7 +798,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (1, 2), False, True
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": (1, 2)},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
 
@@ -801,7 +817,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (1, 2), False, True
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": (1, 2)},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
 
@@ -815,7 +835,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (1, 2), False, True
         )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        qdata, scales = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": (1, 2)},
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+        )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
 
@@ -859,8 +883,14 @@ class TestMXFP8ReferenceNumerics(TestCase):
         scale_shape = scale_k_shape if dim[-1] == -1 else scale_m_shape
         scale_shape = (*shape[:-2], *scale_shape)
         expected_shapes = (shape, scale_shape)
-        outputs = _quantize_mxfp8_tma(
-            data_hp, dim, is_square_scaling, is_scale_swizzled
+        swizzle_type = (
+            SwizzleType.SWIZZLE_32_4_4 if is_scale_swizzled else SwizzleType.NO_SWIZZLE
+        )
+        outputs = F.quantize_tensor(
+            data_hp,
+            **{**_MXFP8_KWARGS, "dim": dim},
+            swizzle_type=swizzle_type,
+            scaling_type_use_square_block_size=is_square_scaling,
         )
         self.assertEqual(len(outputs), len(expected_shapes))
         for index, (output, expected_shape) in enumerate(
@@ -894,8 +924,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape[-2:]
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
+        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
         )
         self.assertEqual(qdata_k.shape, shape)
         self.assertEqual(qdata_m.shape, shape)
@@ -911,64 +941,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.assertEqual(output.numel(), 0)
 
     @parametrize(
-        "shape,transposed,square,swizzle_type",
-        (
-            ((32, 64), False, False, SwizzleType.NO_SWIZZLE),
-            ((160, 160), False, False, SwizzleType.SWIZZLE_32_4_4),
-            ((160, 160), True, False, SwizzleType.SWIZZLE_32_4_4),
-            ((160, 160), False, True, SwizzleType.SWIZZLE_32_4_4),
-            ((1024, 1152), False, False, SwizzleType.NO_SWIZZLE),
-            ((1024, 1152), False, False, SwizzleType.SWIZZLE_32_4_4),
-        ),
-    )
-    @skipIfNoCuteDSL
-    def test_quantize_tensor_reference(
-        self, shape, transposed, square, swizzle_type, device
-    ):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        source = torch.randn(shape, dtype=torch.bfloat16, device=device)
-        api_input = source.t() if transposed else source
-        dim = (-2, -1)
-        swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4
-        expected = _quantize_mxfp8_reference_nd(api_input, dim, square, swizzled)
-        qdata, scales = F.quantize_tensor(
-            api_input,
-            **_MXFP8_KWARGS,
-            swizzle_type=swizzle_type,
-            scaling_type_use_square_block_size=square,
-        )
-        self.assertEqual(qdata, expected[0])
-        self.assertEqual(scales, expected[1])
-        self.assertEqual(qdata.shape, api_input.shape)
-        self.assertEqual(qdata.stride(), expected[0].stride())
-        self.assertEqual(scales.shape, expected[1].shape)
-        self.assertGreater(
-            compute_error(
-                api_input.float(),
-                from_blocked_format(qdata, scales, swizzle_type=swizzle_type).float(),
-            ).item(),
-            18.0,
-        )
-
-    @skipIfNoCuteDSL
-    def test_quantize_tensor_dual_reference(self, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        input = torch.randn((160, 288), dtype=torch.bfloat16, device=device)
-        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
-            input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
-        )
-        expected_k = _quantize_mxfp8_reference_nd(input, (-2, -1), False, True)
-        expected_m = _quantize_mxfp8_reference_nd(input, (-1, -2), False, True)
-        self.assertEqual(qdata_k, expected_k[0])
-        self.assertEqual(scales_k, expected_k[1])
-        self.assertEqual(qdata_m, expected_m[0])
-        self.assertEqual(scales_m, expected_m[1])
-        self.assertEqual(qdata_k.stride(), (288, 1))
-        self.assertEqual(qdata_m.stride(), (1, 160))
-
-    @parametrize(
         "layout",
         (
             "2d",
@@ -982,7 +954,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @parametrize("mode", ("k", "m", "compact", "square"))
     @skipIfNoCuteDSL
-    def test_quantize_tensor_nd_reference(self, layout, mode, device):
+    def test_quantize_tensor_nd_meta(self, layout, mode, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         input, axes = _make_nd_quantize_input(layout, device)
@@ -996,9 +968,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
         square = mode == "square"
         swizzle = (
             SwizzleType.NO_SWIZZLE if mode == "compact" else SwizzleType.SWIZZLE_32_4_4
-        )
-        expected = _quantize_mxfp8_reference_nd(
-            input, dim, square, swizzle == SwizzleType.SWIZZLE_32_4_4
         )
         actual = F.quantize_tensor(
             input,
@@ -1015,10 +984,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
             swizzle_type=swizzle,
             scaling_type_use_square_block_size=square,
         )
-        for result, reference, meta_result in zip(actual, expected, meta, strict=True):
-            self.assertEqual(result, reference)
+        for result, meta_result in zip(actual, meta, strict=True):
             self.assertEqual(result.shape, meta_result.shape)
-            self.assertEqual(result.stride(), reference.stride())
             self.assertEqual(result.stride(), meta_result.stride())
 
     @parametrize(
@@ -1035,7 +1002,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @parametrize("reversed_axes", (False, True))
     @skipIfNoCuteDSL
-    def test_quantize_tensor_dual_nd_reference(self, layout, reversed_axes, device):
+    def test_quantize_tensor_dual_nd_meta(self, layout, reversed_axes, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         input, axes = _make_nd_quantize_input(layout, device)
@@ -1061,28 +1028,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.assertEqual(result.shape, meta_result.shape)
             self.assertEqual(result.stride(), reference.stride())
             self.assertEqual(result.stride(), meta_result.stride())
-
-    @parametrize("shape", ((0, 32), (32, 0), (0, 0)))
-    @skipIfNoCuteDSL
-    def test_quantize_tensor_empty(self, shape, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        input = torch.empty(shape, dtype=torch.bfloat16, device=device)
-        M, K = shape
-        qdata, scales = F.quantize_tensor(
-            input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
-        )
-        self.assertEqual(qdata.shape, shape)
-        self.assertEqual(
-            scales.shape, _get_scale_shape(shape, SwizzleType.SWIZZLE_32_4_4)
-        )
-        dual = F.quantize_tensor_dual(
-            input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
-        )
-        self.assertEqual(
-            tuple(result.shape for result in dual),
-            ((M, K), scales.shape, (M, K), scales.shape[::-1]),
-        )
 
     @parametrize("transposed,square", ((False, False), (True, False), (False, True)))
     @skipIfNoCuteDSL
