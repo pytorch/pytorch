@@ -919,6 +919,14 @@ namespace ldl {
 
 // Panel width. Wider panels cut the memory traffic of the trailing GEMMs,
 // at the price of more work in the panel.
+// Prefer multiples of 256 / sizeof(scalar_t). Panel ends land on the nb grid, and LD22 in
+// the trailing GEMM is on the diagonal, so panel_end is a common factor of its offset from
+// the matrix base: panel_end + panel_end * lda = panel_end * (1 + lda). Multiplying by the
+// integer (1 + lda) preserves divisibility, so a panel_end * sizeof(scalar_t) divisible by
+// 256 aligns LD22 for any lda, hence any n. Worth 1.1-1.4x on the trailing GEMM of a single
+// matrix. L21 and U12 are off the diagonal, nothing factors out, and they get no such
+// guarantee: L21 would need 256 to divide n * sizeof(scalar_t) too, and U12, at row step,
+// is never aligned.
 template <typename scalar_t>
 int panel_width(int n) {
   const auto* prop = at::cuda::getCurrentDeviceProperties();
@@ -934,21 +942,18 @@ int panel_width(int n) {
       return n <= 256 ? 32 : (n <= 6144 ? 16 : (n <= 12288 ? 48 : (n <= 20480 ? 64 : 96)));
     }
   }
-  // Tuned on H100 for all dtypes
-  return n <= 4096 ? 32 : (n <= 8192 ? 64 : (n <= 16384 ? 96 : 128));
-}
-
-// Width of the panel starting at step. cuBLAS runs the trailing GEMM at full speed
-// only with 256-byte aligned operands, so panels end on such a boundary (as far as
-// nb allows), while staying at least nb / 2 wide.
-template <typename scalar_t>
-int aligned_panel_width(int step, int nb, int n) {
-  const int boundary = std::min<int>(256 / sizeof(scalar_t), nb);
-  int panel_end = (step + nb) / boundary * boundary;
-  if (panel_end - step < nb / 2) {
-    panel_end += boundary;
+  // Tuned on H100. Above n = 4096 float measures fastest at 64, which is also
+  // 256 / sizeof(scalar_t) and so keeps the panel ends 256-byte aligned.
+  if constexpr (std::is_same_v<scalar_t, float>) {
+    return n <= 4096 ? 32 : 64;
+  } else if constexpr (std::is_same_v<scalar_t, c10::complex<double>>) {
+    return n <= 4096 ? 32 : (n <= 8192 ? 64 : (n <= 16384 ? 96 : 128));
+  } else {
+    // double and complex64 keep 32 up to 8192: it is 6-9% faster on indefinite and on
+    // badly scaled inputs at every n in that range, and only well scaled positive
+    // definite ones prefer 64, by 5% and only at the top of it.
+    return n <= 8192 ? 32 : (n <= 16384 ? 96 : 128);
   }
-  return std::min(panel_end, n) - step;
 }
 
 // Panels with more rows than this are factored by a cooperative grid of
@@ -1401,7 +1406,11 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   // and factor diagonal panels, then update the trailing matrix with a GEMM
   while (step < n) {
     // 1. Panel factorization {
-    const auto curr_nb = ldl::aligned_panel_width<scalar_t>(step, nb, n);
+    // Panel ends land on the nb grid, which is what aligns the trailing GEMM (see
+    // panel_width). It is step + 1 that is snapped, not step: the panel kernel leaves its
+    // last column to the next panel, so step comes back one below the previous panel end.
+    const auto panel_end = std::min(((step + 1) / nb + 1) * nb, n);
+    const auto curr_nb = panel_end - step;
     ldl_diagonal_panel<scalar_t, hermitian>(
       dLD, n, lda,
       curr_nb, step, dstep,
@@ -1410,10 +1419,10 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
     );
     // }
 
-    // 2. Trailing matrix update of B[step + curr_nb: step + curr_nb:] {
+    // 2. Trailing matrix update of B[panel_end:, panel_end:] {
     // D2H to update the step on the host
     auto curr_step = panel_step_holder.item().toInt();
-    if (step + curr_nb < n) {
+    if (panel_end < n) {
       // TODO: LD22 is symmetric/Hermitian, so updating its lower triangle suffices.
       // cuBLAS syrkx/herkx with W = op(U12) as an m x k matrix (a transpose, e.g. via
       // cublas<t>geam) beats this gemm by 1.2-1.9x for n >= 16384 on H100 (1.6-1.9x
@@ -1421,12 +1430,12 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
       // triangle of LD22 (candidate column, swaps).
       at::cuda::blas::gemm(
         'n', 'n',
-        n - step - curr_nb, n - step - curr_nb, curr_step - step,
+        n - panel_end, n - panel_end, curr_step - step,
         /*alpha=*/static_cast<scalar_t>(-1),
-        /*L21=*/dLD + LinOff(step + curr_nb, step, lda), lda,
-        /*U12=*/dLD + LinOff(step, step + curr_nb, lda), lda,
+        /*L21=*/dLD + LinOff(panel_end, step, lda), lda,
+        /*U12=*/dLD + LinOff(step, panel_end, lda), lda,
         /*beta=*/static_cast<scalar_t>(1),
-        /*LD22=*/dLD + LinOff(step + curr_nb, step + curr_nb, lda), lda
+        /*LD22=*/dLD + LinOff(panel_end, panel_end, lda), lda
       );
     }
     // }
