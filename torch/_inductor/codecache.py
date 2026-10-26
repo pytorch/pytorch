@@ -4168,14 +4168,15 @@ class CppCodeCache:
             return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
 
         key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
+
         # The key a capture freezes this kernel's binary under, and a replay finds it
         # by, on a host that may put torch elsewhere. The source and any cache-dir
         # path in the command stay in it (see _relocatable_command_line). The binary
         # itself stays under key, which this host's paths tell apart.
-        frozen_key = relocatable_cpp_key(
-            lambda: kernel_key(_relocatable_command_line(main_cmd_line)),
-            loaded=key in cls.cache,
-        )
+        def relocatable_key() -> str:
+            return kernel_key(_relocatable_command_line(main_cmd_line))
+
+        frozen_key = relocatable_cpp_key(relocatable_key, loaded=key in cls.cache)
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
@@ -4291,6 +4292,9 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
+        # A capture may have opened while this kernel loaded.
+        if frozen_key is None:
+            frozen_key = relocatable_cpp_key(relocatable_key, loaded=True)
         if frozen_key is not None:
             record_cpp_kernel(frozen_key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
