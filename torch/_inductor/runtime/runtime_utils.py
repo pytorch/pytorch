@@ -69,6 +69,11 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     )
 
 
+def extra_options_to_hashable(extra_options: Any) -> str:
+    """Canonicalize backend options with string keys and JSON-serializable values."""
+    return json.dumps(extra_options or {}, sort_keys=True)
+
+
 def triton_config_to_hashable(cfg: Config) -> Hashable:
     """
     Convert triton config to a tuple that can uniquely identify it. We can use
@@ -87,7 +92,7 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     if extra_options := getattr(cfg, "extra_options", None):
         # Match the cache's JSON representation, including nested options and
         # tuples that are restored as lists. Dict insertion order is irrelevant.
-        items.append(("extra_options", json.dumps(extra_options, sort_keys=True)))
+        items.append(("extra_options", extra_options_to_hashable(extra_options)))
     return tuple(items)
 
 

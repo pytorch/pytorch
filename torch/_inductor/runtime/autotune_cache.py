@@ -36,7 +36,7 @@ from typing_extensions import override
 
 import torch
 from torch._guards import CompileContext
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir, extra_options_to_hashable
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -732,8 +732,25 @@ def _load_cached_autotuning(
             and cfg.num_stages == best_config.get("num_stages")
             and getattr(cfg, "maxnreg", None) == maxnreg
         ]
-        if len(matching_configs) == 1:
-            matched_config = matching_configs[0]
+        if matching_configs:
+            extra_options_key = extra_options_to_hashable(extra_options)
+            exact_matches = [
+                cfg
+                for cfg in matching_configs
+                if extra_options_to_hashable(getattr(cfg, "extra_options", None))
+                == extra_options_key
+            ]
+            if len(exact_matches) == 1:
+                matched_config = exact_matches[0]
+            elif (
+                not exact_matches
+                and len(matching_configs) == 1
+                and not getattr(matching_configs[0], "extra_options", None)
+            ):
+                # Backends may attach tuned options only after candidate creation.
+                matched_config = matching_configs[0]
+            else:
+                return None
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config

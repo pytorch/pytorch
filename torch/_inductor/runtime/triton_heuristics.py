@@ -12,7 +12,6 @@ import hashlib
 import importlib
 import inspect
 import itertools
-import json
 import logging
 import math
 import operator
@@ -78,6 +77,7 @@ from .runtime_utils import (
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
+    extra_options_to_hashable,
     get_first_attr,
     get_max_y_grid,
     get_num_bytes,
@@ -3718,7 +3718,7 @@ def hash_configs(configs: list[Config]):
         if extra_options := getattr(cfg, "extra_options", None):
             # Preserve existing hashes when no backend-specific options exist.
             hasher.update(
-                f"extra_options={json.dumps(extra_options, sort_keys=True)}\n".encode()
+                f"extra_options={extra_options_to_hashable(extra_options)}\n".encode()
             )
     return hasher.hexdigest()
 

@@ -6092,6 +6092,7 @@ class TestCompilationEventLogging(TestCase):
         )
 
 
+@instantiate_parametrized_tests
 class TestAutotuneCacheExtraOptions(TestCase):
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
@@ -6100,6 +6101,70 @@ class TestAutotuneCacheExtraOptions(TestCase):
     options alongside the standard Triton config. These tests verify that
     extra_options is correctly preserved when saving and loading from cache.
     """
+
+    @requires_triton()
+    @parametrize("other_options", [None, {"tile": (8, 16)}])
+    def test_cache_hit_returns_original_extra_options_winner(self, other_options):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for options in (other_options, {"tile": (2, 4)}):
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            cfg.extra_options = options
+            configs.append(cfg)
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIs(result, configs[1])
+        self.assertEqual(result.num_ctas, 2)
+        self.assertEqual(result.extra_options, {"tile": [2, 4]})
+
+    @requires_triton()
+    @parametrize(
+        "options",
+        [
+            [{"option": 2}],
+            [{"option": 2}, {"option": 3}],
+            [None, None],
+            [{"option": 4}, {"option": 4}],
+        ],
+    )
+    def test_conflicting_or_ambiguous_extra_options_miss(self, options):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        configs = []
+        for extra_options in options:
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+            cfg.extra_options = extra_options
+            configs.append(cfg)
+        best_config = {
+            "XBLOCK": 128,
+            "num_warps": 4,
+            "num_stages": 1,
+            "configs_hash": "test_hash",
+            "extra_options": {"option": 4},
+        }
+        self.assertIsNone(
+            _load_cached_autotuning(best_config, "test_hash", configs, {})
+        )
+        self.assertEqual([cfg.extra_options for cfg in configs], options)
 
     @requires_triton()
     def test_load_cached_autotuning_preserves_extra_options_with_coordesc(self):
