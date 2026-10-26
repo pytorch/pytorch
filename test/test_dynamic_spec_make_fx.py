@@ -206,10 +206,8 @@ class <lambda>(torch.nn.Module):
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(arg1_1, 0)
-        ge_1: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
-        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
         eq: "Sym(True)" = sym_size_int_1 == sym_size_int;  sym_size_int_1 = sym_size_int = None
-        _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0) on node 'eq'");  eq = _assert_scalar_default_2 = None
+        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0) on node 'eq'");  eq = _assert_scalar_default_1 = None
         sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(arg0_1, [0]);  arg0_1 = None
         sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0]);  arg1_1 = None
         return (sum_1, sum_2)""",

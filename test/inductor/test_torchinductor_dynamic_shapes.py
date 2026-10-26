@@ -457,6 +457,66 @@ class TestInductorDynamic(DynamicShapesTestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_bool_mask_cse_unbacked_bindings(self, device):
+        def f(x, y):
+            mask = torch.eye(x.shape[-1], dtype=torch.bool)
+            return x[:, ~mask].sum() + y[:, ~mask].sum()
+
+        x = torch.randn(3, 4, 4, device=device, requires_grad=True)
+        y = torch.randn(3, 4, 4, device=device, requires_grad=True)
+        actual = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected, (x, y))
+        self.assertEqual(torch.autograd.grad(actual, (x, y)), expected_grads)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_independent_bool_mask_unbacked_bindings(self, device):
+        def f(mask1, mask2, w, x, y, z):
+            return (
+                w[:, ~mask1].sum()
+                + x[:, ~mask1].sum()
+                + y[:, ~mask2].sum()
+                + z[:, ~mask2].sum()
+            )
+
+        mask1 = torch.eye(4, dtype=torch.bool, device=device)
+        mask2 = torch.triu(torch.ones(4, 4, dtype=torch.bool, device=device))
+        tensors = [
+            torch.randn(3, 4, 4, device=device, requires_grad=True) for _ in range(4)
+        ]
+        opt_f = torch.compile(f, fullgraph=True)
+        self.assertEqual(opt_f(mask1, mask2, *tensors), f(mask1, mask2, *tensors))
+
+    @parametrize("op", [torch.unique, torch.unique_consecutive])
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cse_unique_unbacked_bindings(self, device, op):
+        # Different flags keep two unique nodes, but CSE merges their inputs.
+        def f(x, y, z):
+            a = op(z.floor()).long()
+            b, counts = op(z.floor(), return_counts=True)
+            return x[a].sum() + y[b.long()].sum() + counts.sum()
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        y = torch.randn(8, device=device, requires_grad=True)
+        z = torch.tensor([0.5, 0.7, 1.7, 3.2, 3.9, 0.1], device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y, z), f(x, y, z))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_dce_memoized_item(self, device):
+        def f(n, x):
+            n.item()
+            return x * n.item()
+
+        n = torch.tensor(3, device=device)
+        x = torch.randn(5, device=device, requires_grad=True)
+        actual = torch.compile(f, fullgraph=True)(n, x)
+        expected = f(n, x)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected.sum(), x)
+        self.assertEqual(torch.autograd.grad(actual.sum(), x), expected_grads)
+
     def test_adaptive_max_pool3d_with_indices(self, device):
         x = 5
         y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)

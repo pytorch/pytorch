@@ -4519,6 +4519,122 @@ class ShapeEnv:
     def _eliminate_unbacked(self, orig_s: sympy.Symbol, new_s: sympy.Expr) -> None:
         self._set_replacement(orig_s, new_s, "eliminate_unbacked")
 
+    def _get_deferred_assertion_nodes(
+        self, graph: torch.fx.Graph
+    ) -> OrderedSet[torch.fx.Node]:
+        r"""_get_deferred_assertion_nodes(graph) -> OrderedSet[Node]
+
+        Find producers whose unbacked values are needed by deferred checks.
+        """
+        if torch._dynamo.config.do_not_emit_runtime_asserts:
+            return OrderedSet()
+        # Deferred assertions are not FX users until inserted into the graph.
+        # Do not apply replacements: checks must validate the original runtime
+        # values that justified those replacements.
+        symbols = free_unbacked_symbols(
+            [ra.expr for ras in self.deferred_runtime_asserts.values() for ra in ras]
+        )
+        if not symbols:
+            return OrderedSet()
+        return OrderedSet(
+            node
+            for node in graph.nodes
+            if any(
+                s in symbols or self.unbacked_renamings.get(s, s) in symbols
+                for s in node.meta.get("unbacked_bindings") or ()
+            )
+        )
+
+    def _repair_unbacked_bindings(self, graph: torch.fx.Graph) -> bool:
+        r"""_repair_unbacked_bindings(graph) -> bool
+
+        Replace uses of a missing symbol with a surviving equal producer's
+        symbol, preserving input and producer bindings. Return whether this
+        changed any symbol uses.
+        """
+        bound: OrderedSet[sympy.Symbol] = OrderedSet()
+        for node in graph.nodes:
+            bindings = node.meta.get("unbacked_bindings")
+            bound.update(bindings or {})
+            bound.update(resolve_unbacked_bindings(self, bindings) or {})
+            if node.op == "placeholder":
+                value = node.meta.get("val", node.meta.get("example_value"))
+                for leaf in pytree.tree_leaves(value):
+                    if isinstance(leaf, sympy.Basic):
+                        bound.update(free_unbacked_symbols(leaf))
+                    for sym_node in _iterate_nodes(leaf):
+                        bound.update(free_unbacked_symbols(sym_node._expr))
+                        expr = _get_placeholder_expr(sym_node)
+                        bound.update(free_unbacked_symbols(expr))
+
+        substitutions: dict[sympy.Symbol, sympy.Symbol] = {}
+        for node in graph.nodes:
+            bindings = node.meta.get("unbacked_bindings")
+            bindings = resolve_unbacked_bindings(self, bindings)
+            for symbol in bindings or ():
+                terminal = self._find(symbol)
+                if (
+                    isinstance(terminal, sympy.Symbol)
+                    and free_unbacked_symbols(terminal)
+                    and terminal not in bound
+                ):
+                    substitutions.setdefault(terminal, symbol)
+
+        if not substitutions:
+            return False
+        for symbol in list(self.replacements):
+            if symbol in bound:
+                continue
+            terminal = self._find(symbol)
+            if terminal in substitutions:
+                substitutions[symbol] = substitutions[terminal]
+        self._redirect_unbacked_symbols(substitutions)
+
+        def rewrite(value: Any) -> Any:
+            if isinstance(value, sympy.Basic):
+                return value.xreplace(substitutions)
+            if isinstance(value, DivideByKey):
+                rewrite(value.divisor)
+            for sym_node in _iterate_nodes(value):
+                expr = sym_node._expr
+                if sym_node.shape_env is not self or not isinstance(expr, sympy.Basic):
+                    continue
+                expr = expr.xreplace(substitutions)
+                if expr != sym_node._expr:
+                    sym_node._expr = expr
+                    sym_node._expr_ver = -1
+                    sym_node._expr_cache = None
+                    sym_node._optimized_summation = False
+            return value
+
+        for node in graph.nodes:
+            node.args = pytree.tree_map(rewrite, node.args)
+            node.kwargs = pytree.tree_map(rewrite, node.kwargs)
+            node.meta = pytree.tree_map(rewrite, node.meta)
+        return True
+
+    @record_shapeenv_event()
+    def _redirect_unbacked_symbols(
+        self, substitutions: dict[sympy.Symbol, sympy.Symbol]
+    ) -> None:
+        # Remove the survivor's old replacement before reversing the equality.
+        # Update caches now, even though the final replacement count may match.
+        for symbol in substitutions.values():
+            self.replacements.pop(symbol, None)
+        self._replacements_version_counter += 1
+        self._update_version_counter()
+        for symbol, expr in list(self.replacements.items()):
+            self._set_replacement(symbol, expr.xreplace(substitutions), "dce")
+        for old, new in substitutions.items():
+            self._set_replacement(old, new, "dce")
+            if self.replacements.get(old) != new:
+                msg = f"Could not redirect deleted binding {old} to {new}"
+                raise AssertionError(msg)
+        self.unbacked_renamings = {
+            old: substitutions.get(new, new)
+            for old, new in self.unbacked_renamings.items()
+        }
+
     @record_shapeenv_event()
     def set_real_tensor_prop_unbacked_vals(
         self, k: sympy.Symbol, v: int | float | torch.Tensor
