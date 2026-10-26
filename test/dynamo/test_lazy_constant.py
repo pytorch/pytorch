@@ -751,6 +751,7 @@ class ComputedLazyConstantTests(TestCase):
             ("floordiv_float", lambda t, a: (t.sin(), a // 2.0), [(t, 7.5), (t, 9.5)]),
             ("mod_float", lambda t, a: (t.sin(), a % 2.0), [(t, 7.5), (t, 9.5)]),
             ("truediv_float_int", lambda t, a: (t.sin(), a / 2), [(t, 7.0), (t, 9.0)]),
+            ("floordiv_sum", lambda t, a: (t.sin(), (a + 1) // 2), [(t, 7), (t, 9)]),
         ]
         for name, fn, arg_sets in cases:
             with self.subTest(name=name):
@@ -791,6 +792,7 @@ class ComputedLazyConstantTests(TestCase):
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_lazy_divisor_zero_raises_in_traced_handler(self):
+        # a dynamic b sends 7 // 0 to eager (pre-existing); keep b static
         t = torch.ones(2)
 
         def fn(t, a, b):
@@ -819,6 +821,8 @@ class ComputedLazyConstantTests(TestCase):
             ("xor", lambda t, a, b: t * (a ^ b)),
             ("lt", lambda t, a, b: t * (a < b)),
             ("eq", lambda t, a, b: t * (a == b)),
+            ("floordiv", lambda t, a, b: t * (a // 2)),
+            ("mod", lambda t, a, b: t * (a % 4)),
         ]
         for name, fn in cases:
             with self.subTest(name=name):
@@ -897,6 +901,16 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=2)
 
+    def test_division_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if a // 2 > 3:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
+
     def test_computed_constant_in_tensor_math_recompiles(self):
         t = torch.ones(2)
 
@@ -904,6 +918,14 @@ class ComputedLazyConstantTests(TestCase):
             return t * (a + b)
 
         self._check(fn, [(t, 1.5, 2.0), (t, 3.25, 4.0)], expected_frames=2)
+
+    def test_division_in_tensor_math_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t * (a / 2.0)
+
+        self._check(fn, [(t, 1.5), (t, 3.25)], expected_frames=2)
 
     def test_computed_constant_as_dict_key_realizes(self):
         t = torch.ones(2)
