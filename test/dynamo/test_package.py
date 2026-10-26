@@ -24,7 +24,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.exc import PackageError, SkipFrame, Unsupported, UserError
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -41,7 +41,7 @@ from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -236,6 +236,19 @@ def _package_op(x):
     return x + 1
 
 
+@torch._dynamo.disable
+def _opaque(y):
+    return y + 0
+
+
+def _dispatch(y, opaque_layers):
+    # Traces whole for opaque_layers=0. For more, the graph break inside the loop
+    # is one Dynamo cannot resume from, so it gives up on the code object.
+    for _ in range(opaque_layers):
+        y = _opaque(y)
+    return y.sin()
+
+
 @dataclasses.dataclass
 class _GraphBreakingDataclass:
     x: torch.Tensor
@@ -303,6 +316,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def count_backend_runs(self, fn, backends):
+        """Wrap the backends install() put in fn's module; the list grows by one
+        per run, so a served variant is told apart from an eager run."""
+        module = sys.modules[fn.__module__]
+        runs = []
+        for backend_id in backends:
+            installed = getattr(module, backend_id)
+
+            @torch._dynamo.disable
+            def run(*args, _installed=installed):
+                runs.append(1)
+                return _installed(*args)
+
+            def restore(backend_id=backend_id, run=run, installed=installed):
+                # uninstall() may already have removed the name; leave it gone.
+                if vars(module).get(backend_id) is run:
+                    setattr(module, backend_id, installed)
+
+            self.addCleanup(restore)
+            setattr(module, backend_id, run)
+        return runs
 
     def setUp(self):
         super().setUp()
@@ -477,6 +512,169 @@ print(eval(f"bbmod.{name}.{path}") is code)
             )(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
+
+    def _reload_eager_package(self, fn, package, backends):
+        ctx = DiskDynamoStore()
+        for backend_id, backend in backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        return ctx.load_package(fn, self.path())
+
+    def test_refuse_callback_runs_a_miss_of_an_eager_fallback_frame_eagerly(self):
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
+        x = torch.randn(3)
+        package = CompilePackage(_dispatch)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(_dispatch)
+        compiled_fn(x, 0)
+        compiled_fn(x, 1)
+        entry = package._codes[_dispatch.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+        # A reloaded package caches no backends, so keep the captured ones.
+        eager = dict(package.cached_backends)
+        package, backends = self._reload_eager_package(_dispatch, package, eager)
+
+        # A plain install() (DynamoCache's) takes no hold for the flag: a miss
+        # still reaches the callback.
+        compiled_fn = torch._dynamo.optimize(package=package)(_dispatch)
+        package.install(backends)
+        with (
+            torch.compiler.set_stance("fail_on_recompile"),
+            self.assertRaisesRegex(RuntimeError, "Detected recompile"),
+        ):
+            compiled_fn(x, 1)
+        package.uninstall()
+
+        # An installed precompile artifact's callback serves the variant and runs
+        # the miss eagerly; without the frame in eager_codes it refuses.
+        for eager_codes in ([_dispatch.__code__], []):
+            torch._dynamo.reset()
+            package, backends = self._reload_eager_package(_dispatch, package, eager)
+            context = torch._dynamo.optimize(package=package)
+            context.callback = _RefuseRecompileCallback(context.callback, eager_codes)
+            compiled_fn = context(_dispatch)
+            package.install(backends)
+            runs = self.count_backend_runs(_dispatch, backends)
+            self.assertEqual(compiled_fn(x, 0), x.sin())
+            self.assertEqual(len(runs), 1)
+            if eager_codes:
+                # The eager miss warns, once per frame.
+                torch._logging._internal.warning_once.cache_clear()
+                with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                self.assertEqual(len(logs.output), 1, logs.output)
+                self.assertIn("no captured variant of _dispatch", logs.output[0])
+                self.assertEqual(compiled_fn(x, 0), x.sin())
+                self.assertEqual(len(runs), 2)
+            else:
+                msg = "Detected recompile of a frame whose callable refuses"
+                with self.assertRaisesRegex(_RecompileRefusedError, msg):
+                    compiled_fn(x, 1)
+            package.uninstall()
+
+    def test_a_suppressed_user_error_is_an_eager_fallback(self):
+        def fn(x, branch):
+            if branch:
+                # Tracing this raises a UserError, which Dynamo suppresses and
+                # skips the frame for, as for Unsupported; eager raises TypeError.
+                try:
+                    torch._dynamo.decorators.override_optimization_hint(x, 1)
+                except TypeError:
+                    pass
+            return x.sin()
+
+        package = CompilePackage(fn)
+        # Unsupported is flagged too, so pin that this one is a UserError.
+        flagged = []
+        record = package.record_eager_fallback
+
+        def spy(code):
+            flagged.append(type(sys.exc_info()[1]))
+            record(code)
+
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x, False)
+        with patch.object(package, "record_eager_fallback", spy):
+            self.assertEqual(compiled_fn(x, True), x.sin())
+        self.assertEqual(flagged, [UserError])
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_skip_is_an_eager_fallback(self):
+        compiled = []
+
+        def backend(gm, example_inputs):
+            if compiled:
+                raise SkipFrame("declined")
+            compiled.append(gm)
+            return gm.forward
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x)
+        compiled_fn(x.double())
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_fallback_error_is_an_eager_fallback(self):
+        # Dynamo turns this into a soft Unsupported for the whole frame.
+        calls = []
+
+        def backend(gm, example_inputs):
+            calls.append(gm)
+            raise DynamicOutputShapeException(torch.ops.aten.nonzero.default)
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        compiled_fn(torch.randn(3))
+        compiled_fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(entry.guarded_codes, [])
+
+    def test_a_recompile_limit_hit_or_suppressed_error_is_not_an_eager_fallback(self):
+        def fn(x):
+            return x.sin()
+
+        def failing_backend(gm, example_inputs):
+            if example_inputs[0].dtype == torch.float64:
+                raise RuntimeError("backend failed")
+            return gm.forward
+
+        x = torch.randn(3)
+        # The limit sets RUN_ONLY and stays a coverage gap. A non-soft error
+        # suppress_errors swallows skips the frame too, but is left unflagged so
+        # the failure stays a gap rather than a silent eager fallback.
+        for backend, config_patch in (
+            ("eager", torch._dynamo.config.patch(recompile_limit=1)),
+            (failing_backend, torch._dynamo.config.patch(suppress_errors=True)),
+        ):
+            torch._dynamo.reset()
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+            with config_patch:
+                compiled_fn(x)
+                self.assertEqual(compiled_fn(x.double()), x.double().sin())
+            entry = package._codes[fn.__code__]
+            self.assertEqual(len(entry.guarded_codes), 1)
+            self.assertFalse(entry.eager_fallback)
 
     def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
         # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,

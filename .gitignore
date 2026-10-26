@@ -40,9 +40,7 @@ docs/src/**/*
 docs/cpp/build
 docs/cpp/source/html/
 docs/cpp/source/latex/
-docs/source/compile/generated/
 docs/source/generated/
-docs/source/compile/generated/
 log
 usage_log.txt
 usage_log*

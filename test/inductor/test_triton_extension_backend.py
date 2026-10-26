@@ -149,9 +149,10 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
         ):
             code = get_triton_code(opt_fn, x)
 
-        FileCheck().check("import triton").check("@triton.jit").check(
-            "tl_math.sin"
-        ).check("device_str='privateuseone'").run(code)
+        # The kernel's triton_meta names the device in both the string and module-level forms.
+        FileCheck().check("import triton").check("type='privateuseone'").check(
+            "@triton.jit"
+        ).check("tl_math.sin").run(code)
 
     @unittest.skipUnless(has_triton_package(), "Requires the triton package")
     def test_flex_attention_open_device_registration(self):
@@ -179,9 +180,9 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
                 torch.compile(flex_attention), q, k, v, block_mask=block_mask
             )
 
-        FileCheck().check("@triton.jit").check(
+        FileCheck().check("type='privateuseone'").check("@triton.jit").check(
             "def triton_tem_fused_flex_attention"
-        ).check("device_str='privateuseone'").run(code)
+        ).run(code)
 
     def _register_custom_backend_with_heuristics(self, device):
         path_to_ext_heuristics = str(
