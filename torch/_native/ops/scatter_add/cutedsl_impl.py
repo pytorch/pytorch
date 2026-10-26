@@ -121,14 +121,44 @@ def _normalize_dim(dim: int, ndim: int) -> int:
     return dim + ndim if dim < 0 else dim
 
 
+# Eligibility depends only on the layout metadata in the key, so it is cached
+# across calls; pointer alignment isn't layout and is checked per call.
+_ELIGIBILITY_CACHE: dict[tuple, tuple[int, int] | None] = {}
+_ELIGIBILITY_CACHE_MAX = 256
+
+
 def _scatter_add_eligibility(
     self: torch.Tensor, d: int, index: torch.Tensor, src: torch.Tensor
-) -> TensorIterator | None:
-    """Return the analysis TensorIterator if (self, d, index, src) fits the
-    kernel's expected layout, else ``None``. ``d`` is the already-normalized
-    scatter axis.
+) -> tuple[int, int] | None:
+    """Return the coalesced ``(N, M_src)`` geometry if (self, d, index, src)
+    fits the kernel's expected layout, else ``None``. ``N`` is the slice
+    extent and ``M_src`` the number of index entries. ``d`` is the
+    already-normalized scatter axis.
+    """
+    key = (
+        d,
+        self.device, self.dtype, self.shape, self.stride(),
+        index.device, index.dtype, index.shape, index.stride(),
+        src.device, src.dtype, src.shape, src.stride(),
+    )  # fmt: skip
+    try:
+        return _ELIGIBILITY_CACHE[key]
+    except KeyError:
+        pass
+    except TypeError:
+        # Symbolic sizes (tracing) are unhashable.
+        return _compute_eligibility(self, d, index, src)
+    geometry = _compute_eligibility(self, d, index, src)
+    if len(_ELIGIBILITY_CACHE) >= _ELIGIBILITY_CACHE_MAX:
+        _ELIGIBILITY_CACHE.clear()
+    _ELIGIBILITY_CACHE[key] = geometry
+    return geometry
 
-    Mirrors aten's ``fast_scatter_add_kernel_eligible`` (IndexKernelUtils.h):
+
+def _compute_eligibility(
+    self: torch.Tensor, d: int, index: torch.Tensor, src: torch.Tensor
+) -> tuple[int, int] | None:
+    """Mirrors aten's ``fast_scatter_add_kernel_eligible`` (IndexKernelUtils.h):
     restride ``self`` so its scatter-axis stride is 0 (shape = ``index.shape``),
     let TensorIterator coalesce + reorder, then check that the result is
     a 2D iter where dim 0 is the contiguous slice axis and dim 1 is the
@@ -142,6 +172,12 @@ def _scatter_add_eligibility(
         return None
     if not 0 <= d < self.ndim:
         return None
+    # aten's scatter shape check, left to aten to raise. It also keeps the
+    # as_strided views below within each operand, so the result can't depend
+    # on storage size (not in the cache key).
+    for k, (i, s, x) in enumerate(zip(index.shape, self.shape, src.shape)):
+        if i > x or (k != d and i > s):
+            return None
 
     self_strides = list(self.stride())
     self_strides[d] = 0  # aten's restride_dim trick
@@ -172,7 +208,7 @@ def _scatter_add_eligibility(
         and s_src[0] == elem
         and s_self[1] == 0
     ):
-        return it
+        return it.shape[0], it.shape[1]
     return None
 
 
@@ -210,8 +246,8 @@ def _alignment_contract_ok(
 
 
 # ---------------------------------------------------------------------------
-# Per-kernel eligibility. ``it.shape[0]`` is the slice extent (N elements)
-# after coalescing; that's what the alignment / divisibility checks key on.
+# Per-kernel eligibility. ``N`` is the slice extent after coalescing; that's
+# what the alignment / divisibility checks key on.
 # ---------------------------------------------------------------------------
 
 
@@ -221,8 +257,8 @@ def _is_tma_supported(
     if not _has_sm90_plus():
         return False
     d = _normalize_dim(dim, self.ndim)
-    it = _scatter_add_eligibility(self, d, index, src)
-    if it is None:
+    geometry = _scatter_add_eligibility(self, d, index, src)
+    if geometry is None:
         return False
     if not _alignment_contract_ok(self, src, d, dst_ptr_align=_TMA_DST_ALIGN_BYTES):
         return False
@@ -230,7 +266,7 @@ def _is_tma_supported(
     # by chunk_bytes and chunk_bytes must be 16-byte aligned.
     from .tma_kernel import row_shape_supported
 
-    return row_shape_supported(self.dtype, it.shape[0])
+    return row_shape_supported(self.dtype, geometry[0])
 
 
 def _is_vec_scatter_supported(
@@ -241,8 +277,8 @@ def _is_vec_scatter_supported(
     if self.dtype is torch.bfloat16 and not _has_sm90_plus():
         return False
     d = _normalize_dim(dim, self.ndim)
-    it = _scatter_add_eligibility(self, d, index, src)
-    if it is None:
+    geometry = _scatter_add_eligibility(self, d, index, src)
+    if geometry is None:
         return False
     if not _alignment_contract_ok(self, src, d, dst_ptr_align=_VEC_DST_ALIGN_BYTES):
         return False
@@ -251,7 +287,7 @@ def _is_vec_scatter_supported(
     # N % vec_elems == 0 (fp32: %4, halves: %8).
     from .vec_scatter_kernel import vec_elems_for
 
-    return it.shape[0] % vec_elems_for(self.dtype) == 0
+    return geometry[0] % vec_elems_for(self.dtype) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -266,17 +302,17 @@ def _prepare_kernel_inputs(
     d: int,
     index: torch.Tensor,
     src: torch.Tensor,
-    it: TensorIterator,
+    geometry: tuple[int, int],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build (self_2d, index_1d, src_2d) for the kernel host functions.
 
-    Caller has verified eligibility via ``_scatter_add_eligibility``.
-    ``d`` is the already-normalized scatter axis. ``it.shape[0]`` is the
-    coalesced slice extent (product of every non-scatter dim of ``self``).
-    The 2D views preserve the user's original stride along ``d`` (used by
-    the kernel for the row stride).
+    ``geometry`` is ``_scatter_add_eligibility``'s ``(N, M_src)``. ``d`` is
+    the already-normalized scatter axis. ``N`` is the coalesced slice extent
+    (product of every non-scatter dim of ``self``). The 2D views preserve
+    the user's original stride along ``d`` (used by the kernel for the row
+    stride).
     """
-    N, M_src = it.shape[0], it.shape[1]
+    N, M_src = geometry
     M_self = self.shape[d]
     self_2d = self.as_strided((M_self, N), (self.stride(d), 1))
     src_2d = src.as_strided((M_src, N), (src.stride(d), 1))
@@ -313,8 +349,8 @@ def _make_cond(
     which the ``.out`` impl runs the kernel on instead of ``self``.
 
     ``support_check`` is ``_is_tma_supported`` or ``_is_vec_scatter_supported``
-    -- both take ``(self, dim, index, src)`` and rebuild the analysis iter
-    internally.
+    -- both take ``(self, dim, index, src)`` and look up the (cached)
+    eligibility internally.
     """
     if out_dst_ptr_align is not None:
 
@@ -359,24 +395,23 @@ def _make_impls(kernel_getter):
 
     ``kernel_getter`` lazily imports the ``*_scatter_add_into`` kernel
     host function (we defer to keep the DSL runtime out of registration).
-    Cond has already verified eligibility; we rebuild the iter inside the
-    impl to recover the post-coalesce geometry that ``_prepare_kernel_inputs``
-    needs. The build is pure C++ and cheap.
+    Cond has already verified eligibility; the impl gets the post-coalesce
+    geometry ``_prepare_kernel_inputs`` needs from the eligibility cache.
     """
 
     def _run(dst: torch.Tensor, dim: int, index, src) -> torch.Tensor:
         d = _normalize_dim(dim, dst.ndim)
-        it = _scatter_add_eligibility(dst, d, index, src)
-        if it is None:
+        geometry = _scatter_add_eligibility(dst, d, index, src)
+        if geometry is None:
             raise RuntimeError(
-                "scatter_add cutedsl: cond approved but iter rebuild failed"
+                "scatter_add cutedsl: cond approved but eligibility check failed"
             )
         # Mirrors aten's `if (iter.numel() == 0) return;` in
         # ScatterGatherKernel.cu -- the eligibility check is purely
         # layout-shaped, so empty inputs satisfy it but have no work.
-        if it.numel == 0:
+        if geometry[0] * geometry[1] == 0:
             return dst
-        dst_2d, index_1d, src_2d = _prepare_kernel_inputs(dst, d, index, src, it)
+        dst_2d, index_1d, src_2d = _prepare_kernel_inputs(dst, d, index, src, geometry)
         kernel_getter()(dst_2d, index_1d, src_2d)
         return dst
 

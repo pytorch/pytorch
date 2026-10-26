@@ -24,6 +24,7 @@ from cutlass._mlir.dialects import llvm, vector as mlir_vector
 from cutlass.cutlass_dsl import dsl_user_op, T
 
 import torch
+from torch._native.cutedsl.hw_caps import caps
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._ptx import make_packed_half_atomic_add
@@ -253,6 +254,6 @@ def vec_scatter_add_into(
     M, N = src.shape
     contig = src.stride(0) == N and out.stride(0) == N
     compiled = _compile_vec_scatter(src.dtype, contig)
-    sm = torch.cuda.get_device_properties(out.device).multi_processor_count
+    sm = caps(out.get_device()).sm_count
     grid = min((M + _WARPS_PER_BLOCK - 1) // _WARPS_PER_BLOCK, sm * 8)
     compiled(src, index_1d, out, M, N, grid, src.stride(0), out.stride(0))

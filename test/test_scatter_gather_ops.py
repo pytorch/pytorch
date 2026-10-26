@@ -922,6 +922,16 @@ class TestScatterAddOverrideConds(TestCase):
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
+    def test_declines_index_larger_than_src(self):
+        # aten raises for this. src's storage is wide enough that as_strided
+        # can't catch it; only the explicit shape check does.
+        self_t = torch.zeros(64, 256, device="cuda")
+        src = torch.randn(32, 256, device="cuda")[:, :128]
+        idx = torch.zeros(32, 256, dtype=torch.int64, device="cuda")
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+        with self.assertRaisesRegex(RuntimeError, "Expected index"):
+            self_t.scatter_add_(0, idx, src)
+
     @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
     def test_alignment_cond_matrix(self, case):
         # Joint coverage of the data_ptr / row-stride alignment checks
