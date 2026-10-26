@@ -42,7 +42,6 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
   if (n * m <= kSinglePassThreshold) {
     auto key = "eye_" + scalarToMetalTypeString(result);
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(key);
 
     // Map x to the smaller stride for coalesced writes
@@ -54,6 +53,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
+        auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, result, y_stride, x_stride);
 
@@ -69,11 +69,11 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     int64_t sz = std::min(n, m);
     int64_t diag_stride = stride0 + stride1;
     auto key = "eye_diag_" + scalarToMetalTypeString(result);
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(key);
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
+        auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, result, diag_stride);
         mtl_dispatch1DJob(computeEncoder, pso, sz);

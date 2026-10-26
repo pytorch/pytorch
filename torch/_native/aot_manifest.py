@@ -6,12 +6,14 @@ call, ahead of its cond chain, so a covered call declines the Python route and
 reaches the embedded kernel through the router's aten fallback. Anything uncovered
 keeps its JIT override eligibility.
 
-A call is covered iff some point of the declaration's ``kernel_precompile_grid()``
-matches every field ``covered_axes()`` returns; dtypes match by canonical torch
-dtype, grid-only fields like block sizes are ignored, and an exception degrades to
-uncovered. The C++ dispatch chain in the AOT library is the authority on what
-actually launches, and drift is benign: a call both sides decline lands on stock
-aten.
+A call is covered only when the build embedded kernels for its op and device.
+When available, the generated C++ predicate is authoritative: codegen conjoins
+the declaration predicate with the artifact-target and ABI gates. The Python
+fallback first checks the embedded device capabilities, then whether some point
+of ``kernel_precompile_grid()`` matches every field ``covered_axes()`` returns.
+Dtypes match by canonical torch dtype, grid-only fields like block sizes are
+ignored, and an exception degrades to uncovered. The C++ dispatch chain is the
+authority on what actually launches.
 """
 
 import functools
@@ -41,11 +43,34 @@ class _Coverage:
         self._covered_axes = covered_axes
         self._grid = grid
         # Declarations with cpp_covers() get a C++ predicate in the AOT library,
-        # registered as torch.ops._native_aot.covers_<op>: the same answer as the
-        # Python matching below for ~1.5us instead of ~7-10us. Resolved lazily,
-        # because the library loads after coverage is built.
+        # registered as torch.ops._native_aot.covers_<op>. Its declaration body
+        # mirrors the Python matching below, and codegen adds the artifact-target
+        # and ABI gates. Resolved lazily because the library loads after coverage
+        # is built.
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
+        self._archs: tuple[int, ...] | None = None
+        self._available: dict[int, bool] = {}
+
+    def is_available(self, device: torch.device) -> bool:
+        """Whether this build embedded this op for the given device."""
+        if device.type != "cuda" or torch.version.hip is not None:
+            return False
+        if self._archs is None:
+            try:
+                name = f"archs_{decl_id_for_op(self._op)}"
+                self._archs = tuple(getattr(torch.ops._native_aot, name)())
+            except (AttributeError, RuntimeError):
+                self._archs = ()
+        if not self._archs:
+            return False
+        index = device.index
+        if index is None:
+            index = torch.cuda.current_device()
+        if index not in self._available:
+            major, minor = torch.cuda.get_device_capability(index)
+            self._available[index] = major * 10 + minor in self._archs
+        return self._available[index]
 
     def _resolve_cpp_covers(self) -> Callable[..., bool] | None:
         if not self._cpp_probed:
@@ -73,10 +98,16 @@ class _Coverage:
                 # Arguments the schema cannot bind: uncovered, so the cond decides.
                 return False
         try:
+            call_args = (*args, *kwargs.values())
+            tensor = next(
+                (arg for arg in call_args if isinstance(arg, torch.Tensor)),
+                None,
+            )
+            if tensor is None or not self.is_available(tensor.device):
+                return False
             values = self._covered_axes(*args, **kwargs)
         except Exception:
-            # Underspecified call (e.g. a FakeTensor missing the queried attribute):
-            # uncovered, so the cond decides.
+            # Failed availability or argument probes leave the call to the cond chain.
             return False
         for point in self._grid:
             if all(
@@ -117,8 +148,8 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
 
 
 def _base_name(op_symbol: str) -> str:
-    # Overload-qualified ("topk.values") and in-place ("scatter_add_") symbols
-    # share the base op's declaration: one structured wrapper serves all variants.
+    # Overload-qualified and in-place symbols share the base op's declaration:
+    # one structured wrapper serves all variants.
     base = op_symbol.split(".")[0]
     return base.removesuffix("_") if not base.endswith("__") else base
 

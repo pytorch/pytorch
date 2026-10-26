@@ -294,7 +294,51 @@ struct VecConvert<
 };
 #endif
 
-#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+#if defined(CPU_CAPABILITY_SVE256)
+
+// Store the low byte of (int64_t)f for each float lane of src into dst.
+// Widening to double before FCVTZS (svct) puts the saturation point at the
+// int64_t bounds rather than the int32_t ones, so every input that is not
+// astronomically large contributes its true low byte, as the scalar
+// float -> int64_t -> uint8_t narrowing in c10::convert does.
+inline void store_float_as_uint8(const Vectorized<float>& src, uint8_t* dst) {
+  const svbool_t pg64 = svptrue_b64();
+  const svuint32_t u = svreinterpret_u32_f32(src);
+  // Zero-extending each 32-bit lane to 64 bits leaves the float in the low
+  // half of the lane, which is where svcvt_f64_f32_x reads it from.
+  const svfloat32_t lo = svreinterpret_f32_u64(svunpklo_u64(u));
+  const svfloat32_t hi = svreinterpret_f32_u64(svunpkhi_u64(u));
+  svst1b_vnum_s64(
+      pg64,
+      reinterpret_cast<int8_t*>(dst),
+      0,
+      svcvt_s64_f64_x(pg64, svcvt_f64_f32_x(pg64, lo)));
+  svst1b_vnum_s64(
+      pg64,
+      reinterpret_cast<int8_t*>(dst),
+      1,
+      svcvt_s64_f64_x(pg64, svcvt_f64_f32_x(pg64, hi)));
+}
+
+template <int src_n>
+struct VecConvert<uint8_t, 1, float, src_n> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<float, src_n>& src) {
+    constexpr int kFloatLanes = Vectorized<float>::size();
+    constexpr int kDstLanes = Vectorized<uint8_t>::size();
+    constexpr int kGroups = std::min(src_n, kDstLanes / kFloatLanes);
+    // Vectorized<uint8_t> has no SVE specialization, so this is the
+    // scalar-array fallback; lanes past the source stay zero, matching the
+    // VectorizedN::loadu(buf, count) the generic VecConvert ends with.
+    __at_align__ uint8_t buf[kDstLanes];
+    for (int i = 0; i < kGroups; i++) {
+      store_float_as_uint8(src[i], buf + i * kFloatLanes);
+    }
+    return Vectorized<uint8_t>::loadu(buf, kGroups * kFloatLanes);
+  }
+};
+
+#if defined(__ARM_FEATURE_BF16)
 
 template <>
 struct VecConvert<float, 1, BFloat16, 1> {
@@ -334,7 +378,8 @@ struct VecConvert<BFloat16, 1, float, 2> {
   }
 };
 
-#endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+#endif // defined(__ARM_FEATURE_BF16)
+#endif // defined(CPU_CAPABILITY_SVE256)
 
 template <typename src_t>
 struct VecConvert<
