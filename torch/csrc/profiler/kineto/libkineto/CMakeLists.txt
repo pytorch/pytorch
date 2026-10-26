@@ -174,8 +174,10 @@ elseif(KINETO_BACKEND STREQUAL "rocm")
   endif()
   message(STATUS "Building with: rocprofiler-sdk")
 elseif(KINETO_BACKEND STREQUAL "xpu")
-  # XPU plugin
-  add_subdirectory(src/plugin/xpupti)
+  # find xpupti sdk
+  find_package(Pti GLOBAL REQUIRED)
+  get_target_property(PTI_VIEW_LOCATION Pti::pti_view LOCATION)
+  message(STATUS "pti_view library location = ${PTI_VIEW_LOCATION}")
 endif()
 
 # Define file lists. Backends are mutually exclusive — exactly one (or none)
