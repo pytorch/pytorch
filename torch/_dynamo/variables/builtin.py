@@ -4106,7 +4106,12 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(
                         obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
                     )
-                elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                elif not isinstance(obj, variables.UnspecializedNNModuleVariable) and (
+                    obj.tp_as_sequence.sq_length is not None
+                    or obj.tp_as_mapping.mp_length is not None
+                ):
+                    # Iterables need not be Sized. Unsized user-defined objects
+                    # are guarded through the state read while tracing iteration.
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         lst = ListVariable([], mutation_type=ValueMutationNew())
