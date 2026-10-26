@@ -6229,7 +6229,7 @@ def _rewrite_envelope(cache_path, **fields):
 
 
 def _no_compilation_single_graph(x):
-    return x.sin() + 1
+    return x.neg() + 1
 
 
 def _no_compilation_inductor_graph(x):
@@ -7737,6 +7737,12 @@ class TestPrecompileRuntimeCache(TestCase):
             [r["reason"] for r in failure.exception.sources[0]["instances"]],
             ["non_static_compile_result", "launcher_count_not_one"],
         )
+        # A launch that left no fast-path launcher (under the profiler, say) still
+        # counts as one.
+        ran._cached_launcher = None
+        ran._launched = True
+        with self.assertRaises(_UnresolvedTritonExport):
+            _freeze_triton_kernel("source", [unlaunched, ran])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_reports_a_never_run_kernel_once(self):
@@ -7822,7 +7828,12 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
         )
-        with fresh_cache():
+        # Built under a capture, the kernel is keyed for any host, as a replay
+        # holding frozen kernels looks it up.
+        with (
+            fresh_cache(),
+            mock.patch.object(_runtime_cache, "relocatable_cpp_keys", return_value=True),
+        ):
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
                 payload = pickle.dumps({lib.key: binary.read()})
@@ -9371,13 +9382,32 @@ def _(x):
     return torch.empty_like(x)
 
 
+@torch.library.custom_op("{ns}::lowered", mutates_args=())
+def lowered(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@lowered.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+# Inductor lowers this op away, so only an eager artifact calls it.
+from torch._inductor.lowering import lowerings, register_lowering
+
+
+@register_lowering(torch.ops.{ns}.lowered.default)
+def _(x):
+    return lowerings[torch.ops.aten.mul.Tensor](x, 2)
+
+
 def fn(x):
-    return torch.ops.{ns}.triple.default(x.sin()) + 1
+    return torch.ops.{ns}.triple.default(torch.ops.{ns}.lowered.default(x.neg())) + 1
 
 
 class Child(torch.nn.Module):
     def forward(self, x):
-        y = torch.ops.{ns}.triple.default(x.sin())
+        y = torch.ops.{ns}.triple.default(x.neg())
         torch._dynamo.graph_break()
         return y + 1
 
@@ -9387,6 +9417,48 @@ child = Child()
 
 def step(x):
     return child(x * 2) + 1
+"""
+
+
+# Calls the op only from __torch_dispatch__, so the op is in the graphs AOTAutograd
+# traces but not in the graph Dynamo captures; it registers nothing itself.
+_SUBCLASS_MODULE = """
+import torch
+import torch.utils._pytree as pytree
+
+
+class Tripled(torch.Tensor):
+    @staticmethod
+    def __new__(cls, inner):
+        return torch.Tensor._make_wrapper_subclass(
+            cls, inner.shape, dtype=inner.dtype, device=inner.device
+        )
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    def __repr__(self):
+        return f"Tripled({self.inner!r})"
+
+    def __tensor_flatten__(self):
+        return ["inner"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return Tripled(inner_tensors["inner"])
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        args = pytree.tree_map_only(
+            Tripled, lambda t: torch.ops.{ns}.triple.default(t.inner), args
+        )
+        return func(*args, **(kwargs or {}))
+
+
+def subclass_fn(x):
+    return x.neg() + 1
 """
 
 
@@ -9419,8 +9491,13 @@ artifact = os.path.join(directory, "artifact.py")
 cache = os.path.join(directory, "artifact.cache")
 expected_path = os.path.join(directory, "expected.pt")
 x = torch.arange(6, dtype=torch.float32)
+if entry == "subclass_fn":
+    subclass_module = __import__(module + "_subclass")
+    x = subclass_module.Tripled(x)
 if phase == "capture":
-    fn = getattr(__import__(module), entry)
+    fn_module = module + "_subclass" if entry == "subclass_fn" else module
+    fn = getattr(__import__(fn_module), entry)
+    __import__(module)
     __import__(unused)
     torch._dynamo.config.nested_graph_breaks = False
     with pc.capture(
@@ -9471,6 +9548,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "fn", "standalone"),
             ("dynamo", "inductor", "fn", "standalone"),
             ("dynamo", "eager", "step", "installed"),
+            ("dynamo", "inductor", "subclass_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9482,6 +9560,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ns = f"precompile_op_test_{tag}"
             for name, source in (
                 (module, _CUSTOM_OP_MODULE),
+                (module + "_subclass", _SUBCLASS_MODULE),
                 (unused, _UNUSED_OP_MODULE),
             ):
                 with open(os.path.join(directory, name + ".py"), "w") as f:
@@ -9492,6 +9571,9 @@ class TestPrecompileCustomOpModules(TestCase):
             phases = ("capture", "replay", "registered", "missing")
             if tracer == "dynamo":
                 phases = ("capture", "replay", "missing")
+            if entry == "subclass_fn":
+                # Building the input needs the subclass's module on the path.
+                phases = ("capture", "replay")
             for phase in phases:
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
@@ -9504,17 +9586,11 @@ class TestPrecompileCustomOpModules(TestCase):
                 self.assertIn(f"custom op phase ok: {phase}", out.stdout)
             with open(os.path.join(directory, "artifact.py")) as f:
                 python_code = f.read()
-            lines = {
-                line.split(" = ", 1)[0]: line
-                for line in python_code.splitlines()
-                if line.startswith(("CUSTOM_OP_MODULES = ", "CUSTOM_OPS = "))
-            }
-            op = f"{ns}::triple"
-            modules = {module: (op,)}
-            self.assertEqual(
-                lines["CUSTOM_OP_MODULES"], f"CUSTOM_OP_MODULES = {modules!r}"
-            )
-            self.assertEqual(lines["CUSTOM_OPS"], f"CUSTOM_OPS = {(op,)!r}")
+            ops = (f"{ns}::triple",)
+            if entry == "fn" and backend == "eager":
+                ops = (f"{ns}::lowered", *ops)
+            modules = {module: ops}
+            self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", python_code.splitlines())
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
@@ -9568,7 +9644,7 @@ class TestPrecompileCustomOpModules(TestCase):
         registered = f"{ns}::registered"
         missing_module = f"precompile_missing_{uuid.uuid4().hex}"
         # Already registered: the module is not needed.
-        _import_custom_op_modules({missing_module: (registered,)}, (registered,))
+        _import_custom_op_modules({missing_module: (registered,)})
         self.assertNotIn(missing_module, sys.modules)
         # Not registered: the module is imported, and registers it.
         with tempfile.TemporaryDirectory() as directory:
@@ -9578,29 +9654,22 @@ class TestPrecompileCustomOpModules(TestCase):
             sys.path.insert(0, directory)
             self.addCleanup(sys.path.remove, directory)
             self.addCleanup(sys.modules.pop, module, None)
-            _import_custom_op_modules({module: (f"{ns}::unused",)}, (f"{ns}::unused",))
+            _import_custom_op_modules({module: (f"{ns}::unused",)})
             self.assertIn(module, sys.modules)
         with self.assertRaisesRegex(PrecompileError, repr(missing_module)):
-            _import_custom_op_modules({missing_module: (f"{ns}::absent",)}, ())
-        with self.assertRaisesRegex(PrecompileError, f"{ns}::absent"):
-            _import_custom_op_modules({}, (registered, f"{ns}::absent"))
+            _import_custom_op_modules({missing_module: (f"{ns}::absent",)})
 
-    def test_custom_ops_follow_the_served_backends(self):
-        from torch._dynamo.precompile_package import _CapturePackage
+    def test_custom_op_names_in_source(self):
+        from torch._precompile import _custom_op_names_in_source
 
-        ns = f"precompile_backends_{uuid.uuid4().hex}"
-        graphs = {}
-        for name in ("served", "bypassed"):
-            op = self._define_op(ns, name)
-            graph = torch.fx.Graph()
-            x = graph.placeholder("x")
-            graph.output(graph.call_function(op._opoverload, (x,)))
-            graphs[name] = torch.fx.GraphModule(torch.nn.Module(), graph)
-        package = _CapturePackage(lambda x: x)
-        package.add_backend_graph("__compiled_fn_1", graphs["served"])
-        package.add_backend_graph("__compiled_fn_2", graphs["bypassed"])
+        source = (
+            "aten = torch.ops.aten\n"
+            "buf0 = torch.ops.mylib.triple.default(arg0_1)\n"
+            "buf1 = torch.ops.prims.convert_element_type.default(buf0)\n"
+            "buf2 = torch.ops.mylib.packet(buf1)\n"
+        )
         self.assertEqual(
-            package.custom_op_names_for(["__compiled_fn_1"]), {f"{ns}::served"}
+            _custom_op_names_in_source(source), {"mylib::triple", "mylib::packet"}
         )
 
 

@@ -198,10 +198,9 @@ it.
 #    load() rejects a (code, cache) pair from different precompile captures (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
-# self-contained: beyond torch, ``python_code`` imports only the CUSTOM_OP_MODULES of
-# custom ops its graphs call that are not registered where it is served; otherwise it
-# runs on its own -- it inlines the composed graph
-# module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
+# self-contained: ``python_code`` runs on its own, importing beyond torch only the
+# CUSTOM_OP_MODULES of custom ops it calls that are not registered where it is
+# served -- it inlines the composed graph module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
 # prelude/epilogue) or the captured graph (eager), plus all calling-convention
 # metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
 # calling convention. The ``cache`` holds ONLY the compiled INDUCTOR artifact and is
@@ -267,6 +266,7 @@ import logging
 import operator
 import os
 import pickle
+import re
 import stat
 import sys
 import threading
@@ -1687,8 +1687,7 @@ _GENERATED_HEADER = """\
 # This is a SELF-CONTAINED, EXECUTABLE artifact: it runs on its own, needing no
 # companion cache; beyond torch it imports only those CUSTOM_OP_MODULES, the modules
 # registering the custom ops its graph calls, whose ops are not registered yet. You
-# provide the model(s) at runtime,
-# exactly as the original fn took them, e.g.:
+# provide the model(s) at runtime, exactly as the original fn took them, e.g.:
 #
 #     import runpy
 #     ns = runpy.run_path("this_file.py")
@@ -1703,8 +1702,8 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
-#   0. CUSTOM_OP_MODULES and CUSTOM_OPS: before anything else runs, the modules of
-#      custom ops not yet registered are imported, and a missing op is refused.
+#   0. CUSTOM_OP_MODULES: before anything else runs, the modules of custom ops not
+#      yet registered are imported.
 #   1. The composed graph module from aot_autograd.compile_to_python: the inlined
 #      Inductor kernels (JIT-compiled from the embedded source on first use -- no
 #      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
@@ -1887,7 +1886,8 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         }
     # Parsed when present but never required, so older artifacts load unchanged:
     # TRACER and SERVING_MODE already selected the required set above, and
-    # the guard-audit sections come back as data.
+    # the guard-audit sections come back as data. CUSTOM_OP_MODULES is listed only
+    # so it is not logged as unrecognized; the artifact consumes it when it runs.
     optional = {
         "TRACER",
         "SERVING_MODE",
@@ -1895,7 +1895,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
         "CUSTOM_OP_MODULES",
-        "CUSTOM_OPS",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -1925,8 +1924,16 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+def _is_custom_op(name: str) -> bool:
+    return name.split("::", 1)[0] not in ("aten", "prims")
+
+
 def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
-    """The ``ns::op`` names of the non-ATen operators ``gm`` and its subgraphs call."""
+    """The ``ns::op`` names of the non-ATen operators ``gm`` and its subgraphs call.
+
+    For a graph served as-is (the eager backend); a compiled graph's operators are
+    read from its generated code instead, by :func:`_custom_op_names_in_source`.
+    """
     names: set[str] = set()
     for module in gm.modules():
         graph = getattr(module, "graph", None)
@@ -1942,7 +1949,42 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
                     names.add(target._schema.name)
                 elif isinstance(target, torch._ops.OpOverloadPacket):
                     names.add(target._qualified_op_name)
-    return {name for name in names if name.split("::", 1)[0] not in ("aten", "prims")}
+    return {name for name in names if _is_custom_op(name)}
+
+
+_OP_REFERENCE = re.compile(r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)")
+
+
+def _custom_op_names_in_source(source: str) -> set[str]:
+    """The ``ns::op`` names of the non-ATen operators generated code calls.
+
+    Inductor and AOTAutograd emit an operator they do not lower as
+    ``torch.ops.<ns>.<op>``, so this sees exactly the operators the served code
+    runs: one a decomposition or a tensor subclass introduced is here, and one
+    Inductor lowered away is not.
+    """
+    names = {f"{ns}::{op}" for ns, op in _OP_REFERENCE.findall(source)}
+    return {name for name in names if _is_custom_op(name)}
+
+
+def _backend_custom_op_names(backends: Mapping[str, Any]) -> set[str]:
+    """The custom ops the backend artifacts of a multi-graph capture call."""
+    names: set[str] = set()
+    for artifact in backends.values():
+        content = artifact.content
+        # The eager backend serves the captured graph, as its bound forward.
+        gm = getattr(content, "__self__", content)
+        if isinstance(gm, torch.fx.GraphModule):
+            names |= _custom_op_names(gm)
+            continue
+        for compiled in (
+            getattr(content, "compiled_fw", None),
+            getattr(content, "compiled_bw", None),
+        ):
+            source = getattr(getattr(compiled, "result", None), "source_code", None)
+            if isinstance(source, str):
+                names |= _custom_op_names_in_source(source)
+    return names
 
 
 def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
@@ -1986,16 +2028,17 @@ def _custom_op_registered(name: str) -> bool:
     return hasattr(getattr(torch.ops, namespace), op)
 
 
-def _import_custom_op_modules(
-    modules: dict[str, tuple[str, ...]], ops: Sequence[str]
-) -> None:
+def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
     """Make the custom ops an artifact's graphs call resolvable before it runs.
 
     A compiled graph calls ``torch.ops.<ns>.<op>`` directly, so nothing on the
     serving path imports the module whose ``torch.library.custom_op`` registers it,
     and under lazy imports the model's own import of that module may never resolve.
     A module is imported only if one of its ops is not registered yet, so a process
-    that registers them some other way does not need the module by that name.
+    that registers them some other way does not need the module by that name. An
+    op with no module here (``__main__``, ``torch.library.Library``,
+    ``torch.ops.load_library``) is not checked: it only has to be registered by
+    the first call, as under ``torch.compile``.
     """
     for module, module_ops in modules.items():
         if all(_custom_op_registered(op) for op in module_ops):
@@ -2009,26 +2052,17 @@ def _import_custom_op_modules(
                 f"cannot be imported here ({e}). Make it importable wherever the "
                 "artifact is served, or register the ops before loading it."
             ) from e
-    missing = [op for op in ops if not _custom_op_registered(op)]
-    if missing:
-        raise PrecompileError(
-            f"this artifact's compiled graphs call operator(s) {', '.join(missing)}, "
-            "which are not registered in this process. Import or load whatever "
-            "registers them before loading the artifact."
-        )
 
 
 def _write_custom_op_imports(buf: Any, op_names: set[str]) -> None:
     buf.writeline(f"CUSTOM_OP_MODULES = {_custom_op_modules(op_names)!r}")
-    buf.writeline(f"CUSTOM_OPS = {tuple(sorted(op_names))!r}")
     buf.writeline("from torch._precompile import _import_custom_op_modules")
-    buf.writeline("_import_custom_op_modules(CUSTOM_OP_MODULES, CUSTOM_OPS)")
+    buf.writeline("_import_custom_op_modules(CUSTOM_OP_MODULES)")
     buf.writeline("")
 
 
 def _build_python_source(
     compiled: PrecompiledModule,
-    gm: torch.fx.GraphModule,
     graph_python: str,
 ) -> str:
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
@@ -2036,7 +2070,7 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
-    _write_custom_op_imports(buf, _custom_op_names(gm))
+    _write_custom_op_imports(buf, _custom_op_names_in_source(graph_python))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2403,7 +2437,6 @@ def _build_multigraph_python_source(
     entry_binding: dict[str, Any] | None,
     mode: str,
     unreachable: list[str],
-    custom_op_names: set[str],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2421,7 +2454,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, custom_op_names)
+    _write_custom_op_imports(buf, _backend_custom_op_names(backends))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -2553,7 +2586,6 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_names: set[str],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2573,15 +2605,7 @@ def _build_multigraph_artifact(
     mode = "installed" if unreachable else "standalone"
     binding = _entry_binding(entry_fn) if mode == "standalone" else None
     python_code = _build_multigraph_python_source(
-        entry,
-        frames,
-        backends,
-        summary,
-        backend,
-        binding,
-        mode,
-        unreachable,
-        custom_op_names,
+        entry, frames, backends, summary, backend, binding, mode, unreachable
     )
     inductor_bundle = None
     if backend != "eager":
@@ -2876,9 +2900,9 @@ class PrecompiledModule(PrecompiledRunnable):
             if self._gm is None:
                 raise PrecompileError("internal: not compiled; call _compile() first")
             return _build_eager_python_source(self)
-        if not self._graph_python or self._gm is None:
+        if not self._graph_python:
             raise PrecompileError("internal: not compiled; call _compile() first")
-        return _build_python_source(self, self._gm, self._graph_python)
+        return _build_python_source(self, self._graph_python)
 
     def to_cache_bytes(self, python_code: str | None = None) -> bytes:
         """Return the binary cache as bytes -- an ACCELERATION, not required to run.
@@ -3530,6 +3554,14 @@ def capture(
     checked, and the :class:`DynamoTracer` ``require_*`` gates refuse the risky
     ones by default.
 
+    The artifact records the importable module defining each
+    ``torch.library.custom_op`` its compiled code calls and imports it when it
+    loads, if the op is not registered yet. An op defined in ``__main__`` or in a
+    module that cannot be re-imported, or registered through
+    ``torch.library.Library`` or ``torch.ops.load_library``, has no such module:
+    capture logs a warning for the first kind, and the serving process must
+    register all of them before the first call.
+
     ``backend`` selects how the captured graph is realized: ``"inductor"``
     (default) lowers through AOTAutograd + Inductor into one self-contained
     module, and the cache holds the bundle that primes the inductor kernel caches
@@ -3694,8 +3726,11 @@ def load(
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
-    captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
+    captures -- if an installed artifact cannot install onto the serving process (for
+    example, a captured source changed since capture), or if a module in the
+    artifact's ``CUSTOM_OP_MODULES`` cannot be imported. ``load`` imports such a
+    module, user code, only when one of the custom ops it registers is not
+    registered yet. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """

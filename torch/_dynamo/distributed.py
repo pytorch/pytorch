@@ -67,6 +67,18 @@ def get_guard_pg() -> dist.ProcessGroup | None:
 
 # NB: Like get_guard_pg, this is only called when the caller explicitly asked for
 # compile time synchronization.
+def _is_fake_world() -> bool:
+    """Whether every backend of the default group is fake, so no rank has a real peer
+    to rendezvous with."""
+    backend_config = dist.distributed_c10d.BackendConfig(
+        dist.Backend(dist.get_backend())
+    )
+    return all(
+        backend == dist.Backend.FAKE
+        for backend in backend_config.get_device_backend_map().values()
+    )
+
+
 def get_compile_sync_pg() -> dist.ProcessGroup | None:
     """
     Process group for collectives issued from inside the compiler itself, e.g. the
@@ -89,7 +101,7 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
         global _COMPILE_SYNC_PG
         if _COMPILE_SYNC_PG is None:
             timeout: timedelta | None = None
-            if dist.get_backend() == dist.Backend.FAKE:
+            if _is_fake_world():
                 backend = dist.Backend.FAKE
             else:
                 if not dist.is_gloo_available():
