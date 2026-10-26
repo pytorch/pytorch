@@ -11,6 +11,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
+# The padded producer's rows are wider than its groups, so its write and the
+# grouped read factor the same addresses differently. Ordinary fusion does not
+# prove that, and the producer stays a separate kernel.
 def rounded_groups(x, y, group):
     x = F.pad(x, (0, group))
     y = F.pad(y, (0, group))
@@ -65,7 +68,7 @@ class TestPersistentReductionLanes(TestCase):
                 return tuple(maximum + lane.float() for lane in value.unbind(-1))
             return maximum + value[:, 0].float() + value[:, group - 1].float()
 
-        source = self.check(fn, device, group)
+        source = self.check(fn, device, group, kernels=2)
         self.assertNotIn("for r0_offset", source)
 
     @parametrize("pointwise_cat", [False, True])
@@ -108,14 +111,14 @@ class TestPersistentReductionLanes(TestCase):
             )
             return torch.stack(words, -1)
 
-        self.check(fn, device, reference=stacked_lanes)
+        self.check(fn, device, reference=stacked_lanes, kernels=2)
 
     def test_concat_destination_reader_is_separate(self, device):
         def fn(x, y):
             packed = stacked_lanes(x, y)
             return packed, packed[:, 0] + packed[:, 1]
 
-        self.check(fn, device, kernels=2)
+        self.check(fn, device, kernels=3)
         self.assertEqual(metrics.codegen_nested_reduction, 1)
 
     def test_concat_with_foreign_column(self, device):
