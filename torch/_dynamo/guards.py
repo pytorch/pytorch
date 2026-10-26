@@ -3534,8 +3534,8 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         item_word = "item" if remaining == 1 else "items"
         reason = (
-            f"Expected {ref} to be a tuple iterator with {remaining} {item_word} left; "
-            "this compiled version assumes that iterator type and remaining count."
+            f"Iterator {ref} must be a tuple iterator with {remaining} {item_word} left; "
+            "Dynamo specialized the compiled code on the tuple iterator type and remaining count."
         )
 
         obj_id = self.id_ref(t, f"type({guard.name})")
