@@ -136,6 +136,7 @@ from .resume_execution import (
 from .source import (
     AttrSource,
     DictGetItemSource,
+    get_global_source_name,
     GlobalSource,
     GlobalWeakRefSource,
     LocalCellSource,
@@ -250,6 +251,9 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
+# Prefix of the global an inlined frame's globals are guarded through when they
+# belong to no module (see get_globals_source_and_value).
+UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 compare_op_handlers: dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
@@ -1922,6 +1926,9 @@ class InstructionTranslatorBase(
                     )
                 e.skip_frame = True
                 raise
+            # Nested fallback would retain a caller resume on each loop iteration.
+            if self.parent is not None and self.parent.maybe_has_backedge():
+                self.raise_loop_graph_break(self.f_code, e)
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -3495,17 +3502,15 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
-        obj = self.pop()
         if sys.version_info >= (3, 13):
-            self.push(obj)
+            self._load_attr(inst.argval)
             self.PUSH_NULL(inst)
         elif sys.version_info >= (3, 11):
-            # always follow the NULL + fn convention, since if obj
-            # is actually a method, self is already bound to it, so it
-            # doesn't need to be passed in as an arg.
+            obj = self.pop()
+            # Push NULL before lookup so nested graph breaks preserve the call stack.
             self.PUSH_NULL(inst)
             self.push(obj)
+            self._load_attr(inst.argval)
         else:
             raise AssertionError(
                 "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
@@ -5592,7 +5597,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def raise_loop_graph_break(
-        code: types.CodeType, exc: Unsupported | UserError
+        code: types.CodeType, exc: Unsupported | UserError | StepUnsupported
     ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
@@ -6635,8 +6640,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             global_source = AttrSource(module_source, name)
         else:
             globals_name = self.output.install_global_by_id(
-                "___unnamed_scope", self.f_globals
+                UNNAMED_SCOPE_PREFIX, self.f_globals
             )
+            source = self.funcvar.source
+            root = get_global_source_name(source)
+            # How a loading process finds the live namespace again: the key
+            # embeds this process's id() of it. A source rooted at an unnamed
+            # scope key needs that key bound first, so it cannot.
+            if (
+                source is not None
+                and root is not None
+                and not root.startswith(UNNAMED_SCOPE_PREFIX)
+            ):
+                self.output.unnamed_scope_sources.setdefault(
+                    globals_name, AttrSource(source, "__globals__")
+                )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Don't use lazy vt because we will do a setattr afterwards

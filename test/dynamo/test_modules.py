@@ -3813,6 +3813,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Make sure Dynamo actually traced the method.
         self.assertEqual(cache.bool_invoked, 1)
 
+    def test_optimized_module_bool(self):
+        # Modules without __bool__/__len__ used to raise TypeError via __len__
+        opt_mod = torch.compile(torch.nn.Linear(2, 2), backend="eager")
+        self.assertTrue(bool(opt_mod))
+        with self.assertRaisesRegex(TypeError, "does not support len"):
+            len(opt_mod)
+
+        # Sized containers keep their len-based truthiness
+        for mod in [torch.nn.Sequential(), torch.nn.ModuleDict()]:
+            self.assertFalse(bool(torch.compile(mod, backend="eager")))
+
+        # A user-defined __bool__ on the original module is respected
+        class Falsy(torch.nn.Module):
+            def __bool__(self):
+                return False
+
+        self.assertFalse(bool(torch.compile(Falsy(), backend="eager")))
+
     def test_patch_module(self):
         def set_attrs_from_orig_model(cls_instance, mod, *func_names):
             cls_instance.__dict__.update(mod.__dict__)

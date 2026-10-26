@@ -567,6 +567,14 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # FIXME: scatter_gather_base_kernel_func not implemented for ComplexFloat/ComplexDouble on XPU (sparse_coo inputs)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMasked",
+                "test_mask_layout",
+                device_type="xpu",
+                dtypes=(torch.complex64, torch.complex128),
+            ),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -613,7 +621,7 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_jvp",
                 device_type="cuda",
             ),
@@ -1273,7 +1281,7 @@ op_db: list[OpInfo] = [
             # Greatest relative difference: nan at index (0,) (up to 0.0001 allowed
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_vmapvjpvjp",
                 device_type="cpu",
             ),

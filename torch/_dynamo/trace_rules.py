@@ -36,6 +36,7 @@ import sys
 import types
 import typing
 import unittest
+import weakref
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -594,6 +595,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
+        "torch._C._copy_backend_meta",
         "torch._C._cpu._init_amx",
         "torch._C._cpu._get_cpu_capability",
         "torch._C._crash_if_aten_asan",
@@ -4049,6 +4051,11 @@ def check_verbose(
     # break. Skip it at the top level to avoid installing unnecessary guards.
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
+
+    # Guard construction adds finalizers and invalidates any registry snapshot
+    # traced by detach before the first guard check.
+    if fi.code is not None and fi.code is weakref.finalize.detach.__code__:
+        return SkipResult(True, "weakref.finalize.detach uses the finalizer registry")
 
     # Consult the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()

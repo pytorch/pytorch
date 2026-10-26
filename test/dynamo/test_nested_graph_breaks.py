@@ -7,7 +7,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.utils._pytree as python_pytree
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 try:
@@ -65,6 +69,7 @@ class GraphBreakingInt(int):
         return GraphBreakingInt(int(self) + other)
 
 
+@instantiate_parametrized_tests
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -648,6 +653,65 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # 4 additions from f5+f4, 2 x 4 additions from f2+f1 (i == 5, i != 5)
         self.assertEqual(cnts.op_count, 12)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 6)
+
+    @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
+    @parametrize("num_iters", [12, 24])
+    def test_nested_step_graph_break_in_loop(self, num_iters):
+        def step(x):
+            y = x + 1
+            positive = torch.all(y > 0)
+            try:
+                if positive:
+                    return y * 2
+            except ValueError:
+                return x
+            return y
+
+        def loop(x, n):
+            for _ in range(n):
+                x = step(x)
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(loop, backend=cnts)
+        x = torch.zeros(3)
+        expected = loop(x, num_iters)
+        self.assertEqual(opt_fn(x, num_iters), expected)
+        frame_count = cnts.frame_count
+        self.assertGreater(frame_count, 0)
+        self.assertEqual(opt_fn(x, num_iters), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+        expected = loop(x, 2 * num_iters)
+        self.assertEqual(opt_fn(x, 2 * num_iters), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+        self.assertEqual(opt_fn(x, 2 * num_iters), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+
+    @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
+    @parametrize("num_iters", [12, 24])
+    def test_nested_step_graph_break_in_leaf_loop(self, num_iters):
+        def helper(x, n):
+            x = (x + 1).relu()
+            for _ in range(n):
+                y = x + 1
+                positive = torch.all(y > 0)
+                try:
+                    if positive:
+                        x = y * 2
+                except ValueError:
+                    pass
+            return x
+
+        def caller(x, n):
+            return helper(x + 2, n) + 3
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(caller, backend=cnts, dynamic=True)
+        x = torch.ones(3)
+        for n in (num_iters, num_iters, 2 * num_iters, 2 * num_iters):
+            self.assertEqual(opt_fn(x, n), caller(x, n))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 4)
 
     def test_nested_graph_break_in_try_block(self):
         # NOTE: this also tests nested step_graph_break
@@ -1826,6 +1890,105 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         result = fn(x)
         self.assertEqual(result, x + 2)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_load_method_getattr_nested_graph_break(self):
+        class Wrapper:
+            def __getattr__(self, name):
+                torch._dynamo.graph_break()
+                return torch.sin
+
+        wrapper = Wrapper()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            return wrapper.sin(x) + 2
+
+        x = torch.randn(3)
+        expected = torch.sin(x + 1) + 2
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 3)
+
+    def test_getattr_nested_graph_break_instance_shadow(self):
+        class Wrapper:
+            def __getattr__(self, name):
+                torch._dynamo.graph_break()
+                return torch.sin
+
+        wrapper = Wrapper()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            bound = wrapper.method
+            return bound(x) + 2
+
+        x = torch.randn(3)
+        self.assertNotIn("method", wrapper.__dict__)
+        self.assertEqual(fn(x), torch.sin(x + 1) + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        wrapper.method = torch.cos
+        self.assertEqual(fn(x), torch.cos(x + 1) + 2)
+        self.assertEqual(fn(x), torch.cos(x + 1) + 2)
+        self.assertEqual(cnts.frame_count, 3)
+
+    @parametrize("owner", ("class", "base"))
+    def test_getattr_nested_graph_break_class_shadow(self, owner):
+        class Base:
+            pass
+
+        class Wrapper(Base):
+            def __getattr__(self, name):
+                torch._dynamo.graph_break()
+                return torch.sin
+
+        wrapper = Wrapper()
+        target = Wrapper if owner == "class" else Base
+        self.assertNotIn("method", target.__dict__)
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            x = x + 1
+            bound = wrapper.method
+            return bound(x) + 2
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 2)
+        target.method = torch.cos
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_getattr_constant_source(self):
+        class Wrapper:
+            def __getattr__(self, name):
+                if name != "method":
+                    raise AttributeError(name)
+                return torch.sin
+
+        wrapper = Wrapper()
+
+        @torch._dynamo.assume_constant_result
+        def factory():
+            return wrapper
+
+        def fn(x):
+            bound = factory().method
+            return bound(x + 1) + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_map_callback_graph_break_preserves_iteration(self):
         def transform(x):
