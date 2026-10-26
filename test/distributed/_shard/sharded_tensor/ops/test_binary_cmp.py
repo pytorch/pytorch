@@ -129,15 +129,15 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         ):
             cmp_op(st1, st2)
 
+    @requires_capabilities(Capability.distributed.backend)
     @with_comms()
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_torch_equal_tensor_specs(self, device):
         self._test_common_failures(torch.equal, device)
 
+    @requires_capabilities(Capability.distributed.backend)
     @with_comms()
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_torch_equal(self, device):
         """Test torch.equal(ShardedTensor, ShardedTensor)"""
 
@@ -145,15 +145,15 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.equal(st1, st2))
 
+    @requires_capabilities(Capability.distributed.backend)
     @with_comms()
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_torch_allclose_tensor_specs(self, device):
         self._test_common_failures(torch.allclose, device)
 
+    @requires_capabilities(Capability.distributed.backend)
     @with_comms()
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_torch_allclose(self, device):
         """Test torch.allclose(ShardedTensor, ShardedTensor)"""
 
