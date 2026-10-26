@@ -756,16 +756,11 @@ def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
         return x
 
     if not config.emulate_precision_casts_on_saved_tensors:
-        # The knob owns the saved-vs-unsaved rounding policy; off means this
+        # The gate owns the saved-vs-unsaved rounding policy; off means this
         # rounding is elided for every op, saved or not.
         return x
 
-    node = getattr(V.graph, "current_node", None) if V.graph is not None else None
-    if _has_lowp_pointwise_barrier(node) or _has_saved_lowp_output_use(node):
-        # make_pointwise already emits the rounding for this value.
-        return x
-
-    return make_pointwise(lambda out: out)(x, force_output_cast=True)
+    return make_pointwise(lambda out: out, force_output_cast=True)(x)
 
 
 def make_pointwise(
@@ -777,13 +772,18 @@ def make_pointwise(
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
+    force_output_cast: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
-    the define-by-run IR."""
+    the define-by-run IR.
 
-    def inner(  # noqa: docstring_linter
-        *inputs: Any, alpha=None, force_output_cast: bool = False
-    ) -> TensorBox | _T:
+    force_output_cast rounds a bf16/fp16 result down and back up in registers,
+    emulating the rounding eager applies at the op's output; lowerings that
+    split one user-visible low-precision op into several nodes use it so fused
+    consumers see the op's declared output precision.
+    """
+
+    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):

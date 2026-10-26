@@ -567,10 +567,14 @@ def convolution(
         # The peeled add is not a user-visible op: the declared output of the
         # convolution is the rounded low-precision sum, so fused consumers must
         # see it rounded whether or not the output is saved
-        # (https://github.com/pytorch/pytorch/issues/201296).  This matches
-        # cudnn eager, which peels the bias itself; XPU eager (oneDNN) fuses
-        # the bias instead.  Gated on emulate_precision_casts_on_saved_tensors.
-        return emulate_lowp_output_cast(result)
+        # (https://github.com/pytorch/pytorch/issues/201296).  cudnn and MIOpen
+        # eager peel the bias themselves and round the conv output first;
+        # oneDNN and MPS fuse it, so the cast is kept to the backends whose
+        # eager rounding it matches (cuda covers ROCm).  Gated on
+        # emulate_precision_casts_on_saved_tensors.
+        if device_type == "cuda":
+            return emulate_lowp_output_cast(result)
+        return result
 
     x.realize()
     weight.realize()
