@@ -953,8 +953,10 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   std::vector<std::string> getFunctionNames() override {
     getLibrary();
     auto rc = MetalShaderLibrary::getFunctionNames();
-    std::erase_if(rc, [&](const auto& name) { return metal40FunctionNames.contains(name); });
-    rc.insert(rc.end(), metal40FunctionNames.begin(), metal40FunctionNames.end());
+    std::erase_if(rc, [&](const auto& name) { return variantLibraries.contains(name); });
+    for (const auto& it : variantLibraries) {
+      rc.push_back(it.first);
+    }
     return rc;
   }
 
@@ -962,18 +964,24 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   id<MTLLibrary> getLibrary() override {
     c10::call_once(libraryInitFlag, [this] {
       library = loadSection("metal_basic");
+      const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
 #ifdef CAN_BUILD_METAL_4
-      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
-      // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
-      if (has_mpp()) {
-        metal40Library = loadSection("metal_40");
+          // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+          // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
+          {"metal_40", has_mpp},
+#endif
+      };
+      for (const auto& [section, isSupported] : variantSections) {
+        if (!isSupported()) {
+          continue;
+        }
+        auto lib = loadSection(section);
         @autoreleasepool {
-          for (NSString* name in [metal40Library functionNames]) {
-            metal40FunctionNames.emplace([name UTF8String]);
+          for (NSString* name in [lib functionNames]) {
+            variantLibraries.try_emplace([name UTF8String], lib);
           }
         }
       }
-#endif
     });
     return library;
   }
@@ -984,7 +992,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 
   id<MTLLibrary> getLibraryForFunc(const std::string& fname) override {
     auto basicLibrary = getLibrary();
-    return metal40FunctionNames.contains(fname) ? metal40Library : basicLibrary;
+    auto it = variantLibraries.find(fname);
+    return it != variantLibraries.end() ? it->second : basicLibrary;
   }
 
  private:
@@ -1015,8 +1024,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   }
 
   c10::once_flag libraryInitFlag;
-  id<MTLLibrary> metal40Library = nil;
-  std::unordered_set<std::string> metal40FunctionNames;
+  std::unordered_map<std::string, id<MTLLibrary>> variantLibraries;
 };
 
 // Inner extent below which the per-element strided kernel beats the ILP tile.
