@@ -2,15 +2,12 @@
 
 
 import torch
+from torch.testing._internal import tci
 from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
     TestAutocast,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyMPS,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -242,7 +239,7 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
 class TestAutocastDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cast_cache_is_global(self, device):
         """
         Verifies that the autocast cache is global. This is done by
@@ -262,7 +259,7 @@ class TestAutocastDevice(TestCase):
 
         self.assertEqual(mode.dtype_cast_counter, 1)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cache_disabled(self, device):
         data = torch.randn(2, 3).to(device)
         weight = torch.nn.Parameter(torch.randn(4, 3).to(device))
@@ -293,7 +290,7 @@ class TestAutocastDevice(TestCase):
     # and due to the multi-threaded nature of the autograd, the forward pass is being run in bfloat16, while the backward
     # pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
     # For more info see https://github.com/pytorch/pytorch/issues/132715.
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_autocast_prioritize(self, device):
         dtype = torch.bfloat16
 
@@ -309,7 +306,7 @@ class TestAutocastDevice(TestCase):
             loss = res.mean()
             loss.backward()
 
-    @onlyMPS
+    @tci.test(device="mps")
     def test_mps_autocast_error_message(self, device):
         with self.assertWarnsRegex(
             UserWarning,
@@ -318,7 +315,7 @@ class TestAutocastDevice(TestCase):
             with torch.autocast(device_type="mps", dtype=torch.float32):
                 _ = torch.ones(10)
 
-    @onlyMPS
+    @tci.test(device="mps")
     def test_mps_autocast_bfloat16_supported(self, device):
         with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
             x = torch.randn(2, 3, device=device)

@@ -9,13 +9,12 @@ from pathlib import Path
 
 import torch
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -164,7 +163,7 @@ class TestLibtorchAgnostic(TestCase):
         else:
             print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_slow_sgd(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -191,7 +190,7 @@ class TestLibtorchAgnostic(TestCase):
         )
         self.assertEqual(new_param, param)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_identity_does_not_hog_memory(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -394,7 +393,7 @@ class TestLibtorchAgnostic(TestCase):
             torch.floor_divide(a, -b_1d),
         )
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_is_pinned_cpu_false(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -402,7 +401,7 @@ class TestLibtorchAgnostic(TestCase):
         t = torch.randn(2, 3, device=device)
         self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_is_pinned_cuda_true(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -488,7 +487,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out, torch_op(a, b))
         self.assertEqual(id(result), id(out))
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfTorchVersionLessThan(2, 10)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
@@ -518,7 +517,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result, torch.flip(t, dims))
 
     @skipIfWindows(msg="TemporaryFileName cannot unlink a memory-mapped file")
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_from_file(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -534,7 +533,7 @@ class TestLibtorchAgnostic(TestCase):
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 14)
     def test_pyobject_roundtrip(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
@@ -548,7 +547,7 @@ class TestLibtorchAgnostic(TestCase):
         x.add_(1)
         self.assertEqual(y, x)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 14)
     def test_pyobject_sum(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
@@ -557,7 +556,7 @@ class TestLibtorchAgnostic(TestCase):
         s = libtorch_agnostic._interop.pyobject_sum(x)
         self.assertEqual(s, x.sum())
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 14)
     def test_pyobject_to_parameter_type(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
@@ -567,7 +566,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertIsInstance(p, torch.nn.Parameter)
         self.assertEqual(p.detach(), x)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 14)
     def test_pyobject_non_tensor_raises(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
@@ -575,7 +574,7 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
             libtorch_agnostic._interop.pyobject_roundtrip("not a tensor")
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_is_tensor(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
@@ -587,7 +586,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertFalse(is_tensor(None))
         self.assertFalse(is_tensor(torch.float32))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_tensor_subclass(self, device):
         import libtorch_agn_2_14
@@ -602,7 +601,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(y, x)
         self.assertEqual(y.data_ptr(), x.data_ptr())
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     @skipIfTorchDynamo("Dynamo intercepts the spoofed __class__")
     def test_pyobject_spoofed_tensor_class(self, device):
@@ -620,7 +619,7 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
             libtorch_agn_2_14._interop.pyobject_roundtrip(obj)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     @parametrize(
         "dtype",
@@ -641,7 +640,7 @@ class TestLibtorchAgnostic(TestCase):
         # torch.dtype objects are singletons.
         self.assertIs(out, dtype)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     # "cuda" (no index) must not come back as cuda:0; constructing the
     # device objects needs no GPU.
@@ -655,7 +654,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out, dev)
         self.assertEqual(out.index, dev.index)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_tensor_dtype_and_device(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
@@ -664,7 +663,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertIs(libtorch_agnostic._interop.tensor_dtype(x), torch.float64)
         self.assertEqual(libtorch_agnostic._interop.tensor_device(x), x.device)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_non_dtype_raises(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
@@ -672,7 +671,7 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.dtype"):
             libtorch_agnostic._interop.dtype_roundtrip("not a dtype")
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_unsupported_dtype_raises(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
@@ -680,7 +679,7 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Not yet supported ScalarType"):
             libtorch_agnostic._interop.dtype_roundtrip(torch.qint8)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_non_device_raises(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
@@ -688,7 +687,7 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.device"):
             libtorch_agnostic._interop.device_roundtrip("not a device")
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_unsupported_device_raises(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
@@ -784,7 +783,7 @@ class TestLibtorchAgnostic(TestCase):
         finally:
             torch.use_deterministic_algorithms(deterministic)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_my_zero_(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -824,7 +823,7 @@ class TestLibtorchAgnostic(TestCase):
         expected = torch.full_like(t, math.inf)
         self.assertEqual(out, expected)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_default_constructor(self):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -856,7 +855,7 @@ class TestLibtorchAgnostic(TestCase):
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_my_narrow_symint(self, device):
         op = torch.ops.libtorch_agn_2_9.my_narrow_symint
 
@@ -889,7 +888,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out3, torch.narrow(t2, 0, 2, t2.shape[0] - 2))
         self.assertEqual(cnt.frame_count, frame_count)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @deviceCountAtLeast(2)
     def test_device_guard(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -898,7 +897,7 @@ class TestLibtorchAgnostic(TestCase):
         out = libtorch_agnostic.ops.test_device_guard(device_index)
         self.assertEqual(out, device_index)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @deviceCountAtLeast(2)
     def test_device_guard_set_index(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -908,7 +907,7 @@ class TestLibtorchAgnostic(TestCase):
         out = libtorch_agnostic.ops.test_device_guard_set_index()
         self.assertEqual(out, 0)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_stream(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -922,7 +921,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(stream_id, expected_stream_id)
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_stream_native_handle(self, device):
         import libtorch_agn_2_13 as libtorch_agnostic
 
@@ -940,7 +939,7 @@ class TestLibtorchAgnostic(TestCase):
             native_handles.append(nh)
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_kernel_launch_on_custom_stream(self, device):
         import libtorch_agn_2_13 as libtorch_agnostic
 
@@ -982,7 +981,7 @@ class TestLibtorchAgnostic(TestCase):
         out3 = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
         self.assertEqual(out, out3)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @deviceCountAtLeast(2)
     def test_get_current_device_index(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -1100,7 +1099,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result[1], t2 * t2)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_device(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1154,7 +1153,7 @@ class TestLibtorchAgnostic(TestCase):
             libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     @deviceCountAtLeast(2)
     def test_tensor_device(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -1173,7 +1172,7 @@ class TestLibtorchAgnostic(TestCase):
         )
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_parallel_for(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1193,7 +1192,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result_thread_ids, torch.arange(expected_num_threads_used))
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_get_num_threads(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1203,7 +1202,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @skipIfTorchVersionLessThan(2, 15)  # Requires 2.15 for C++ warnings to reach Python
     @skipIfTorchDynamo("Dynamo also runs the op while tracing")
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_stable_torch_warn(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -1256,7 +1255,7 @@ for warning in w:
         return result.stdout.splitlines()
 
     @skipIfTorchVersionLessThan(2, 16)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_stable_torch_warn_once(self, device):
         emitted = self._run_stable_torch_warn_once()
 
@@ -1266,7 +1265,7 @@ for warning in w:
             self.assertIn(f"UserWarning test_stable_torch_warn_once {message}", line)
 
     @skipIfTorchVersionLessThan(2, 16)
-    @onlyCPU
+    @tci.test(device="cpu")
     @parametrize("warn_always", [False, True])
     def test_is_warn_always_enabled(self, device, warn_always):
         import libtorch_agn_2_16 as libtorch_agnostic
@@ -1378,7 +1377,7 @@ for warning in w:
         expected_range = torch.flatten(t, 2, -1)
         self.assertEqual(result_range, expected_range)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @xfailIf(TEST_WITH_TORCHDYNAMO and not torch._dynamo.config.use_cpp_fake_tensor)
     def test_my_optional_tensor_ref(self, device):
         """Test TORCH_BOX with const std::optional<Tensor>& parameter."""
@@ -1671,7 +1670,7 @@ for warning in w:
                             )
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_my_get_curr_cuda_blas_handle(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1782,7 +1781,7 @@ for warning in w:
         self.assertEqual(result_size, t.size(0))
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_my_set_requires_grad(self, device):
         """Test set_requires_grad method on Tensor."""
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -1804,7 +1803,7 @@ for warning in w:
         self.assertFalse(t.requires_grad)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_my_get_current_cuda_stream(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1814,7 +1813,7 @@ for warning in w:
         self.assertEqual(res, expected)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_my_set_current_cuda_stream(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1830,7 +1829,7 @@ for warning in w:
             libtorch_agnostic.ops.my_set_current_cuda_stream(prev_stream, device_index)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_my_get_cuda_stream_from_pool(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1849,7 +1848,7 @@ for warning in w:
             libtorch_agnostic.ops.my_set_current_cuda_stream(prev_stream, device_index)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_my_cuda_stream_synchronize(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1915,7 +1914,7 @@ for warning in w:
         self.assertEqual(stable_transposed, reference_transposed)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_std_cuda_check_success(self, device):
         """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -1925,7 +1924,7 @@ for warning in w:
         self.assertEqual(result, expected_device)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     @parametrize("show_cpp_stacktraces", [False, True])
     def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
         """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
@@ -2090,7 +2089,7 @@ except RuntimeError as e:
         self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_std_cuda_kernel_launch_check_success(self, device):
         """Test that STD_CUDA_KERNEL_LAUNCH_CHECK works correctly for successful kernel launches."""
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -2098,7 +2097,7 @@ except RuntimeError as e:
         libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_success()
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @tci.test(device="cuda")
     @parametrize("show_cpp_stacktraces", [False, True])
     @unittest.skipIf(
         _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
@@ -2460,7 +2459,7 @@ except RuntimeError as e:
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfTorchVersionLessThan(2, 11)
     def test_my_from_blob_with_cuda_deleter_no_leak(self, device):
         """Test that from_blob deleter properly frees cudaMalloc'd memory."""
@@ -2482,7 +2481,7 @@ except RuntimeError as e:
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfTorchVersionLessThan(2, 11)
     def test_my_from_blob_with_cuda_lambda_deleter_no_leak(self, device):
         """Test that from_blob lambda deleter properly frees cudaMalloc'd memory."""
@@ -2507,7 +2506,7 @@ except RuntimeError as e:
             self.assertEqual(curr_mem, init_mem)
 
     @skipIfTorchVersionLessThan(2, 12)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_tagged_op(self, device):
         import libtorch_agn_2_12  # noqa: F401
 
@@ -2516,7 +2515,7 @@ except RuntimeError as e:
         self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
         self.assertIn(torch.Tag.core, op.tags)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_my_layout(self, device):
         """Test layout() method for various tensor layouts."""
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -2542,7 +2541,7 @@ except RuntimeError as e:
         self.assertFalse(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.strided))
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_set_python_module_meta_works(self, device):
         import libtorch_agn_2_13  # noqa: F401
 
@@ -2552,7 +2551,7 @@ except RuntimeError as e:
         self.assertEqual(out.device, x.device)
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_set_python_module_nonexistent_module(self, device):
         # When set_python_module points at a module that doesn't exist, the
         # meta call should fail with the configured module name in the error.
@@ -2565,7 +2564,7 @@ except RuntimeError as e:
             torch.ops.libtorch_agn_2_13.identity_w_nonexistent_fake_module.default(x)
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_set_python_module_registers_properly(self, device):
         import libtorch_agn_2_13  # noqa: F401
 

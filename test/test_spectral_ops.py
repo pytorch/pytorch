@@ -10,12 +10,13 @@ import itertools
 import doctest
 import inspect
 
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
+     skipCPUIfNoFFT, deviceCountAtLeast, OpDTypes, toleranceOverride, tol,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
@@ -344,7 +345,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
-    @onlyOn(["cuda", "xpu"])
+    @tci.test(device=('cuda', 'xpu'))
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.bfloat16])
     def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
@@ -857,7 +858,7 @@ class TestFFT(TestCase):
         self._test_fft_ifft_rfft_irfft(device, dtype)
 
     @deviceCountAtLeast(1)
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.double)
     def test_cufft_plan_cache(self, devices, dtype):
         @contextmanager
@@ -930,7 +931,7 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/109448
@@ -946,7 +947,7 @@ class TestFFT(TestCase):
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @largeTensorTest("18GB")
     def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
         # The CUDA conjugate-symmetry fill uses 32-bit index math when numel and
@@ -1621,7 +1622,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input

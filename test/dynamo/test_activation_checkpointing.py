@@ -32,6 +32,7 @@ from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -2501,6 +2502,7 @@ sum_1: aten.sum.default -> PREFER_RECOMPUTE
 cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_region_activation_memory_budget_reduces_act_mem(self):
         N, NUM_LAYERS = 1000, 4
@@ -2637,6 +2639,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             [[0.2], [0.7], [0.7], [0.2], [None]],
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_region_activation_memory_budget_per_region(self):
         """Different graphs (separated by a graph break) can have different
@@ -2827,6 +2830,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertIsNotNone(x.grad)
         self.assertEqual(budgets, [0.3, 0.3])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_region_activation_memory_budget_covers_invoke_subgraph(self):
@@ -3246,6 +3250,7 @@ def forward(self, arg0_1, arg1_1):
 
                     self.assertEqual(is_rng_op(node), expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_rematerialize_with_sdpa_dropout_zero(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -3577,6 +3582,7 @@ def forward(self, arg0_1):
         self.assertEqual(ref, result)
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_multiple_user_phase_annotations_errors(self):
         x = torch.randn(4, 4, requires_grad=True)
@@ -3598,6 +3604,7 @@ def forward(self, arg0_1):
         with self.assertRaisesRegex(RuntimeError, "backward regions annotated"):
             self._compile_and_capture(fn, True, (x, w))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_user_phase_annotation_with_extra_autograd_grad(self):
         """Only the user-annotated backward region gets rematerialization."""

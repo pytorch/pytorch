@@ -14,11 +14,11 @@ import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -587,12 +587,12 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
         queue = mp.SimpleQueue()
         self.assertRaisesRegex(RuntimeError, r"requires_grad", lambda: queue.put(var))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_is_shared_accelerator(self, device):
         t = torch.randn(5, 5, device=device)
         self.assertTrue(t.is_shared())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_device_bad_call(self, device):
         # Initialize device
@@ -605,7 +605,7 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_device_fork(self, device):
         stderr = TestCase.runWithPytorchAPIUsageStderr(

@@ -7,6 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -33,6 +34,7 @@ class TestPythonAgnostic(TestCase):
         if return_code != 0:
             raise RuntimeError("python_agnostic bdist_wheel failed to build")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not (TEST_CUDA or TEST_XPU),
         "test requires CUDA or XPU",

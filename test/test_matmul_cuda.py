@@ -22,6 +22,7 @@ from torch.quantization._quantized_conversions import (
 )
 
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     _get_torch_cuda_version,
@@ -37,7 +38,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCUDA,
     skipCUDAIfNotRocm,
     tol as xtol,
     toleranceOverride,
@@ -218,7 +218,7 @@ class TestMatmulCuda(InductorTestCase):
                 torch.backends.cuda.matmul.fp32_precision = "bfx9"
                 self.assertEqual(torch.mm(a, a), expected)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
@@ -466,7 +466,7 @@ class TestMatmulCuda(InductorTestCase):
                 "extern_kernels.mm(",
             )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @runOnRocmArch(["gfx942"])
     @serialTest()
@@ -496,7 +496,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_tf32 = False
         self.assertEqual(torch.mm(a, identity), a, atol=0, rtol=0)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @runOnRocmArch(["gfx942"])
     @serialTest()
@@ -512,7 +512,7 @@ class TestMatmulCuda(InductorTestCase):
             output = torch.mm(a, identity)
         self.assertEqual(output, torch.ones_like(a), atol=0, rtol=0)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @runOnRocmArch(["gfx942"])
     @serialTest()
@@ -548,7 +548,7 @@ class TestMatmulCuda(InductorTestCase):
             )
             self.assertTrue(torch.isnan(nan_output).item())
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @runOnRocmArch(["gfx942"])
     @parametrize(
@@ -574,7 +574,7 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(output.shape, (a_shape[0], b_shape[1]))
         self.assertLess(peak_delta, a.nbytes + b.nbytes)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @runOnRocmArch(["gfx950"])
     @serialTest()
@@ -589,7 +589,7 @@ class TestMatmulCuda(InductorTestCase):
             output = torch.mm(a, identity)
         self.assertEqual(output, a, atol=0, rtol=0)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @runOnRocmArch(["gfx942"])
     @serialTest()
@@ -610,7 +610,7 @@ class TestMatmulCuda(InductorTestCase):
             with self.subTest(operation=name):
                 self.assertEqual(output, expected.expand_as(output), atol=0, rtol=0)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @serialTest()
     @_isolated_gfx942_tf32_rounding(None)
@@ -776,7 +776,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.cfloat, torch.cdouble)
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_with_mH_args(self, dtype, backend):
@@ -798,7 +798,7 @@ class TestMatmulCuda(InductorTestCase):
 
             self.assertEqual(torch.corrcoef(x), ref_corrcoef)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
                         torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
@@ -813,7 +813,7 @@ class TestMatmulCuda(InductorTestCase):
                 self.skipTest(f"failed on Navi for ROCm6.3 due to hipblas backend, dtype={dtype} and size={size}")
             self.cublas_addmm(size, dtype, False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=2e-3, rtol=2e-3),
                         torch.bfloat16: xtol(atol=2e-3, rtol=2e-3)})
@@ -825,7 +825,7 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, True)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
                         torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
@@ -843,7 +843,7 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: (shape[-1],))
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     # Fails with triton 3.7 on RDNA3/RDNA3.5 with the cublaslt backend
     @decorateIf(
         skipIfRocmArch(NAVI3_ARCH + NAVI3_5_ARCH),
@@ -868,7 +868,7 @@ class TestMatmulCuda(InductorTestCase):
             self.assertEqual(out.sum().item(), 0.0)
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @parametrize("batched", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
@@ -901,7 +901,7 @@ class TestMatmulCuda(InductorTestCase):
             grad = w.grad.flatten()[0].item()
             self.assertEqual(grad, ref)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
                         torch.bfloat16: xtol(atol=1e-4, rtol=1e-4)})
@@ -912,7 +912,7 @@ class TestMatmulCuda(InductorTestCase):
         with blas_library_context(backend):
             self.cublas_addmm(size, dtype, False, True)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
         orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_fp16_accumulation = True
@@ -931,7 +931,7 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(out, out_cpu, atol=1e-3, rtol=5e-3)
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=3e-3)})
     @dtypes(torch.float16)
     def test_cublas_addmm_alignment(self, dtype):
@@ -951,7 +951,7 @@ class TestMatmulCuda(InductorTestCase):
                 out = torch.nn.functional.linear(X, A, B)
                 self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
@@ -1010,7 +1010,7 @@ class TestMatmulCuda(InductorTestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @parametrize("shape", [2**i for i in range(5, 14)])
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_cublas_deterministic(self, device, shape, dtype):
@@ -1019,7 +1019,7 @@ class TestMatmulCuda(InductorTestCase):
         for _ in range(10):
             self.assertEqual(first, torch.matmul(inp, inp), atol=0., rtol=0.)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
     @parametrize("batched", [False, True])
@@ -1473,7 +1473,7 @@ class TestMatmulCuda(InductorTestCase):
             ck_unequal_kernels = collect_kernel_names(equal_k=False)
             self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 32, 64])
@@ -1538,7 +1538,7 @@ class TestMatmulCuda(InductorTestCase):
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
     @parametrize("N", [1, 64])
@@ -1627,7 +1627,7 @@ class TestMatmulCuda(InductorTestCase):
                     torch.testing.assert_close(out_ten, out, atol=0, rtol=0)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @parametrize("batch_size", [1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
@@ -1665,7 +1665,7 @@ class TestMatmulCuda(InductorTestCase):
 
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @parametrize("ops", [("mm", torch.mm), ("bmm", torch.bmm), ("addmm", torch.addmm), ("baddbmm", torch.baddbmm)])
     def test_input_dimension_checking_out_dtype(self, ops):
         op_name, op = ops

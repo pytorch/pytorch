@@ -24,11 +24,10 @@ import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
 from torch._utils_internal import deprecated
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCPU,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -400,6 +399,7 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
         _acc = torch.accelerator.current_accelerator()
@@ -476,7 +476,7 @@ class TestCheckpoint(TestCase):
 
 
 class TestCheckpointDeviceType(TestCase):
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpoint_rng_accelerator(self, device):
         for _ in range(5):
             inp = torch.randn(20000, device=device).requires_grad_()
@@ -504,7 +504,7 @@ class TestCheckpointDeviceType(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self, device):
         inp = torch.randn(2, device=device).requires_grad_()
         layer = torch.nn.Dropout()
@@ -515,7 +515,7 @@ class TestCheckpointDeviceType(TestCase):
         out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
         out.sum().backward()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     def test_get_device_states_recursive(self, devices):
         dev_type = torch.device(devices[0]).type
@@ -531,7 +531,7 @@ class TestCheckpointDeviceType(TestCase):
         self.assertTrue(isinstance(device_states[0], torch.Tensor))
         self.assertTrue(isinstance(device_states[1], torch.Tensor))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     def test_infer_device_state_recursive_multi_device(self, devices):
         dev_type = torch.device(devices[0]).type
@@ -567,7 +567,7 @@ class TestCheckpointDeviceType(TestCase):
         self.assertTrue(f"Device types: ['{dev_type}', 'meta']" in warning_msg)
         self.assertTrue(f"first device type: {dev_type}" in warning_msg)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpoint_preserves_device_context(self, device):
         """Test that checkpoint preserves torch.device() context during recomputation."""
         recomputed_devices = []
@@ -1054,7 +1054,7 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(torch.get_default_device().type, "meta")
         torch.set_default_device(None)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     def test_get_default_device_more(self, devices):
         dev_type = torch.device(devices[0]).type
@@ -1091,7 +1091,7 @@ class TestDeviceUtils(TestCase):
         finally:
             torch.set_default_device(None)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @ops(op_db)
     def test_device_mode_ops(self, device, dtype, op):
         func = op.get_op()

@@ -101,7 +101,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # Testing utils
-from torch.testing._internal import jit_utils
+from torch.testing._internal import jit_utils, tci
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
     GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
@@ -3652,6 +3652,9 @@ def foo(x):
     def test_device_type(self):
         self._test_device_type('cpu')
 
+    @tci.test(
+        exclude=tci.platform.linux_x86_64, add=tci.platform.linux_x86_64_cuda_t4
+    )
     @unittest.skipIf(not RUN_CUDA, "Requires CUDA")
     def test_device_type_cuda(self):
         self._test_device_type('cuda')
@@ -4737,6 +4740,9 @@ def foo(xyz):
         self.assertEqual(to_cpu(x).device, script_fn(x).device)
         self.checkScript(to_cpu, (x,))
 
+    @tci.test(
+        exclude=tci.platform.linux_x86_64, add=tci.platform.linux_x86_64_cuda_t4
+    )
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_tensor_to_cuda(self):
         def to_cuda(x):
@@ -9907,6 +9913,9 @@ dedent """
                 print(a)
                 print(b)
 
+    @tci.test(
+        exclude=tci.platform.linux_x86_64, add=tci.platform.linux_x86_64_cuda_t4
+    )
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_script_get_device_cuda(self):
         @torch.jit.script

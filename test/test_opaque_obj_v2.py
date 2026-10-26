@@ -54,9 +54,9 @@ from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -4368,7 +4368,7 @@ instantiate_parametrized_tests(TestOpaqueObject)
 class TestOpaqueObjectDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @requires_triton()
     def test_benchmark_harness_no_pickle_for_opaque_inputs(self, device):
         """Opaque graph inputs must not be pickled in the benchmark harness."""
@@ -4411,7 +4411,7 @@ class TestOpaqueGenerator(TestCase):
 class TestOpaqueGeneratorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
     def test_make_fx_with_generator(self, device):
         """make_fx should trace through Generator inputs as opaque values."""
@@ -4473,7 +4473,7 @@ class TestOpaqueGeneratorDevice(TestCase):
         actual = gm0(q, k, v, gen3)
         self.assertEqual(actual, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_make_fx_randn_with_generator(self, device):
         """make_fx should trace torch.randn with a Generator input."""
 

@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from torch import tensor
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
@@ -20,11 +21,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
-    onlyAccelerator,
     onlyNativeDeviceTypes,
     skipCUDAIf,
-    skipMPS,
-    skipXLA,
     skipXPUIf,
     tol,
     toleranceOverride,
@@ -1129,8 +1127,7 @@ class TestIndexingDevice(TestCase):
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1182,7 +1179,7 @@ class TestIndexingDevice(TestCase):
             a_dev.index_put_(indices=[b_dev], values=c_dev, accumulate=True)
             self.assertEqual(a_dev.cpu(), a)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_index_put_accumulate_non_contiguous(self, device):
         t = torch.zeros((5, 2, 2))
         t_dev = t.to(device)
@@ -1201,8 +1198,7 @@ class TestIndexingDevice(TestCase):
 
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
@@ -1297,7 +1293,7 @@ class TestIndexingDevice(TestCase):
             torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
             self.assertEqual(inp_ref, inp_res)
 
-    @skipXLA
+    @tci.test(exclude_device="xla")
     def test_index_put_accumulate_empty(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/94667
         input = torch.rand([], dtype=torch.float32, device=device)
@@ -1713,7 +1709,7 @@ class TestIndexingDevice(TestCase):
 
         self.assertRaisesRegex(IndexError, "invalid index", runner)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_invalid_device(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(5, device=device)
@@ -1725,7 +1721,7 @@ class TestIndexingDevice(TestCase):
                 lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate),
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cpu_indices(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(2, device=device)
@@ -1801,8 +1797,7 @@ class TestIndexingDevice(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.take_along_dim(t, indices, dim=7)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -1832,7 +1827,7 @@ class TestIndexingDevice(TestCase):
         ):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_gpu_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
@@ -2218,7 +2213,7 @@ class TestIndexingDevice(TestCase):
         getattr(out, op + "_")(0, index, source, **kwargs)
         self.assertEqual(out, dst)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @toleranceOverride(
         {
             torch.float32: tol(atol=1e-5, rtol=1e-3),
@@ -2317,8 +2312,7 @@ class TestIndexingDevice(TestCase):
             )
 
     @serialTest()
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @toleranceOverride(
         {
             # Tolerances follow test_index_add_copy_fast_path: this shape does
@@ -2365,7 +2359,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out.cpu(), expected)
 
     @serialTest()
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.complex64, torch.complex128, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
         # Originally test added for CUDA implementation:

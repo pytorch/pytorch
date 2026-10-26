@@ -12,12 +12,11 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 from torch import nn
 from torch.cuda.amp import autocast
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCUDA,
-    skipMeta,
 )
 from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
@@ -982,8 +981,7 @@ class TestDataParallel(TestCase):
 
 
 class TestDataParallelDeviceType(TestCase):
-    @onlyCUDA
-    @skipMeta
+    @tci.test(device="cuda", exclude_device="meta")
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module(self, device, dtype):
         l = nn.Linear(10, 5).to(device, dtype)
@@ -994,8 +992,7 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
-    @skipMeta
+    @tci.test(device="cuda", exclude_device="meta")
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only(self, device, dtype):
         class Net(nn.Module):
@@ -1014,8 +1011,7 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
-    @skipMeta
+    @tci.test(device="cuda", exclude_device="meta")
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
         class Net(nn.Module):
@@ -1034,8 +1030,7 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
-    @skipMeta
+    @tci.test(device="cuda", exclude_device="meta")
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
         class Net(nn.Module):
@@ -1054,8 +1049,7 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
-    @skipMeta
+    @tci.test(device="cuda", exclude_device="meta")
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):
         class Net(nn.Module):

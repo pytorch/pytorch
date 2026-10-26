@@ -16,6 +16,7 @@ from torch._dynamo.eval_frame import (
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch._dynamo.types import FrameAction, FrameExecStrategy
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -118,6 +119,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             .startswith("torch._dynamo hit config.recompile_limit")
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not torch.cuda.is_available() and not torch.xpu.is_available(),
         "requires cuda or xpu",

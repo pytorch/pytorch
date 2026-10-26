@@ -33,6 +33,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
+from torch.testing._internal import tci
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _move_to_device,
@@ -467,6 +468,7 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
     def test_always_wrap(self):
         """
@@ -732,6 +734,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[0], nn.Linear))
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
     @parametrize(
         "device_init_mode", [DEVICEInitMode.DEVICE_BEFORE, DEVICEInitMode.DEVICE_AFTER]

@@ -9,6 +9,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.utils.checkpoint import CheckpointError
@@ -141,6 +142,7 @@ class TestCheckpoint(TestCase):
         net = ToyModel()
         self._test_tensor_only(net, x)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_tensor_only_gpu(self):
         x = torch.randn(20, 100, device=f"{device_type}:0")

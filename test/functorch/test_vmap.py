@@ -44,6 +44,7 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch._functorch.vmap import restore_vmap
 from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal import tci
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
@@ -55,8 +56,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCPU,
     OpDTypes,
     ops,
     skipOps,
@@ -3992,7 +3991,7 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     def test_sdpa(self, device, backend):
         def T(*args):
@@ -4044,7 +4043,7 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
                 in_dims=(2, 1, None),
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     def test_sdpa_unbatched_inputs(self, device, backend):
         query = torch.randn(
@@ -4074,7 +4073,7 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
         self.assertEqual(actual_backward_grads, expected_backward_grads)
         self.assertEqual(actual_grads, expected_grads)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_sdpa_unbatched_inputs_cpu(self, device):
         query = torch.randn(3, 4, 32, 64, device=device, requires_grad=True)
         key = torch.randn_like(query, requires_grad=True)
@@ -4103,7 +4102,7 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
         self.assertEqual(actual_backward_grads, expected_backward_grads)
         self.assertEqual(actual_grads, expected_grads)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize(
         "backend",
         [
@@ -4126,7 +4125,7 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
 
         self.assertEqual(actual, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
     def test_randomness(self, device, randomness, backend):
@@ -5333,7 +5332,7 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
 
         self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("inplace", [True, False])
     def test_0d_tensor_index_put(self, device, inplace):
         def f(t, idx, v):

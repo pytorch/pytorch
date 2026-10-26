@@ -12,6 +12,7 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
+from torch.testing._internal import tci
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import (
@@ -1312,6 +1313,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(alive_during_call, [False])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_hop_codegen_releases_multiple_boxed_inputs_before_dispatch(self):
         from torch._higher_order_ops.wrap import (

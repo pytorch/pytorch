@@ -9,6 +9,7 @@ import random
 import unittest
 import warnings
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import HardwareClassification, TestCase, run_tests, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
@@ -21,8 +22,8 @@ from typing import Any
 from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, precisionOverride,
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
@@ -685,7 +686,7 @@ class TestSparse(TestSparseBase):
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size, dtype, device, coalesced)
             _test_coalesce(t)  # this tests correctness
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @largeTensorTest("30GB", "cuda")
     @skipCUDAIf(not SM80OrLater and not TEST_WITH_ROCM, "CUDA capability < SM80 and not ROCM")
     @dtypes(torch.float)
@@ -700,7 +701,7 @@ class TestSparse(TestSparseBase):
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32, torch.float16, torch.bool)
     @dtypesIfMPS(torch.float32)
     def test_coalesce_wide_dense_dims(self, device, dtype):
@@ -1304,7 +1305,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(None, x1.grad)
 
     @coalescedonoff
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_to_sparse_copy_multi_device(self, devices, dtype, coalesced):
@@ -1337,7 +1338,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(expected_grad.to_dense(), x2.grad.to(device).to_dense())
         self.assertEqual(None, x1.grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_device_empty(self, device):
         def test_tensor(x):
             y = x.to(device)
@@ -1862,7 +1863,7 @@ class TestSparse(TestSparseBase):
         ).transpose(1, 2)
         self.assertEqual(ab, ab_traspose_check)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -1899,7 +1900,7 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_bmm_oob(self, device):
         # Targets an out of bounds error when the sparse tensor has no non-zero
         # values in the first batch dimension (#131977).
@@ -1916,7 +1917,7 @@ class TestSparse(TestSparseBase):
         ab = torch.bmm(a, b)
         self.assertEqual(ab, torch.zeros((2, 1, 1), device=device))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_bmm_coo_row_index_alignment(self, device, dtype):
@@ -3058,7 +3059,7 @@ class TestSparse(TestSparseBase):
 
         self.assertFalse(z._indices().numel() != 2 and z.is_coalesced())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_storage_not_null(self, device):
         x = torch.sparse_coo_tensor((2,), dtype=torch.float32, device=device)
         self.assertNotEqual(x.get_device(), -1)
@@ -3066,7 +3067,7 @@ class TestSparse(TestSparseBase):
         x = torch.sparse_coo_tensor((2, 0), dtype=torch.float32, device=device)
         self.assertNotEqual(x.get_device(), -1)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     def test_same_device(self, devices):
         def check_device(x, device_id):
@@ -3102,7 +3103,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(x1.get_device(), should_be_device.index)
         self.assertEqual(x2.get_device(), should_be_device.index)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_new_device_single_device(self, device):
         self._test_new_device((), device)
@@ -3110,7 +3111,7 @@ class TestSparse(TestSparseBase):
         self._test_new_device((30, 20, 10), device)
         self._test_new_device((30, 20, 10, 0), device)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     def test_new_device_multi_device(self, devices):
         secondary_device = devices[1]
@@ -3136,7 +3137,7 @@ class TestSparse(TestSparseBase):
         test_shape(3, 10, 100)
         test_shape(3, 0, [100, 100, 0])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @dtypes(torch.float64, torch.float32, torch.float16, torch.cfloat, torch.cdouble)
     def test_factory(self, device, dtype):
@@ -3278,7 +3279,7 @@ class TestSparse(TestSparseBase):
         with self.assertRaisesRegex(RuntimeError, "values has incorrect size"):
             torch.sparse_coo_tensor(indices, values, sizes)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble, torch.int64)
     def test_factory_type_inference(self, device, dtype):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=dtype))
@@ -3295,7 +3296,7 @@ class TestSparse(TestSparseBase):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.LongTensor(1, 0))
         self.assertEqual(torch.int64, t.dtype)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_factory_device_type_inference(self, device):
         cpu_device = ('cpu', device)
         cpu_device_none = cpu_device + (None,)
@@ -3319,7 +3320,7 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(torch.device(should_be_device).type, t.device.type)
                 self.assertEqual(t.device.type, t_empty.device.type)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_factory_copy(self, device):
         def test_tensor(indices, values, indices_equal, values_equal):
@@ -3382,7 +3383,7 @@ class TestSparse(TestSparseBase):
         values = make_tensor([1, 1], dtype=torch.cdouble, device=device)
         test_tensor(indices, values, False, False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_legacy_new_device(self, device):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
@@ -4408,6 +4409,7 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
@@ -4431,6 +4433,7 @@ class TestSparseOneOff(TestCase):
                                     torch.randn(0, 4, 4, 0),
                                     [0, 4, 4, 0])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_sparse_cpu_dense_add(self):
         x = torch.zeros(3, 4, 4)
@@ -4889,7 +4892,7 @@ class _SparseDataset(torch.utils.data.Dataset):
 
 class TestSparseAny(TestCase):
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=False)
     @torch.sparse.check_sparse_tensor_invariants(enable=False)
     def test_check_sparse_tensor_invariants(self, layout):
@@ -5534,7 +5537,7 @@ class TestSparseAny(TestCase):
                 raise
             self.assertEqual(result, dense)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=True)
     @dtypes(torch.double)
     def test_to_sparse_identity(self, device, layout, dtype):
@@ -5693,7 +5696,7 @@ class TestSparseAny(TestCase):
 
                 gradcheck(func, x.requires_grad_(True), masked=masked, fast_mode=fast_mode)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=False)
     @dtypes(torch.double)
     def test_dataloader(self, device, layout, dtype):
@@ -5706,7 +5709,7 @@ class TestSparseAny(TestCase):
         loaded_data = list(loader)
         self.assertEqual(data, loaded_data)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     def test_invalid_blocksize(self):
         # Blocksize should be a tuple/list/torch.Size containing two values
         with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
@@ -5723,7 +5726,7 @@ class TestSparseAny(TestCase):
             torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pin_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices, values, pin_memory=True)
@@ -5752,7 +5755,7 @@ class TestSparseAny(TestCase):
             self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=True)
     def test_method_pin_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory()
@@ -5801,7 +5804,7 @@ class TestSparseAny(TestCase):
 
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pinned_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices.pin_memory(device), values.pin_memory(device))
@@ -5831,7 +5834,7 @@ class TestSparseAny(TestCase):
             self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @tci.test(device='cpu')
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_mismatched_pinned_memory(self, device, layout):
         """Test the failure to construct sparse tensor from indices and values

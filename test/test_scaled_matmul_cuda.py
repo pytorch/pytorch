@@ -22,6 +22,7 @@ from torch.nn.functional import (
     SwizzleType,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     IS_SM12X,
     IS_SM90,
@@ -38,15 +39,11 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCUDA,
-    onlyOn,
     e4m3_type,
     e5m2_type,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     expectedFailureCUDA,
-    skipXPU,
     skipCUDAIf,
     skipCUDAIfNotRocm,
 )
@@ -843,7 +840,7 @@ class TestFP8Matmul(TestCase):
             # Non-CUDA: test basic TN layout as sanity check
             self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=True, y_cm=False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipCUDAIfNotRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
@@ -880,7 +877,7 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @skipCUDAIfNotRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
@@ -940,7 +937,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale_result(self, device) -> None:
         torch.manual_seed(0)
@@ -979,7 +976,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(high_precision, unscaled)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -1058,7 +1055,7 @@ class TestFP8Matmul(TestCase):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [16640])
@@ -1271,7 +1268,7 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -1296,7 +1293,7 @@ class TestFP8Matmul(TestCase):
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_inplace_tunableop(self, device):
@@ -1326,7 +1323,7 @@ class TestFP8Matmul(TestCase):
             torch.cuda.tunable.tuning_enable(prev_tuning)
             torch.cuda.tunable.enable(prev_enabled)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
@@ -1346,7 +1343,7 @@ class TestFP8Matmul(TestCase):
         )
         self.assert_scaled_addmm_inplace(grad, reference.to(grad.dtype), args_b)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -1372,7 +1369,7 @@ class TestFP8Matmul(TestCase):
             (mat1.float() @ mat2.float()).to(input.dtype),
         )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -1388,7 +1385,7 @@ class TestFP8Matmul(TestCase):
 
         self.assertEqual(op(input.clone(), *args, beta=2), input * 2)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
@@ -1422,7 +1419,7 @@ class TestFP8Matmul(TestCase):
                         result, scaled_addmm(input, *args), atol=5e-2, rtol=5e-2
                     )
 
-    @onlyOn(["cpu", "cuda", "xpu"])
+    @tci.test(device=('cpu', 'cuda', 'xpu'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
     @parametrize("use_out", [False, True])
@@ -1451,7 +1448,7 @@ class TestFP8Matmul(TestCase):
                 if not fake:
                     self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_validation(self, device):
@@ -1524,7 +1521,7 @@ class TestFP8Matmul(TestCase):
                     ScalingType.RowWise,
                 )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not IS_SM90, "cuBLASLt accumulation requires SM90")
     @unittest.skipIf(
@@ -1573,7 +1570,7 @@ class TestFP8Matmul(TestCase):
         )
         self.assertEqual(actual, expected, atol=5e-2, rtol=5e-2)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -1611,7 +1608,7 @@ class TestFP8Matmul(TestCase):
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("two_level", [False, True])
@@ -1676,7 +1673,7 @@ class TestFP8Matmul(TestCase):
             self.assertIs(compiled, compiled_input)
             self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     def test_scaled_addmm_fake_tensor(self, device):
         with FakeTensorMode():
@@ -1693,7 +1690,7 @@ class TestFP8Matmul(TestCase):
 
             self.assertIs(scaled_addmm_(input, *args), input)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_fullgraph(self, device):
@@ -1736,7 +1733,7 @@ class TestFP8Matmul(TestCase):
         self.assertIn("_scaled_addmm_", source)
         self.assertNotIn("triton_poi_fused_copy", source)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_cudagraph(self, device):
@@ -1854,7 +1851,7 @@ class TestFP8Matmul(TestCase):
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -2138,7 +2135,7 @@ class TestFP8Matmul(TestCase):
         else:
             self.assertEqual(out, out_emulated, atol=7e-2, rtol=7e-2)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("wrap_v2", [True, False])
@@ -2171,7 +2168,7 @@ class TestFP8Matmul(TestCase):
                 wrap_v2=wrap_v2,
             )
 
-    @onlyOn(["cuda", "xpu"])
+    @tci.test(device=('cuda', 'xpu'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling requires SM90 (Hopper)")
     @skipCUDAIf(
@@ -2427,7 +2424,7 @@ class TestFP8Matmul(TestCase):
                   y_hp, y_recipe, y_fp8, y_scales, y_scales_original)
 
 
-    @onlyOn(["cuda", "xpu"])
+    @tci.test(device=('cuda', 'xpu'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling requires SM90 (Hopper)")
     @skipCUDAIf(
@@ -2516,7 +2513,7 @@ class TestFP8Matmul(TestCase):
             output_dtype
         )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
     @unittest.skipIf(
@@ -2601,7 +2598,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -2685,7 +2682,7 @@ class TestFP8Matmul(TestCase):
                     self.assertNotEqual(no_carveout, carveout_66)
                     self.assertNotEqual(carveout_66, carveout_0)
 
-    @skipXPU
+    @tci.test(exclude_device='xpu')
     def test_pack_uint4(self):
         """
         Verify that given a tensor with high precision values [val0, val1],
@@ -2701,7 +2698,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
-    @onlyOn(["cuda", "xpu"])
+    @tci.test(device=('cuda', 'xpu'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -2760,9 +2757,8 @@ class TestFP8Matmul(TestCase):
         if sqnr.item() <= approx_match_sqnr_target:
             raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
-    @onlyAccelerator
+    @tci.test(device=('cuda', 'xpu'), exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @onlyOn(["cuda", "xpu"])
     @parametrize("test_case_name", [
         "a_eye_b_eye",
         "a_ones_b_ones",
@@ -3037,7 +3033,7 @@ class TestFP8Matmul(TestCase):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
-    @skipXPU
+    @tci.test(exclude_device='xpu')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_passed_swizzle_arrays(self, device) -> None:
         # Ensure that incorrectly-sized swizzle arrays are caught
@@ -3275,7 +3271,7 @@ class TestFP8Matmul(TestCase):
     # _scaled_mm() already has more combinations of parameters than
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3313,7 +3309,7 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3359,7 +3355,7 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3383,7 +3379,7 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3421,7 +3417,7 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_mxfp8_compile(self, device) -> None:
 
@@ -3460,7 +3456,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("recipe", ["nvfp4", "mxfp4"])
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
@@ -3506,7 +3502,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @unittest.skipIf(not torch.version.hip, "MX alignment checks are ROCm-only")
     @parametrize("recipe", ["mxfp8", "mxfp4"])
@@ -3560,7 +3556,7 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     @runOnRocmArch(MI350_ARCH)
@@ -3629,7 +3625,7 @@ class TestFP8Matmul(TestCase):
                 output_dtype=torch.bfloat16,
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MX_GEMM and not isRocmArchAnyOf(NAVI_ARCH), mx_skip_msg
     )
@@ -3661,7 +3657,7 @@ class TestFP8Matmul(TestCase):
                 output_dtype=torch.bfloat16,
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     @parametrize("recipe", ["mxfp8", "mxfp4"])
@@ -3703,7 +3699,7 @@ class TestFP8Matmul(TestCase):
             scaled_mm_wrap(A, B.t(), to_blocked(A_scale, swizzle_32_8=True), to_blocked(B_scale, swizzle_32_8=True),
                            out_dtype=torch.bfloat16, wrap_v2=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_mm_v2_fullgraph(self, device) -> None:
         m, n, k = 15, 32, 16
@@ -3729,7 +3725,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(actual, expected)
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     def test_scaled_grouped_mm_v2_fullgraph(self, device) -> None:
         fp8_dtype = e4m3_type

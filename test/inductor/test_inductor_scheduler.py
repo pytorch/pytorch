@@ -56,12 +56,11 @@ from torch._inductor.utils import (
     snode_args_kwargs,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
@@ -886,7 +885,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
         def fn(x, weight):
             early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
@@ -961,7 +960,7 @@ class TestScheduler(TestCase):
         self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_fusion_memory_guard_foreach(self, device):
         def fn(a, b):
             values = torch._foreach_abs([a, b])
@@ -2706,7 +2705,7 @@ class TestScheduler(TestCase):
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_index_add_fusion_prevented(self):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -2747,7 +2746,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_atomic_add_no_fusion_correctness(self):
         """
         Test that atomic_add operations produce correct results.
@@ -2778,7 +2777,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_expand_reuse_does_not_realize_before_reduction(self):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -2849,7 +2848,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_expand_reuse_realizes_in_deterministic_mode(self):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -2887,7 +2886,7 @@ class TestScheduler(TestCase):
             check_realizes()
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @tci.test(device="cuda")
     @parametrize("op", ["select_scatter", "index_put"])
     # Both settings are pinned so the test can only pass via graph_fanout:
     # deterministic mode makes expand realize src on its own, and the read

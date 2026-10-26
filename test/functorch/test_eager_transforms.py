@@ -50,6 +50,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.func import functional_call, linearize, stack_module_state
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     SM70OrLater,
     TEST_CUDA,
@@ -59,8 +60,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCPU,
 )
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_utils import (
@@ -3240,7 +3239,7 @@ class TestLinearizeDevice(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_linearize_errors(self, device):
         dtype = torch.float
         # CPU primals so `device` is a distinct device for the mismatch check below
@@ -3800,7 +3799,7 @@ class TestComposabilityDevice(TestCase):
     @unittest.skipIf(IS_WINDOWS, "fails in Windows; needs investigation")
     @unittest.skipIf(IS_FBCODE, "can't subprocess in fbcode")
     # it is redundant to run this test twice on a machine that has GPUs
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_no_warning_on_import_functorch(self, device):
         out = subprocess.check_output(
             [sys.executable, "-W", "always", "-c", "import functorch"],

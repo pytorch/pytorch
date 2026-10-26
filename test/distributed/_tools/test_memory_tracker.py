@@ -10,6 +10,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -45,6 +46,7 @@ class TestMemoryTracker(TestCase):
             loaded_tracker.summary()
         self.assertEqual(actual_output.getvalue(), expected_output.getvalue())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_local_model(self):
         """

@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._inductor.cudagraph_trees as cudagraph_trees
 from torch._dynamo.testing import same
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import TEST_CUDA_GRAPH
 
 
@@ -55,6 +56,7 @@ def patch_all(ok=True):
 N_ITERS = 5
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
 class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
     @patch_all()

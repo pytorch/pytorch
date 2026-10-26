@@ -34,6 +34,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -300,6 +301,7 @@ with torch.xpu._DeviceGuard(0):
         self.assertTrue(make_line(1).setup_stream_cache)
         self.assertTrue(make_line(0).setup_stream_cache)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @xfailIfNoAcceleratorTriton
     def test_generated_code_uses_get_stream_by_index(self):
@@ -318,6 +320,7 @@ with torch.xpu._DeviceGuard(0):
         torch.testing.assert_close(result, expected)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
 class TestUserStreamCompile(InductorTestCase):
@@ -2025,6 +2028,7 @@ class GraphModule(torch.nn.Module):
                     )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
 class TestStreamOrderingStress(InductorTestCase):
@@ -2308,6 +2312,7 @@ class TestStreamOrderingStress(InductorTestCase):
         self._check_compiled_matches_eager(fn, x, w)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
 class TestGenericStreamCompile(InductorTestCase):
@@ -2459,6 +2464,7 @@ class TestGenericStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
 class TestStreamIdentity(InductorTestCase):
@@ -2841,6 +2847,7 @@ class TestPDLWithMultiStream(InductorTestCase):
         ).run(triton_code)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
 class TestAOTIUserStreams(InductorTestCase):
@@ -2929,6 +2936,7 @@ class TestAOTIUserStreams(InductorTestCase):
             self._compile_and_run(model, inputs)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
 @xfailIfNoAcceleratorTriton
@@ -3058,6 +3066,7 @@ instantiate_parametrized_tests(TestAOTIUserStreams)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 class TestStreamExternalObjectRestore(InductorTestCase):
     @xfailIfNoAcceleratorTriton

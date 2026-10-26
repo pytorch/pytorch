@@ -22,6 +22,7 @@ except ImportError:
     sys.exit(0)
 
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -177,6 +178,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
         finally:
             self._destroy_pg()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_nccl()
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_multi_backend_pg_resolves_to_nccl(self):
@@ -201,6 +203,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
         finally:
             self._destroy_pg()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_nccl()
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_single_nccl_backend_resolves_correctly(self):

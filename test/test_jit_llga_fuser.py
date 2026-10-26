@@ -8,11 +8,11 @@ from functools import wraps
 from concurrent import futures
 import torch.nn.functional as F
 import torch.fx.experimental.optimization as optimization
+from torch.testing._internal import tci
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_SCIPY, IS_WINDOWS, IS_MACOS
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     dtypes
 )
 
@@ -139,7 +139,7 @@ def get_eltwise_fn(name):
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestOp(JitLlgaTestCase):
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d(self, dtype):
         for [spatial, in_channels, out_channels, kernel, padding, stride, dilation, g, bias] in itertools.product(
@@ -166,7 +166,7 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_bn2d(self, dtype):
         m = nn.BatchNorm2d(32).eval()
@@ -175,7 +175,7 @@ class TestOp(JitLlgaTestCase):
         # single-op partition shouldn't be created for softmax
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_eltwise(self, dtype):
         class M(nn.Module):
@@ -194,7 +194,7 @@ class TestOp(JitLlgaTestCase):
             # single-op partition shouldn't be created.
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_max_pool2d(self, dtype):
         for [spatial, kernel, padding, stride, dilation, ceil_mode] in itertools.product(
@@ -215,7 +215,7 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_avg_pool2d(self, dtype):
         for [spatial, kernel, padding, stride, ceil_mode, count_include_pad] in itertools.product(
@@ -236,7 +236,7 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_variable_kernel_avg_pool2d(self, dtype):
         class M(nn.Module):
@@ -251,7 +251,7 @@ class TestOp(JitLlgaTestCase):
         # TODO: with shape specialization, should have 1 LLGA_FUSION_GROUP
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_softmax(self, dtype):
         for dim in [-4, -3, -2, -1, 0, 1, 2, 3]:
@@ -261,7 +261,7 @@ class TestOp(JitLlgaTestCase):
             # single-op partition shouldn't be created for softmax
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_linear(self, dtype):
         for bias in [True, False]:
@@ -284,7 +284,7 @@ class TestOp(JitLlgaTestCase):
             if gen_permute and xshape != yshape:
                 yield torch.rand(yshape), torch.rand(xshape)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_add(self, dtype):
         def forward_add(x, y):
@@ -294,7 +294,7 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(forward_add, [x, y], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_add_scalar(self, dtype):
         def add_scalar(x):
@@ -304,7 +304,7 @@ class TestOp(JitLlgaTestCase):
         _, graph = self.checkTrace(add_scalar, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_addmm(self, dtype):
         # Just a sidenote - comparison of eager-mode & oneDNN Graph JIT outputs of
@@ -321,7 +321,7 @@ class TestOp(JitLlgaTestCase):
         # single-op partition should be created for matmul with bias.
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_mul(self, dtype):
         def forward_mul(x, y):
@@ -332,7 +332,7 @@ class TestOp(JitLlgaTestCase):
             # single-op partitions shouldn't be created
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_identity_binary(self, dtype):
         def forward(x):
@@ -342,7 +342,7 @@ class TestOp(JitLlgaTestCase):
         _, graph = self.checkTrace(forward, [x], dtype)
         self.assertFused(graph, ['aten::add', 'aten::mul'])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_layer_norm(self, dtype):
         # TODO: support more normalized_shape
@@ -351,7 +351,7 @@ class TestOp(JitLlgaTestCase):
         _, graph = self.checkTrace(m, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_cat(self, dtype):
         def cat_along_dim(d):
@@ -369,7 +369,7 @@ class TestOp(JitLlgaTestCase):
                 _, graph = self.checkTrace(cat_along_dim(d), [x, x, x], dtype)
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_typecheck(self, dtype):
         x = torch.rand(32, 28, dtype=dtype)
@@ -385,7 +385,7 @@ class TestOp(JitLlgaTestCase):
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestFusionPattern(JitLlgaTestCase):
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_eltwise(self, dtype):
         class M(nn.Module):
@@ -417,7 +417,7 @@ class TestFusionPattern(JitLlgaTestCase):
                 # test if relu is fused into the fusion group
                 self.assertFused(graph, ['aten::' + eltwise])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_silu(self, dtype):
         class M(nn.Module):
@@ -449,7 +449,7 @@ class TestFusionPattern(JitLlgaTestCase):
                 self.assertFused(graph, ['aten::_convolution', silu_op])
                 self.checkPatterns(graph, patterns)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_ensure_tensor_is_rewrapped(self, dtype):
         class M(nn.Module):
@@ -488,7 +488,7 @@ class TestFusionPattern(JitLlgaTestCase):
         _, graph = self.checkTrace(m, [x, y], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 4)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_clamp(self, dtype):
         class M(nn.Module):
@@ -520,7 +520,7 @@ class TestFusionPattern(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
             self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_bn(self, dtype):
         class M(nn.Module):
@@ -542,7 +542,7 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm'])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_bn_relu(self, dtype):
         class M(nn.Module):
@@ -566,7 +566,7 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm',
                                  'aten::relu'])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_bn2d_eltwise(self, dtype):
         class M(nn.Module):
@@ -588,7 +588,7 @@ class TestFusionPattern(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::' + eltwise])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_linear_eltwise(self, dtype):
         class M(nn.Module):
@@ -613,7 +613,7 @@ class TestFusionPattern(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::' + eltwise])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_sum(self, dtype):
         class M(nn.Module):
@@ -646,7 +646,7 @@ class TestFusionPattern(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x, y], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 3)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_wildcard(self, dtype):
         class M(nn.Module):
@@ -676,7 +676,7 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution'])
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.int32)
     def test_wildcard_unsupported_dtype(self, dtype):
         class M(nn.Module):
@@ -697,7 +697,7 @@ class TestFusionPattern(JitLlgaTestCase):
         _, graph = self.checkTrace(m, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float32, torch.bfloat16)
     def test_rewrap_tensor_input_to_pytorch(self, dtype):
         class M(nn.Module):

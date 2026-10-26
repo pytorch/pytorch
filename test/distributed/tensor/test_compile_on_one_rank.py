@@ -18,6 +18,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -289,6 +290,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     accelerator, is refused (it could not run SPMD).
     """
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_factory_device_replaced_with_current_device(self):
@@ -307,6 +309,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             lambda msg: f"{msg}\nno node should bake a concrete indexed accelerator device; found: {baked}",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_dynamo_output_graph_factory_device_not_baked(self):
@@ -352,6 +355,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 torch.device(f"{device_type}:1"),
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     def test_default_path_unchanged_bakes_device(self):
         # Without compile_on_one_rank the device stays baked (the feature must be
@@ -362,6 +366,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(_current_device_nodes(gm), [])
         self.assertTrue(_indexed_accelerator_device_nodes(gm))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_to_copy_explicit_device_replaced(self):
@@ -377,6 +382,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(len(_current_device_nodes(gm)), 1)
         self.assertEqual(_indexed_accelerator_device_nodes(gm), [])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_unindexed_accelerator_device_replaced(self):
@@ -390,6 +396,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         )
         self.assertEqual(len(_current_device_nodes(gm)), 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_device_left_alone(self):
@@ -411,6 +418,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         ]
         self.assertTrue(cpu_ops, "the cpu device should stay baked")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_coor_check_current_accelerator(self):
@@ -432,6 +440,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             with self.assertRaisesRegex(RuntimeError, "device-agnostic"):
                 _coor_check_current_accelerator(torch.device(f"{device_type}:1"), cur)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch(cpp_wrapper=True)
@@ -448,6 +457,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             ):
                 torch.compile(lambda x: x + 1)(torch.randn(8, device=device_type))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch(fx_wrapper=True)
@@ -461,6 +471,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             ):
                 torch.compile(lambda x: x + 1)(torch.randn(8, device=device_type))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_factory_without_matching_input_succeeds(self):
@@ -474,6 +485,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(len(_current_device_nodes(gm)), 1)
         self.assertEqual(_indexed_accelerator_device_nodes(gm), [])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_wrong_index_raises(self):
@@ -555,6 +567,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         b = torch.rand_like(x) * torch.randn_like(x)
         return a + b + torch.randint_like(x, 0, 10)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @parametrize("align_random_eager", (False, True))
     def test_rng_ops_compile_under_coor(self, align_random_eager):
@@ -623,6 +636,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertNotIn("index=0", graph0)
         self.assertEqual(graph0, graph1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_post_grad_replacement_with_device_under_coor(self):
@@ -641,6 +655,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out, f(x))
         self._assert_no_baked_device("\n".join(codes))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_mutating_custom_op_with_device_arg_under_coor(self):
@@ -687,6 +702,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             ]
         return parts
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_guard_does_not_bake_device_index_under_coor(self):
@@ -891,6 +907,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             "passing a device to a factory is not an observation and must not guard",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_guard_still_rejects_device_type_under_coor(self):
@@ -911,6 +928,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             cnt.frame_count, before + 1, "device type must still be guarded"
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_tensor_guard_unchanged_under_coor(self):
@@ -963,6 +981,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         z = torch.zeros(4, x.shape[1], device=x.device, dtype=x.dtype)
         return z + x.sum()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_compiles_under_coor(self):
@@ -1008,6 +1027,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         return fn
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch(
@@ -1040,6 +1060,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertIn("triton_tem_fused", code)
         self._assert_no_baked_device(code)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch(
@@ -1067,6 +1088,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertIn("combo_grid_meta", code)
         self._assert_no_baked_device(code)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_user_defined_triton_kernel_no_baked_device(self):
@@ -1209,6 +1231,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             self.assertIn("combo_grid_meta", code0)
         self._assert_no_baked_device(code0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch({"triton.force_cooperative_reductions": True})
@@ -1289,6 +1312,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             f"CooR compile failed with no visible device:\n{proc.stderr[-3000:]}",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_constructor_passes_through_current_device_under_coor(self):
@@ -1306,6 +1330,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(compiled(x), f(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @skipIfXpu(
         msg="XPU device properties have no multi_processor_count, https://github.com/intel/torch-xpu-ops/issues/4389"
@@ -1356,6 +1381,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_current_device_context_preserves_type_under_coor(self):
@@ -1663,6 +1689,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_stream_equality_under_coor(self):
@@ -1675,6 +1702,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(compiled(x, stream), f(x, stream))
         self.assertEqual(compiled(x, stream), f(x, stream))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize("stream_kind", ("generic", device_type, "subclass"))
@@ -1707,6 +1735,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             )
             self.assertEqual(compiled(x, stream), f(x, stream))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_current_stream_ordering_raises_under_coor(self):
@@ -1757,6 +1786,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_explicit_index_stream_is_an_error_under_coor(self):
@@ -1786,6 +1816,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         )(torch.zeros(1, device=f"{device_type}"))
         self.assertEqual(stream.device.type, f"{device_type}")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_as_dict_key_under_coor(self):
@@ -1839,6 +1870,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 torch.compile(mixed, backend="eager", fullgraph=True)(x), mixed(x)
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_clip_grad_norm_under_coor(self):
@@ -1855,6 +1887,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             torch._dynamo.reset()
             self.assertEqual(torch.compile(step, backend=backend)(inp), expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_observation_is_cached_per_graph(self):
@@ -1882,6 +1915,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         ]
         self.assertEqual(len(nodes), 1, f"expected one cached node, got {len(nodes)}")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_symbol_is_not_size_like(self):
@@ -1900,6 +1934,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The >= 0 bound is the part worth keeping.
         self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_does_not_graph_break_by_default(self):
@@ -1917,6 +1952,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(len(backend.graphs), 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_predicate_is_data_dependent_under_coor(self):
@@ -1935,6 +1971,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         x = torch.zeros(1, device=device_type)
         self.assertEqual(torch.compile(f, backend="eager")(x), f(x))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_get_device_predicate_is_data_dependent_under_coor(self):
@@ -1972,6 +2009,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             torch.compile(provable, backend="eager", fullgraph=True)(x), provable(x)
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_code_identical_across_cache_dirs(self):
@@ -2009,6 +2047,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 f"another machine:\n{diff}"
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_extern_kernel_device_arg_not_baked(self):

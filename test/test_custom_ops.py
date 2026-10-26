@@ -39,7 +39,7 @@ from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal import custom_op_db
+from torch.testing._internal import custom_op_db, tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2075,6 +2075,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
             op(x)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_separate(self):
@@ -2100,6 +2101,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         result = op(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_multiple(self):
@@ -2719,6 +2721,7 @@ Dynamic shape operator
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_impl_device_cuda(self):
@@ -5101,6 +5104,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(z, x + y)
                 self.assertTrue(called)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast(self):
@@ -5127,6 +5131,7 @@ with warnings.catch_warnings(record=True) as w:
                     y = torch.ops.mylib.my_sin(x)
                 self.assertEqual(y.dtype, torch.float16)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_low_level(self):
@@ -5157,6 +5162,7 @@ with warnings.catch_warnings(record=True) as w:
                         y = torch.ops._torch_testing.my_sin(x)
                     self.assertEqual(y.dtype, torch.float16)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_list_input(self):
@@ -5185,6 +5191,7 @@ with warnings.catch_warnings(record=True) as w:
                     y = torch.ops.mylib.my_add_sin(lst)
                 self.assertEqual(y.dtype, torch.float16)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times(self):
@@ -5208,6 +5215,7 @@ with warnings.catch_warnings(record=True) as w:
                 y2 = my_sin(x)
             self.assertEqual(y2.dtype, torch.float16)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times_different_devices(self):
@@ -5479,6 +5487,7 @@ Please use `add.register_fake` to add an fake impl.""",
         y = f(x)
         self.assertEqual(y, x.cos())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_split_device(self):
@@ -5515,6 +5524,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(cpu_call_count, 1)
         self.assertEqual(cuda_call_count, 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_multi_types(self):
@@ -6443,6 +6453,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
@@ -6462,6 +6473,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
         torch.library.opcheck(op, (x,), test_utils="test_schema")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
@@ -6525,6 +6537,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         self.assertEqual(cloned.elem, x.elem)
         self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"

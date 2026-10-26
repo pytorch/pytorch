@@ -45,6 +45,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     dtype_name,
@@ -2175,6 +2176,7 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(torch.allclose(result_1, result_2))
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 class TestNVUniversalGemmScheduling(TestCase):
     def setUp(self):

@@ -17,6 +17,7 @@ import torch
 import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -25,15 +26,12 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
-    onlyAccelerator,
     onlyNativeDeviceTypes,
-    onlyOn,
     OpDTypes,
     ops,
     precisionOverride,
     skipCUDAIfNotRocm,
     skipIf,
-    skipMeta,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -1372,7 +1370,7 @@ class TestBinaryUfuncsDevice(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.float, torch.bfloat16)
     def test_division_by_scalar(self, device, dtype):
         num = torch.rand(1024, device=device, dtype=dtype)
@@ -1384,7 +1382,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
     # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_inplace_error_msg(self, device):
         a = torch.tensor(2.0)
         b = torch.tensor(2.0, device=device)
@@ -1877,7 +1875,7 @@ class TestBinaryUfuncsDevice(TestCase):
             for tensor in tensors:
                 self._test_pow(device, base, tensor)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_device_tensor_pow_scalar_tensor(self, device):
         device_tensors = [
             torch.randn((3, 3), device=device),
@@ -1891,7 +1889,7 @@ class TestBinaryUfuncsDevice(TestCase):
         for base, exp in product(device_tensors, scalar_tensors):
             self._test_pow(device, base, exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cpu_tensor_pow_device_scalar_tensor(self, device):
         device_tensors = [
             torch.tensor(5.0, device=device),
@@ -1946,7 +1944,7 @@ class TestBinaryUfuncsDevice(TestCase):
                 self._test_pow(device, base, second_exp)
 
     @onlyNativeDeviceTypes
-    @skipMeta
+    @tci.test(exclude_device="meta")
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
         inputs = [17, [17]]
@@ -2029,7 +2027,7 @@ class TestBinaryUfuncsDevice(TestCase):
     # binary operation, and that device "scalars" cannot be used in the same
     # binary operation as non-scalar CPU tensors.
     @deviceCountAtLeast(2)
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_binary_ops(self, devices):
         vals = (1.0, (2.0,))
         cpu_tensor = torch.randn(2, 2)
@@ -2066,7 +2064,7 @@ class TestBinaryUfuncsDevice(TestCase):
     # in a binary operation in conjunction with a Tensor on all
     # available devices
     @deviceCountAtLeast(2)
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_binary_op_scalar_device_unspecified(self, devices):
         scalar_val = torch.tensor(1.0)
         for default_device in devices:
@@ -2515,7 +2513,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     torch.ones(1, device=device, dtype=dtypes[0]),
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_maximum_minimum_cross_device(self, device):
         a = torch.tensor((1, 2, -1))
         b = torch.tensor((3, 0, 4), device=device)
@@ -3752,7 +3750,7 @@ class TestBinaryUfuncsDevice(TestCase):
             ):
                 input.heaviside_(values)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_heaviside_cross_device(self, device):
         x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         y = torch.tensor(0)
@@ -4218,7 +4216,7 @@ class TestBinaryUfuncsDevice(TestCase):
             lambda: torch.add(m1, m1, out=m2),
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
         for op, y, alpha in (
@@ -4556,7 +4554,7 @@ class TestBinaryUfuncsDevice(TestCase):
                 torch.randn((3, 3)), x=torch.randn((3, 3)), dx=3
             )
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(torch.double)
     def test_pow_scalar_overloads_mem_overlap(self, device, dtype):
         sz = 3
@@ -4959,7 +4957,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyOn(["cuda", "xpu"])
+    @tci.test(device=("cuda", "xpu"))
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.

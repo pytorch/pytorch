@@ -12,10 +12,8 @@ import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from torch._numpy.testing import assert_allclose, assert_equal
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -715,7 +713,7 @@ class TestMisc(TestCase):
 class TestMiscDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_f16_on_gpu(self, device):
         # make sure operations with float16 tensors give same results on gpu and on CPU
         t = torch.arange(5, dtype=torch.float16)

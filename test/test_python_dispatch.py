@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.library import _scoped_library, fallthrough_kernel, impl, Library
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -754,6 +755,7 @@ class TestPythonRegistration(TestCase):
 instantiate_parametrized_tests(TestPythonRegistration)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipUnless(TEST_CUDA and not TEST_WITH_ROCM, "CUDA-only tests")
 class TestPythonRegistrationCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA

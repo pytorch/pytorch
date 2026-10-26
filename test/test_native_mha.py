@@ -3,13 +3,12 @@ import math
 import copy
 
 import torch
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    skipMeta,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -100,7 +99,7 @@ class TestMHADevice(TestCase):
     @dtypesIfCUDA(torch.float)
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
-    @skipMeta
+    @tci.test(exclude_device='meta')
     def test_transform_bias_rescale_qkv(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -111,8 +110,7 @@ class TestMHADevice(TestCase):
     @dtypesIfCUDA(torch.float)
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
-    @skipMeta
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -278,7 +276,7 @@ class TestMHADevice(TestCase):
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @parametrize("use_nt", [False, True])
     @parametrize("use_padding, pad_all", [(False, False), (True, False), (True, True)])
     @parametrize("need_weights", [False])
@@ -325,7 +323,7 @@ class TestMHADevice(TestCase):
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @torch.no_grad()
     def test_native_multihead_encoder_decoder_attention(self, device, dtype):
         self._test_multihead_attention_impl(
@@ -340,7 +338,7 @@ class TestMHADevice(TestCase):
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @torch.no_grad()
     def test_native_multihead_attention(self, device, dtype):
         self._test_multihead_attention_impl(

@@ -83,10 +83,10 @@ from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, S
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     ops,
     skipCUDAIf,
     skipOps,
@@ -5011,7 +5011,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             self.assertEqual(out, torch.zeros_like(out))
             self.assertEqual(grad, torch.ones_like(grad))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_mem_leak_from_save_for_bw(self, device):
         # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
         # Note [Detaching saved tensors in AOTAutograd]
@@ -5039,7 +5039,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertTrue(mem_after == mem_before)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_save_input_view_for_bw_does_not_leak_memory(self, device):
         def f(x):
             return (x * x).sum()
@@ -5121,7 +5121,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         self.assertIsNone(input_view_ref())
         self.assertIsNone(non_leaf_base_ref())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_synthetic_base_base_attribute_is_none(self, device):
         def f(a, b):
             a.add_(1)
@@ -5137,14 +5137,14 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_autocast_disable_guard(self, device):
         with torch._C._DisableAutocast():
             x = torch.rand([4, 4]).to(device=device)
             y = x @ x
             self.assertEqual(y.dtype, torch.float32)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_nonidempotent_amp(self, device):
         def f(self_s_emb, add_3):
             einsum_2 = torch.functional.einsum("ah,th->t", self_s_emb, add_3)
@@ -5163,7 +5163,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         with torch.amp.autocast(device_type, enabled=True):
             self.verify_aot_autograd(f, args)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
     def test_batch_norm_amp(self, device):
         input_dtype = torch.float16
@@ -5215,7 +5215,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             if not torch.allclose(a, b):
                 raise AssertionError(f"Tensors not allclose: {a} vs {b}")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
     @torch._functorch.config.patch(recompute_views=True)
     def test_saved_tensors_hooks_mutations_raise(self, device):
@@ -5309,7 +5309,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             "removing all user-visible references",
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tangent_freed_compiled_model_and_loss(self, device):
         """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
 
@@ -5338,7 +5338,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self._assert_no_extra_refs(refcount_box)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tangent_freed_compiled_model_eager_loss(self, device):
         """Scenario: compiled model + eager loss (common training pattern).
 
@@ -5356,7 +5356,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self._assert_no_extra_refs(refcount_box)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tangent_user_provided_via_pop(self, device):
         """Scenario: user creates tangent but releases it before backward runs.
 
@@ -7307,6 +7307,7 @@ def forward(self, primals_1, tangents_1):
         aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self):
@@ -7556,6 +7557,7 @@ def forward(self, primals_1, tangents_1):
         node.meta["val"] = torch.device("cuda:0")
         self.assertEqual(_size_of(node), 0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_min_cut_partitions_device_valued_node(self):
         """A device-valued node must be placeable, not just sizeable.
@@ -7602,6 +7604,7 @@ def forward(self, primals_1, tangents_1):
             torch.compile(model, backend=backend, fullgraph=True)(x).backward()
         self.assertIsNotNone(x.grad)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_min_cut_partitions_must_save_device_valued_node(self):
         """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
@@ -7867,6 +7870,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(compiled_out, eager_out)
         self.assertEqual(compiled_grad, eager_grad)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
@@ -7954,6 +7958,7 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops_nested_tuple(self):
         """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
@@ -8377,6 +8382,7 @@ def forward(self, primals_1, tangents_1):
             return_new_outs=return_new_outs
         ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_emitted(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8428,6 +8434,7 @@ def forward(self, primals_1, tangents_1):
         )
         self.assertIs(result, sentinel)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_correctness(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8443,6 +8450,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(out.device, x.device)
         self.assertTrue((out >= 0).all() and (out <= 1).all())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_multi_output(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8458,6 +8466,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(out2, x * 2)
         self.assertEqual(out1.shape, x.shape)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_advances_state(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8475,6 +8484,7 @@ def forward(self, primals_1, tangents_1):
             "Successive calls should produce different random outputs",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_source_structure(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8556,6 +8566,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(set_offset_log, ["out_2"])
         self.assertEqual(result, ["out_0", "out_1", "out_2", "out_3"])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_training(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8843,6 +8854,7 @@ def forward(self, primals_1, tangents_1):
         ):
             torch.autograd.grad(loss, x, create_graph=True)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_prologue_rng_codegen(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -8946,6 +8958,7 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertNotIn("_rng_add_(ctx, args)", source)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_forward_rng_codegen(self):
         # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
@@ -9022,6 +9035,7 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertNotIn("_rng_add_(_ctx_", source)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_backward_rng_codegen(self):
         # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
@@ -9127,6 +9141,7 @@ def forward(self, primals_1, tangents_1):
         (a + b + c).sum().backward()
         self.assertEqual(x.grad, 2 + 2 * x + 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_backward_rng_correctness(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -9367,6 +9382,7 @@ def forward(self, primals_1, tangents_1):
             h1.destroy()
             h2.destroy()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_epilogue_rng_codegen(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
@@ -9384,6 +9400,7 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("_set_offset_", source)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_epilogue_rng_correctness(self):
         def f(x):
@@ -9417,6 +9434,7 @@ def forward(self, primals_1, tangents_1):
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_epilogue_tokens_and_rng_codegen(self):
         from torch._higher_order_ops.effects import _register_effectful_op
@@ -9458,6 +9476,7 @@ def forward(self, primals_1, tangents_1):
             h1.destroy()
             h2.destroy()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_epilogue_tokens_and_rng_correctness(self):
         from torch._higher_order_ops.effects import _register_effectful_op
@@ -10461,6 +10480,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_register_hook_in_checkpoint_accumulated_grad(self):
@@ -10869,6 +10889,7 @@ def forward(self, primals_1, tangents_1):
         sg_ops = [n for n in sg_mod.graph.nodes if n.op == "call_function"]
         self.assertEqual(len(sg_ops), 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_control_deps_mixed_fwd_bw_deps_e2e(self):
         """Forward compilation and backward must not crash when
@@ -12022,6 +12043,7 @@ Expected a .* tangent but got a plain Tensor.""",
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_rms_norm(self):
         # Only CUDA rms norm fails to be decomposed
@@ -12197,6 +12219,7 @@ Expected a .* tangent but got a plain Tensor.""",
         y.backward(grad)
         self.assertEqual(ref_x.grad, x.grad)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @parametrize("dynamic_shapes", [True, False])
     @parametrize("test_subclasses", [True, False])
@@ -12267,6 +12290,7 @@ Expected a .* tangent but got a plain Tensor.""",
 
             self.assertEqual(ref_x.grad, x.grad)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
@@ -12373,6 +12397,7 @@ Expected a .* tangent but got a plain Tensor.""",
             x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, x)
             self.assertEqual(ref_x_grad, x_grad, atol=1e-2, rtol=1e-2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @parametrize("saved_tensors_hooks_filtering_mode", ["donated", "no_static", "all"])
@@ -12524,6 +12549,7 @@ Expected a .* tangent but got a plain Tensor.""",
                 #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
                 # )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_params(self):
@@ -12647,6 +12673,7 @@ Expected a .* tangent but got a plain Tensor.""",
                 self.assertTrue([2, 2, 2] in logged_shapes)
                 self.assertTrue(torch.float64 in logged_dtypes)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")

@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -111,6 +112,7 @@ class TestPyLibCuptiCUDA(TestCase):
         self.assertIn("deliberately_bad", str(cm.exception))
         self.assertIn("CUPTI_ERROR_INVALID_PARAMETER", str(cm.exception))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_v2_subscribe_timestamp_roundtrip(self):
         torch.cuda.init()
@@ -130,6 +132,7 @@ class TestPyLibCuptiCUDA(TestCase):
         finally:
             lib.unsubscribe(sub_handle)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_v2_activity_lifecycle(self):
         # Drive the subscription-scoped wrapper surface against real libcupti, the
@@ -208,6 +211,7 @@ class TestPyLibCuptiCUDA(TestCase):
             self.skipTest("HW trace unsupported on this platform")
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_finalize_in_subprocess(self):
         # finalize() is cuptiFinalize -- a global, process-wide teardown Cuspy

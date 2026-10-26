@@ -7,10 +7,10 @@ import unittest.mock as mock
 import torch
 import torch.nn as nn
 from torch.nn import MultiheadAttention
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_nn import NNTestCase
@@ -862,7 +862,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
                 # If mock was called, fastpath was taken
                 self.assertTrue(fastpath_mock.called)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype(self, device, dtype):
         embed_dim = 128
@@ -877,7 +877,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype_batch_first(self, device, dtype):
         embed_dim = 128

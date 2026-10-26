@@ -13,11 +13,9 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     StatelessSymbolicContext,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCPU,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -455,7 +453,7 @@ class TestDecomp(NNTestCase):
         a = torch.full(shape, 100.0, dtype=torch.float16, device=device)
         self.assertEqual(torch.compile(fn, fullgraph=True)(x, a, a), fn(x, a, a))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @parametrize("op", [torch.addmm, torch.baddbmm])
     def test_zero_beta_aten_reads_no_zeros(self, device, op):
         from torch._inductor import metrics
@@ -470,7 +468,7 @@ class TestDecomp(NNTestCase):
         self.assertEqual(torch.compile(fn, fullgraph=True)(x, a, a), fn(x, a, a))
         self.assertEqual(metrics.generated_kernel_count, 0)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @parametrize("beta,m", [(0, 1), (0, 32), (1, 1)])
     def test_addmm_checks_bias_shape(self, device, beta, m):
         def fn(x, a, b):
@@ -482,7 +480,7 @@ class TestDecomp(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "expand"):
             torch.compile(fn, fullgraph=True)(*args)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_addmm_unbacked_alpha(self, device):
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
@@ -493,7 +491,7 @@ class TestDecomp(NNTestCase):
             out = decomp_addmm(bias, a, b, alpha=alpha)
         self.assertEqual(out.shape, (4, 4))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @parametrize(
         "bias_device,bias_shape,msg",
         [

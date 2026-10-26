@@ -46,6 +46,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -1449,6 +1450,7 @@ def forward(self, arg0_1):
 class TestMoveToDevicePassCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass_recompiles_graph_module(self):
         class M(torch.nn.Module):
@@ -1462,6 +1464,7 @@ class TestMoveToDevicePassCuda(TestCase):
         (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device="cuda:0"))
         self.assertEqual(out.device, torch.device("cuda:0"))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass_recompiles_nested_graph_modules(self):
         class M(torch.nn.Module):
@@ -1488,6 +1491,7 @@ class TestMoveToDevicePassCuda(TestCase):
         (out,) = ep.graph_module(torch.ones(4, device="cuda:0"))
         self.assertEqual(out, torch.full((4,), 2.0, device="cuda:0"))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass_does_not_mutate_source_module(self):
         class M(torch.nn.Module):
@@ -1521,6 +1525,7 @@ class TestMoveToDevicePassCuda(TestCase):
             torch.device("cuda:0"),
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass_wrapper_subclass_parameter(self):
         class M(torch.nn.Module):

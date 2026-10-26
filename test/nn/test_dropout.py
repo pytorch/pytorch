@@ -6,12 +6,12 @@ from itertools import product
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_nn import freeze_rng_state, NNTestCase
 from torch.testing._internal.common_utils import (
@@ -165,7 +165,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         self._test_dropout_stride_mean_preserve(nn.Dropout, device)
 
     @dtypes(torch.bfloat16)
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_Dropout_bfloat16(self, device, dtype):
         input = torch.empty(1000, dtype=dtype)
         self._test_dropout(nn.Dropout, device, input)
@@ -302,7 +302,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         out = torch.nn.functional.dropout(x)
         self.assertEqual(out.size(), x.size())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_native_dropout_corner_case(self, device):
         for train in [True, False]:
             for p in [0.0, 1.0]:

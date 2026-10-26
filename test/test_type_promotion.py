@@ -6,11 +6,12 @@ import unittest
 
 import torch
 
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
                                                   numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
-                                                        dtypes, onlyCPU, expectedFailureMeta, skipMeta)
+                                                        dtypes, expectedFailureMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes,
     float_to_corresponding_complex_type_map,
@@ -922,7 +923,7 @@ class TestTypePromotionDevice(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
-    @onlyCPU
+    @tci.test(device='cpu')
     # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
     @dtypes(*list(itertools.product(
         set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
@@ -1067,7 +1068,7 @@ class TestTypePromotionDevice(TestCase):
 
     # Verifies that the out= argument doesn't affect the computation, that
     # is, out = op(...) and op(..., out=out) produce the same result.
-    @skipMeta
+    @tci.test(exclude_device='meta')
     def test_computation_ignores_out(self, device):
         t = torch.tensor(33000, dtype=torch.float16, device=device)
         out = torch.empty(0, dtype=torch.float64, device=device)

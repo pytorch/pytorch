@@ -23,6 +23,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -203,6 +204,7 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @requires_cuda
 class TestDTensorDebugMode(TestCase):
     @classmethod

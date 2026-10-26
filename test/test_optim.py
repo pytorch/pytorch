@@ -20,13 +20,12 @@ from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    skipMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -274,7 +273,7 @@ class TestOptimRenewed(TestCase):
                 else:
                     self.assertLess(closure().item(), initial_value)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
@@ -577,7 +576,7 @@ class TestOptimRenewed(TestCase):
                     sum(rosenbrock(param_t) for param_t in params_t),
                 )
 
-    @skipMPS
+    @tci.test(exclude_device="mps")
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -654,7 +653,7 @@ class TestOptimRenewed(TestCase):
             # also checks steps taken within for example a line search
             self.assertEqual(complex_steps, real_steps)
 
-    @skipMPS
+    @tci.test(exclude_device="mps")
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex_2d(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -880,7 +879,9 @@ class TestOptimRenewed(TestCase):
                 input, models, optimizers, assert_eq_kwargs, assert_step_dtype
             )
 
-    @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
+    @tci.test(
+        exclude_device="mps"
+    )  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float64],
@@ -888,8 +889,7 @@ class TestOptimRenewed(TestCase):
     def test_foreach_matches_forloop(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "foreach")
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @deviceCountAtLeast(2)
     @parametrize("impl", ["foreach", "fused"])
     @optims(
@@ -1001,8 +1001,7 @@ class TestOptimRenewed(TestCase):
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
 
-    @skipMPS  # MPS does not support float64
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "mps"))  # MPS does not support float64
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float64],
@@ -1030,8 +1029,7 @@ class TestOptimRenewed(TestCase):
             finally:
                 torch.set_default_dtype(old_default_dtype)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @largeTensorTest("72GB", "cuda")
     @serialTest()
     @optims(
@@ -1068,8 +1066,7 @@ class TestOptimRenewed(TestCase):
             optim_cls([ref], foreach=True, **optim_input.kwargs).step()
             self.assertEqual(params[0][0], ref[0])
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float32],
@@ -1291,8 +1288,9 @@ class TestOptimRenewed(TestCase):
             optim_cls([ref], fused=True, **optim_input.kwargs).step()
             self.assertEqual(params[0][0], ref[0])
 
-    @skipMPS  # MPS fused optimizer does not properly handle found_inf
-    @onlyAccelerator
+    @tci.test(
+        exclude_device=("cpu", "meta", "mps")
+    )  # MPS fused optimizer does not properly handle found_inf
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
@@ -1921,8 +1919,9 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(state_dict)
             optimizer.step(closure)
 
-    @skipMPS  # Muon optimizer creates float64 tensors internally, unsupported on MPS
-    @onlyAccelerator
+    @tci.test(
+        exclude_device=("cpu", "meta", "mps")
+    )  # Muon optimizer creates float64 tensors internally, unsupported on MPS
     @optims(optim_db, dtypes=[torch.float32])
     def test_state_dict_cross_device(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -2398,8 +2397,7 @@ class TestOptimRenewed(TestCase):
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
 
-    @skipMPS  # MPS does not support float64
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "mps"))  # MPS does not support float64
     @optims(
         [optim for optim in optim_db if "cpu" in optim.supports_fused_on],
         dtypes=floating_types_and(
@@ -2447,8 +2445,7 @@ class TestOptimRenewed(TestCase):
                 optimizers.append(optimizer)
             self._compare_between(inpts, models, optimizers)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @optims(
         [
             o
@@ -2516,8 +2513,7 @@ class TestOptimRenewed(TestCase):
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
@@ -2556,8 +2552,7 @@ class TestOptimRenewed(TestCase):
             if amsgrad:
                 self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
@@ -2614,8 +2609,7 @@ class TestOptimRenewed(TestCase):
             if amsgrad:
                 self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],

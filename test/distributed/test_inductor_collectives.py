@@ -59,6 +59,7 @@ from torch.distributed.distributed_c10d import GroupMember
 from torch.distributed.tensor.placement_types import Shard
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -1693,6 +1694,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(cnt.frame_count, 1)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @instantiate_parametrized_tests
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(

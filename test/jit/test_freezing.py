@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -2157,6 +2158,7 @@ class TestFrozenOptimizations(JitTestCase):
 
     # During freezing this creates tensors constants that are attached to the frozen graph,
     # which is then kept alive by the compilation unit (which causes a leak)
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipCUDAMemoryLeakCheckIf(True)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_conv_bn_folding_autocast_scenario_cuda(self):
@@ -2477,6 +2479,7 @@ class TestFrozenOptimizations(JitTestCase):
             ):
                 nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @skipCUDAMemoryLeakCheckIf(True)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_bn_folding_autocast_scenario_cuda(self):
@@ -2536,6 +2539,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
             self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
         out_dimms = [[5, 10], [1, 5]]
@@ -2560,6 +2564,7 @@ class TestFrozenOptimizations(JitTestCase):
             test_val1 = torch.rand([50, 5])
             self.check_linear_optimizations(mod_eager, 2, 1, (test_val1,))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat_complex(self):
         """
@@ -2588,6 +2593,7 @@ class TestFrozenOptimizations(JitTestCase):
         test_val1 = torch.rand([50, 5])
         self.check_linear_optimizations(mod_eager, 4, 2, (test_val1,))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat_different_input(self):
         """
@@ -2614,6 +2620,7 @@ class TestFrozenOptimizations(JitTestCase):
         test_val2 = torch.rand([50, 5])
         self.check_linear_optimizations(mod_eager, 2, 2, (test_val1, test_val2))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_multiple_blocks(self):
         class ModMultLinear(nn.Module):

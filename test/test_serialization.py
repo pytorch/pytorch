@@ -45,10 +45,10 @@ from torch.serialization import (
     skip_data,
     SourceChangeWarning,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipMPSIf,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -717,6 +717,7 @@ class SerializationMixin:
         self.assertEqual(sd_loaded['empty'].dtype, torch.float32)
         self.assertEqual(sd_loaded['empty_int'].dtype, torch.int32)
 
+    @tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:0' restore location
@@ -5078,7 +5079,7 @@ class TestSerialization(TestCase, SerializationMixin):
 class TestSerializationAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_serialization_map_location(self, device):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
 
@@ -5113,7 +5114,7 @@ class TestSerializationAccelerator(TestCase):
 
         check_map_locations(map_locations, torch.float, intended_device)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     def test_serialization_map_location_multi_device(self, devices):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -5218,7 +5219,7 @@ class TestSerializationAccelerator(TestCase):
                 sd_loaded[k] = sd_loaded[k].zero_()
             self.assertEqual(sd_loaded, sd_zeroed)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_serialization_mmap_loading_with_map_location(self, device):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -5303,7 +5304,7 @@ class TestSerializationAccelerator(TestCase):
                     with skip_data(), BytesIOContext() as f:
                         torch.save(ft, f)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_tensor_subclass_map_location(self, device):
         t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
         sd = {'t': t}
@@ -5321,7 +5322,7 @@ class TestSerializationAccelerator(TestCase):
                 self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
                 self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipMPSIf(True, "pin memory allocator is not registered on MPS")
     def test_use_pinned_memory_for_d2h(self, device):
         def patched_write_record(self, filename, data, nbytes):

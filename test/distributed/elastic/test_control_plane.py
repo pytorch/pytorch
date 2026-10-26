@@ -17,6 +17,7 @@ from torch.distributed.elastic.control_plane import (
     worker_main,
 )
 from torch.monitor import _WaitCounter
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     requires_cuda,
@@ -82,6 +83,7 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 404)
             self.assertIn(b"Handler nonexistent not found:", resp.data)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_dump_nccl_trace_pickle(self) -> None:
         with local_worker_server() as pool:
@@ -91,6 +93,7 @@ class WorkerServerTest(TestCase):
             self.assertIsInstance(out, dict)
             self.assertIn("version", out)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_dump_nccl_trace_pickle_with_params(self) -> None:
         with local_worker_server() as pool:
@@ -126,6 +129,7 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_dump_nccl_trace_pickle_with_json(self) -> None:
         with local_worker_server() as pool:

@@ -43,9 +43,9 @@ import pytest
 import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -921,7 +921,7 @@ class TestOpInfoProperties(TestCase):
     # Batch Invariance Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1075,7 +1075,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1147,7 +1147,7 @@ class TestOpInfoProperties(TestCase):
     # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1191,7 +1191,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1246,7 +1246,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)

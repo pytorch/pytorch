@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -27,8 +28,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    onlyCUDA,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -667,7 +666,7 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self, device):
@@ -693,7 +692,7 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_forward(self, device):
@@ -713,7 +712,7 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_adaptive_avg_pooling_overflow(self, device):
         input = torch.randint(
             -256, 256, (20, 32, 256, 256), dtype=torch.half, device=device
@@ -723,7 +722,7 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_adaptive_avg_pooling_nhwc_overflow(self, device):
         input = torch.randint(
             -256, 256, (20, 32, 256, 256), dtype=torch.half, device=device
@@ -734,7 +733,7 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfMPS
     @largeTensorTest("10GB")
     def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
@@ -1487,7 +1486,7 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @parametrize_test("layout", ["contiguous", "unbatched", "channels_last"])
     @parametrize_test(
@@ -1537,7 +1536,7 @@ torch.{device_type}.synchronize()
         self.assertEqual(actual.data_ptr(), grad_input.data_ptr())
         self.assertEqual(actual, ref_input.grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @gcIfJetson
     def test_max_pool2d(self, device):
         def helper(n, c, h, w, ks):
@@ -1690,7 +1689,7 @@ torch.{device_type}.synchronize()
         helper(1, 79, 4, 4, 4, 3, stride=2)
         helper(0, 79, 4, 4, 4, 3, stride=2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @gcIfJetson
     def test_max_pool2d_indices(self, device):
         def helper(n, c, h, w, ks):
@@ -1858,7 +1857,7 @@ torch.{device_type}.synchronize()
             helper(4, 8, 9, 14, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
             helper(4, 8, 11, 11, (4, 4), (2, 2), (2, 2), (2, 2), contig, device)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_pool3d_size_one_feature_dim(self, device):
         # Tests crazy strides for feature dim of size 1
         x = torch.randn(7, 1, 5, 3, 2, device=device)
@@ -1877,7 +1876,7 @@ torch.{device_type}.synchronize()
             out_x = fn(x)
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("18GB")
     @largeTensorTest("180GB", "cpu")
     @expectedFailureMPS
@@ -1901,7 +1900,7 @@ torch.{device_type}.synchronize()
         self.assertEqual(y, ref_y, exact_dtype=False)
         self.assertEqual(x.grad, ref_x.grad, exact_dtype=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -2301,7 +2300,7 @@ torch.{device_type}.synchronize()
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS  # Not implemented
     @largeTensorTest("6GB")
     def test_pooling_large(self, device):
@@ -2341,7 +2340,7 @@ torch.{device_type}.synchronize()
                         # some implementations do not support dilation
                         fn(x, 6, stride=2, padding=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(

@@ -107,6 +107,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import softmax
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -114,7 +115,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
-    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -1986,7 +1986,7 @@ class TestDistributions(DistributionsTestCase):
             torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64),
         )
 
-    @skipMPS  # very long runtime on MPS
+    @tci.test(exclude_device="mps")  # very long runtime on MPS
     def test_multinomial_sequential_draw(self):
         # Adapted after script mentioned in https://github.com/pytorch/pytorch/issues/132395
         torch.manual_seed(0xDE0B6B3A764007E8)
@@ -3377,7 +3377,7 @@ class TestDistributions(DistributionsTestCase):
         wishart_log_prob_gradcheck(df, None, None, scale_tril)
         wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
-    @skipMPS  # flaky failure
+    @tci.test(exclude_device="mps")  # flaky failure
     def test_wishart_stable_with_precision_matrix(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
@@ -3449,7 +3449,7 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @skipMPS  # flaky failure
+    @tci.test(exclude_device="mps")  # flaky failure
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -4737,6 +4737,7 @@ class TestDistributions(DistributionsTestCase):
 # TODO: Enable CUDA/XPU in `instantiate_device_type_tests` and remove the following class
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsGPU(DistributionsTestCase):
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_zero_excluded_binomial(self):
         vals = Binomial(
@@ -4765,6 +4766,7 @@ class TestDistributionsGPU(DistributionsTestCase):
                 f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
@@ -4790,6 +4792,7 @@ class TestDistributionsGPU(DistributionsTestCase):
             ):
                 torch.binomial(total_count, total_prob)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
@@ -4802,6 +4805,7 @@ class TestDistributionsGPU(DistributionsTestCase):
                 failure_rate=1e-3,
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_gpu_shape(self):
@@ -4824,6 +4828,7 @@ class TestDistributionsGPU(DistributionsTestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_gpu_sample(self):
@@ -4840,6 +4845,7 @@ class TestDistributionsGPU(DistributionsTestCase):
                 failure_rate=1e-4,
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_beta_underflow_gpu(self):
         set_rng_seed(1)

@@ -26,6 +26,7 @@ from torch.cuda.graph_annotations import (
     is_available,
     mark_kernels,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1827,6 +1828,7 @@ class TestGraphInstantiateHooks(TestCase):
         self._run(graph)  # first raises, second still runs
         self.assertEqual(seen, [graph])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_fires_once_on_real_graph_instantiate(self):
         import torch.cuda.graphs as cg
@@ -1893,6 +1895,7 @@ class TestGraphDestroyHooks(TestCase):
         cg._run_graph_destroy_hooks({1})  # first raises, second still runs
         self.assertEqual(seen, [{1}])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_fires_with_recorded_exec_ids_on_teardown(self):
         import torch.cuda.graphs as cg
@@ -2075,6 +2078,7 @@ class TestGraphGlobalLifecycleHooks(TestCase):
         self.assertIn(f"register_graph_{name}_hook", cg.__all__)
         self.assertFalse(hasattr(cg, f"run_graph_{name}_hooks"))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_fire_points_over_a_real_graph(self):
         # Each registry fires at its own point in one graph's life, for a graph the consumer
@@ -2104,6 +2108,7 @@ class TestGraphGlobalLifecycleHooks(TestCase):
         )
         g.reset()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_global_hooks_run_before_per_graph_hooks(self):
         # Ordering matches instantiate(): the global fan-out runs first, then the graph's own
@@ -2122,6 +2127,7 @@ class TestGraphGlobalLifecycleHooks(TestCase):
         self.assertEqual(order, ["global", "per-graph"])
         g.reset()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_capture_start_hook_sees_live_capture(self):
         # The hook fires with capture already under way -- that is what lets it read capture
@@ -2141,6 +2147,7 @@ class TestGraphGlobalLifecycleHooks(TestCase):
         self.assertEqual(capturing, [True])
         g.reset()
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_replay_end_hook_fires_when_launch_raises(self):
         # The end hook is in a finally, so a start hook is always balanced by an end even if

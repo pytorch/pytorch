@@ -25,10 +25,8 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -3164,7 +3162,7 @@ User code traceback:
 class ErrorMessagesAcceleratorTest(LoggingTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_fx_node_error_cross_device(self, device):
         linear = torch.nn.Linear(10, 20, device=device).eval()
 

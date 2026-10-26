@@ -25,6 +25,7 @@ from collections.abc import Iterator
 import torch
 
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
@@ -34,7 +35,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import common_cuda, opinfo
@@ -360,7 +361,7 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @onlyCUDA
+    @tci.test(device='cuda')
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
@@ -396,7 +397,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
@@ -441,7 +442,7 @@ if __name__ == '__main__':
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
@@ -500,7 +501,7 @@ if __name__ == '__main__':
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @ops(
         [
             op
@@ -704,6 +705,7 @@ def _count_junit_tags(normalized: str) -> collections.Counter[str]:
 
 # The fixture runs as the default config, so its XML doesn't depend on the test
 # config or device; skip the configs and GPU builds that would only repeat it.
+@tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
 @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")

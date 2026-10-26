@@ -28,6 +28,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -38,13 +39,10 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
     ops,
     PYTORCH_CUDA_MEMCHECK,
     skipCPUIf,
     skipCUDAIf,
-    skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
@@ -1008,7 +1006,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             self.assertEqual(ub_contiguous[i], ub_noncontiguous[i])
 
     @dtypes(torch.float)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     def test_to_then_from_padded_tensor_no_transform0213(self, device, dtype):
         t = torch.randn(4, 4, 4, device=device, dtype=dtype)
         ts = list(torch.unbind(t))
@@ -1024,7 +1022,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     def test_layer_norm(self, device, dtype):
         def _test(size):
@@ -1085,7 +1083,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     def test_layer_norm_breaking(self, device, dtype):
         size = 128
@@ -1317,7 +1315,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
         self.assertEqual(result_min.values, expected_min)
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     @dtypes(*floating_types_and_half())
     def test_masked_fill(self, device, dtype):
@@ -1449,7 +1447,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             lambda: torch.nested.to_padded_tensor(nt_noncontiguous, 0.0),
         )
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     def test_device_checks(self, device):
         nt = torch.nested.nested_tensor([], device=device)
         is_cuda = "cuda" in str(device)
@@ -1787,7 +1785,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             self.assertEqual(nt_contiguous[i], nt_noncontiguous[i])
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     @parametrize("transpose", [True, False])
     def test_nested_tensor_add(self, device, dtype, transpose):
@@ -1807,7 +1805,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(ref, out)
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     @parametrize("transpose", [True, False])
     def test_nested_tensor_sub(self, device, dtype, transpose):
@@ -1826,7 +1824,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         out = nt1 - nt2
         self.assertEqual(ref, out)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float, torch.float16)
     @torch.inference_mode()
     @parametrize("embedding_dim", [8, 128, 256, 384])
@@ -1857,7 +1855,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         _test_add_mul(nt, t)
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     def test_nested_tensor_mul(self, device, dtype):
         # nested tensor * nested tensor
@@ -1893,7 +1891,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     def test_nested_tensor_div(self, device, dtype):
         nt, nt2 = self.random_nt_pair(device, dtype, 4, (4, 4))
@@ -1935,7 +1933,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     def test_nested_tensor_add_in_place(self, device, dtype):
         (nt1, nt2) = self.random_nt_pair(device, dtype, 4, (4, 4))
@@ -1946,7 +1944,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(ref, nt1)
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @torch.inference_mode()
     def test_nested_tensor_mul_in_place(self, device, dtype):
         # nested tensor * nested tensor
@@ -1984,8 +1982,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             lambda: vector.mul_(nt1),
         )
 
-    @onlyCPU
-    @skipMeta
+    @tci.test(device="cpu", exclude_device="meta")
     @dtypes(torch.float)
     def test_nested_tensor_sum_dim(self, device, dtype):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
@@ -2061,7 +2058,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             self.assertTrue(chunk.contiguous().is_contiguous())
 
     @dtypes(torch.float, torch.float16)
-    @skipMeta
+    @tci.test(exclude_device="meta")
     def test_clone(self, device, dtype):
         nt1 = random_nt(device, dtype, 4, (4, 4), (1, 1))
         nt2 = nt1.clone()
@@ -2330,13 +2327,13 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         else:
             self.assertEqual(actual, expect)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     @tf32_on_and_off(0.005)
     def test_bmm_cuda(self, device, dtype):
         self._test_bmm(device, dtype)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     def test_bmm_cpu(self, device, dtype):
@@ -4216,7 +4213,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             grad_test_func, inputs=(a, b, c, weight, bias), check_batched_grad=False
         )
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float32)
     @serialTest()
     def test_linear_backward_memory_usage(self, device, dtype):
@@ -4713,7 +4710,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         self.assertEqual(res_dense, res_nt.values())
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float32)
     def test_record_stream(self, device, dtype):
         def _create_nt():
@@ -5689,7 +5686,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_pin_memory(self, device):
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for nt in [nt_contiguous, nt_noncontiguous]:
@@ -5860,7 +5857,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_jagged_layout_construction_with_pinned_memory(self, device):
         for tensor_list in self._get_example_tensor_lists():
             nt = torch.nested.nested_tensor(
@@ -6057,7 +6054,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 values, lengths=lengths, jagged_dim=0
             )
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_nested_tensor_from_jagged_fx_trace(self, device):
         def fn(x, y):
             return torch.nested.nested_tensor_from_jagged(x, y)
@@ -6270,7 +6267,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
     @dtypes(torch.double, torch.half)
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_device_dtype_transfer_updates_offsets(self, device, dtype):
         for tensor_list in self._get_example_tensor_lists():
             orig_device = torch.device("cpu")
@@ -7165,7 +7162,7 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfWindows
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7291,7 +7288,7 @@ torch.cuda.synchronize()
         output_dense.sum().backward()
         torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
@@ -7351,7 +7348,7 @@ torch.cuda.synchronize()
     @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7381,7 +7378,7 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
@@ -7463,7 +7460,7 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
         from torch.utils.flop_counter import FlopCounterMode
@@ -7700,7 +7697,7 @@ torch.cuda.synchronize()
         self.assertIsNone(nt.grad)
         self.assertIsNone(nt._values.grad_fn)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float64, torch.float32, torch.half)
     @parametrize(
         "contiguity",

@@ -7,6 +7,7 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -97,6 +98,7 @@ class TestNativeUtils(TestCase):
         ):
             self.assertFalse(cap.device_ok(x, (9, 10)))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_CUDA, "needs a CUDA device to populate the arch cache")
     @skipIfRocm
     def test_device_ok_memoizes_per_device(self):
@@ -142,6 +144,7 @@ class TestNativeUtils(TestCase):
         if torch.cuda.is_available():
             self.assertTrue(cap.on_current_device(torch.empty(2, device="cuda")))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_CUDA, "needs a CUDA tensor to compare device indices")
     @skipIfRocm
     def test_on_current_device_declines_another_device(self):

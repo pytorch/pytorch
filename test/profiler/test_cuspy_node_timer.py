@@ -6,6 +6,7 @@ CUDA + libcupti >= 13.3 (gated the same way as the rest of the Cuspy suite)."""
 import unittest
 
 import torch
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -34,6 +35,7 @@ def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
     return g
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyNodeTimerCUDA(TestCase):
     """NodeTimerObserver collection through Cuspy (not via profile)."""

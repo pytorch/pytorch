@@ -13,6 +13,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -20,11 +21,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     ops,
-    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -188,7 +186,7 @@ class TestForeachDevice(TestCase):
     #   - https://github.com/pytorch/pytorch/pull/94655
     #   - https://github.com/pytorch/pytorch/issues/100701
     #   - https://github.com/pytorch/pytorch/pull/100811
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(
         foreach_op_db,
         dtypes=(torch.float32,),
@@ -594,7 +592,7 @@ class TestForeachDevice(TestCase):
             # Regression test for https://github.com/pytorch/pytorch/issues/113156
             torch.foreach.mul_(tensors, 1)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.float32)
     def test_foreach_check_stride_ignore_dims_of_one(self, device, dtype):
         # default tensor stride is (9, 9, 3, 1).
@@ -740,7 +738,7 @@ class TestForeachDevice(TestCase):
                 ):
                     foreach_op_([tensor1], [tensor2])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
@@ -909,7 +907,7 @@ class TestForeachDevice(TestCase):
     # note: Below three tests (postfixed with `_tensors_on_different_devices`)
     # checks whether foreach works with lists of tensors on different devices
     # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu'].
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
@@ -948,7 +946,7 @@ class TestForeachDevice(TestCase):
             else:
                 self.assertEqual(expected, tensors)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         _acc_tensors = next(
@@ -993,7 +991,7 @@ class TestForeachDevice(TestCase):
         else:
             self.assertEqual(actual, tensors1)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(foreach_pointwise_op_db, allowed_dtypes=floating_types())
     def test_pointwise_op_tensors_on_different_devices(self, device, dtype, op):
         # tensors1: ['accelerator', 'cpu]
@@ -1037,7 +1035,7 @@ class TestForeachDevice(TestCase):
 
     # note: BFloat16 has the same number of exponent bits as FP32
     # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(
         [o for o in foreach_reduce_op_db if "norm" in o.name],
         allowed_dtypes=(torch.half, torch.bfloat16),
@@ -1104,7 +1102,7 @@ class TestForeachDevice(TestCase):
         self.assertEqual(result[0], expected_x_max)
         self.assertEqual(result[1], expected_y_max)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_accelerator_graph", (False, True))
     @parametrize("w_empty", (False, True))
@@ -1164,7 +1162,7 @@ class TestForeachDevice(TestCase):
 
             self.assertEqual(expect, actual, equal_nan=True)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.complex128)
     def test_foreach_scalarlist_complex_double_many_tensors(self, device, dtype):
         # Prevent regressions for complex double MTA chunking, see #189827
@@ -1187,7 +1185,7 @@ class TestForeachDevice(TestCase):
         torch.foreach.div_(tensors, scalars)
         self.assertEqual(tensors, expect)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
     def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
@@ -1223,7 +1221,7 @@ class TestForeachDevice(TestCase):
             ),
         )
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float32, torch.float64)
     def test_foreach_norm_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets:
@@ -1259,7 +1257,7 @@ class TestForeachDevice(TestCase):
                 ]
                 self.assertEqual(expect, actual)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
     def test_foreach_max_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets
@@ -1323,7 +1321,7 @@ class TestForeachDevice(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_re):
             torch.foreach.max([empty_tensor, non_empty_tensor])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
@@ -1359,7 +1357,7 @@ class TestForeachDevice(TestCase):
         self.assertIsNotNone(tensors[0].grad_fn)
         self.assertIsNone(tensors[1].grad_fn)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(
         filter(
             lambda op: op.supports_out,
@@ -1451,7 +1449,7 @@ class TestForeachDevice(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     def test_tensors_grouping(self, devices):
         num_tensors_per_list = 10
@@ -1484,7 +1482,7 @@ class TestForeachDevice(TestCase):
                 self.assertEqual(l3[i], list3[index])
         self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_0dim_tensor_overload_cpu_ok(self, device):
         tensors = [torch.ones((), device=device, dtype=torch.float32) for _ in range(2)]
         scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
@@ -1495,7 +1493,7 @@ class TestForeachDevice(TestCase):
         actual = torch.foreach.div(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_pointwise_op_with_0d_tensor1(self, device, dtype):
         # Test that foreach_addcmul/addcdiv uses fast path when tensor1 is a list of 0D tensors
@@ -1576,7 +1574,7 @@ class TestForeachDevice(TestCase):
                 )
                 self.assertEqual(inputs_copy, expected_addcdiv)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_div_reciprocal(self, device):
         expect_m, expect_e = torch.frexp(
             torch.div(torch.tensor(0.1, device=device), 10.0)
@@ -1587,7 +1585,7 @@ class TestForeachDevice(TestCase):
         self.assertEqual(expect_m, actual_m)
         self.assertEqual(expect_e, actual_e)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_addcmul_alpha_one_fma_parity(self, device, dtype):
         # Test that addcmul with alpha=1 produces bitwise identical results
@@ -1672,7 +1670,7 @@ class TestForeachDevice(TestCase):
             rtol=0,
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_0dim_tensor_overload_exception(self, device):
         # check exceptions of fast path
         tensors = [
@@ -1693,7 +1691,7 @@ class TestForeachDevice(TestCase):
         ):
             torch.foreach.add(tensors, torch.tensor([1.0, 1.0], device=device))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_device_inputs(self, devices, dtype, op):
@@ -1715,7 +1713,7 @@ class TestForeachDevice(TestCase):
                     copy_(t, s, non_blocking)
                 self.assertEqual(ref_input, sample.input)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
@@ -1741,7 +1739,7 @@ class TestForeachDevice(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
@@ -1785,11 +1783,10 @@ class TestForeachDevice(TestCase):
             for t, ref_t in zip(out, out_ref):
                 self.assertTrue(torch.equal(t, ref_t))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "xpu"))
     @serialTest()
     # OOM issue on xpu, see https://github.com/intel/torch-xpu-ops/issues/2444
     @largeTensorTest("40GB")
-    @skipXPU
     def test_foreach_copy_with_multi_dtypes_large_input(self, device):
         # see https://github.com/pytorch/pytorch/issues/156261
         self_tensor = torch.empty(2**31 + 1, device=device, dtype=torch.float32)
@@ -1799,8 +1796,7 @@ class TestForeachDevice(TestCase):
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
 
-    @onlyAccelerator
-    @skipXPU
+    @tci.test(exclude_device=("cpu", "meta", "xpu"))
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_foreach_copy_barebones_unsigned(self, device, dtype):
         # The fused kernel doesn't instantiate these, so they take the slow path.
@@ -1854,7 +1850,7 @@ class TestForeachDevice(TestCase):
                 self.assertEqual(output2, ref_input_cpu)
 
     # Test reverse-mode & forward-mode AD if supported.
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops(
         foreach_op_db,
         dtypes=OpDTypes.supported,

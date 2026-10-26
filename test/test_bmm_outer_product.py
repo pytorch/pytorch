@@ -7,12 +7,11 @@ from torch._native.ops.bmm_outer_product.triton_impl import (
     _is_hip_grid_safe,
     _is_outer_product,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    onlyCUDA,
     skipCUDAIfNotRocm,
     skipXPUIf,
 )
@@ -29,7 +28,7 @@ class TestBmmOuterProductDevice(TestCase):
     def _check_bmm(self, a, b, **kwargs):
         self.assertEqual(torch.bmm(a, b), a @ b, **kwargs)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/180318")
     def test_shapes(self, device):
         shapes = [
@@ -47,7 +46,7 @@ class TestBmmOuterProductDevice(TestCase):
                 b = torch.randn(B, 1, N, device=device)
                 self._check_bmm(a, b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_basic_dtypes(self, device):
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
             with self.subTest(dtype=dtype):
@@ -55,7 +54,7 @@ class TestBmmOuterProductDevice(TestCase):
                 b = torch.randn(4, 1, 16, device=device, dtype=dtype)
                 self.assertEqual(torch.bmm(a, b), a @ b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_permuted_inputs(self, device):
         B, M, N = 4, 8, 16
         cases = [
@@ -75,19 +74,19 @@ class TestBmmOuterProductDevice(TestCase):
         for a, b in cases:
             self.assertEqual(torch.bmm(a, b), a @ b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_fallback_non_outer_product(self, device):
         a = torch.randn(4, 8, 16, device=device)
         b = torch.randn(4, 16, 32, device=device)
         self.assertEqual(torch.bmm(a, b), a @ b, atol=1e-5, rtol=1.3e-6)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_batch_one(self, device):
         a = torch.randn(1, 64, 1, device=device)
         b = torch.randn(1, 1, 128, device=device)
         self.assertEqual(torch.bmm(a, b), a @ b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("6GB")
     def test_batch_offset_past_int32_max(self, device):
         # The Triton kernel computed its element offsets in int32. With
@@ -116,7 +115,7 @@ class TestBmmOuterProductDevice(TestCase):
                     self.assertEqual(out[i], a[i] * b[i])
                 del out
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("6GB")
     def test_row_offset_past_int32_max(self, device):
         # Inside one batch matrix the store offset is rm * stride_om, so with
@@ -137,13 +136,13 @@ class TestBmmOuterProductDevice(TestCase):
         ):
             self.assertEqual(out[0, rows], a[0, rows] * b[0])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_m_one_n_one(self, device):
         a = torch.randn(8, 1, 1, device=device)
         b = torch.randn(8, 1, 1, device=device)
         self.assertEqual(torch.bmm(a, b), a @ b)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipCUDAIfNotRocm
     def test_hip_grid_limit_fallback(self, device):
         from torch._native.ops.bmm_outer_product.triton_kernels import (
@@ -169,7 +168,7 @@ class TestBmmOuterProductDevice(TestCase):
         self.assertFalse(_is_hip_grid_safe(a, b))
         self.assertFalse(_bmm_outer_product_cond(a, b))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_gradient_flow(self, device):
         a = torch.randn(4, 8, 1, device=device, requires_grad=True)
         b = torch.randn(4, 1, 16, device=device, requires_grad=True)
@@ -180,14 +179,14 @@ class TestBmmOuterProductDevice(TestCase):
         self.assertEqual(a.grad.shape, a.shape)
         self.assertEqual(b.grad.shape, b.shape)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_mixed_device_outer_product_fallback(self, device):
         a = torch.randn(4, 8, 1)
         b = torch.randn(4, 1, 16, device=device)
         with self.assertRaises(RuntimeError):
             torch.bmm(a, b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     def test_non_current_device_outer_product(self, devices):
         old_device = torch.accelerator.current_device_index()
@@ -210,7 +209,7 @@ class TestBmmOuterProductDevice(TestCase):
         finally:
             torch.accelerator.set_device_index(old_device)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cow_inputs_accepted_by_override(self, device):
         # The override accepts copy-on-write inputs (it wraps its read-only
         # inputs in ConstTensorWrapper and reads through const_data_ptr()).
@@ -225,7 +224,7 @@ class TestBmmOuterProductDevice(TestCase):
 
         self.assertTrue(_bmm_outer_product_cond(a_cow, b_cow))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cow_inputs_not_materialized(self, device):
         # A copy-on-write input routed through the override is read via
         # const_data_ptr() and not materialized. Verify the result is correct

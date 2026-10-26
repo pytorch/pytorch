@@ -23,6 +23,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -102,6 +103,7 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
     @config.patch(cpp_wrapper=True)
     def test_compiled_conv_rejects_mixed_input_weight_devices(self):

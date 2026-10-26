@@ -24,6 +24,7 @@ from torch.distributed._tools.fake_collectives import (
     CollectiveOp,
     non_functional_collectives,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -47,6 +48,7 @@ class TestFakeCollectives(TestCase):
         dist.init_process_group("fake", rank=0, world_size=world_size, store=store)
         torch.accelerator.set_device_index(torch.accelerator.current_device_index())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     def test_collectives(self):
         try:

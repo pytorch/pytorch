@@ -5,6 +5,7 @@ from itertools import product
 
 import torch
 from torch.jit._passes._property_propagation import apply_input_props_using_example
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import raise_on_run_directly, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -228,6 +229,7 @@ class TestDeviceAnalysis(JitTestCase):
         for fn, shapes, devices in product(fns, input_shapes, device_pairs):
             self.assert_device_equal(fn, devices, None, shapes)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_zerodim_gpu(self):
         device_pairs = [

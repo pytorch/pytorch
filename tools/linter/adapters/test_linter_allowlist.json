@@ -853,6 +853,7 @@
   "test/test_static_runtime.py",
   "test/test_subclass.py",
   "test/test_sympy_utils.py",
+  "test/test_tci.py",
   "test/test_tensorboard.py",
   "test/test_tensorexpr.py",
   "test/test_tensorexpr_pybind.py",

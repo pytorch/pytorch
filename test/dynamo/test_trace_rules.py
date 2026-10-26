@@ -29,6 +29,7 @@ from torch._dynamo.variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -348,6 +349,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_XPU or TEST_CUDA, "GPU is not available")
     def test_gpu_manual_seed_functions_graph_break(self):
         for name in (

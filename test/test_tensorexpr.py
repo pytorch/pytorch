@@ -8,6 +8,7 @@ from torch import nn
 import unittest
 import itertools
 
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests, skipIfTorchDynamo
 
 from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
@@ -1415,6 +1416,7 @@ class TestTensorExprFuser(BaseTestClass):
             # print(test.graph_for(x, y, z))
             # np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_guard_fails(self):
         @torch.jit.script

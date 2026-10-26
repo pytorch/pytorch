@@ -10,9 +10,9 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     ops,
     skipOps,
     skipXPUIf,
@@ -190,7 +190,7 @@ class TestExportOnFakeDevice(TestCase):
     # In CI, this test runs on a GPU machine with gpu build
     # We set device-specific env variable to simulate a CPU machine with gpu build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5157")
     @unittest.skipIf(
         IS_WINDOWS,
@@ -262,7 +262,7 @@ for op in ops:
         )
         self.assertEqual(r, "")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(
         IS_WINDOWS,
         "Failing on Windows, device_count() changes from 0 to 1 ",

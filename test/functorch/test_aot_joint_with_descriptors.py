@@ -38,10 +38,8 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import tracing, TracingContext
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -1248,7 +1246,7 @@ class inner_f(torch.nn.Module):
 class TestAOTJointWithDescriptorsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_preserve_annotate_flex_attention(self, device):
         def score_mod(score, b, h, m, n):
             return score

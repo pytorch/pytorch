@@ -12,10 +12,10 @@ from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -739,7 +739,7 @@ class TestDraftExport(TestCase):
 class TestDraftExportDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_missing_meta_kernel_guard(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
@@ -785,7 +785,7 @@ class TestDraftExportDevice(TestCase):
 
     # 16 MB is enough to run the test; ask for more so a regression OOMs
     # instead of silently passing.
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest(2**28)
     def test_accelerator_memory_usage(self, device):
         # This used to OOM

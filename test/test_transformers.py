@@ -22,13 +22,11 @@ import math
 import itertools
 import torch.optim as optim
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    onlyCUDA,
-    onlyOn,
     skipCUDAIf,
     skipXPUIf,
 )
@@ -584,7 +582,7 @@ class TestTransformersAccelerator(NNTestCase):
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skip("4D mask not supported yet - activate when 4D mask supported")
     def test_self_attn_TxT_attn_mask(self, device):
         embed_dim = 16
@@ -699,7 +697,7 @@ class TestTransformersAccelerator(NNTestCase):
             # of NaNs for fully masked rows
             self.assertEqual(out, out_fp.nan_to_num())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
         previous_fastpath = torch.backends.mha.get_fastpath_enabled()
         try:
@@ -1201,7 +1199,7 @@ class TestTransformersAccelerator(NNTestCase):
 
 
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support pre-SM80 hardware"
@@ -1247,7 +1245,7 @@ class TestTransformersAccelerator(NNTestCase):
             with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
                 torch.testing.assert_close(sdp_math_low_prec_out, sdp_math_fp64_out_ref, atol=1e-2, rtol=1e-2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @parametrize("nb_heads", [1, 8])
     @parametrize("bias", [True, False])
     def test_mha_native_args(self, device, nb_heads, bias):
@@ -1297,7 +1295,7 @@ class TestTransformersAccelerator(NNTestCase):
 
     # CPU unit test has_torch_functions in test environment,
     #   preventing successful completion
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_with_nested_tensor_input(self, device):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=256,
@@ -1661,7 +1659,7 @@ class TestTransformersAccelerator(NNTestCase):
                         _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.accelerator.synchronize()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA or pre-SM80 hardware"
@@ -1762,7 +1760,7 @@ class TestSDPAFailureModes(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=True)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION or not (isSM8XDevice or isSM120Device),
@@ -1801,7 +1799,7 @@ class TestSDPAFailureModes(NNTestCase):
             else:
                 flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, dropout_p, False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS   # No viable backend for scaled_dot_product_attention was found on MPS
     def test_dispatch_fails_no_backend(self, device):
         dtype = torch.float16
@@ -1815,7 +1813,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfXpu(msg="torch-xpu-ops/issues/4915")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
@@ -1847,7 +1845,7 @@ class TestSDPAFailureModes(NNTestCase):
 
         self.assertEqual(actual, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
@@ -1927,7 +1925,7 @@ class TestSDPAFailureModes(NNTestCase):
         result = compiled_func(q, k, v)
         self.assertEqual(result.shape, (2, 2, 0, 8))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
@@ -1942,7 +1940,7 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
         or not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
@@ -1970,7 +1968,7 @@ class TestSDPAFailureModes(NNTestCase):
                     ),
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("fused_kernel", [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_sdpa_kernel_grouped_query_attention_cuda(self, device, fused_kernel):
@@ -1985,7 +1983,7 @@ class TestSDPAFailureModes(NNTestCase):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
                                                    is_causal=False, enable_gqa=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
@@ -2001,7 +1999,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
@@ -2017,7 +2015,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION])
@@ -2032,7 +2030,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, mask, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_unaligned_tensors(self, device):
@@ -2046,7 +2044,7 @@ class TestSDPAFailureModes(NNTestCase):
             with ctxmgr:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
     def test_mem_efficient_attention_misaligned_data_ptr_sm80_or_later(self, device):
         is_rocm = TEST_WITH_ROCM
@@ -2096,7 +2094,7 @@ class TestSDPAFailureModes(NNTestCase):
                         lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
                     )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(TEST_WITH_ROCM, "CUTLASS mem efficient attention alignment check is CUDA-only")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
     def test_mem_efficient_attention_misaligned_batch_stride_sm80_or_later(self, device):
@@ -2137,7 +2135,7 @@ class TestSDPAFailureModes(NNTestCase):
         storage = torch.randn(B, H, S, D + 1, dtype=torch.float16, device=device, requires_grad=requires_grad)
         return storage[..., :D]
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(TEST_WITH_ROCM, "Flash and cuDNN attention alignment checks are CUDA-only")
     @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
     @parametrize("misaligned", ["query", "key", "value"])
@@ -2175,7 +2173,7 @@ class TestSDPAFailureModes(NNTestCase):
             else:
                 torch.ops.aten._scaled_dot_product_cudnn_attention(q, k, v, None, False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(TEST_WITH_ROCM, "cuDNN attention alignment checks are CUDA-only")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN attention is not supported")
     def test_cudnn_attention_misaligned_attn_mask(self, device):
@@ -2193,7 +2191,7 @@ class TestSDPAFailureModes(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "attn_bias data pointer"):
             torch.ops.aten._scaled_dot_product_cudnn_attention(q, k, v, mask, False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(TEST_WITH_ROCM, "Flash and cuDNN attention alignment checks are CUDA-only")
     # Flash already copies a stride-misaligned grad_out when transposing it to BSHD.
     @parametrize("backend,layout", [
@@ -2215,7 +2213,7 @@ class TestSDPAFailureModes(NNTestCase):
         expected = torch.autograd.grad(out, (q, k, v), grad_out.contiguous().clone())
         self.assertEqual(actual, expected, atol=2e-3, rtol=2e-3)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3126")
@@ -2229,7 +2227,7 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_autocast_fp32_float16(self, device):
@@ -2242,7 +2240,7 @@ class TestSDPAFailureModes(NNTestCase):
                 _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_autocast_fp32_bfloat16(self, device):
@@ -2266,7 +2264,7 @@ class TestSDPAFailureModes(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_different_devices(self, device, kernel: SDPBackend):
         # Different devices
@@ -2286,7 +2284,7 @@ class TestSDPAFailureModes(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_error_cases(self, device):
         # one of k,v needs to be broadcasted and other has non consistent seq_len dim
@@ -2308,7 +2306,7 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3126")
@@ -2324,7 +2322,7 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isLessThanSM80Device,
                      "Current platform does not support fused SDPA or is an SM80+ device.")
     def test_mem_efficient_fail_bfloat16_less_than_sm80(self, device):
@@ -2337,7 +2335,7 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     def test_flash_atteention_large_bf16_nan_values(self, device):
@@ -2350,7 +2348,7 @@ class TestSDPAFailureModes(NNTestCase):
 
         self.assertFalse(torch.isnan(out).any(), "Output should not contain NaNs!")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
@@ -2378,7 +2376,7 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3126")
@@ -2405,7 +2403,7 @@ class TestSDPAFailureModes(NNTestCase):
                     torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3126")
@@ -2422,7 +2420,7 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, is_causal=True))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536(self, device):
         batch_size = 2**16
@@ -2444,7 +2442,7 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertEqual(key.grad, k_cpu.grad, atol=2e-3, rtol=1e-4)
         self.assertEqual(value.grad, v_cpu.grad, atol=2e-3, rtol=1e-4)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     @unittest.skipIf(not TEST_WITH_ROCM, "CUDA chunks launches without splitting the RNG state")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536_error(self, device):
@@ -2458,7 +2456,7 @@ class TestSDPAFailureModes(NNTestCase):
                                                           attn_bias=None, compute_log_sumexp=True,
                                                           dropout_p=0.01)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     @parametrize("dtype", [torch.float32, torch.bfloat16])
@@ -2511,7 +2509,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertTrue(torch.isfinite(tensor).all())
         check_out_and_grad(*zip(golden, low_precision, actual))
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support Flash Attention")
     @parametrize("batch,heads", [(65536, 1), (1, 65536)])
@@ -2522,7 +2520,7 @@ class TestSDPAFailureModes(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                     F.scaled_dot_product_attention(query, query, query)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_backward_requires_bias_when_bias_grad(self, device):
         q = torch.rand(2, 8, 256, 64, device=device, dtype=torch.float16, requires_grad=True)
@@ -2551,7 +2549,7 @@ class TestSDPAFailureModes(NNTestCase):
             )
 
     @largeTensorTest("15GB", "cuda")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_large_seq_len_uniform_attention(self):
         device = torch.device("cuda")
@@ -2586,7 +2584,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertTrue(torch.allclose(value.grad, torch.ones_like(value)))
 
     @largeTensorTest("12GB", "cuda")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_large_seq_len_attn_mask_index_overflow(self):
         # When an attn_mask is given and seq_len**2 > 2**32, the kernel used to
@@ -2860,7 +2858,7 @@ class TestSDPAGeneric(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
-    @onlyOn(["cpu", "cuda", "xpu"])
+    @tci.test(device=('cpu', 'cuda', 'xpu'))
     def test_sdpa_export_repeat_interleave_unbacked_head_dim(self, device):
         device_type = torch.device(device).type
 
@@ -2959,7 +2957,7 @@ class TestSDPAGeneric(NNTestCase):
                     strict=False,
                 )
 
-    @onlyOn(["cpu", "cuda", "xpu"])
+    @tci.test(device=('cpu', 'cuda', 'xpu'))
     def test_sdpa_export_repeat_interleave_unbacked_num_heads(self, device):
         device_type = torch.device(device).type
 
@@ -3073,7 +3071,7 @@ class TestSDPAGeneric(NNTestCase):
                             strict=False,
                         )
 
-    @onlyOn(["cuda", "xpu"])
+    @tci.test(device=('cuda', 'xpu'))
     @skipCUDAIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "CUDA Flash Attention is not supported",
@@ -3636,7 +3634,7 @@ class TestSDPAAccelerator(NNTestCase):
             if prev_fa_library is not None:
                 torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_sm107_runtime_version(self, device):
         unsupported = (
@@ -4388,7 +4386,7 @@ class TestSDPAAccelerator(NNTestCase):
             torch.zeros_like(actual_grads[0][:, :fully_masked]),
         )
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     @tf32_off()
@@ -4937,7 +4935,7 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertFalse(dv.isnan().any())
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not isSM90Device, "requires SM90")
     def test_cudnn_attention_low_lse_bprop_gate_196678(self, device):
         # https://github.com/pytorch/pytorch/issues/196678
@@ -4964,7 +4962,7 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertTrue(can_use(64, query_requires_grad=False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not isSM90Device, "requires SM90")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("mask_type", ["none", "bool", "float"])
@@ -5745,7 +5743,7 @@ class TestSDPAAccelerator(NNTestCase):
                     raise AssertionError("expected EFFICIENT_ATTENTION backend")
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("use_compile", [True, False])

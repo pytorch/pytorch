@@ -91,6 +91,7 @@ from torch.testing._comparison import (
     Pair,
     TensorLikePair,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
@@ -791,7 +792,7 @@ def instantiate_parametrized_tests(generic_cls):
 
 
 def _omit_skipped_tests(cls) -> None:
-    if not OMIT_SKIPPED_TESTS:
+    if not OMIT_SKIPPED_TESTS or "--list-markers" in sys.argv:
         return
     for name, attr in list(vars(cls).items()):
         if name.startswith("test") and getattr(attr, "__unittest_skip__", False):
@@ -1361,7 +1362,7 @@ def get_test_names(test_cases):
     return ['.'.join(case.id().split('.')[-2:]) for case in test_cases]
 
 def _print_test_names():
-    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    suite = TciTestLoader().loadTestsFromModule(__main__)
     test_cases = discover_test_cases_recursively(suite)
     for name in get_test_names(test_cases):
         print(name)
@@ -1446,7 +1447,47 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
-class HardwareClassificationTestLoader(unittest.TestLoader):
+class TciTestLoader(unittest.TestLoader):
+    """Select test platforms and device variants before unittest runs fixtures."""
+
+    def __init__(self):
+        super().__init__()
+        self.list_metadata = any(arg in sys.argv for arg in ('--list-markers', '--list-test-files'))
+        self.tci_platform = None if self.list_metadata else tci.current_platform()
+        self.tci_strict = 'PYTORCH_TEST_TCI_PLATFORM' in os.environ
+
+    def includes(self, cls, name):
+        if self.list_metadata:
+            return True
+        return tci.is_eligible(
+            tci.resolve(getattr(cls, name), cls),
+            platform=self.tci_platform,
+            device=getattr(cls, 'device_type', None),
+            bypass=getattr(cls, 'bypass_device_restrictions', False),
+            strict=self.tci_strict,
+        )
+
+    def getTestCaseNames(self, testCaseClass):
+        return [name for name in super().getTestCaseNames(testCaseClass) if self.includes(testCaseClass, name)]
+
+    def filter_suite(self, suite):
+        if isinstance(suite, unittest.TestCase):
+            if isinstance(suite, unittest.loader._FailedTest) or self.includes(type(suite), suite._testMethodName):
+                return suite
+            return self.suiteClass()
+        return self.suiteClass(self.filter_suite(test) for test in suite)
+
+    def loadTestsFromTestCase(self, testCaseClass):
+        return self.filter_suite(super().loadTestsFromTestCase(testCaseClass))
+
+    def loadTestsFromModule(self, module, *args, **kwargs):
+        return self.filter_suite(super().loadTestsFromModule(module, *args, **kwargs))
+
+    def loadTestsFromName(self, name, module=None):
+        return self.filter_suite(super().loadTestsFromName(name, module))
+
+
+class HardwareClassificationTestLoader(TciTestLoader):
     """Unittest TestLoader that filters loaded tests by hw_classification."""
     def __init__(self, hw_classification):
         super().__init__()
@@ -1530,7 +1571,7 @@ def run_tests(argv=None):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    testLoader = unittest.loader.defaultTestLoader
+    testLoader = TciTestLoader()
     if HW_CLASSIFICATION is not None:
         testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
 
@@ -1600,10 +1641,10 @@ def run_tests(argv=None):
     elif RUN_PARALLEL > 1:
         suite = testLoader.loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
-        test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
+        test_batches = [batch for batch in chunk_list(get_test_names(test_cases), RUN_PARALLEL) if batch]
         processes = []
-        for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
+        for i, batch in enumerate(test_batches):
+            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + batch
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
@@ -3813,6 +3854,7 @@ class NoTest:
     __test__ = False
 
 
+@tci.test(platform=(tci.platform.linux_x86_64, tci.platform.linux_x86_64_cuda_l4))
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for

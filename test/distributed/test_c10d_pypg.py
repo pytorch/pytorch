@@ -22,6 +22,7 @@ from torch.distributed.distributed_c10d import (
 )
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -594,6 +595,7 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(dist._new_window(t, group=pg), "fake-window")
         self.assertIs(pg.new_window_tensor, t)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
     def test_block_current_stream(self) -> None:
         torch.cuda.synchronize()
@@ -621,6 +623,7 @@ class TestPyProcessGroup(TestCase):
             stream.synchronize()
             self.assertTrue(event.query())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
     def test_block_current_stream_use_after_free(self) -> None:
         """

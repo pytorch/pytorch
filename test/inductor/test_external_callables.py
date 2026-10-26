@@ -4,6 +4,7 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TEST_XPU
 
@@ -72,6 +73,7 @@ class TestInductorExternalCallable(TestCase):
             msg=f"torch.compile(..., external_matmul = {matmul_dup}) failed",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() < (7, 0),

@@ -21,6 +21,7 @@ from torch.sparse._semi_structured_conversions import (
     sparse_semi_structured_from_dense_cutlass,
 )
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_SPARSE,
@@ -302,6 +303,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         output = torch.compile(fn)(x)
         output.backward(output)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_cutlass_mm_functionalization_decomp(self):

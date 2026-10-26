@@ -11,13 +11,13 @@ import numpy as np
 import torch
 from torch import nan
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_dtype import (
     all_passthru_types,
@@ -603,7 +603,7 @@ class TestShapeOps(TestCase):
                     np_fn = partial(np.flip, axis=flip_dim)
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @onlyAccelerator  # CPU is too slow
+    @tci.test(exclude_device=("cpu", "meta"))  # CPU is too slow
     @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest(
         "81GB", "cpu"

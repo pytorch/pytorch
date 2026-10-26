@@ -13,10 +13,8 @@ from torch._tensor_iterator import (
     unary_float_op,
     unary_op,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -353,7 +351,7 @@ class TestTensorIteratorDevice(TestCase):
         self.assertIn("ndim=", r)
         self.assertIn("ntensors=3", r)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_check_raises(self, device):
         # Default check_all_same_device=True rejects mixed CPU+accelerator.
         a = torch.zeros(3, device="cpu")
@@ -361,7 +359,7 @@ class TestTensorIteratorDevice(TestCase):
         with self.assertRaises(RuntimeError):
             binary_op(None, a, b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_allow_cpu_scalars(self, device):
         # A 0-dim CPU tensor is a "CPU scalar". With allow_cpu_scalars=True
         # the iterator accepts it alongside a device tensor without violating

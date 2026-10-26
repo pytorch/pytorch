@@ -19,6 +19,7 @@ from torch.overrides import (
     BaseTorchFunctionMode,
     TorchFunctionMode,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
@@ -891,6 +892,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
     def test_default_device_factory_functions(self):
         """Test that factory functions respect default device in compiled code"""
@@ -926,6 +928,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_default_device(None)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
     def test_default_device_factory_functions_priority(self):
         try:

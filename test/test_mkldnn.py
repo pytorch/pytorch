@@ -20,6 +20,7 @@ import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import TestCase, \
     expectedIfCppFakeTensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 # batched grad doesn't support mkldnn
@@ -1771,7 +1771,7 @@ class TestMkldnn(TestCase):
 class TestMkldnnDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_unsupported(self, device):
         # unsupported types and unsupported types with gpu
         for dtype in [torch.double, torch.uint8, torch.int8,

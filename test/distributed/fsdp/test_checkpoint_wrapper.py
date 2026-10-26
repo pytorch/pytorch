@@ -16,6 +16,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     OffloadWrapper,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal import tci
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import checkpoint
@@ -391,6 +392,7 @@ class CheckpointWrapperTest(TestCase):
 
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_checkpoint_wrapper_with_block_mask(self):
         """Test that BlockMask can be passed through checkpoint_wrapper."""

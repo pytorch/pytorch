@@ -11,10 +11,8 @@ from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -130,27 +128,27 @@ def run_and_compare_activation(self, device, fn, inps):
 class TestMemoryEfficientOpAuthoringDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_gelu_bias(self, device):
         run_and_compare_activation(self, device, gelu_bias, [(1024,), (1024,)])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_mish(self, device):
         run_and_compare_activation(self, device, mish, [(1024,)])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_swish(self, device):
         run_and_compare_activation(self, device, swish, [(1024,)])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_hard_sigmoid(self, device):
         run_and_compare_activation(self, device, hard_sigmoid, [(1024,)])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_hard_swish(self, device):
         run_and_compare_activation(self, device, hard_swish, [(1024,)])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_layer_norm(self, device):
         def layer_norm(x, weight, bias):
             dim = -1
@@ -167,7 +165,7 @@ class TestMemoryEfficientOpAuthoringDevice(TestCase):
         layer_norm_inps = [(bs, ln_size), (ln_size,), (ln_size,)]
         run_and_compare_activation(self, device, layer_norm, layer_norm_inps)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_rmsnorm(self, device):
         class T5LayerNorm(nn.Module):
             def __init__(self, hidden_size, eps=1e-6):

@@ -12,10 +12,8 @@ from torch.distributed.pipelining.microbatch import (
     TensorChunkSpec,
 )
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
@@ -96,7 +94,7 @@ class MicrobatchTests(TestCase):
 class MicrobatchTestsDevices(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_split_block_mask(self, device):
         B = 6
         H = 1

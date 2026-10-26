@@ -12,10 +12,8 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyHPU,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -206,7 +204,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         with patch.dict(sys.modules, {"tvm": None, "tvm.relax.frontend.torch": None}):
             self.assertRaises(ImportError, tvm_backend, gm, [torch.randn(2)])
 
-    @onlyHPU
+    @tci.test(device="hpu")
     def test_intel_gaudi_backend(self, device):
         self._check_backend_works("hpu_backend", device)
 

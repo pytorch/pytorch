@@ -7,6 +7,7 @@ from typing import NamedTuple
 import torch
 
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     gfx_arch_supports_opportunistic_fastatomics,
     SM80OrLater,
@@ -15,8 +16,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    onlyCUDA,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
@@ -441,7 +440,7 @@ class TestScatterGatherDevice(TestCase):
         self.assertIs(result, out)
         self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @serialTest()
     @largeTensorTest("5GB")
     def test_scatter_copy_large_slice(self, device):
@@ -491,7 +490,7 @@ class TestScatterGatherDevice(TestCase):
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
     @serialTest()
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32, torch.half, torch.bfloat16)
     def test_scatter_add_large(self, device, dtype):
         # test larger shapes that exercise the vectorized/TMA scatter_add path
@@ -612,7 +611,7 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @unittest.skipUnless(
         TEST_CUDA and (torch.version.hip is not None or SM80OrLater),
         "requires CUDA sm80+; ROCm runs the generic kernel",

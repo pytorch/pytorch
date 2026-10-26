@@ -8,14 +8,13 @@ import numpy as np
 import torch
 from torch import nan
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
-    onlyCPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -200,7 +199,7 @@ class TestSortAndSelectDevice(TestCase):
             torch.sort(x, out=(res2val, res2ind), descending=True)
             self.assertIsOrdered("descending", x, res2val, res2ind, "random with NaNs")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_sort_large_slice(self, device):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
@@ -231,7 +230,7 @@ class TestSortAndSelectDevice(TestCase):
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device),
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.float16)
     @largeTensorTest("200GB")  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
@@ -300,7 +299,7 @@ class TestSortAndSelectDevice(TestCase):
                         self.assertEqual(r1.values.stride(), t.stride())
                         self.assertEqual(r1.indices.stride(), t.stride())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.float32)
     def test_sort_discontiguous(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
@@ -308,7 +307,7 @@ class TestSortAndSelectDevice(TestCase):
     # TODO: consolidate with test_sort_discontiguous once slowTest supports
     # device/accelerator-level granularity.
     @slowTest  # this test is slow on CPU, but not on CUDA
-    @onlyCPU
+    @tci.test(device="cpu")
     @dtypes(torch.float32)
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
@@ -333,7 +332,7 @@ class TestSortAndSelectDevice(TestCase):
         self.assertTrue(torch.all(idxs[:-1][equal] < idxs[1:][equal]))
 
     @slowTest  # this test is slow on CPU
-    @onlyCPU
+    @tci.test(device="cpu")
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @parametrize("descending", [False, True])
     @parametrize("stable", [False, True])
@@ -1373,7 +1372,7 @@ class TestSortAndSelectDevice(TestCase):
                     c = torch.isin(a, b, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(*all_types())
     def test_isin_different_devices(self, device, dtype):
         a = torch.arange(6, device=device, dtype=dtype).reshape([2, 3])

@@ -6,10 +6,8 @@ import warnings
 
 import torch
 import torch.autograd.functional as autogradF
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
@@ -1730,7 +1728,7 @@ class TestAutogradFunctional(_AutogradFunctionalHelpers, TestCase):
 class TestAutogradFunctionalDevice(_AutogradFunctionalHelpers, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @base_and_logging_tensor
     def test_construct_standard_basis(self, device, ctors):
         test_cases = [
@@ -1741,7 +1739,7 @@ class TestAutogradFunctionalDevice(_AutogradFunctionalHelpers, TestCase):
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_different_devices(self, device, ctors):
         def f(x, y):

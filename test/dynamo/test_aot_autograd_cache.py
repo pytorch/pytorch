@@ -56,6 +56,7 @@ from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -897,6 +898,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             # We save again into the cache
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2250,6 +2252,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not ACC_SUPPORTS_BF16, "requires bfloat16/float8 support")
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
@@ -2355,6 +2358,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not ACC_SUPPORTS_BF16, "requires bfloat16/float8 support")
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")

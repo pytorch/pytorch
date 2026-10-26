@@ -58,6 +58,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.ops import aten
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -565,6 +566,7 @@ class TestUtils(TestCase):
             )
             self.assertEqual(flops, expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
@@ -579,6 +581,7 @@ class TestDeviceTflopsTritonFallback(TestCase):
         _get_device_tflops.cache_clear()
         self.addCleanup(_get_device_tflops.cache_clear)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not triton_utils.has_triton_package(),
         "requires Triton",
@@ -686,6 +689,7 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
             321.0,
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not triton_utils.has_triton_package(),
         "requires Triton",
@@ -718,6 +722,7 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
         max_clock_rate.assert_called_once_with(1)
         get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not triton_utils.has_triton_package(),
         "requires Triton",
@@ -979,6 +984,7 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_rand_strided_fp4_cuda(self):
         from torch._dynamo.testing import rand_strided

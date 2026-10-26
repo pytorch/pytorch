@@ -20,6 +20,7 @@ from itertools import product
 from functools import reduce, partial
 from torch._prims_common import DimsType
 from packaging import version
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride
@@ -34,10 +35,10 @@ from torch.testing._internal.common_utils import \
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
+     skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type, largeMPSBufferTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -516,7 +517,7 @@ class TestLinalg(TestCase):
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
@@ -1275,7 +1276,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvalsh(t, out=out)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_eigh_lwork_lapack(self, device, dtype):
@@ -1615,7 +1616,7 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm, torch.linalg.matrix_norm and numpy.linalg.norm to
     # ensure that their matrix norm results match.
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
+    @tci.test(exclude_device='meta')  # https://github.com/pytorch/pytorch/issues/54082
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-4})
     def test_norm_matrix(self, device, dtype):
@@ -1657,7 +1658,7 @@ class TestLinalg(TestCase):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.bfloat16, torch.float16)
     @dtypesIfMPS(torch.float16)
     def test_norm_fused_type_promotion(self, device, dtype):
@@ -1674,7 +1675,7 @@ class TestLinalg(TestCase):
         for f, kwargs, in zip((torch.linalg.vector_norm, torch.norm), ({}, {"p" : 2})):
             profile_and_check(f, x, kwargs)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
+    @tci.test(exclude_device='meta')  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3})
@@ -1733,7 +1734,7 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
+    @tci.test(exclude_device='meta')  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3})
@@ -1889,7 +1890,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out, expected, msg=msg)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     def test_norm_complexhalf(self, device):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
@@ -1969,7 +1970,7 @@ class TestLinalg(TestCase):
                     expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
                     self.assertEqual(result, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_powsum_dtype_kwarg(self, device):
         # Test dtype kwarg with bfloat16 input and float32 computation
         # This tests the dtype conversion path in the kernel
@@ -1988,7 +1989,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(result.dtype, torch.float32)
                     self.assertEqual(result, expected)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     def test_powsum_dtype_kwarg_1d_reduction(self, device):
         # Test dtype kwarg on CPU with bfloat16 input and float32 computation
         # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
@@ -2025,7 +2026,7 @@ class TestLinalg(TestCase):
                 expected = t.abs().pow(ord).sum()
                 self.assertEqual(r, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_foreach_powsum_dtype_kwarg(self, device):
         # Test dtype kwarg with bfloat16 input and float32 computation
         # This tests the dtype conversion path in both slow and fast CUDA paths
@@ -2308,7 +2309,7 @@ class TestLinalg(TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -2371,7 +2372,7 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -2416,7 +2417,7 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -2472,7 +2473,7 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -3800,7 +3801,7 @@ class TestLinalg(TestCase):
         run_test((1, 2, 3, 2, 3), ind=3)
         run_test((3, 2, 1, 2, 12), ind=4)
 
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
+    @tci.test(exclude_device='meta')  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_tensorinv_empty(self, device, dtype):
@@ -3810,7 +3811,7 @@ class TestLinalg(TestCase):
             a_inv = torch.linalg.tensorinv(a, ind=ind)
             self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
 
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
+    @tci.test(exclude_device='meta')  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_tensorinv_errors_and_warnings(self, device, dtype):
@@ -4943,7 +4944,7 @@ class TestLinalg(TestCase):
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/150959")
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4957,7 +4958,7 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.float32)
     def test_linalg_inv_large_batch(self, device, dtype):
         # The batched hipBLAS and rocSOLVER kernels launch nothing above 65536
@@ -5149,7 +5150,7 @@ class TestLinalg(TestCase):
             run_test((4, 4), (2, 1, 3, 4, 2), device, upper, transpose, unitriangular)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), device, upper, transpose, unitriangular)  # broadcasting A & b
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float)
     @parametrize("bs", [1, 2])
     @parametrize("k", [524280, 524281, 524282])
@@ -5246,7 +5247,7 @@ class TestLinalg(TestCase):
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float)
     @parametrize(
         "shape, stride",
@@ -5385,7 +5386,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
+    @tci.test(device='cuda')
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -5396,7 +5397,7 @@ class TestLinalg(TestCase):
         (A @ B).backward(G)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
+    @tci.test(device='cuda')
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -5723,7 +5724,7 @@ class TestLinalg(TestCase):
         bnp_out = torch.full((b, n, p), float('nan'), device=device)
         self.assertEqual(torch.bmm(bnm, bmp), torch.bmm(bnm, bmp, out=bnp_out))
 
-    @onlyCPU  # not supported by CUBLAS
+    @tci.test(device='cpu')  # not supported by CUBLAS
     def test_blas_mv_large_input(self, device):
         # This would previously fail if the allocated output had NaNs, see:
         # https://github.com/pytorch/pytorch/issues/31663 and [NOTE: cpu_zero]
@@ -5736,7 +5737,7 @@ class TestLinalg(TestCase):
 
         self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
 
-    @onlyCPU
+    @tci.test(device='cpu')
     def test_renorm_ps(self, device):
         # full reduction
         x = torch.randn(5, 5)
@@ -5992,7 +5993,7 @@ class TestLinalg(TestCase):
 
     @slowTest
     @skipIfRocm
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
     @parametrize("pivot", [True, False])
@@ -6104,7 +6105,7 @@ class TestLinalg(TestCase):
             self.assertTrue(info[1] == info[3] == 0)
 
     @skipIfRocm
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
     @parametrize("pivot", [True, False])
@@ -6183,7 +6184,7 @@ class TestLinalg(TestCase):
                     else:
                         self.assertEqual(B_left, X @ A_adj)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_cpu_errors(self, device, dtype):
         # Square tests
@@ -6411,7 +6412,7 @@ class TestLinalg(TestCase):
                              atol=prec, rtol=0)
 
     @skipCPUIfNoLapack
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.double)
     def test_lobpcg_torchscript(self, device, dtype):
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
@@ -6431,7 +6432,7 @@ class TestLinalg(TestCase):
                      "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
@@ -6766,7 +6767,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4,
                         torch.bfloat16: 5e-2, torch.half: 5e-2})
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
@@ -6803,7 +6804,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # `input` is the C operand, not scratch space
         self.assertEqual(inp, inp_before)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.float32, torch.bfloat16)
     def test_addmm_out_distinct_c_and_d_fallbacks(self, device, dtype):
         # Shapes/layouts the distinct-C/D path declines must still be correct
@@ -6838,7 +6839,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch.addmm(aliased, mat1, mat2, beta=0.75, alpha=1.0, out=aliased)
         self.assertEqual(aliased, expected.to(dtype), atol=tol, rtol=tol, exact_dtype=False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfRocm
     @dtypes(torch.bfloat16, torch.half)
     def test_addmm_out_distinct_c_and_d_is_selected(self, device, dtype):
@@ -6872,7 +6873,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(kernel_count(padded), 1)
         self.assertGreater(kernel_count(column_major), contiguous_kernels)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.float32, torch.bfloat16)
     def test_addmm_out_padded_leading_dim(self, device, dtype):
         # cuBLASLt can consume a row-major operand whose rows are padded, so the
@@ -6900,7 +6901,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
         self.assertEqual(wide_out[:, n:], untouched)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfRocm
     @dtypes(torch.bfloat16, torch.half)
     @parametrize("shape", [(2, 256, 1024), (18, 128, 128), (64, 96, 32), (256, 384, 128)])
@@ -6936,7 +6937,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         tol = 5e-2 if dtype == torch.bfloat16 else 1e-2
         self.assertEqual(out, aliased, atol=tol, rtol=tol)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfRocm
     @dtypes(torch.bfloat16, torch.half)
     def test_addmm_out_distinct_c_and_d_float_out_reduced_input(self, device, dtype):
@@ -6976,7 +6977,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(float_out, ref.to(torch.float32), atol=5e-2, rtol=5e-2,
                          exact_dtype=False)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double)
     def test_addmm_out_distinct_c_and_d_not_selected_for_fp32(self, device, dtype):
@@ -7036,7 +7037,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
     @dtypes(torch.half)
-    @onlyCUDA
+    @tci.test(device='cuda')
     def test_addmm_baddbmm_overflow(self, device, dtype):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -7088,7 +7089,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out, y_ref)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_matmul_45724(self, device):
         # https://github.com/pytorch/pytorch/issues/45724
         a = torch.rand(65537, 22, 64, device=device, dtype=torch.half)
@@ -7101,7 +7102,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
+    @tci.test(device='cuda')
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("use_transpose_a", [True, False])
@@ -7176,7 +7177,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
+    @tci.test(device='cuda')
     def test__int_mm_errors(self, device):
 
         def genf_int(x, y):
@@ -7213,7 +7214,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @parametrize("m", [0, 8, 17])
     @parametrize("k", [0, 16, 32])
     @parametrize("n", [16, 32])
@@ -7258,7 +7259,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("x_dtype", [torch.int8, torch.uint8])
@@ -7283,7 +7284,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # with a size-1 contraction dim it is the other stride that is arbitrary
         check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
@@ -7644,7 +7645,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertTrue(mean_err < 0.05)
 
     @slowTest
-    @onlyCPU
+    @tci.test(device='cpu')
     @largeTensorTest('12GB', device='cpu')
     def test__int8_mm_large_shape(self, device):
         torch.manual_seed(1)
@@ -7669,7 +7670,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # should pass without segfault
         weight_int8pack_mm(a, b_int8pack, b_scales)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
     # NOTE: This is intended to cover fp16_gemv_trans in
@@ -8188,7 +8189,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             coeffs = torch.rand([2, 2], device=device, dtype=dtype)
             res = torch._compute_linear_combination(x, coeffs)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @skipCPUIfNoLapack
     @dtypes(torch.complex64)
     def test_linalg_matrix_exp_no_warnings(self, device, dtype):
@@ -9250,7 +9251,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(*floating_and_complex_types())
     # this tests https://github.com/pytorch/pytorch/issues/36921
     def test_lu_solve_large_matrices(self, device, dtype):
@@ -9571,7 +9572,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
             run_test(shape, batch, nrhs, hermitian)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_ldl_solve_cpu_errors(self, device, dtype):
@@ -9734,7 +9735,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(C, B.sum().expand(B.shape))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @largeTensorTest("40GB")
     def test_triu_tril_large_matrix_64bit(self, device):
         """
@@ -9801,7 +9802,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
         self.assertEqual(expect, res)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_logaddexp_cpu_vs_accelerator_complex(self, device):
         # test logaddexp with complex values produce the same values (up to machine precision) on cpu and accelerator.
         input_real = torch.tensor([0.052, -0.2115, 0.6913], dtype=torch.float64)
@@ -9900,7 +9901,7 @@ class TestLinalgSVD(TestCase):
         self.assertEqual(S / scale, torch.linalg.svdvals(A), atol=1e-5, rtol=1e-4)
         self.assertEqual((U * (S / scale).unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @parametrize("shape", [(3, 32, 32), (3, 40, 33), (3, 33, 40), (3, 5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
@@ -11894,7 +11895,7 @@ class TestLinalgCudaOnly(TestCase):
             torch.cuda.tunable.set_max_tuning_iterations(1)
             self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @setLinalgBackendsToDefaultFinally
     def test_preferred_linalg_library(self):
         # The main purpose of this test is to make sure these "backend" calls work normally without raising exceptions.
@@ -12060,7 +12061,7 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs, backward=backward)
 
     # The ROCm grouped gemm backends are opt-in via env var, which CI never sets.
-    @onlyCUDA
+    @tci.test(device='cuda')
     @skipCUDAIfNotRocm
     @parametrize("backend", ["ck_tile"])
     @parametrize("strided", [False, True])
@@ -12091,7 +12092,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs)
 
-    @onlyOn(["cuda", "mps"])
+    @tci.test(device=('cuda', 'mps'))
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16)
     def test_grouped_mm_large_stride_fallback(self, device, dtype):
@@ -12110,7 +12111,7 @@ class TestGroupedMM(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             F.grouped_mm(a, b, offs=offs)
 
-    @onlyOn(["cuda", "mps"])
+    @tci.test(device=('cuda', 'mps'))
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")

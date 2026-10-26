@@ -50,6 +50,7 @@ from torch.autograd.profiler_util import (
     FunctionEventAvg,
 )
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -57,8 +58,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     expectedFailureMPS,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    skipMeta,
     skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -13581,7 +13580,7 @@ class TestAutogradDeviceType(TestCase):
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_backward(self, device, dtype):
         class FixedGradientFunction(Function):
@@ -13728,7 +13727,7 @@ class TestAutogradDeviceType(TestCase):
                 ):
                     f()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_advanced_indexing_backwards_large(self, device):
         # See https://github.com/pytorch/pytorch/issues/22843
         n = 1 << 16
@@ -13786,7 +13785,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertIsNone(t1.grad)
         self.assertIsNone(t3.grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_reentrant_parent_error_on_cpu(self, device):
         if not torch._C._accelerator_isAllocatorInitialized():
             raise unittest.SkipTest("accelerator allocator stats not supported")
@@ -13849,7 +13848,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where_scalar_second, (cond, x))
         gradgradcheck(where_scalar_second, (cond, x))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_free_unneeded_tensor(self, device):
         x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
         m = torch.randn(1, 3, 1, 1, device=device)
@@ -13865,7 +13864,7 @@ class TestAutogradDeviceType(TestCase):
         # previous allocation of z had the same size as the current one.
         self.assertEqual(base_mem, end_mem)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_pin_memory(self, device):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -13874,7 +13873,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.pin_memory(), [x])
         gradgradcheck(lambda x: x.pin_memory(), [x])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_rnn_backward_to_input_but_not_parameters(self, device):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -14016,7 +14015,7 @@ class TestAutogradDeviceType(TestCase):
             non_dual.copy_(x_dual)
             self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
             _cpu_mode = True
@@ -14055,7 +14054,7 @@ class TestAutogradDeviceType(TestCase):
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_reentrant_autograd(self, device):
         # Output on device so that this task will be associated with the device thread
         def fn_on_device(inp):
@@ -14314,7 +14313,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_gradcheck_input_output_different_device(self, device):
         x = torch.ones((1,), dtype=torch.double, device=device, requires_grad=True)
         gradcheck(lambda x: x.to("cpu"), (x,))
@@ -14534,6 +14533,7 @@ class TestAutogradDeviceType(TestCase):
         x.resize_as_(y)
         self.assertEqual(x._version, 2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_zero_dim_param_mixed_device_grad(self, device):
         # cpu 0-dim params with an accelerator device grad
@@ -14664,7 +14664,7 @@ class TestAutogradDeviceType(TestCase):
                     second_order(ref_pdist, x, v, p),
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpoint_compile_no_recompile(self, device):
         # Check for ambient TorchFunctionMode, e.g. when PYTORCH_TEST_WITH_CROSSREF=1
         expect_fail = len(torch.overrides._get_current_function_mode_stack()) > 0
@@ -14706,7 +14706,7 @@ class TestAutogradDeviceType(TestCase):
             else:
                 run()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpoint_device_context_fn(self, device):
         @contextlib.contextmanager
         def apply_device(device):
@@ -14735,7 +14735,7 @@ class TestAutogradDeviceType(TestCase):
             )
             out.backward()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_node_ordering_when_none_returned(self, device):
         class Matmul(torch.autograd.Function):
             @staticmethod
@@ -14778,7 +14778,7 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertEqual(executed, ["B", "A"])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @slowTest
     def test_checkpointing_without_reentrant_memory_savings(self, device):
         class MyModel(nn.Module):
@@ -14841,7 +14841,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpointing_without_reentrant_with_block_mask(self, device):
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
         from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
@@ -14864,7 +14864,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(result, x * 2)
 
     @skipXPUIf(True, "torch._C._scatter Not implemented on XPU, issue #143239")
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_checkpointing_without_reentrant_dataparallel(self, device):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
@@ -14896,7 +14896,7 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertEqual(b_grad, c_grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_callback_propagates_errors_from_device_thread(self, device):
         def callback():
             raise RuntimeError("blah")
@@ -14951,7 +14951,7 @@ class TestAutogradDeviceType(TestCase):
             )
             test(lambda: x, pin_memory)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_graph_save_on_cpu_device(self, device):
         def f(x):
             a = x + 1
@@ -14983,14 +14983,14 @@ class TestAutogradDeviceType(TestCase):
             memory_with_hooks = torch.accelerator.memory_allocated(device)
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_scalar_grad_mixed_device(self, device):
         x = torch.tensor(1.0, requires_grad=True)
         y = torch.randn(2, 2, device=device)
         out = x * y
         out.sum().backward()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_gradcheck_default_device_placement_context(self, device):
         # During gradcheck with fast_mode=True, we create a random vector on the CPU device using a CPU generator.
         # This test ensures that this still works when the default device is set to something else by the user.
@@ -15690,7 +15690,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
@@ -15796,7 +15796,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
@@ -15812,7 +15812,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
@@ -15822,7 +15822,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
@@ -15885,7 +15885,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
@@ -15973,7 +15973,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
         for _ in range(2):
             test()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @expectedFailureMPS
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
         def do_test(suppress_warn, keep_grad_acc):
@@ -18064,7 +18064,7 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
 class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooksBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_save_on_cpu_device_movement(self, device):
         # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
         # mm output never reaches the hook, so it stays on GPU; under the opt-in
@@ -18216,7 +18216,7 @@ class TestAutogradMultipleDispatch(TestCase):
             # Default gradient registered is grad.reshape_as(self)
             self.assertEqual(t.grad, grad.reshape_as(t))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
     )
@@ -18245,7 +18245,7 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertFalse(threads_eq)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_backward_tls_stash(self, device):
         local = threading.local()
         local.my_obj = {}
@@ -18830,7 +18830,7 @@ class TestInputGradBuffers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "while autograd is executing"):
             out.grad_fn.input_grad_buffers
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_reentrant_backward_after_exposure_errors(self, device):
         nested_input = torch.ones((), device=device, requires_grad=True)
         nested_output = nested_input * 2
@@ -18901,7 +18901,7 @@ class TestInputGradBuffers(TestCase):
             with self.assertRaisesRegex(RuntimeError, "create_graph=True"):
                 Producer.apply(x).sum().backward(create_graph=True)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_user_stream_switch_does_not_change_execution_stream(self, device):
         observed_buffers = []
         other_stream = torch.Stream(device)
@@ -18935,7 +18935,7 @@ class TestInputGradBuffers(TestCase):
         self.assertEqual(observed_buffers, [True])
         self.assertEqual(x.grad, torch.full_like(x, 2))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_different_stream_errors(self, device):
         x = torch.randn(4, device=device, requires_grad=True)
         stream = torch.Stream(device)
@@ -18950,7 +18950,7 @@ class TestInputGradBuffers(TestCase):
             with self.assertRaisesRegex(RuntimeError, "same stream"):
                 torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_later_producer_on_different_stream_errors(self, device):
         x = torch.randn(4, device=device, requires_grad=True)
         accumulate_grad = torch.autograd.graph.get_gradient_edge(x).node
@@ -18964,7 +18964,7 @@ class TestInputGradBuffers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same stream"):
             torch.autograd.backward((last, direct, first), (torch.ones_like(x),) * 3)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     def test_different_device_errors(self, devices):
         class Producer(Function):
@@ -18989,7 +18989,7 @@ class TestInputGradBuffers(TestCase):
                 (direct, first), (torch.ones_like(direct), torch.ones_like(first))
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
         script = """
 import sys

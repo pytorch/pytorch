@@ -49,6 +49,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -2485,6 +2486,7 @@ class outer_fn(torch.nn.Module):
         result = _resolve_group(mesh_1d)
         self.assertIsInstance(result, str)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_no_device_mesh_getattr_in_tp_dp_joint_graph(self):
         """Backward closures of DTensor ops should not capture DeviceMesh as

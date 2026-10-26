@@ -44,6 +44,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     e4m3_type,
@@ -4037,6 +4038,7 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
         symm_mem_hdl.barrier()
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @requires_cuda
 @skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")

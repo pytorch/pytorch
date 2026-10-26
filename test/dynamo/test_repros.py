@@ -64,6 +64,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
@@ -73,7 +74,6 @@ from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
     e4m3_type,
     instantiate_device_type_tests,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -977,6 +977,7 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
@@ -9315,7 +9316,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tensor_set_data_cross_device(self, device):
         def func(x):
             x.data = x.data.to(device)
@@ -9330,7 +9331,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(x_eager.device, x_compiled.device)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self, device):
         def func(x):
             x.data = torch.randn(8, device=device)
@@ -9340,7 +9341,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(func, backend="eager", fullgraph=True)(x)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tensor_set_data_cross_device_placeholder_metadata(self, device):
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
@@ -9358,7 +9359,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 if isinstance(ev, torch.Tensor):
                     self.assertEqual(ev.device.type, "cpu")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @torch._dynamo.config.patch(capture_scalar_outputs=False)
     def test_aot_backward_context_reentry_after_graph_break(self, device):
         def fn(x, y, scalar):
@@ -9380,7 +9381,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(x.grad, torch.ones_like(x))
         self.assertEqual(y.grad, -y.detach().sin())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_device_sync(self, device):
         def fn(x):
             y = x + 1
@@ -9393,7 +9394,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_torch_device_is_initialized(self, device):
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
@@ -9409,7 +9410,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         ):
             self.assertEqual(f(inp), inp + 2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_graph_metadata_does_not_retain_device_fake_constants(self, device):
         def f():
             x = torch.tensor(5, dtype=torch.float32, device=device)
@@ -9436,7 +9437,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # retained the real device scalar through FakeTensor.constant.
         self.assertIsNotNone(opt_f)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         if not torch.get_device_module(device).is_bf16_supported():
@@ -9491,7 +9492,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             "expected scalar type BFloat16 but found Long",
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_device_context_matmul_avoids_native_bmm_router_graph_break(self, device):
         torch._dynamo.utils.counters.clear()
 
@@ -9517,7 +9518,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertNotIn("_is_cow_tensor", graph_break_reasons)
         self.assertNotIn("call_boxed", graph_break_reasons)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
     # TODO: Remoe this skip once nccl issue if fixed
     @unittest.skip(
@@ -9597,7 +9598,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 del os.environ["MASTER_PORT"]
 
     @serialTest()
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_mem_leak_guards(self, device):
         def gn(x0, x):
             return x0 * x
@@ -9789,7 +9790,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/pytorch/issues/156580
     @serialTest()
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_dont_dce_rand(self, device):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
@@ -9822,7 +9823,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/151670
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_diagonal_scatter_single_elem_cpu_with_gpu_tensor(self, device):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -9941,7 +9942,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(out3_ref.shape, out3_test.shape)
         self.assertEqual(out3_ref.stride(), out3_test.stride())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
         @torch.compile(backend="eager")
         def f(x):
@@ -10264,7 +10265,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_zero_dim_param_mixed_device_grad(self, device):
         # cpu 0-dim params with cuda grads
         # https://github.com/pytorch/pytorch/issues/160084

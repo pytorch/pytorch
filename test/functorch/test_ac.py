@@ -5,9 +5,9 @@ from math import prod
 
 import torch
 import torch._functorch.config as config
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -77,7 +77,7 @@ def get_mem_and_flops(f, memory_budget=None):
 class MemoryBudgetTestDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_rematerializes_cheap(self, device):
         def f(x, w):
             x = x.cos()
@@ -101,7 +101,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(mem_5, 0.0)
         self.assertEqual(flops_5, eager_flops)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_matmul_even_chain(self, device):
         def f(x, ws):
             x = x.cos()
@@ -132,7 +132,7 @@ class MemoryBudgetTestDevice(TestCase):
                 self.assertEqual(mem, 10.0)
                 self.assertEqual(flops, eager_flops)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_matmul_uneven_chain(self, device):
         # This function is constructed so that we are saving one input of size
         # [512, in_dim] for each w
@@ -201,7 +201,7 @@ class MemoryBudgetTestDevice(TestCase):
                 mem, _ = get_mem_and_flops(call, memory_budget=mem_achieved / total_mem)
                 self.assertEqual(mem, mem_achieved)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(not has_triton(), "test needs triton")
     def test_custom_triton_kernel(self, device):
         @triton.jit
@@ -277,7 +277,7 @@ class MemoryBudgetTestDevice(TestCase):
 
                 self.assertEqual(expected, f_compile())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_prioritize_cheaper_matmul(self, device):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
@@ -297,7 +297,7 @@ class MemoryBudgetTestDevice(TestCase):
         # We are recomputing x1 @ w1 here!
         self.assertEqual(comp_flops, eager_flops + 4)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @config.patch(activation_memory_budget_runtime_estimator="profile")
     def test_profile(self, device):
         def f(x, ws):
@@ -320,7 +320,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(mem, 2)
         self.assertEqual(flops, eager_flops + 3)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_prioritize_cheaper_matmul2(self, device):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
@@ -346,7 +346,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(mem, 12)
         self.assertEqual(flops - eager_flops, 2 * 2 * 6 + 4 * 4 * 4)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4729")
     def test_attention_vs_linear(self, device):
         def f(x, w):
@@ -397,7 +397,7 @@ class MemoryBudgetTestDevice(TestCase):
         try_seq_length(4, 7, "mm")
         try_seq_length(4, 9, "attn")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_manual_ac(self, device):
         # test that manual checkpoint boundaries are respected
         # when autoac is set

@@ -22,10 +22,8 @@ from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -542,6 +540,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(out.a, eager.a)
         self.assertEqual(out.b, eager.b)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not torch.cuda.is_available(),
         "functionalize_rng_ops threads CUDA RNG state via CUDARngStateHelper, which "
@@ -861,7 +860,7 @@ class TestAOTCompileToPythonDevice(TestCase):
     # covered by test/inductor/test_compile_to_python.py's CUDA class.
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_pointwise_runs_like_eager(self, device):
         m = _Pointwise().eval().to(device)
         x = torch.randn(8, 4, device=device)
@@ -871,7 +870,7 @@ class TestAOTCompileToPythonDevice(TestCase):
         with torch.no_grad():
             self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_output_alias_regen_runs_like_eager(self, device):
         m = _ViewAlias().eval().to(device)
         x = torch.randn(4, 4, device=device)
@@ -886,7 +885,7 @@ class TestAOTCompileToPythonDevice(TestCase):
             out.untyped_storage().data_ptr(), xc.untyped_storage().data_ptr()
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_tensor_subclass_wrap_unwrap_runs_like_eager(self, device):
         from torch.testing._internal.two_tensor import TwoTensor
 
@@ -906,7 +905,7 @@ class TestAOTCompileToPythonDevice(TestCase):
         self.assertEqual(out.a, eager.a)
         self.assertEqual(out.b, eager.b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_input_mutation_copy_back_runs_like_eager(self, device):
         # The mutation epilogue's copy-back is the most plausibly device-sensitive wrapper
         # path (it writes updated values back onto the passed-in accelerator tensors), so

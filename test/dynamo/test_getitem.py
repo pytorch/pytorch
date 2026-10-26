@@ -31,10 +31,8 @@ from torch._library.opaque_object import (
     MemberType,
     register_custom_class,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._triton import has_triton
 
@@ -1465,7 +1463,7 @@ class GetItemAcceleratorTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipUnless(has_triton(), "Triton not available")
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_triton_kernel_getitem_grid(self, device):
         from torch.testing._internal.triton_utils import add_kernel
 

@@ -19,6 +19,7 @@ import torch
 import torch.multiprocessing as mp
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -1491,6 +1492,7 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
                 # to avoid errors from here leaking into other tests
                 pass
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_arch_flags_non_default_gencode(self):
         user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
@@ -1503,6 +1505,7 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
             f"Expected: [], Got: {result}",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_arch_flags_default_gencode(self):
         default_flags = _get_cuda_arch_flags()

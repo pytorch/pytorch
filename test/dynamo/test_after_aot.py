@@ -26,10 +26,8 @@ from torch._dynamo.repro.after_aot import (
 from torch._functorch.fx_minifier import MinifierSanityCheckFailed
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -842,7 +840,7 @@ class TupleOut(torch.nn.Module):
 class TestAfterAotAccelerator(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_after_aot_minifier_emits_extra_triton_imports_integration(self, device):
         extra_import_kernel = TestAfterAot.import_triton_extra_import_kernel(self)
@@ -881,7 +879,7 @@ class TestAfterAotAccelerator(torch._dynamo.test_case.TestCase):
 
         self.assertIn("import triton.language.extra.libdevice as libdevice", repro)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_dump_generator(self, device):
         device_type = torch.device(device).type
         gen = torch.get_device_module(device_type).default_generators[0].clone_state()
@@ -897,7 +895,7 @@ class TestAfterAotAccelerator(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(reader.args[0], torch._C.Generator)
         self.assertEqual(reader.args[0].device, torch.device(device_type, 0))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_graphsafe_rng_repro(self, device):
         """save_graph_repro should emit reader.generator() for Generator args."""
         device_type = torch.device(device).type

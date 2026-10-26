@@ -34,10 +34,10 @@ from torch._subclasses.functional_tensor import (
     PythonFunctionalizeAPI,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipCUDAIf,
     skipXPUIf,
 )
@@ -3143,7 +3143,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cond_gpu(self, device):
         def true_fn(x):
             return x.sin()
@@ -3156,7 +3156,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         result = cond(pred, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cond_autograd_gpu(self, device):
         def true_fn(x):
             return x.sin()
@@ -3243,7 +3243,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         return cond_outputs, cond_inputs
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
@@ -3294,7 +3294,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
             cond_fct, pred_fn, true_fn, false_fn, operands
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_switch_gpu(self, device):
         def branch0(inp_x):
             return inp_x.sin()
@@ -3307,7 +3307,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         result = switch(index, (branch0, branch1), (x,))
         self.assertEqual(result, torch.cos(x))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_switch_autograd_gpu(self, device):
         def branch0(x):
             return x.sin()
@@ -3329,7 +3329,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
             expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
             self.assertEqual(expected_grads, grads)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_map_gpu(self, device):
         def f(x, y):
             return x + y
@@ -3340,7 +3340,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         expected = _fake_map(f, xs, y)
         self.assertEqual(expected, res)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_while_loop_gpu(self, device):
         def cond_fn(x):
             return x.sum() < 10
@@ -4826,7 +4826,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
                 result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
@@ -4844,7 +4844,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_input_mutation, init, x, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_scan_additional_input_mutation(self, device):
         buf = torch.randn(2, 2, device=device)
 
@@ -4861,7 +4861,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_additional_input_mutation, init, x, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_scan_input_carry_alias(self, device):
         def fct_input_output_alias(x, y):
             return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
@@ -4880,7 +4880,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
@@ -4899,7 +4899,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_scan_carry_carry_alias(self, device):
         def fct_carry_carry_alias(x, y):
@@ -4920,7 +4920,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_carry_carry_alias, init, inp, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_scan_carry_output_alias(self, device):
         def fct_carry_output_alias(x, y):
@@ -4941,7 +4941,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_kind", ["disjoint", "overlap", "same_view"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -4965,7 +4965,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, (init, xs, kv))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -5009,7 +5009,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, params)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("alias_kind", ["disjoint", "overlap"])
     def test_scan_aliased_additional_input_mutation(self, device, alias_kind):
         kv = torch.randn(2, 4, device=device)
@@ -5032,7 +5032,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_aliased_mutation, init, xs, dim=0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile"])
     def test_scan_unaliased_additional_input_mutation(self, device, compile_mode):
@@ -5644,7 +5644,7 @@ class AssociativeScanTestsDevice(TestCase):
                     results_torch.append(op_pt(x, 0))
                 self.assertEqual(results, results_torch)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
     def test_associative_scan_dim_shape_failure(
@@ -5669,7 +5669,7 @@ class AssociativeScanTestsDevice(TestCase):
                 inputs=x,
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_pointwise_mixed_device_lowering_error(self, device):
         def combine_fn(x, y):
@@ -5979,7 +5979,7 @@ class AssociativeScanTestsDevice(TestCase):
 
     # TODO: NestedFn does not accept the kwargs passed here (dim, reverse, ...),
     # so this fails at model construction. Fix NestedFn's signature to re-enable.
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
     def test_associative_scan_nested(self, device):
@@ -6076,7 +6076,7 @@ class AssociativeScanTestsDevice(TestCase):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
     def test_associative_scan_loop_in_combine_fn_failure(self, device):
@@ -6149,7 +6149,7 @@ class AssociativeScanTestsDevice(TestCase):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
     def test_associative_scan_map_in_combine_fn(self, device):
@@ -6526,7 +6526,7 @@ class AssociativeScanTestsDevice(TestCase):
         grads = torch.func.grad(loss, argnums=(0, 1))(*args)
         self.assertEqual(grads, torch.func.grad(loss_exp, argnums=(0, 1))(*args))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_associative_scan_leaves_on_different_devices_grads(self, device):
         def uncoupled(left, right):
             return left[0] * right[0], left[1] + right[1]
@@ -6576,7 +6576,7 @@ class AssociativeScanTestsDevice(TestCase):
             inputs=elements,
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_different_input_size_wrong_dim(self, device):
         batch = 5
@@ -7001,7 +7001,7 @@ class AssociativeScanTestsDevice(TestCase):
             autograd_param=inp[0:1],
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
         B, N, C, H, W = 3, 3, 2, 3, 3
@@ -7023,7 +7023,7 @@ class AssociativeScanTestsDevice(TestCase):
             ):
                 associative_scan(fct, x, 0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_non_pointwise(self, device):
         x = torch.randn(3, 10, 2, device=device)
@@ -7039,7 +7039,7 @@ class AssociativeScanTestsDevice(TestCase):
                 combine_mode="pointwise",
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_pointwise_multiple_additional_inputs_autograd(
         self, device
@@ -7081,7 +7081,7 @@ class AssociativeScanTestsDevice(TestCase):
         self.assertEqual(result, result_exp)
         self._check_autograd(result, result_exp, (xs, H))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_associative_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
@@ -7098,7 +7098,7 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_input_mutation, x, 0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_associative_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return x[0], x[1] + y[1]
@@ -7116,7 +7116,7 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_output_output_alias(self, device):
         def fct_output_output_alias(x, y):
@@ -7136,7 +7136,7 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_simple(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7161,7 +7161,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_autograd(self, device, combine_mode):
         # The stack's motivation is an efficient backward, so exercise autograd
@@ -7193,7 +7193,7 @@ class AssociativeScanTestsDevice(TestCase):
         xd = torch.randn(2, 3, 2, dtype=torch.double, device=device, requires_grad=True)
         self.assertTrue(torch.autograd.gradcheck(fn, (xd,)))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_pytree(self, device, combine_mode):
         xs = {
@@ -7230,7 +7230,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_reverse(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7257,7 +7257,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nested(self, device, combine_mode):
         x = torch.randn(2, 3, 4, 2, device=device)
@@ -7289,7 +7289,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_additional_inputs(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7317,7 +7317,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_scan_length_one(self, device, combine_mode):
         x = torch.randn(3, 1, 2, device=device)
@@ -7338,7 +7338,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), x)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("don't test compile on compile")
     def test_associative_scan_in_vmap_pointwise_compile_error(self, device):
         from torch._inductor.exc import InductorError
@@ -7357,7 +7357,7 @@ class AssociativeScanTestsDevice(TestCase):
         with self.assertRaisesRegex(InductorError, "LoweringException"):
             torch.compile(fn)(x)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_in_dims(self, device, combine_mode):
         x = torch.randn(4, 3, 2, device=device)
@@ -7384,7 +7384,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_out_dims(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7412,7 +7412,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_unbatched_additional_inputs(
         self, device, combine_mode
@@ -7442,7 +7442,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_scan_dim(self, device, combine_mode):
         # The frontend moves the scan dim to 0 (associative_scan.py movedim),
@@ -7470,7 +7470,7 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_zero_length_scan_dim(self, device, combine_mode):
         # Size-0 scan dim under vmap: the frontend short-circuits (see the size-0

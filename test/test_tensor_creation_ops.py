@@ -14,6 +14,7 @@ import tempfile
 from typing import Any
 
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -42,8 +43,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
-    largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
+    largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, dtypesIfCUDA,
+    dtypesIfCPU, dtypesIfXPU, expectedFailureXLA
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -696,7 +697,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(res1, res2)
         self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_cat_channels_last_large_inputs(self, device):
         num_tensors = 130
         inputs_device = [
@@ -711,7 +712,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(result.cpu(), expected)
         self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_cat_out_memory_format(self, device):
         inp_size = (4, 4, 4, 4)
         expected_size = (8, 4, 4, 4)
@@ -752,7 +753,7 @@ class TestTensorCreation(TestCase):
 
         self.assertTrue(res3_cuda.is_contiguous(memory_format=torch.channels_last))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_cat_stack_cross_devices(self, device):
         cuda = torch.randn((3, 3), device=device)
         cpu = torch.randn((3, 3), device='cpu')
@@ -767,7 +768,7 @@ class TestTensorCreation(TestCase):
 
     # TODO: reconcile with other cat tests
     # TODO: Compare with a NumPy reference instead of CPU
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_cat(self, device):
         SIZE = 10
         for dim in range(-3, 3):
@@ -790,7 +791,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
     # TODO: update this test to compare against NumPy instead of CPU
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.float, torch.double)
     def test_device_rounding(self, device, dtype):
         # test half-to-even
@@ -1108,7 +1109,7 @@ class TestTensorCreation(TestCase):
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @skipCUDAIf(True, "CUDA diverges on most dtypes, often dramatically.")
-    @skipXPU
+    @tci.test(exclude_device='xpu')
     @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
@@ -1273,7 +1274,7 @@ class TestTensorCreation(TestCase):
     # contiguous, so _stack uses the native serial kernel on CPU. The inputs and
     # the output sit inside larger buffers, so a wrong copy length stays in
     # bounds and shows up as wrong values.
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float, torch.double)
     def test__stack_size_one_dim_strided_inputs(self, device, dtype):
         width = 566
@@ -1291,7 +1292,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(buffer[2:], torch.full_like(buffer[2:], -1), atol=0, rtol=0)
 
     # A size-1 stack dim may carry any stride and still be contiguous.
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float, torch.double)
     def test__stack_out_size_one_dim_strided(self, device, dtype):
         a = torch.full((1, 1), 3, device=device, dtype=dtype)
@@ -1555,7 +1556,7 @@ class TestTensorCreation(TestCase):
         self.assertTrue(grid_b.equal(grid_b2))
         self.assertTrue(grid_c.equal(grid_c2))
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     def test_meshgrid_vs_numpy(self, device):
         # Shapes to the random tensors. Each line is a test case, and
         # each list within that line is the shape of a single
@@ -1660,7 +1661,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     def test_linlogspace_mem_overlap(self, device):
         x = torch.rand(1, device=device).expand(10)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -2291,7 +2292,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(d.shape[0], 800)
 
     # cannot call storage() on meta tensor
-    @skipMeta
+    @tci.test(exclude_device='meta')
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             # some of these cases are pretty strange, just verifying that if as_strided
@@ -2461,8 +2462,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[0], a[0])
             self.assertEqual(t[steps - 1], a[steps - 1])
 
-    @onlyAccelerator
-    @skipXPU
+    @tci.test(exclude_device=('cpu', 'meta', 'xpu'))
     @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
@@ -2531,7 +2531,7 @@ class TestTensorCreation(TestCase):
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_new_tensor_device(self, device):
         torch_device = torch.device(device)
         cpu_device = torch.device('cpu')
@@ -2957,7 +2957,7 @@ class TestTensorCreation(TestCase):
     def test_refs_tensor(self, device, dtype):
         self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_as_tensor(self, device):
         # from python data
         x = [[0, 1], [2, 3]]
@@ -3760,7 +3760,7 @@ class TestRandomTensorCreation(TestCase):
         self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Produces inconsistent errors when run in fbcode.")
     def test_randperm_device_compatibility(self, device):
         device_type = torch.device(device).type
@@ -4527,23 +4527,23 @@ class TestAsArray(_TestAsArrayBase):
     # Skipping 'meta' devices, since there's no point in comparing their
     # data pointer (which is basically the point here), since they all
     # return 0.
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_alias_from_tensor(self, device, dtype):
         self._test_alias_with_cvt(identity, device, dtype)
 
     # Skipping 'meta', since 'to_dlpack' does not work for them.
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_alias_from_dlpack(self, device, dtype):
         self._test_alias_with_cvt(to_dlpack, device, dtype)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
@@ -4560,13 +4560,13 @@ class TestAsArray(_TestAsArrayBase):
         check(copy=True)
         check(dtype=dtype, copy=True)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_tensor_mult_devices(self, devices, dtype):
         self._test_copy_mult_devices(devices, dtype, identity)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack_mult_devices(self, devices, dtype):
@@ -4603,7 +4603,7 @@ class TestAsArray(_TestAsArrayBase):
                                     "can't alias arbitrary sequence"):
             torch.asarray(original.tolist(), copy=False)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @deviceCountAtLeast(2)
     @dtypes(torch.float32)
     def test_unsupported_alias_mult_devices(self, devices, dtype):
@@ -4654,7 +4654,7 @@ class TestAsArray(_TestAsArrayBase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_device_without_index(self, device):
         original = torch.arange(5, device=device)
 

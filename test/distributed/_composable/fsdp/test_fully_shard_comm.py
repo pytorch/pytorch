@@ -62,11 +62,11 @@ from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.profiler import profile, ProfilerActivity
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCUDA,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -480,7 +480,7 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             self.assertEqual(out, expected, atol=0, rtol=0)
             self.assertGreater(out._version, version)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_kernels(self, device):
         bf16, fp32 = torch.bfloat16, torch.float32
         for size, num_leading_dims in (((8, 3), None), ((2, 8, 3), [1, 1])):
@@ -528,7 +528,7 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
                 {"out": packed.repeat(1, 2), "num_leading_dims": num_leading_dims},
             )
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_cuda_graph(self, device):
         tensor = make_tensor((128, 8, 3), device=device, dtype=torch.bfloat16)
         packed = tensor.new_empty((4, tensor.numel() // 4))

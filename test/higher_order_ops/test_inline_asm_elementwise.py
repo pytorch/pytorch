@@ -13,11 +13,9 @@ from dataclasses import dataclass
 
 import torch
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI200_ARCH,
@@ -317,6 +315,7 @@ TEST_CASES = [
 TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @instantiate_parametrized_tests
@@ -427,6 +426,7 @@ class TestInlineAsmElementwise(TestCase):
         self.assertEqual(result.float(), expected.float(), atol=1e-5, rtol=1e-5)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 class TestInlineAsmElementwiseErrors(TestCase):
     """Tests for error handling."""
@@ -520,7 +520,7 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(code.count("@triton_heuristics"), 1)
         self.assertEqual(code.count("tl.inline_asm_elementwise("), 1)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_multiple_outputs_compile(self, device):
@@ -552,7 +552,7 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(result, x.float() * 4)
         self.assertEqual("\n".join(sources).count("tl.inline_asm_elementwise("), 1)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_stochastic_rounding_with_rng_input(self, device):
@@ -573,7 +573,7 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         rng = torch.tensor([0x7FFF, 0x8000], device=device, dtype=torch.int32)
         self._check_stochastic_rounding(device, fn, rng)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_stochastic_rounding_with_inline_rng(self, device):
@@ -596,7 +596,7 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         counter = torch.tensor([1, 0], device=device, dtype=torch.int32)
         self._check_stochastic_rounding(device, fn, counter)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_multiple_outputs_with_pack_compile(self, device):
@@ -616,6 +616,7 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(torch.compile(fn, fullgraph=True)(x), (x, x + 1))
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmElementwiseEdgeCases(TestCase):
@@ -761,6 +762,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
             self.assertEqual(eager_result, compiled_result)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @xfailIfNoAcceleratorTriton

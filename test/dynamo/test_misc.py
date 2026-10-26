@@ -80,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -88,7 +89,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
     PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -346,6 +346,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "cuda needed")
     def test_assume_32_bit_indexing(self):
         @torch.compile(backend="inductor")
@@ -7250,6 +7251,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
@@ -7344,6 +7346,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "cuda needed")
     def test_cuda_tensor_is_pinned_constant_false(self):
         def pinned_memory_of(arg):
@@ -10490,6 +10493,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
     def test_symint_as_device_kwarg_non_strict_export(self):
         class Mod(torch.nn.Module):
@@ -20489,7 +20493,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self, device):
         def fn(x):
@@ -20503,7 +20507,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable_bad_inputs(self, device):
         def fn1(x):
@@ -20530,7 +20534,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @torch._dynamo.config.patch(recompile_limit=999)
     def test_legacy_cuda_tensor(self, device):
         typs = [

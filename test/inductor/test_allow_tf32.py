@@ -19,6 +19,7 @@ from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import tci
 
 
 class _TensorNode:
@@ -143,6 +144,7 @@ class TestAllowTf32ExtraKwargs(TestCase):
         extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
         self.assertFalse(extra["ALLOW_TF32"])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_cuda_small_shapes_disable_allow_tf32(self):
         orig = torch.backends.cuda.matmul.fp32_precision
@@ -154,6 +156,7 @@ class TestAllowTf32ExtraKwargs(TestCase):
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_cuda_large_shapes_enable_allow_tf32(self):
         orig = torch.backends.cuda.matmul.fp32_precision
@@ -188,6 +191,7 @@ class TestAllowTf32ExtraKwargs(TestCase):
         recorded = [device for device, _flag in details.mm_template_allow_tf32]
         self.assertNotIn("meta", recorded)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_cache_key_tracks_cuda_allow_tf32(self):
         tensor = torch.zeros(2, 2, device="cuda")

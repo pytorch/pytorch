@@ -11,6 +11,7 @@ import torch
 from torch import inf, nan
 
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
@@ -20,7 +21,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPSComplex,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
     ops,
     precisionOverride,
 )
@@ -1538,7 +1538,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertGreater(math.copysign(1.0, v), 0.0)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float, torch.double)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
@@ -1546,7 +1546,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.bool, torch.int8)
     def test_narrow_dtypes(self, device, dtype):
         x_int = torch.randint(2, (8 * 1024,), device=device, dtype=torch.int)
@@ -1614,7 +1614,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
     def test_nonzero_large(self, device, dtype):

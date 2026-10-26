@@ -2,11 +2,10 @@
 
 import torch
 import torch.func._random as random
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import (
@@ -171,7 +170,7 @@ class TestStatelessRNGKeySplit(TestCase):
         self.assertEqual(splits[2], random.fold_in(key0, 1))
 
     @parametrize("batched", [False, True])
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_consistency(self, device, batched):
         key_cpu = random.key(42)
         key_dev = random.key(42, device=device)
@@ -300,7 +299,7 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
             random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_error_data_wrong_device(self, device):
         key = random.key(42, device=device)
         # A CPU data tensor with an accelerator key is a device mismatch.
@@ -327,7 +326,7 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         self.assertEqual(random.fold_in(key, scalar), expected)
         self.assertEqual(random.fold_in(key, one_d), expected)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_tensor_data_cuda_graph(self, device):
         # A tensor data is not baked into the graph: mutating it and replaying
         # produces the result for the new value.
@@ -353,7 +352,7 @@ class TestStatelessRNGKeyFoldIn(TestCase):
 
     @parametrize("batched", [False, True])
     @parametrize("tensor_data", [False, True])
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_consistency(self, device, batched, tensor_data):
         key_cpu = random.key(42)
         key_dev = random.key(42, device=device)
@@ -613,7 +612,7 @@ class TestStatelessRNGDistribution(TestCase):
 
     @dtypes(*all_floating_dtypes)
     @parametrize("batched", [False, True])
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_uniform_consistency(self, device, dtype, batched):
         if batched:
             # Batched key exercises the multi-key path.
@@ -633,7 +632,7 @@ class TestStatelessRNGDistribution(TestCase):
         )
 
     @dtypes(*all_floating_dtypes)
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_normal_consistency(self, device, dtype):
         key_cpu = random.fold_in(random.key(42), 7)
         key_dev = random.fold_in(random.key(42, device=device), 7)
@@ -775,7 +774,7 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.bits(key, (100,), dtype=torch.uint64))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("op", ["uniform", "normal", "randint"])
     def test_generation_no_extra_clone(self, device, op):
         # Out-of-place generation fully overwrites its output; ensure generation
@@ -810,7 +809,7 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(result, gen(key, shape))
         self.assertLess(extra, 1.5 * out_bytes)  # no extra full-size clone
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_generation_no_corruption_from_buffer_reuse(self, device):
         # Regression test for Inductor buffer reuse corrupting generation.
         if torch.device(device).type == "cuda" and not HAS_TRITON:
@@ -828,7 +827,7 @@ class TestStatelessRNGCompile(TestCase):
         x = torch.randn(16, device=device)
         self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("op", ["uniform", "normal", "randint"])
     def test_generation_returned_directly_with_cudagraphs(self, device, op):
         # Regression test: returning a reinplaced (Tensor(a!)) result used to
@@ -848,7 +847,7 @@ class TestStatelessRNGCompile(TestCase):
         compiled = torch.compile(f, fullgraph=True, mode="reduce-overhead")
         self.assertEqual(compiled(x), expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_key_input_with_cudagraphs(self, device):
         # Regression test: after warmup, cudagraphs copies inputs with
         # _foreach_copy_, which didn't support the uint64 key.
@@ -1183,7 +1182,7 @@ class TestStatelessRNGInteger(TestCase):
         with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
             random.randint_(key, result, high=10)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cross_device_consistency(self, device):
         key_cpu = random.key(42)
         key_dev = random.key(42, device=device)

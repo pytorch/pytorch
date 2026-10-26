@@ -29,6 +29,7 @@ from torch._inductor.utils import (
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -186,6 +187,7 @@ class CudaReproTests(TestCase):
         torch.compile(fn, backend="inductor", fullgraph=True)(compiled_acc, a, b)
         self.assertEqual(compiled_acc, expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_frexp_non_finite(self):
         def fn(x):
@@ -202,6 +204,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
         self.assertEqual(actual_exponent, expected_exponent)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_frexp_subnormal(self):
         # https://github.com/pytorch/pytorch/issues/195007
@@ -1925,6 +1928,7 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
     @config.patch(
@@ -2022,6 +2026,7 @@ class CudaReproTests(TestCase):
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_promoted_lowp_cuda(self):
@@ -3765,6 +3770,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
     @skipIfXpu(msg="PTX atan codegen is CUDA-specific")

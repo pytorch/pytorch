@@ -11,11 +11,9 @@ import expecttest
 
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCPU,
-    onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
@@ -539,7 +537,7 @@ class TestProfilerTree(_TestProfilerTreeBase):
 class TestProfilerTreeDevice(_TestProfilerTreeBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cpu_profile(self, device):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -595,7 +593,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                   detach""",
         )
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_record_function(self, device):
         with torch.profiler.profile(
@@ -646,7 +644,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                       aten::copy_""",
         )
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory(self, device):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -725,7 +723,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @onlyCPU
+    @tci.test(device="cpu")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory_and_stack(self, device):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -838,7 +836,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @onlyCUDA
+    @tci.test(device="cuda")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self, device):
         # Do lazy imports ahead of time to avoid it showing up in the tree
@@ -1293,7 +1291,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                 [memory]""",
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/83606")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stream(self, device):

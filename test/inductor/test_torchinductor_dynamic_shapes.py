@@ -21,10 +21,10 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
@@ -1077,7 +1077,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 cfn = self.compile_fn(fn, fullgraph=True)
                 self.assertEqual(fn(x), cfn(x))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
             cfn = self.compile_fn(fn)
@@ -1100,7 +1100,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         test(div)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_sub_constant_folding(self, device):
         def sub(x):
             return x - torch.zeros(3)

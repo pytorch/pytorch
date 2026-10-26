@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch.testing._internal import common_utils
+from torch.testing._internal import common_utils, tci
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_SANDCASTLE,
@@ -162,6 +162,7 @@ def _table(header: tuple[str, ...], rows: list[tuple[Any, ...]]) -> str:
 
 
 # torchci test run reports, on TestJunitXml's fixture suite.
+@tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
 @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
@@ -436,6 +437,7 @@ TestUnittest    | test_unittest            | test_unittest""",
                 self.assertEqual(_report_files(prefix), [])
 
 
+@tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
 @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
@@ -518,6 +520,7 @@ class TestReportFailureIsolation(TestCase):
 instantiate_parametrized_tests(TestReportFailureIsolation)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
 @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
@@ -626,6 +629,7 @@ _GTEST_LISTING = {
 }
 
 
+@tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
 @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")

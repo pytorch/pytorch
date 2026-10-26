@@ -24,23 +24,18 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv as SymbolicShapeEnv,
 )
 from torch.testing import make_tensor
-from torch.testing._internal import composite_compliance, opinfo
+from torch.testing._internal import composite_compliance, opinfo, tci
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCPU,
     onlyNativeDeviceTypesAnd,
     OpDTypes,
     ops,
     skip,
     skipCUDAIfNotRocm,
-    skipMeta,
-    skipMPS,
     skipOps,
-    skipXPU,
     xfail,
 )
 from torch.testing._internal.common_dtype import (
@@ -230,7 +225,7 @@ class TestCommon(TestCase):
                 raise AssertionError(err_msg)
 
     # Validates that each OpInfo works correctly on different CUDA devices
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
     def test_multiple_devices(self, devices, dtype, op):
@@ -490,7 +485,7 @@ class TestCommon(TestCase):
         self.assertEqual(actual, expected, atol=0, rtol=1e-6)
 
     # Tests that the cpu and gpu results are consistent
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfMPS
     @suppress_warnings
     @skipCUDAIfNotRocm
@@ -754,9 +749,8 @@ class TestCommon(TestCase):
             )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "xpu"))
     @skipIfMPS
-    @skipXPU
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
@@ -769,7 +763,7 @@ class TestCommon(TestCase):
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
@@ -780,7 +774,7 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
         [op for op in op_db if op.error_inputs_sparse_func is not None],
@@ -803,7 +797,7 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
         [op for op in python_ref_db if op.error_inputs_func is not None],
@@ -1065,7 +1059,7 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @skipXPU
+    @tci.test(exclude_device="xpu")
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
@@ -1574,7 +1568,7 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
-    @skipMPS
+    @tci.test(exclude_device="mps")
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
@@ -1603,7 +1597,7 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
@@ -1809,7 +1803,7 @@ class TestCommon(TestCase):
         self.fail(msg)
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
         (op for op in op_db if op.promotes_int_to_float),
@@ -1829,7 +1823,7 @@ class TestCommon(TestCase):
     #
     # The idea is that the meta implementations should correctly reflect on the behavior
     # of other concrete devices (e.g. CPU and CUDA).
-    @onlyCPU
+    @tci.test(device="cpu")
     @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
     @skipOps(meta_consistency_out_dtype_mismatch_xfails)
     @skipIfTorchDynamo("meta device runs only on eager")
@@ -2032,7 +2026,7 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
         }
     )
-    @skipXPU
+    @tci.test(exclude_device="xpu")
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2274,7 +2268,7 @@ class TestMathBits(TestCase):
         self.assertIsInstance(result.shape[0], torch.SymInt)
         return result
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_prims_as_strided_conjugate(self, device):
         x = torch.randn(4, dtype=torch.cfloat, device=device).conj()
         result = torch.ops.prims.as_strided(x, (2, 2), (2, 1), 0)
@@ -2298,7 +2292,7 @@ class TestMathBits(TestCase):
         self.assertTrue(tangent.is_conj())
         self.assertEqual(tangent.shape, view.shape)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_prims_as_strided_negative(self, device):
         x = torch._neg_view(torch.arange(4, dtype=torch.float, device=device))
         result = torch.ops.prims.as_strided(x, (2, 2), (2, 1), 0)
@@ -3199,7 +3193,7 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
         fake_backward_xfails | fake_backward_mps_xfails | {skip("sparse.sampled_addmm")}
@@ -3207,7 +3201,7 @@ class TestFakeTensor(TestCase):
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
         fake_backward_xfails | fake_autocast_backward_xfails | fake_backward_mps_xfails

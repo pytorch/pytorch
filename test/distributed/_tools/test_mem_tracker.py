@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
@@ -28,6 +29,7 @@ class TestMemTracker(TestCase):
         mod.reset_accumulated_memory_stats(dev)
         mod.reset_peak_memory_stats(dev)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
     )
@@ -84,6 +86,7 @@ class TestMemTracker(TestCase):
         accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(
         not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
     )

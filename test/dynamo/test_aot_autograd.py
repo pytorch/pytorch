@@ -32,10 +32,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.profiler import profile
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -1915,7 +1913,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
     def test_partitioner_filters_symbool_saved_for_bw(self, device):

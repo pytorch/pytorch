@@ -12,10 +12,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._C._dynamo.guards import assert_size_stride
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyXPU,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
@@ -1358,7 +1358,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         test_aten_conv_backward_op_output_mask([False, False, True])
         test_aten_conv_backward_op_output_mask([False, False, False])
 
-    @onlyXPU
+    @tci.test(device="xpu")
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_channels_last_ouput_stride(self, device, dtype):
         input = torch.randn(
@@ -1407,7 +1407,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             output_device = conv_fn(input_device, weight_device, bias_device)
             self.assertEqual(output_device.cpu(), output_cpu)
 
-    @onlyXPU
+    @tci.test(device="xpu")
     def test_onednn_allow_tf32_get_set(self):
         with torch.backends.mkldnn.flags(
             enabled=None, deterministic=None, allow_tf32=False

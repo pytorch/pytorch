@@ -38,6 +38,7 @@ from torch.cuda._memory_viz import (
     segments,
     trace_plot,
 )
+from torch.testing._internal import tci
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
@@ -65,7 +66,6 @@ from torch.testing._internal.common_device_type import (
     has_hipsolver,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
 )
@@ -418,6 +418,7 @@ if library._name != "libamd_smi.so":
         self.assertIn("unexpected amdsmi package failure", proc.stderr)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
@@ -7002,6 +7003,7 @@ print("OK")
         self.assertEqual(r, "OK")
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @unittest.skipIf(TEST_WITH_ROCM, "expandable segment bases are CUDA-only")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
@@ -7038,6 +7040,7 @@ print(json.dumps([
         self.assertEqual(min(r["address"] for r in runs), bases.pop())
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @unittest.skipIf(TEST_WITH_ROCM, "restoring at a fixed address is CUDA-only")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
@@ -7263,6 +7266,7 @@ print(json.dumps(errors))
         self.assertIn("at least one mapped range", out[1])
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @unittest.skipIf(
     TEST_WITH_ROCM and EXPANDABLE_SEGMENTS,
@@ -7555,6 +7559,7 @@ class TestResizeStorageWithAddr(TestCase):
         self.assertEqual(t2.untyped_storage().nbytes(), original_size2)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaAllocator(TestCase):
@@ -9569,6 +9574,7 @@ def caching_host_allocator_max_round_threshold_and_max_cached_size(
         )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorConfig(TestCase):
     def setUp(self):
@@ -9668,6 +9674,7 @@ class TestCachingHostAllocatorConfig(TestCase):
             self.assertNotEqual(b.data_ptr(), small_ptr)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorCudaGraph(TestCase):
     # As soon as pinned host memory allocated by a private pool is
@@ -9796,6 +9803,7 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 data.copy_(data_gpu, non_blocking=True)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def tearDown(self):
@@ -12499,13 +12507,14 @@ print(json.dumps([
                 torch.cuda.empty_cache()
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >=5.3 required for graphs"
     )
@@ -12581,7 +12590,7 @@ class TestCudaOptims(TestCase):
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -12772,7 +12781,7 @@ class TestCudaOptims(TestCase):
                                 else {},
                             )
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @parametrize("in_place_unscale", [False, True])
     @optims(
         [optim for optim in optim_db if "cuda" in optim.supports_fused_on],
@@ -12801,7 +12810,7 @@ class TestCudaOptims(TestCase):
         # check that the user's grad_scale was respected (i.e. the gradient was divided by 5 * 3)
         self.assertEqual(weight.grad, torch.full_like(weight, fill_value=1))
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -12862,6 +12871,7 @@ class TestCudaOptims(TestCase):
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
@@ -12972,6 +12982,7 @@ class TestGDS(TestCase):
             file.save_storage(storage)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaAutocast(TestAutocast):
     def setUp(self):
@@ -13529,6 +13540,7 @@ class TestCudaAutocast(TestAutocast):
 
 
 class TestCompileKernel(TestCase):
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
         # Simple vector addition kernel
@@ -13634,6 +13646,7 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_large_shared_memory(self):
         kernel_source = """
@@ -13712,6 +13725,7 @@ class TestCompileKernel(TestCase):
     # comfortably meets (~2e-3). This is the documented behavior of CDNA3's
     # matrix instructions (arXiv:2511.10909 §IV-F), not a hipBLASLt bug.
     # See https://github.com/jeffdaily/tf32_analysis.
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
@@ -13785,6 +13799,7 @@ class TestCompileKernel(TestCase):
         # Verify results
         self.assertEqual(C_explicit, expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_as_custom_op(self):
         # Define a simple vector addition kernel
@@ -13844,6 +13859,7 @@ class TestCompileKernel(TestCase):
         expected = a + b
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_validation(self):
         kernel_source = """
@@ -13891,6 +13907,7 @@ class TestCompileKernel(TestCase):
         expected = input_data + scalar_val
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_double_precision(self):
         """Test that Python floats are correctly handled as doubles in kernels."""
@@ -13925,6 +13942,7 @@ class TestCompileKernel(TestCase):
         )
         torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_cuda_headers(self):
         """Test that kernels can include and use CUDA headers like cuda_fp16.h."""
@@ -13959,6 +13977,7 @@ class TestCompileKernel(TestCase):
         expected = torch.full((n,), test_value, device="cuda", dtype=torch.float16)
         torch.testing.assert_close(output, expected, rtol=1e-3, atol=1e-3)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_template(self):
         kernel_source = """
@@ -14020,6 +14039,7 @@ class TestCompileKernel(TestCase):
         expected = a + b
         self.assertEqual(c, expected)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_dlpack(self):
         """Test that compile_kernel works with tensors created via DLPack."""
@@ -14057,9 +14077,10 @@ class TestCompileKernel(TestCase):
         self.assertEqual(a[0].item(), 42.0, "DLPack tensors should share memory")
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfRocm
     @skipCUDAIf(
         not TEST_BF16 or (torch.backends.cudnn.version() or 0) < 91300,
@@ -14279,6 +14300,7 @@ class TestFXMemoryProfiler(TestCase):
                                         fx_frames.append(frame)
         return fx_frames
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_fx_memory_profiler_augmentation(self):

@@ -25,6 +25,7 @@ from torch._C._profiler import _ExperimentalConfig
 from torch._utils import try_import
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     TEST_CUDA,
@@ -2622,6 +2623,7 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertEqual(submission_id_sets[0], {node_a_event_id})
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyCUDA(TestCase):
     """Collection through Cuspy directly (not via torch.profiler.profile)."""
@@ -3343,6 +3345,7 @@ def _graph_node_created_key():
     return int(CallbackDomain.RESOURCE), int(CallbackIdResource.GRAPHNODE_CREATED)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 # setUp imports Cuspy, which hard-imports the build-generated _cupti_stubs, so the
 # whole class has to be gated -- a method-level gate would still let setUp error out where
@@ -3627,6 +3630,7 @@ class TestCuspyTraceExport(TestCase):
         prof.profiler.export_chrome_trace.assert_not_called()
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
 class TestCuspyProfilerCUDA(TestCase):

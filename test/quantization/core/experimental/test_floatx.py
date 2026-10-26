@@ -7,13 +7,12 @@ import unittest
 import torch
 from torch._prims_common import _uncastable_shell_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
-    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -285,7 +284,7 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
-    @skipMPS
+    @tci.test(exclude_device="mps")
     def test_float8_e8m0fnu_rne_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
@@ -496,7 +495,7 @@ class TestFloat4Dtype(TestCase):
                 lambda t: t.to(torch.float32), backend="eager", fullgraph=True
             )(x)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_shell_dtype_lists_match(self, device):
         # The prims check mirrors the C++ copy_ check; keep their dtype sets equal.
         quantized = {

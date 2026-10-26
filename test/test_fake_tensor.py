@@ -63,11 +63,11 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
     OpDTypes,
     ops,
 )
@@ -2254,6 +2254,7 @@ assert not torch.cuda.is_initialized()
             msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
     @unittest.skipIf(
         TEST_ACCELERATOR, "Only execute when an accelerator is not present"
     )
@@ -2265,6 +2266,7 @@ assert not torch.cuda.is_initialized()
             "Expected avoid_device_init to return True when no backends are registered",
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64_cuda_l4)
     @parametrize("is_available", [False, True])
     @skipIfTorchDynamo(
         "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
@@ -2381,7 +2383,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     are therefore marked ``@onlyAccelerator``; the rest also run on cpu.
     """
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_accelerator_initialized(self, device):
         # doesn't error
         with FakeTensorMode():
@@ -2393,7 +2395,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(*all_types_complex_float8_and())
     def test_index_with_cpu_indices(self, device, dtype):
         with FakeTensorMode():
@@ -2402,7 +2404,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.checkType(out, self.device_type, [36])
             self.assertEqual(out.dtype, dtype)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_shape_take_not_device(self, device):
         with FakeTensorMode():
             x = torch.empty(1, device="cpu")
@@ -2412,7 +2414,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(out.device.type, "cpu")
             self.assertTrue(is_fake_tensor(out))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_conv_rejects_mismatched_fake_devices(self, device):
         with FakeTensorMode():
             x = torch.empty(1, 3, 8, 8)
@@ -2427,7 +2429,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                     x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_conv_mismatched_device_error_matches_eager(self, device):
         error = f"Expected all tensors to be on the same device.*weight is on {device}"
 
@@ -2445,7 +2447,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                         x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
                     )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_zero_dim(self, device):
         with FakeTensorMode() as mode:
             x = torch.tensor(0.0)
@@ -2455,7 +2457,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(out.device, y.device)
             self.assertTrue(is_fake_tensor(out))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_op_with_zero_dim_bypassed(self, device):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
@@ -2472,7 +2474,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         ) as exc:
             torch.nextafter(fake_x, fake_y)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_diagonal_scatter_one_dim_single_elem_cpu_with_device_tensor(self, device):
         with FakeTensorMode():
             base = torch.zeros((1, 2), device=device)
@@ -2482,7 +2484,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(out.device, base.device)
             self.assertTrue(is_fake_tensor(out))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_diagonal_scatter_two_dim_cpu_with_device_tensor(self, device):
         with FakeTensorMode():
             base = torch.zeros((3, 3, 3))
@@ -2492,7 +2494,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(out.device, base.device)
             self.assertTrue(is_fake_tensor(out))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_add_one_dim_single_elem_cpu_with_device_tensor(self, device):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
@@ -2506,7 +2508,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             ) as exc:
                 x + y
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_throw(self, device):
         x = torch.tensor(0.0)  # TODO: tensor() errors
         with FakeTensorMode() as mode:
@@ -2515,7 +2517,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             z = torch.rand([4, 4], device="cpu")
             self.assertRaises(Exception, lambda: torch.lerp(x_conv, y, z))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_type_as(self, device):
         with FakeTensorMode():
             x = torch.rand([16, 1], device="cpu")
@@ -2530,7 +2532,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 x = torch.rand([16, 1], device=dev)
                 x[..., 0] = 0
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_device_inplace_copy(self, device):
         with FakeTensorMode():
             x = torch.rand([8, 8], device="cpu")
@@ -2540,7 +2542,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             if y.copy_(x).device.type != self.device_type:
                 raise AssertionError(f"expected {self.device_type} device")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_fake_device(self, device):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -2562,7 +2564,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             z = x.to(torch.device(device))
             self.assertEqual(z.device.type, self.device_type)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_index_put_error(self, device):
         mode = FakeTensorMode()
         for context in [contextlib.nullcontext, lambda: mode]:
@@ -2611,7 +2613,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(out[1].is_contiguous())
         self.checkMetaProps(out[0], out[1])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_cpu_fallback(self, device):
         with FakeTensorMode(allow_fallback_kernels=False):
             filters = torch.randn(8, 4, 3, 3).to(device)
@@ -2635,7 +2637,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(out.device.type, self.device_type)
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_out_multi_device(self, device):
         with FakeTensorMode():
             x = torch.rand([4])
@@ -2661,7 +2663,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_new(self, device):
         with FakeTensorMode():
             a = torch.rand([16, 1])
@@ -2671,7 +2673,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.checkType(b.new(device=device), self.device_type, [0])
             self.checkType(a.new(torch.rand([1])), "cpu", [1])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_embedding_device_indices(self, device):
         with FakeTensorMode():
             weight = torch.empty(20, 8, device=device)
@@ -2698,7 +2700,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_aten_copy_multi_device(self, device):
         with FakeTensorMode():
             x1 = torch.rand(4, device="cpu")
@@ -2714,7 +2716,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_aten_index_multi_device(self, device):
         with FakeTensorMode():
             x1 = torch.rand(4, 4, device="cpu")
@@ -2740,7 +2742,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_aten_slice_scatter_multi_device(self, device):
         with FakeTensorMode():
             x1 = torch.rand(4, 4, device="cpu")
@@ -2759,7 +2761,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_aten_set_data_multi_device(self, device):
         with FakeTensorMode():
             x1 = torch.rand(4, device="cpu")

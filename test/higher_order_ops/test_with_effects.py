@@ -27,10 +27,10 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
@@ -1006,7 +1006,7 @@ def forward(self, tangents_1, tangents_token):
 class TestWithEffectsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(IS_WINDOWS, "triton")
     @skipCUDAIf(not SM80OrLater, "triton")
     @skipIfNoDynamoSupport
@@ -1116,7 +1116,7 @@ class TestWithEffectsDevice(TestCase):
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @xfailIfNoAcceleratorTriton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_export_invoke_subgraph(self, device):
@@ -1263,7 +1263,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(IS_WINDOWS, "triton")
     @skipCUDAIf(not SM80OrLater, "triton")
     def test_effectful_op_with_flex_attention(self, device):

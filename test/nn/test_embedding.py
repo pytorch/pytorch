@@ -8,6 +8,7 @@ from itertools import product
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -15,9 +16,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
     skipCUDAIf,
-    skipMeta,
     skipXPUIf,
     TEST_WITH_ROCM,
 )
@@ -269,7 +268,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             embedding.to("cpu")
             self.assertEqual(embedding.weight.device.type, "cpu")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_embedding_max_norm_unsorted_repeating_indices(self, device):
         def create_embedding(device):
             # Seed RNG so we get the same Embedding each time
@@ -286,7 +285,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         self.assertEqual(out.cpu(), out_cpu)
 
     # https://github.com/pytorch/pytorch/issues/130806
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("40GB")
     def test_large_tensors(self, device):
         input = torch.randint(low=0, high=16032, size=[131072], device=device)
@@ -686,7 +685,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -778,7 +777,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -828,7 +827,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     lambda msg: f"{msg}\nExpected non-zero gradient for index {idx}",
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -879,7 +878,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     self.assertEqual(weight.grad, reference_grad, atol=0, rtol=0)
                 weight.grad = None
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.bfloat16)
     @largeTensorTest("80GB")
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
@@ -959,7 +958,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
 
     # https://github.com/pytorch/pytorch/issues/188467
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.int32, torch.int64)
     @largeTensorTest("20GB")
     def test_embedding_bag_max_backward_large_offset_overflow(self, device, dtype):
@@ -1120,7 +1119,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -1307,7 +1306,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(
         *itertools.product(
             (torch.int, torch.long),
@@ -1380,7 +1379,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(
         *itertools.product(
             (torch.int, torch.long),
@@ -1448,7 +1447,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(
         *itertools.product(
             (torch.int, torch.long),
@@ -1825,7 +1824,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 RuntimeError, lambda: es(input.view(-1), offset)
             )
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(
         *itertools.product(
             (torch.int, torch.long),
@@ -1908,7 +1907,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 test_backward=test_backward,
             )
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     @dtypes(
         *itertools.product(
             (torch.int, torch.long),

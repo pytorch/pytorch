@@ -22,10 +22,8 @@ import torch
 import torch.utils.data.datapipes as dp
 from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_CI,
@@ -3045,7 +3043,7 @@ class TestDataLoaderDevice(TestCase):
             for i, batch in enumerate(loader):
                 self.assertEqual(batch[0], dataset[i])
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_pin_memory_for_device(self, device):
         # pin_memory pins to the current accelerator automatically;
         # @onlyAccelerator ensures this runs only when one is present.

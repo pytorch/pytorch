@@ -15,6 +15,7 @@ from torch.distributed._tools.ilp_utils import (
 from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -254,6 +255,7 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_get_optimial_checkpointing_policy_per_module(self):

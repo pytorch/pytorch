@@ -17,11 +17,9 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2211,10 +2209,12 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_use_mem_pool_context_manager(self):
         self._check_cuda_use_mem_pool(backend="eager")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_mem_pool_id(self):
         def fn(pool):
@@ -2461,6 +2461,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_use_mem_pool_invalid_signatures(self):
         pool = torch.cuda.MemPool()
@@ -2502,6 +2503,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
         def fn(x):
@@ -2594,6 +2596,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 18)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_method(self):
         def fn(x):
@@ -2631,6 +2634,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """15""")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_compared_with_constant(self):
         def fn(x):
@@ -2661,6 +2665,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(ref, res2)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_compared_with_stream(self):
         def fn(x, s0, s1):
@@ -2820,6 +2825,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """16""")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
         def fn(x):
@@ -2859,6 +2865,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """17""")
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
         def fn(x):
@@ -2872,6 +2879,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda__exchange_device_args(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -2883,6 +2891,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(torch._dynamo.exc.Unsupported, fn, args, kwargs)
             self.assertEqual(torch.cuda.current_device(), initial_dev)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast(self):
         if not torch.cuda.is_bf16_supported():
@@ -2913,6 +2922,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_amp_autocast(self):
         class MyModule(torch.nn.Module):
@@ -2938,6 +2948,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
         class MyModule(torch.nn.Module):
@@ -2964,6 +2975,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_device(self):
         class MyModule(torch.nn.Module):
@@ -2990,6 +3002,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float16)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_arguments_binding(self):
         def f1(x):
@@ -3012,6 +3025,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
         self.assertTrue(same(ref2, res2))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_decorator(self):
         def autocast_func(orig_func):
@@ -3416,7 +3430,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_autocast_bf16(self, device):
         if not torch.cuda.is_bf16_supported():
             raise unittest.SkipTest("requires bf16")
@@ -3449,7 +3463,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.dtype, torch.bfloat16)
 
     # autocast with float64 not support on XPU
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
 
@@ -3476,7 +3490,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_autocast_float64(self, device):
         device_type = torch.device(device).type
 

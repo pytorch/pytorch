@@ -12,6 +12,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
@@ -25,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -36,9 +36,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoMiopen,
     skipCUDAIfRocm,
     skipCUDAIfRocmHipBlasltVersionLessThan,
-    skipMeta,
-    skipMPS,
-    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -1176,7 +1173,7 @@ class TestConvolutionNN(NNTestCase):
 class TestConvolutionNNDevice(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipMPS
+    @tci.test(exclude_device="mps")
     @expectedFailureXPU
     def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
         inp = torch.full((1, 2, 4, 5, 4), 0.5, device=device)
@@ -1273,8 +1270,7 @@ class TestConvolutionNNDevice(NNTestCase):
 
         return gradgradcheck(func, inputs, (grad_y,))
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     def test_thnn_conv_strided_padded_dilated(self, device):
         for convfn, dims in (
             (torch.nn.functional.conv2d, 2),
@@ -1333,8 +1329,7 @@ class TestConvolutionNNDevice(NNTestCase):
                     ).squeeze(0)
                 self.assertEqual(res_nb, res_via_batched)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     def test_Conv2d_inconsistent_types_on_accelerator_without_cudnn(self, device):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device=device)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device=device)
@@ -1353,7 +1348,7 @@ class TestConvolutionNNDevice(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_ConvTranspose2d_half_gemm(self, device):
         with torch.backends.cudnn.flags(enabled=False):
             inputs = torch.randn(1, 1, 16, 16, device=device, dtype=torch.half)
@@ -1451,7 +1446,7 @@ class TestConvolutionNNDevice(NNTestCase):
             rtol=0,
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.half, torch.float)
     def test_ConvTranspose2d_large_output_padding(self, device, dtype):
         net1 = torch.nn.ConvTranspose2d(
@@ -1470,7 +1465,7 @@ class TestConvolutionNNDevice(NNTestCase):
         x.backward(torch.randn_like(x))
         torch.accelerator.synchronize()
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
@@ -1535,7 +1530,7 @@ class TestConvolutionNNDevice(NNTestCase):
                 rtol=0,
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(torch.float, torch.double, torch.half)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -1605,7 +1600,7 @@ class TestConvolutionNNDevice(NNTestCase):
                 rtol=rtol,
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @dtypes(
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
@@ -1631,9 +1626,8 @@ class TestConvolutionNNDevice(NNTestCase):
             result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @dtypes(torch.double)
-    @skipMPS
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.mkldnn.flags(enabled=True, deterministic=True)
     @torch.backends.miopen.flags(immediate=True)
@@ -2192,7 +2186,7 @@ class TestConvolutionNNDevice(NNTestCase):
             _test(t, weight_odd, mode)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @skipMPS  # Results in CI are inconsistent, forced to skip
+    @tci.test(exclude_device="mps")  # Results in CI are inconsistent, forced to skip
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
@@ -2309,8 +2303,7 @@ class TestConvolutionNNDevice(NNTestCase):
         output = m(inp, output_size=output_size)
         self.assertEqual(output.shape, output_size)
 
-    @skipMeta
-    @skipXPU  # Refer https://github.com/intel/torch-xpu-ops/issues/2594
+    @tci.test(exclude_device=("meta", "xpu"))
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
@@ -3197,8 +3190,7 @@ class TestConvolutionNNDevice(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp, check_size=False)
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @largeTensorTest("12GB")
     @serialTest()
     def test_conv_large_nosplit(self, device):
@@ -3259,7 +3251,7 @@ class TestConvolutionNNDevice(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("12GB")
     @serialTest()
     def test_conv_transposed_large(self, device):
@@ -3307,10 +3299,9 @@ class TestConvolutionNNDevice(NNTestCase):
     # XPU: skipped due to fp16 weight gradient divergence across chunked
     # backward (oneDNN jit:ir generates different reduction trees per batch size).
     # Tracked in: https://github.com/intel/torch-xpu-ops/issues/3975
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "xpu"))
     @largeTensorTest("12GB")
     @serialTest()
-    @skipXPU
     # MI200-specific MIOpen failure, addressed by
     # https://github.com/ROCm/rocm-libraries/pull/11809
     @skipIfRocmArch(MI200_ARCH)
@@ -3344,7 +3335,7 @@ class TestConvolutionNNDevice(NNTestCase):
         grad2 = grad2 * scale
         self.assertEqual(grad1, grad2, atol=5e-2, rtol=5e-3)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")
     @largeTensorTest("60GB", "xpu")
@@ -3375,7 +3366,7 @@ class TestConvolutionNNDevice(NNTestCase):
         output_cpu = model_cpu(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
@@ -3407,7 +3398,7 @@ class TestConvolutionNNDevice(NNTestCase):
             exact_device=False,
         )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
@@ -3439,8 +3430,7 @@ class TestConvolutionNNDevice(NNTestCase):
             exact_device=False,
         )
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     def test_ConvTranspose3d_size_1_kernel(self, device):
         with set_default_dtype(torch.double):
             x_cpu = torch.randn(2, 3, 3, 5, 5)
@@ -3611,8 +3601,7 @@ class TestConvolutionNNDevice(NNTestCase):
                         output_format,
                     )
 
-    @onlyAccelerator
-    @skipMPS
+    @tci.test(exclude_device=("cpu", "meta", "mps"))
     @tf32_on_and_off(0.05)
     def test_conv_mismatch_memory_format(self, device):
         configs = [
@@ -3630,7 +3619,7 @@ class TestConvolutionNNDevice(NNTestCase):
                 nn.ConvTranspose2d, n, c, h, w, k, filter_size, device
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_convert_conv2d_weight_memory_format(self, device):
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device)
         model = nn.Sequential(nn.Conv2d(8, 4, 3), nn.BatchNorm2d(4)).to(device).float()
@@ -3649,7 +3638,7 @@ class TestConvolutionNNDevice(NNTestCase):
             out = model(input)
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_convert_conv3d_weight_memory_format(self, device):
         input = torch.randint(
             1, 10, (2, 8, 4, 4, 4), dtype=torch.float32, device=device
@@ -3722,7 +3711,7 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(grad_weight.shape, weight.shape)
 
     @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
     @serialTest()
@@ -3734,7 +3723,7 @@ class TestConvolutionNNDevice(NNTestCase):
         y = m.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta", "xpu"))
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     @serialTest()
@@ -3742,7 +3731,6 @@ class TestConvolutionNNDevice(NNTestCase):
     # on channels_last format with large tensor indexing.
     # Tracked in: https://github.com/intel/torch-xpu-ops/issues/3974
     # Related pytorch issue: https://github.com/pytorch/pytorch/issues/186314
-    @skipXPU
     # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
     # Reference: https://github.com/ROCm/MIOpen/pull/2838
     @xfailIf(

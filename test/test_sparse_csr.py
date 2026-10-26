@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import torch
 from torch.testing import FileCheck, make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_BF16_ATOMICS,
@@ -23,7 +24,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyAccelerator,
     OpDTypes,
     ops,
     precisionOverride,
@@ -31,7 +31,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
-    skipMeta,
     tol,
     toleranceOverride,
 )
@@ -399,7 +398,7 @@ class TestSparseCompressedDevice(TestCase):
                         self.assertFalse(compressed_indices_mth(sparse).requires_grad)
                         self.assertFalse(plain_indices_mth(sparse).requires_grad)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @sparse_compressed_nonblock_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
     def test_empty(self, layout, device, dtype):
@@ -430,7 +429,7 @@ class TestSparseCompressedDevice(TestCase):
             self.assertEqual(plain_indices_mth(result).dtype, torch.int64)
             self.assertEqual(result.values().dtype, dtype)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @sparse_compressed_nonblock_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_empty_errors(self, layout, device, dtype):
@@ -439,7 +438,7 @@ class TestSparseCompressedDevice(TestCase):
                                     ", but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=layout)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
     def test_sparse_compressed_tensor_with_dims(self, layout, device, dtype):
@@ -479,7 +478,7 @@ class TestSparseCompressedDevice(TestCase):
                 for k, v in e_prop.items():
                     self.assertEqual(v, t_prop[k], lambda msg: f'{msg} when comparing {k}, expected {t_prop[k]}, got {v}')
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_clone(self, layout, device, dtype):
@@ -560,7 +559,7 @@ class TestSparseCompressedDevice(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy(self, layout, device, dtype):
@@ -582,7 +581,7 @@ class TestSparseCompressedDevice(TestCase):
             run_test((*b, m, n), blocksize, 0, index_dtype)
             run_test((*b, m, n), blocksize, m * n, index_dtype)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_errors(self, layout, device, dtype):
@@ -699,7 +698,7 @@ class TestSparseCompressedDevice(TestCase):
                 expected.masked_fill_(~output_mask, 0)
             self.assertEqual(strided_output, expected, atol=atol, rtol=rtol)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @all_sparse_compressed_layouts('layout2')
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -721,7 +720,7 @@ class TestSparseCompressedDevice(TestCase):
                     lambda: torch.empty_like(sparse, layout=layout2)
                 )
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_validate(self, layout, device, dtype):
@@ -975,7 +974,7 @@ class TestSparseCompressedDevice(TestCase):
                    shape((2, 3)),
                    rf'Expected all tensors to be on the same device, but found at least two devices, {device_type}:0 and {device_type}:1!')
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @parametrize('target', [subtest('validate_sparse_compressed_tensor_args'),
                             subtest('sparse_compressed_tensor'),
@@ -1017,7 +1016,7 @@ class TestSparseCompressedDevice(TestCase):
                 else:
                     raise NotImplementedError(target)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_to_dtype(self, layout, device, dtype):
@@ -1032,7 +1031,7 @@ class TestSparseCompressedDevice(TestCase):
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181682")
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181536")
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181535")
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @dtypes(torch.double)
     def test_pickle(self, layout, dtype, device):
@@ -1209,7 +1208,7 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-1, 0)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize(self, device, dtype):
 
@@ -1248,7 +1247,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a._nnz(), 5)
             self.assertEqual(a.numel(), numel(a))
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(torch.float, torch.bool)
     @all_sparse_compressed_layouts()
     def test_resize_as_sparse_compressed(self, device, dtype, layout):
@@ -1369,7 +1368,7 @@ class TestSparseCSR(TestCase):
                                         r"resize_as_sparse_compressed_tensor_: self and src must have the same layout"):
                 b.resize_as_sparse_(a.transpose(-2, -1))
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
@@ -1456,7 +1455,7 @@ class TestSparseCSR(TestCase):
     def test_sparse_csc_to_dense(self, device, dtype):
         self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csc)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @skipCPUIfNoMklSparse
     @coalescedonoff
     @dtypes(torch.double)
@@ -1508,7 +1507,7 @@ class TestSparseCSR(TestCase):
     @parametrize("blocksize", [2, 4])
     @dtypes((torch.double, torch.int32), (torch.double, torch.int64))
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @skipMeta
+    @tci.test(exclude_device='meta')
     def test_csr_to_block_csr(self, device, dtypes, blocksize):
         for shape in [(24, 24), (12, 24)]:
             dtype, index_dtype = dtypes
@@ -1540,7 +1539,7 @@ class TestSparseCSR(TestCase):
 
     # TODO: Support auto generation of device check for sparse tensors
     # See: https://github.com/pytorch/pytorch/issues/59058
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.double)
     def test_matmul_device_mismatch(self, device, dtype):
         cpu = torch.rand((10, 10))
@@ -1577,7 +1576,7 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_baddbmm(self, device, dtype):
 
@@ -1621,7 +1620,7 @@ class TestSparseCSR(TestCase):
                                                   device=device, index_dtype=index_dtype)
                 self.assertEqual(torch.baddbmm(c, batched, b), torch.baddbmm(c, batched.to_dense(), b))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipCUDAIfNoSparseGeneric
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
@@ -2629,7 +2628,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(b.grad, b1.grad)
 
     @skipCUDAIfRocm
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2645,7 +2644,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor((k, n), dtype=dtype, device=device)
             run_test(c, a, b)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sampled_addmm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse sampled versions
@@ -2782,7 +2781,7 @@ class TestSparseCSR(TestCase):
                     run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
 
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
@@ -2793,7 +2792,7 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_csr_coo_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
@@ -3067,7 +3066,7 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sum(self, device, dtype):
         def run_test(shape, nnz, index_type):
@@ -3085,7 +3084,7 @@ class TestSparseCSR(TestCase):
             run_test(shape, shape[0] * shape[1], index_dtype)
 
     @skipIfTorchDynamo()
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @all_sparse_compressed_layouts()
     def test_transpose(self, device, dtype, layout):
@@ -3214,7 +3213,7 @@ class TestSparseCSR(TestCase):
 
     # TODO: This is a stopgap for a rigorous extension of our autograd tests
     # to test the functionality of detach
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_exercise_detach(self, device, dtype):
         shape = (3, 3)
@@ -3259,7 +3258,7 @@ class TestSparseCSR(TestCase):
             return FakeBscMatrix.from_matrix(tensor.cpu().numpy(), blocksize=blocksize).sorted_indices()
         raise NotImplementedError(repr(tensor))
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts('to_layout')
     @all_sparse_compressed_layouts('from_layout')
     def test_compressed_layout_conversions_coverage(self, device, from_layout, to_layout):
@@ -3343,7 +3342,7 @@ class TestSparseCSR(TestCase):
             a = make_tensor(batch_dim + sparse_dims, dtype=torch.float, device=device)
             _to_from_layout(from_layout, to_layout, a)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @batched_nonbatched()
     @hybrid_nonhybrid()
@@ -3537,7 +3536,7 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
-    @skipMeta
+    @tci.test(exclude_device='meta')
     @all_sparse_compressed_layouts()
     @coalescedonoff
     @dtypes(torch.double)
@@ -3755,7 +3754,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         return d
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3788,7 +3787,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         bsr = input.to_sparse_bsr(1)
         self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU,
                      "Skipped for internal with remote GPUs")
@@ -3835,7 +3834,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs, rhs, out=out)
 
     @parametrize("block_size", [16, 32, 64])
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3883,7 +3882,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
 
     @parametrize("block_size", [16, 32, 64])
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3951,7 +3950,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                     res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
                     self.assertEqual(res_tri, res_tri_grid)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3996,7 +3995,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 self.assertEqual(result, expected)
 
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -4133,7 +4132,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear', '_int_bsr_dense_addmm'])
     @parametrize("blocksize", [16, '16x32', 32])
     @parametrize("out_dtype", ['unspecified', 'int32'])
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
@@ -4309,7 +4308,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 self.assertEqual(result, expected)
 
     @parametrize("op", ['bsr_dense_addmm', '_int_bsr_dense_addmm'])
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @parametrize("out_dtype", ['unspecified', 'int32'])
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
@@ -4371,7 +4370,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         result = operation(*args, **dict(meta=meta, out=out))
         self.assertEqual(result, expected)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_addmm_meta(self, device):
         from torch.sparse._triton_ops import bsr_dense_addmm_meta

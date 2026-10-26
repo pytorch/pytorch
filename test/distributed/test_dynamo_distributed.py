@@ -38,6 +38,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1785,6 +1786,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.accelerator.synchronize(device)
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipUnless(torch.accelerator.is_available(), "Requires accelerator")
 class TestSingleProc(DynamoDistributedSingleProcTestCase):

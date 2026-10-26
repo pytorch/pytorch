@@ -74,15 +74,13 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     TEST_CUDA,
     xfailIfDistributedNotSupported,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -4000,6 +3998,7 @@ def forward(self, add_tensor):
         ):
             log_prob_ep.module()(invalid_log_prob_input)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_non_strict_export_distribution_validation_cuda(self):
         script = """\
@@ -18044,6 +18043,7 @@ class GraphModule(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
     def test_module_to_with_shared_weights(self):
         class Model(torch.nn.Module):
@@ -18212,6 +18212,7 @@ def forward(self, x):
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
     def test_exception(self):
         class Model(torch.nn.Module):
@@ -19433,7 +19434,7 @@ class TestExportDevice(TorchTestCase):
     # never exited, which would leak into every other test in this file.
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_assert_tensor_metadata_device_index(self, device):
         class N(torch.nn.Module):
             def __init__(self):
@@ -19451,7 +19452,7 @@ class TestExportDevice(TorchTestCase):
         ep = move_to_device_pass(ep, {device: torch.device(device).type})
         ep.module()(torch.randn(3, device=device), torch.randn(3, device=device))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfCrossRef
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     @unittest.skipIf(

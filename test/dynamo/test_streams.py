@@ -21,6 +21,7 @@ from torch._dynamo.graph_bytecode_inputs import (
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_LINUX,
@@ -2979,6 +2980,7 @@ instantiate_device_type_tests(
 )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
     @torch.compiler.config.patch(compile_on_one_rank=True)

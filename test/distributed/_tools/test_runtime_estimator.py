@@ -8,6 +8,7 @@ import torch
 from torch import nn, optim
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -135,6 +136,7 @@ class TestRuntimeEstimator(TestCase):
             raise NotImplementedError("Only Transformer and CNN is supported")
         return (model, optimizer, inp)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     def test_transformer_runtime(
         self,
@@ -171,6 +173,7 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     def test_conv_model_runtime(
         self,

@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -18,7 +19,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
     OpDTypes,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -77,7 +77,7 @@ class TestPrimsDevice(TestCase):
         reference = getattr(torch, "_" + op)(x.to(reference_dtype), dim, 0, *kwargs.values())
         self.assertEqual(result, reference.to(result.dtype), atol=1e-4, rtol=1e-5)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         def _wrapper(a, b, broadcast_dimensions):
@@ -126,7 +126,7 @@ class TestPrimsDevice(TestCase):
             self.assertEqual(result.shape, b.shape)
             self.assertEqual(a.unsqueeze(2), result)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32)
     def test_broadcast_in_dim_sum(self, device, dtype):
         def _wrapper(a):
@@ -217,7 +217,7 @@ class TestPrimsDevice(TestCase):
         )
         self.assertTrue(all_prims_namespace)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):

@@ -20,12 +20,11 @@ from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     skip,
@@ -757,7 +756,7 @@ class TestDecomp(TestCase):
         )
         self.assertEqual(shape, res[0].shape)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_log_sigmoid_forward_buffer_shape(self, device):
         # The buffer output of aten.log_sigmoid_forward is only consumed by the
         # CPU backward kernel (log_sigmoid_backward_cpu); the accelerator
@@ -1041,7 +1040,7 @@ def forward(self, scores_1, mask_1, value_1):
             ),
         )
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfCrossRef
     def test_decomp_crossref_mode_skips_overloaded_inplace(self, device):
         x = torch.tensor(2.0, device=device)
@@ -1054,7 +1053,7 @@ def forward(self, scores_1, mask_1, value_1):
         self.assertIn(aten.pow_.Scalar, mode.called)
         self.assertNotIn(aten.pow_.Scalar, mode.decomposed)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfCrossRef
     def test_decomp_crossref_mode_decomposes_mutable_functional_ops(self, device):
         x = torch.randn(2, 3, 4, 4, device=device)
@@ -1348,7 +1347,7 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
 
@@ -1361,7 +1360,7 @@ class DecompOneOffTests(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
-    @onlyCUDA
+    @tci.test(device="cuda")
     def test_amp_batch_norm_backward(self):
         device = "cuda"
         grad_out = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
@@ -1462,7 +1461,7 @@ class DecompOneOffTests(TestCase):
                 rtol=1e-2,
             )
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
@@ -1493,7 +1492,7 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(decomp_out, ref_out)
         self.assertEqual(decomp_mask, ref_mask)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfCrossRef
     def test_fused_dropout_compile_extreme_p(self, device):
         def fn(input_tensor, p, generator):
@@ -1515,7 +1514,7 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(res_out, ref_out, equal_nan=True)
             self.assertEqual(res_mask, ref_mask)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfCrossRef
     @skipOps(
         [
@@ -1560,7 +1559,7 @@ class DecompOneOffTests(TestCase):
 
             self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_native_layer_norm_cpu_decomp(self, device):
         def f(x, w, b):
             return torch.ops.aten.native_layer_norm.default(x, [1, 2, 3], w, b, eps=0.5)
@@ -1585,7 +1584,7 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @unittest.skipIf(not SM70OrLater, "triton")
     def test_rms_norm_decomp_cuda(self, device):
         @torch.compile
@@ -1611,7 +1610,7 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
-    @onlyCUDA
+    @tci.test(device="cuda")
     @skipIfCrossRef
     def test_addmm_out_dtype_decomp(self, device):
         cases = [
@@ -1632,7 +1631,7 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res, ref)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfCrossRef
     def test_addmv_decomp_rejects_mixed_dtype(self, device):
         addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
@@ -1643,7 +1642,7 @@ class DecompOneOffTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             addmv_decomp(input, mat, vec)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfCrossRef
     def test_addmm_addmv_decomp_reject_input_wider_than_output(self, device):
         # addmm_out_cpu and addmv_impl_cpu expand `self` to the mm/mv result
@@ -1669,7 +1668,7 @@ class DecompOneOffTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expand"):
             addmv_decomp(vec_input, mat, vec)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfCrossRef
     def test_linalg_vector_norm_decomp_correctness(self, device):
         decomp = decomposition_table[aten.linalg_vector_norm.default]

@@ -13,6 +13,7 @@ import warnings
 
 from torch import inf, nan
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, highest_precision_float,
     integral_types, complex_types, floating_types_and,
@@ -26,8 +27,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
+    OpDTypes, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    dtypesIfCPU, dtypesIfXPU, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
@@ -968,7 +969,7 @@ class TestReductionsDevice(TestCase):
         # Check whether the returned values are the mode
         self.assertTrue((values == v).all().item())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_mode_large(self, device, dtype):
@@ -1041,7 +1042,7 @@ class TestReductionsDevice(TestCase):
         test_for_dtypes(torch.int32, torch.int32, torch.float32, indices_err)
         test_for_dtypes(torch.float32, torch.float32, torch.float64, indices_err)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_mode_wrong_device(self, device):
         # CPU Input Tensor
@@ -1479,7 +1480,7 @@ class TestReductionsDevice(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @dtypes(torch.float16, torch.float32)
     def test_prod_gpu(self, device, dtype):
@@ -1541,7 +1542,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(x[0].prod(), 5 ** 14)
         self.assertEqual(x.prod(1), torch.full((2,), 5 ** 14, device=device))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_max_mixed_devices(self, device):
         a = torch.randn(10)
@@ -1553,7 +1554,7 @@ class TestReductionsDevice(TestCase):
             self.assertRaises(RuntimeError,
                               lambda: torch.amax(a, 0, out=values))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_min_mixed_devices(self, device):
         a = torch.randn(10)
@@ -1690,7 +1691,7 @@ class TestReductionsDevice(TestCase):
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
 
-    @onlyCUDA
+    @tci.test(device='cuda')
     @largeTensorTest("10GB", "cuda")
     @serialTest()
     def test_bucketization_int32_overflow(self, device):
@@ -2087,7 +2088,7 @@ class TestReductionsDevice(TestCase):
                     op(x, dim=dim)
 
     # TODO: update this test to compare against NumPy
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_var(self, device):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -2104,7 +2105,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(device_tensor.var(), cpu_tensor.var())
 
     # TODO: update this test to compare against NumPy
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_var_large_input(self, device):
         # Large, not-nice input
@@ -2114,7 +2115,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(cpu_tensor.var(2), device_tensor.var(2))
 
     # TODO: update this to compare against NumPy instead of CPU
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @dtypes(torch.double)
     @skipIfMPS
     def test_sum_noncontig(self, device, dtype):
@@ -2125,7 +2126,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
 
     # TODO: update this to compare against NumPy instead of CPU
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_min_max_nan(self, device):
         tests = [(lambda x: x.min(), 'min'),
@@ -2146,7 +2147,7 @@ class TestReductionsDevice(TestCase):
                              expected[~torch.isnan(expected)], msg=lambda msg: f'{msg}\nnans for {name}')
 
     # TODO: make this test generic using OpInfos
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     def test_sum_cpu_device_mismatch(self, device):
         x = torch.randn(20, dtype=torch.float32, device=device)
@@ -2413,7 +2414,7 @@ class TestReductionsDevice(TestCase):
         expected = fn(y, 1, keepdim=False)
         self.assertEqual(x[:, 1], expected, msg=lambda msg: f'{msg}\n{fn_name} with out= kwarg')
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
@@ -2424,7 +2425,7 @@ class TestReductionsDevice(TestCase):
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_input_corner(self, device, dtype):
@@ -2523,7 +2524,7 @@ class TestReductionsDevice(TestCase):
                 self.assertEqual(xs1[j].item(), size[1] - i)
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
@@ -2548,7 +2549,7 @@ class TestReductionsDevice(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
         x = torch.zeros(2**31, device=device, dtype=torch.int8)
@@ -2559,7 +2560,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(x.argmin(0), x.shape[0] - 1)
         self.assertEqual(x.min(0).indices, x.shape[0] - 1)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @serialTest()
     @largeMPSBufferTest("5GB")
     @largeTensorTest("5GB")
@@ -2723,7 +2724,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
     # CUDA median with dim returns the first occurrence of the median value
-    @onlyCUDA
+    @tci.test(device='cuda')
     @dtypes(torch.int8, torch.int32, torch.half, torch.float)
     def test_median_dim_index_is_first_occurrence(self, device, dtype):
         for size in [(7, 1100), (5, 19999)]:
@@ -3441,7 +3442,7 @@ class TestReductionsDevice(TestCase):
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
 
-    @onlyCPU
+    @tci.test(device='cpu')
     @dtypes(torch.float, torch.double)
     def test_histc_value_corner_cases(self, device, dtype):
         min_val = torch.finfo(dtype).min
@@ -3455,7 +3456,7 @@ class TestReductionsDevice(TestCase):
             bins=4)
         self.assertEqual(3.0, actual.sum())
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @skipIfMPS
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
     def test_histc_min_max_corner_cases_device(self, device, dtype):
@@ -3708,7 +3709,7 @@ class TestReductionsDevice(TestCase):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=('cpu', 'meta'))
     @serialTest()
     @largeMPSBufferTest(lambda self, device, dtype: 2**31 * dtype.itemsize)
     @largeTensorTest(lambda self, device, dtype: 2**31 * dtype.itemsize)

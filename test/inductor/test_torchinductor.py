@@ -80,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import is_symbolic
 from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -14447,6 +14448,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
@@ -18468,6 +18470,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_conv_transpose_zero_size_output(self):
         # CUDA/HIP support zero-sized spatial outputs for conv_transpose by
@@ -18499,6 +18502,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
         self.assertEqual(eager_out, compiled_out)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_lazy_conv_zero_in_channels_backward(self):
         for dim in (1, 2, 3):

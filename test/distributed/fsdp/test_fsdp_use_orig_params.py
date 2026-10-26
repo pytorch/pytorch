@@ -29,6 +29,7 @@ from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGI
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -1420,6 +1421,7 @@ class TestMultiTensorApply(TestCase):
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_multi_tensor_apply_size0_tensors_cuda(self):
         size0_tensors = [

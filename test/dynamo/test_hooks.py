@@ -11,10 +11,8 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils.hooks import RemovableHandle
 
@@ -1244,7 +1242,7 @@ def forward(self, L_x_ : torch.Tensor):
 class HooksTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters
 
@@ -1271,7 +1269,7 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_register_hook_on_intermediate_autograd_cache_different_hooks(self, device):
         from torch._dynamo.utils import counters
 

@@ -10,7 +10,7 @@ from torch.optim.swa_utils import (
     get_swa_multi_avg_fn,
     update_bn,
 )
-from torch.testing._internal.common_device_type import onlyAccelerator
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -221,14 +221,14 @@ class TestSWAUtils(TestCase):
     def test_averaged_model_same_device(self, device, ema):
         self._test_averaged_model(device, device, ema)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("ema", [True, False])
     def test_averaged_model_cross_device(self, device, ema):
         cpu = torch.device("cpu")
         self._test_averaged_model(device, cpu, ema)
         self._test_averaged_model(cpu, device, ema)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @parametrize("ema", [True, False])
     def test_averaged_model_mixed_device(self, device, ema):
         dnn = torch.nn.Sequential(

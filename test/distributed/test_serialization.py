@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
 
 
@@ -164,6 +165,7 @@ class TestSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
             _streaming_load(file, weights_only=True, pickle_module=pickle)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @requires_cuda
     def test_cuda(self) -> None:
         device = torch.device("cuda:0")

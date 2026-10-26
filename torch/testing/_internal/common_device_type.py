@@ -19,6 +19,7 @@ from typing_extensions import override, ParamSpec
 import torch
 from torch._inductor.utils import GPU_TYPES
 from torch._utils import _is_privateuse1_backend_available
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
@@ -650,19 +651,46 @@ class DeviceTypeTestBase(TestCase):
             # Add the device param kwarg if the test needs device or devices.
             param_kwargs = {} if param_kwargs is None else param_kwargs
             test_sig_params = inspect.signature(test).parameters
-            if "device" in test_sig_params or "devices" in test_sig_params:
-                device_arg: str = cls._init_and_get_primary_device()
-                if hasattr(test, "num_required_devices"):
-                    device_arg = cls.get_all_devices()
+            needs_device = "device" in test_sig_params or "devices" in test_sig_params
+            defer_device = (
+                needs_device
+                and "--list-markers" in sys.argv
+                and cls.device_type in ("cpu", "cuda")
+            )
+            num_devices = getattr(test, "num_required_devices", None)
+            if needs_device:
+                if defer_device:
+                    # Decorators need device kwargs, but collection needs no hardware.
+                    device_arg = "cpu" if cls.device_type == "cpu" else "cuda:0"
+                    if num_devices is not None:
+                        device_arg = [
+                            f"{cls.device_type}:{i}" for i in range(num_devices)
+                        ]
+                else:
+                    device_arg = cls._init_and_get_primary_device()
+                    if num_devices is not None:
+                        device_arg = cls.get_all_devices()
                 _update_param_kwargs(param_kwargs, "device", device_arg)
 
             # Apply decorators based on param kwargs.
             for decorator in decorator_fn(param_kwargs):
                 test = decorator(test)
 
+            metadata = tci.resolve(test, cls)
+            if metadata is not None and not metadata.supports_device(
+                cls.device_type, bypass=cls.bypass_device_restrictions
+            ):
+                return
+
             # Constructs the test
             @wraps(test)
             def instantiated_test(self, param_kwargs=param_kwargs):
+                if defer_device:
+                    param_kwargs = param_kwargs.copy()
+                    device_arg = cls._init_and_get_primary_device()
+                    if num_devices is not None:
+                        device_arg = cls.get_all_devices()
+                    _update_param_kwargs(param_kwargs, "device", device_arg)
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
@@ -796,6 +824,7 @@ class CPUTestBase(DeviceTypeTestBase):
         }
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
     _do_cuda_memory_leak_check = True
@@ -1024,6 +1053,12 @@ def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
     test_bases: list[Any] = []
+
+    if "--list-markers" in sys.argv:
+        test_bases = [CPUTestBase, CUDATestBase]
+        if not (IS_SANDCASTLE or IS_FBCODE) and _is_privateuse1_backend_available():
+            test_bases.append(PrivateUse1TestBase)
+        return test_bases
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -1282,11 +1317,29 @@ def instantiate_device_type_tests(
         if base._should_exclude(generic_test_class.__name__):
             continue
 
+        bypass_devices = vars(generic_test_class).get(
+            "bypass_device_restrictions", base.bypass_device_restrictions
+        )
+        device_tests = {}
+        for name in generic_tests:
+            test = getattr(generic_test_class, name)
+            metadata = tci.resolve(test, generic_test_class)
+            if (
+                metadata is None
+                or hasattr(test, "parametrize_fn")
+                or metadata.supports_device(base.device_type, bypass=bypass_devices)
+            ):
+                device_tests[name] = test
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
-        device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+        device_type_test_class: Any = type(
+            class_name,
+            (base, generic_test_class),
+            {"bypass_device_restrictions": bypass_devices},
+        )
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test
@@ -1314,9 +1367,11 @@ def instantiate_device_type_tests(
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
                 # Skip the specified methods.
-                if base._should_exclude(generic_test_class.__name__, test_name=name):
+                if name not in device_tests or base._should_exclude(
+                    generic_test_class.__name__, test_name=name
+                ):
                     continue
-                test = getattr(generic_test_class, name)
+                test = device_tests[name]
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
                 if len(sig.parameters) == 3:
@@ -1327,7 +1382,7 @@ def instantiate_device_type_tests(
                 else:
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             # Ports non-test member. Setup / teardown have already been handled above
-            elif name not in device_type_test_class.__dict__:
+            elif name != "_tci" and name not in device_type_test_class.__dict__:
                 # Copy the raw attribute: getattr would unwrap staticmethod and
                 # classmethod descriptors.
                 nontest = generic_test_class.__dict__[name]

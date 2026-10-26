@@ -13,7 +13,7 @@ import pytest
 from _pytest.config import Config, filename_arg
 from _pytest.config.argparsing import Parser
 from _pytest.junitxml import _NodeReporter, bin_xml_escape, LogXML
-from _pytest.python import Module
+from _pytest.python import Module, Package
 from _pytest.reports import TestReport
 from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
@@ -52,6 +52,18 @@ def pytest_addoption(parser: Parser) -> None:
     group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
     group.addoption("--sc", action="store", default=None, dest="stepcurrent")
     group.addoption("--rs", action="store", default=None, dest="run_single")
+    group.addoption(
+        "--list-markers",
+        action="store_true",
+        default=False,
+        help="list collected tests and their pytest markers as JSON, then exit.",
+    )
+    group.addoption(
+        "--list-test-files",
+        action="store_true",
+        default=False,
+        help="list test files as JSON without importing their modules, then exit.",
+    )
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -151,8 +163,54 @@ class HardwareClassificationPytestPlugin:
         items[:] = filtered
 
 
+class TciPytestPlugin:
+    def __init__(self, list_markers=False):
+        from torch.testing._internal import tci
+
+        self.platform = None if list_markers else tci.current_platform()
+        self.strict = not list_markers and "PYTORCH_TEST_TCI_PLATFORM" in os.environ
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        from torch.testing._internal import tci
+
+        selected, deselected = [], []
+        for item in items:
+            cls = getattr(item, "cls", None)
+            metadata = tci.resolve(_safe_obj(item), cls)
+            if tci.is_eligible(
+                metadata,
+                platform=self.platform,
+                device=getattr(cls, "device_type", None),
+                bypass=getattr(cls, "bypass_device_restrictions", False),
+                strict=self.strict,
+            ):
+                selected.append(item)
+            else:
+                deselected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
+    list_files = config.getoption("list_test_files")
+    if list_files and config.getoption("list_markers"):
+        raise pytest.UsageError(
+            "--list-test-files and --list-markers are mutually exclusive"
+        )
+    if list_files or config.getoption("list_markers"):
+        terminal_reporter = config.pluginmanager.getplugin("terminalreporter")
+        if terminal_reporter is not None:
+            config.pluginmanager.unregister(terminal_reporter)
+        config.pluginmanager.register(ListTestsPlugin(list_files), "listtestsplugin")
+    if not list_files:
+        config.pluginmanager.register(
+            TciPytestPlugin(config.getoption("list_markers")), "tci_plugin"
+        )
 
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
@@ -278,6 +336,54 @@ class LogXMLReruns(LogXML):
         self.node_reporters_ordered.append(reporter)
 
         return reporter
+
+
+class ListTestsPlugin:
+    def __init__(self, list_files: bool):
+        self.list_files = list_files
+        self.files: set[str] = set()
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_make_collect_report(self, collector):
+        if (
+            self.list_files
+            and isinstance(collector, Module)
+            and not isinstance(collector, Package)
+        ):
+            self.files.add(collector.config.cwd_relative_nodeid(collector.nodeid))
+            return pytest.CollectReport(collector.nodeid, "passed", None, result=[])
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_finish(self, session) -> None:
+        # Pytest calls this hook in a finally block, including on selector errors.
+        if sys.exc_info()[0] is not None:
+            return
+        missing_paths = []
+        for arg in session.config.args:
+            path = arg.split("::", 1)[0]
+            if not os.path.exists(path):
+                missing_paths.append(arg)
+        if missing_paths:
+            missing_path = missing_paths[0]
+            print(
+                f"ERROR: file or directory not found: {missing_path}", file=sys.stderr
+            )
+            pytest.exit(reason="test path not found", returncode=4)
+        if session.testsfailed:
+            print("ERROR: collection failed", file=sys.stderr)
+            pytest.exit(reason="test collection failed", returncode=2)
+
+        if self.list_files:
+            print(json.dumps(sorted(self.files), indent=2))
+            pytest.exit(reason="test files collected", returncode=0)
+        markers_by_test = {
+            session.config.cwd_relative_nodeid(item.nodeid): sorted(
+                {marker.name for marker in item.iter_markers()}
+            )
+            for item in session.items
+        }
+        print(json.dumps(markers_by_test, indent=2, sort_keys=True))
+        pytest.exit(reason="test markers collected", returncode=0)
 
 
 # imitating summary_failures in pytest's terminal.py
@@ -445,6 +551,14 @@ def pytest_itemcollected(item: Any) -> None:
     """
     if _spawns_multiple_processes(getattr(item, "cls", None)):
         item.add_marker("multigpu")
+    from torch.testing._internal import tci
+
+    obj = _safe_obj(item)
+    if obj is not None:
+        metadata = tci.resolve(obj, getattr(item, "cls", None))
+        if metadata is not None:
+            for marker in metadata.markers:
+                item.add_marker(marker)
 
 
 class MultiGpuMinFilterPlugin:

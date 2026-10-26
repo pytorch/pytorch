@@ -65,10 +65,8 @@ from torch._dynamo.utils import (
 )
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -3455,6 +3453,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_tensor_match_current_device(self):
@@ -3484,6 +3483,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             inputs = {"x": torch.randn(4, device="cuda:0")}
             self._test_check_fn(ref, loaded, inputs, True)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_tensor_match_current_device_survives_config_change_on_load(self):
         # Whether the index is pinned or relative belongs to the saved guard, not to
@@ -5890,7 +5890,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @torch._dynamo.config.patch({"strict_precompile": True})
     def test_unused_stream(self, device):
         def foo(inputs):

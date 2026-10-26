@@ -48,10 +48,8 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     SYMPY_INTERP,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal import tci
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
@@ -7791,7 +7789,7 @@ class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_flex_attention_foreign_fake_e2e(self, device):
         """E2E test: trace flex_attention with BlockMask containing unbacked dims
         through a fresh FakeTensorMode, exercising the foreign ShapeEnv transfer path."""

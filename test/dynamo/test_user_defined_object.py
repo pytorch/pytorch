@@ -12,6 +12,7 @@ import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import common_constant_types
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1907,6 +1908,7 @@ class TestConstantTypeProperty(TestCase):
 class TestConstantTypePropertyAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_property_on_cuda_device_properties(self):
         # _CudaDeviceProperties is the constant type carrying properties that

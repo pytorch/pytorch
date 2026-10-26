@@ -43,6 +43,7 @@ from torch.compiler.precompile import (
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -1111,6 +1112,7 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
     def test_artifact_with_module_level_kernels_runs_from_its_file(self):
         # A module-level Triton kernel reads its source back from the module's file,
@@ -1130,6 +1132,7 @@ class TestPrecompile(TestCase):
         for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
             self.assertEqual(f_c(m, x), m(x))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
     )
@@ -1164,6 +1167,7 @@ class TestPrecompile(TestCase):
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA for Triton autotuning")
     def test_cache_bundles_autotune_artifacts(self):
         from torch._inductor.utils import fresh_cache
@@ -2166,6 +2170,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_CUDA, "needs CUDA for a cpu-vs-cuda device mismatch")
     @parametrize("path", ("cached", "inlined"))
     def test_device_mismatch_rejected(self, path):
@@ -2552,6 +2557,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_CUDA, "needs CUDA for a cpu-vs-cuda device mismatch")
     def test_eager_device_mismatch_rejected(self):
         # The eager driver bakes each input's device (invariant 6): a cpu-traced eager
@@ -2606,6 +2612,7 @@ class TestPrecompile(TestCase):
         xt = torch.randn(8, 4)
         self.assertEqual(f_c(m, xt), m(xt))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
     def test_functionalized_rng_matches_eager_cpu(self):
         # Under functionalized RNG the dropout draw is seeded from the global generator,
@@ -4057,6 +4064,7 @@ class TestPrecompileNumerics(TestCase):
         self.assertEqual(x, torch.ones(4, device=device))
         self.assertEqual(out, torch.ones(4, device=device))
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
     def test_functionalized_rng_supported(self, device):
         # Functionalized RNG (dropout) threads seed/offset; the AOT backend composes

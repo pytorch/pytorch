@@ -19,6 +19,7 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal import tci
 from torch.testing._internal.common_utils import (
     raise_on_run_directly,
     skipIfTorchDynamo,
@@ -1504,6 +1505,7 @@ class TestList(JitTestCase):
                 (torch.ones(5, dtype=torch.long),),
             )
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_to_list_gpu(self):
         """GPU tests for Tensor.tolist() function."""

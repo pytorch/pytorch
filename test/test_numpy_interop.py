@@ -10,11 +10,10 @@ import numpy as np
 
 import torch
 from torch.testing import make_tensor
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU,
-    skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
@@ -26,13 +25,13 @@ class TestNumPyInterop(TestCase):
     # Note: the warning this tests for only appears once per program, so
     # other instances of this warning should be addressed to avoid
     # the tests depending on the order in which they're run.
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_numpy_non_writeable(self, device):
         arr = np.zeros(5)
         arr.flags["WRITEABLE"] = False
         self.assertWarns(UserWarning, lambda: torch.from_numpy(arr))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIf(
         sys.version_info[:2] == (3, 14)
         and np.lib.NumpyVersion(np.__version__) < "2.4.0",
@@ -51,7 +50,7 @@ class TestNumPyInterop(TestCase):
         with self.assertRaises(ValueError):
             w.resize((10, 10))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_to_numpy(self, device) -> None:
         def get_castable_tensor(shape, dtype):
             if dtype.is_floating_point:
@@ -321,14 +320,14 @@ class TestNumPyInterop(TestCase):
         )
 
     @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_from_numpy_zero_element_type(self):
         # This tests that dtype check happens before strides check
         # which results in div-by-zero on-x86
         x = np.ndarray((3, 3), dtype=str)
         self.assertRaises(TypeError, lambda: torch.from_numpy(x))
 
-    @skipMeta
+    @tci.test(exclude_device="meta")
     def test_from_list_of_ndarray_warning(self, device):
         warning_msg = (
             r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
@@ -371,7 +370,7 @@ class TestNumPyInterop(TestCase):
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([[1, 2, 3], np.random.random(size=(2,))], device=device)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [
             np.double,
@@ -386,7 +385,7 @@ class TestNumPyInterop(TestCase):
         for dtype in dtypes:
             self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_numpy_index(self, device):
         i = np.array([0, 1, 2], dtype=np.int32)
         x = torch.randn(5, 5)
@@ -394,7 +393,7 @@ class TestNumPyInterop(TestCase):
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_numpy_index_multi(self, device):
         for dim_sz in [2, 8, 16, 32]:
             i = np.zeros((dim_sz, dim_sz, dim_sz), dtype=np.int32)
@@ -402,7 +401,7 @@ class TestNumPyInterop(TestCase):
             x = torch.randn(dim_sz, dim_sz, dim_sz)
             self.assertTrue(x[i == 1].numel() == np.sum(i))
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_numpy_array_interface(self, device):
         types = [
             torch.DoubleTensor,
@@ -485,7 +484,7 @@ class TestNumPyInterop(TestCase):
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_multiplication_numpy_scalar(self, device) -> None:
         for np_dtype in [
             np.float32,
@@ -509,7 +508,7 @@ class TestNumPyInterop(TestCase):
                 self.assertTrue(r2.dtype == t_dtype)
                 self.assertTrue(r2.requires_grad)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @skipIfTorchDynamo()
     def test_parse_numpy_int_overflow(self, device):
         # assertRaises uses a try-except which dynamo has issues with
@@ -527,7 +526,7 @@ class TestNumPyInterop(TestCase):
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
@@ -616,7 +615,7 @@ class TestNumPyInterop(TestCase):
                 else:
                     self.assertTrue(t == a)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test___eq__(self, device, dtype):
         a = make_tensor((5, 7), dtype=dtype, device=device, low=-9, high=9)
@@ -659,7 +658,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(a == b_np, res_check)
         self.assertEqual(b_np == a, res_check)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     def test_empty_tensors_interop(self, device):
         x = torch.rand((), dtype=torch.float16)
         y = torch.tensor(np.random.rand(0), dtype=torch.float16)

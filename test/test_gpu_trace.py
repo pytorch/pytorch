@@ -5,6 +5,7 @@ import unittest
 import unittest.mock
 
 import torch
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
@@ -129,6 +130,7 @@ class TestGpuTraceDevice(TestCase):
         other.assert_called_once_with(tensor.data_ptr())
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestGpuTraceCUDA(TestCase):

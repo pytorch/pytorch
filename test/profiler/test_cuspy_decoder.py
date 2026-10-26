@@ -4,6 +4,7 @@ import time
 import unittest
 
 import torch
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -22,6 +23,7 @@ if TEST_CUPTI:
 class TestCuspyDecoderCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_decoder_groups_distinct_layouts(self):

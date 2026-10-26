@@ -44,9 +44,9 @@ from test_jit import (
     MiLSTMCell,
 )
 
+from torch.testing._internal import tci
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     OpDTypes,
     ops,
 )
@@ -2899,7 +2899,7 @@ def f({", ".join(param_names)}):
             self.assertEqual(kernel.run(tuple(param_values)), correct_val)
             self.assertEqual(kernel.fallback(tuple(param_values)), correct_val)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     @ops(
         [op for op in op_db if get_name(op) in works_list],
@@ -2908,7 +2908,7 @@ def f({", ".join(param_names)}):
     def test_working(self, device, dtype, op):
         self.te_compile(device, dtype, op)
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     @ops(
         [op for op in op_db if get_name(op) in known_failures],
@@ -2924,7 +2924,7 @@ def f({", ".join(param_names)}):
                 "Expected test to fail. If it now works, move op into works_list"
             )
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     @ops(
         [op for op in op_db if get_name(op) not in works_list + known_failures],
@@ -2945,7 +2945,7 @@ def f({", ".join(param_names)}):
             )
 
     @slowTest
-    @onlyCPU
+    @tci.test(device="cpu")
     @ops(
         [op for op in op_db if get_name(op) not in known_failures],
         dtypes=OpDTypes.supported,
@@ -3033,7 +3033,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
         os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
         super(TestLoopnestRandomizationParent, self).tearDown()
 
-    @onlyCPU
+    @tci.test(device="cpu")
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     def test_relu(self, device):
         def fn_test_relu(x, y):

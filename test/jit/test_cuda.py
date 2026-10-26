@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     NoTest,
@@ -660,6 +661,7 @@ class TestCUDA(JitTestCase):
             self.assertEqual(torch.cat((a_load, b_load), 0), c_load)
 
     # Make sure that cuda._exchange_device doesn't get DCE'ed
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "Cuda not available")
     def test__exchange_device_op(self):
         def fn(device: int, tensor):
@@ -675,6 +677,7 @@ class TestCUDA(JitTestCase):
         FileCheck().check("cuda::_exchange_device(").run(g)
 
     # Make sure that cuda._maybe_exchange_device doesn't get DCE'ed
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not TEST_CUDA, "Cuda not available")
     def test__maybe_exchange_device_op(self):
         def fn(device: int, tensor):

@@ -52,10 +52,10 @@ from torch.profiler import (
     supported_activities,
 )
 from torch.profiler.profiler import _get_profiler_extensions
+from torch.testing._internal import tci
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
@@ -1999,6 +1999,7 @@ torch.ones(10) * 2
                 payload()
             validate_json(prof, gc_flag)
 
+    @tci.test(exclude=tci.platform.linux_x86_64)
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.accelerator.is_available(), "Accelerator is required")
     def test_region_device_time(self):
@@ -3034,7 +3035,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     "Kineto is not working properly with the Dynolog environment variable",
                 )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     def test_event_list(self, device):
         device_type = device.split(":")[0]
         x, y = (torch.rand((4, 4), requires_grad=True, device=device) for _ in range(2))
@@ -3070,7 +3071,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             else:
                 self.assertFalse(evt.is_user_annotation)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_profile(self, device):
         device_type = device.split(":")[0]
@@ -3083,7 +3084,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 self.assertTrue(False, "Found unexpected event: " + name)
         self.assertTrue("aten::mul_" in names)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_dynamic_toggle(self, device):
         device_type = device.split(":")[0]
@@ -3119,7 +3120,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 torch.add(x, y)
         self.assertTrue(len(p2.events()) == 0)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(
@@ -3222,7 +3223,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_nonmember_type_name(self, device):
         """Activity type name that is not a member of the requested activity group raises RuntimeError."""
@@ -3236,7 +3237,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_empty_list(self, device):
         """Passing an empty list to activities means not collecting for the specified activity."""
@@ -3255,7 +3256,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         True,
         "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
     )
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
         device_type = device.split(":")[0]
@@ -3292,7 +3293,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 "Error: No kernel events in trace contained grid/block metadata",
             )
 
-    @onlyAccelerator
+    @tci.test(exclude_device=("cpu", "meta"))
     @skipIfRocm(msg="ROCm does not emit OVERHEAD activity records")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_overhead_activities_own_no_device_time(self, device):
@@ -4985,6 +4986,7 @@ instantiate_device_type_tests(
 )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestPythonChromeTraceExportCudaOnly(TestCase):
@@ -5354,6 +5356,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
         )
 
 
+@tci.test(exclude=tci.platform.linux_x86_64)
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestMetadataJsonFormatCUDA(TestCase):
