@@ -3428,10 +3428,12 @@ def capture(
     :func:`torch.compile`: at most one of them may be given, and only with
     ``backend="inductor"``. They apply to every graph the capture compiles. A
     ``mode`` or ``options`` that turns on ``triton.cudagraphs`` (such as
-    ``mode="reduce-overhead"``) is refused, since a loaded artifact does not
-    serve the capture's CUDA graph choice yet. A :class:`MakeFxTracer` capture
-    also refuses ``size_asserts`` or ``scalar_asserts`` off, which it always
-    compiles with on.
+    ``mode="reduce-overhead"``) is refused: a loaded :class:`DynamoTracer`
+    artifact does not serve the capture's CUDA graph choice yet, and a
+    :class:`MakeFxTracer` capture's standalone module runs outside Inductor's
+    CUDA graph wrapper. A :class:`MakeFxTracer` capture also refuses
+    ``size_asserts`` or ``scalar_asserts`` off: it compiles with
+    ``size_asserts`` on, and with ``scalar_asserts`` on for a dynamic capture.
 
     .. note::
 
@@ -3457,7 +3459,7 @@ def capture(
                 "takes neither."
             )
         if mode is not None and options is not None:
-            raise ValueError(
+            raise RuntimeError(
                 "Either mode or options can be specified, but both can't be "
                 "specified at the same time."
             )
@@ -3468,6 +3470,12 @@ def capture(
 
         requested = list_mode_options(mode) if mode is not None else options or {}
         if requested.get("triton.cudagraphs") is True:
+            if isinstance(tracer, MakeFxTracer):
+                raise PrecompileError(
+                    "a MakeFxTracer capture cannot serve CUDA graphs: its standalone "
+                    "module runs outside Inductor's CUDA graph wrapper. Use "
+                    "mode='max-autotune-no-cudagraphs'."
+                )
             raise PrecompileError(
                 "precompile cannot serve CUDA graphs yet: a loaded artifact wraps "
                 "its graphs in them by the loading process's triton.cudagraphs, not "
