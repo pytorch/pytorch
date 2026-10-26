@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import unittest
+import unittest.mock
 
 import torch
 import torch._functorch.config as functorch_config
@@ -497,6 +498,37 @@ class TestAOTCompileToPython(TestCase):
         self.assertIn("isnan", src)
         with torch.no_grad():
             self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
+
+    def test_options_reach_both_steps_under_the_standalone_pins(self):
+        # Step 1 (compile_fx, capturing the dense graph) runs under the options with
+        # step 2's pins over them, so cpp_wrapper=True cannot send it down the C++
+        # wrapper branch that step 2 then compiles without.
+        import torch._inductor.compile_fx as compile_fx_module
+
+        seen = []
+        real_compile_fx = compile_fx_module.compile_fx
+
+        def spy(*args, **kwargs):
+            config = torch._inductor.config
+            seen.append((config.cpp_wrapper, config.nan_asserts))
+            return real_compile_fx(*args, **kwargs)
+
+        m = _Pointwise().eval()
+        x = torch.randn(8, 4)
+        gm, inputs = _capture(m, x), _flat_inputs(m, x)
+        options = {"cpp_wrapper": True, "nan_asserts": True}
+        with unittest.mock.patch.object(compile_fx_module, "compile_fx", spy):
+            src, _ = compile_to_python(gm, inputs, options=options)
+        self.assertEqual(seen, [(False, True)])
+        with torch.no_grad():
+            self.assertEqual(load_from_python(src)(inputs)[0], m(x))
+
+    def test_rejects_freezing_in_options(self):
+        m = _Pointwise().eval()
+        x = torch.randn(8, 4)
+        gm, inputs = _capture(m, x), _flat_inputs(m, x)
+        with self.assertRaisesRegex(NotImplementedError, "'freezing': True"):
+            compile_to_python(gm, inputs, options={"freezing": True})
 
     def test_orchestration_inlined_as_real_def(self):
         # The orchestration is spliced as a real top-level ``def _runtime_wrapper`` that the
