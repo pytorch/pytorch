@@ -738,7 +738,8 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
 // Inputs group_gemm_ck_tile handles; anything else falls through to the next grouped mm path.
 static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const auto dtype = mat_a.scalar_type();
-  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf)) { // no dtype mixing yet
+  const bool fp32_configs = dtype == at::kFloat && at::detail::getCUDAHooks().isGPUArch({"gfx950"});
+  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf && !fp32_configs)) { // no dtype mixing yet
     return false;
   }
   const bool a_is_2d = mat_a.dim() == 2;

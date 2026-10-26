@@ -12052,7 +12052,9 @@ class TestGroupedMM(TestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES)
-    @dtypes(torch.bfloat16, torch.float16)
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    # ck_tile sums K in one fp32 accumulator; on long K that has up to 2x the rounding error of hipBLASLt kernels that split K
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})
     def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
                                        backward, dtype):
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
