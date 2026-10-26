@@ -1921,7 +1921,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
-
 def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
     """The ``ns::op`` names of the operators ``gm`` and its subgraphs call."""
     names: set[str] = set()
@@ -1989,6 +1988,7 @@ def _check_custom_op_modules(modules: tuple[str, ...]) -> None:
                 f"module {module!r}, which cannot be imported here. Make it "
                 "importable wherever the artifact is served."
             )
+
 
 def _build_python_source(
     compiled: PrecompiledModule,
