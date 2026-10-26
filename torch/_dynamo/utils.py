@@ -1409,7 +1409,10 @@ def _unpack_fast_types() -> tuple[type, ...]:
 
 
 def unpack_iterable(
-    tx: InstructionTranslatorBase, iterable: VariableTracker
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    *,
+    emulate_length_hint: int | None = None,
 ) -> list[VariableTracker]:
     # Realize first: istype is exact, so a lazy wrapper would otherwise miss
     # the fast path (and a subclass VT stays excluded since its exact type is
@@ -1419,7 +1422,7 @@ def unpack_iterable(
         # unpack_var_sequence returns a fresh list, so hand it back directly:
         # no generator, no per-element callback, single allocation.
         return iterable.unpack_var_sequence(tx)
-    return list(lazily_unpack(tx, iterable))
+    return list(lazily_unpack(tx, iterable, emulate_length_hint=emulate_length_hint))
 
 
 def unpack_and_apply_fn(
@@ -1434,7 +1437,16 @@ def unpack_and_apply_fn(
 def lazily_unpack(
     tx: InstructionTranslatorBase,
     iterable: VariableTracker,
+    *,
+    emulate_length_hint: int | None = None,
 ):
+    """Yield an iterable's items one at a time.
+
+    emulate_length_hint: call operator.length_hint on the original iterable with
+    this default, between GetIter and the first item. PySequence_List does that,
+    so callers that must reproduce its observable side effects pass a default.
+    Ignored on the fast path in unpack_iterable, which creates no iterator.
+    """
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
@@ -1445,6 +1457,14 @@ def lazily_unpack(
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     disable_ngb = config.patch(nested_graph_breaks=False)
+    if emulate_length_hint is not None:
+        from .variables import BuiltinVariable, ConstantVariable
+
+        # Native list materialization asks the original iterable after GetIter.
+        with disable_ngb:
+            BuiltinVariable(operator.length_hint).call_function(
+                tx, [iterable, ConstantVariable.create(emulate_length_hint)], {}
+            )
     while True:
         try:
             # This host-side iteration has no resumable frame. Compute the item
