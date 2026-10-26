@@ -2032,18 +2032,15 @@ def _backend_custom_op_names(
         if isinstance(gm, torch.fx.GraphModule):
             eager_names |= _custom_op_names(gm)
             continue
-        compiled = [
-            c
-            for c in (
-                getattr(content, "compiled_fw", None),
-                getattr(content, "compiled_bw", None),
+        compiled = {
+            half: c
+            for half, c in (
+                ("forward", getattr(content, "compiled_fw", None)),
+                ("backward", getattr(content, "compiled_bw", None)),
             )
             if c is not None
-        ]
-        sources = [
-            getattr(getattr(c, "result", None), "source_code", None) for c in compiled
-        ]
-        if not sources or not all(isinstance(source, str) for source in sources):
+        }
+        if not compiled:
             log.warning(
                 "precompile: cannot read the code backend %s serves (%s), so the "
                 "artifact records none of its custom ops; serving needs them "
@@ -2051,9 +2048,19 @@ def _backend_custom_op_names(
                 backend_id,
                 type(content).__name__,
             )
-        for source in sources:
+        for half, c in compiled.items():
+            source = getattr(getattr(c, "result", None), "source_code", None)
             if isinstance(source, str):
                 names |= _custom_op_names_in_source(source)
+            else:
+                log.warning(
+                    "precompile: cannot read the %s code backend %s serves (%s), so "
+                    "the artifact records none of the custom ops it calls; serving "
+                    "needs them registered by the first call",
+                    half,
+                    backend_id,
+                    type(content).__name__,
+                )
     return names | eager_names, eager_names
 
 
@@ -2086,9 +2093,9 @@ def _custom_op_modules(
 
     eager_op_names = set(eager_op_names)
 
-    def module_of(fn: object) -> str:
+    def module_of(fn: object) -> str | None:
         name = getattr(fn, "__module__", None)
-        return name if isinstance(name, str) else "?"
+        return name if isinstance(name, str) else None
 
     def in_torch(name: str) -> bool:
         return name == "torch" or name.startswith("torch.")
@@ -2117,11 +2124,13 @@ def _custom_op_modules(
     for op_name, qualname in sorted(defining.items()):
         opdef = OPDEFS[qualname]
         defined_in = [module_of(opdef._init_fn)]
-        if torch_wrapper(defined_in[0]):
+        if defined_in[0] is not None and torch_wrapper(defined_in[0]):
             # triton_op: the user's function is the fake; torch wrapped it.
             defined_in.append(module_of(opdef._abstract_fn))
 
-        def unusable(name: str) -> str | None:
+        def unusable(name: str | None) -> str | None:
+            if name is None:
+                return "no __module__"
             if name == "__main__":
                 return "__main__"
             if torch_wrapper(name):
@@ -2131,7 +2140,9 @@ def _custom_op_modules(
             return None
 
         # Outside torch first; then a torch submodule.
-        candidates = sorted(dict.fromkeys(defined_in), key=in_torch)
+        candidates = sorted(
+            dict.fromkeys(defined_in), key=lambda n: n is None or in_torch(n)
+        )
         reasons = {n: unusable(n) for n in candidates}
         name = next((n for n in candidates if reasons[n] is None), None)
         if name is None:
@@ -2140,13 +2151,12 @@ def _custom_op_modules(
                 "op %s (%s); the artifact serves only where it is already registered "
                 "by its first call",
                 op_name,
-                ", ".join(f"{n!r}: {reason}" for n, reason in reasons.items())
-                or "no defining module",
+                ", ".join(f"{n!r}: {reason}" for n, reason in reasons.items()),
             )
             continue
         modules.setdefault(name, []).append(op_name)
         reached = [
-            *map(_registered_fn, opdef._backend_fns.values()),
+            *map(inspect.unwrap, opdef._backend_fns.values()),
             *opdef._torch_dispatch_fns.values(),
         ]
         if {op_name, qualname, op_name.partition(".")[0]} & eager_op_names:
@@ -2156,9 +2166,7 @@ def _custom_op_modules(
         others = {
             n
             for fn in reached
-            if fn is not None
-            and (n := module_of(fn)) not in (name, "?")
-            and not in_torch(n)
+            if isinstance(n := module_of(fn), str) and n != name and not in_torch(n)
         }
         if others:
             log.warning(
@@ -2169,19 +2177,6 @@ def _custom_op_modules(
                 ", ".join(sorted(others)),
             )
     return {module: tuple(ops) for module, ops in sorted(modules.items())}
-
-
-def _registered_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """The user's function behind CustomOpDef.register_kernel's wrapper, which
-    closes over it as ``fn``."""
-    fn = inspect.unwrap(fn)
-    code = getattr(fn, "__code__", None)
-    closure = getattr(fn, "__closure__", None)
-    if code is not None and closure and "fn" in code.co_freevars:
-        inner = closure[code.co_freevars.index("fn")].cell_contents
-        if callable(inner):
-            return inner
-    return fn
 
 
 def _importable_by_name(name: str) -> bool:
@@ -3907,8 +3902,10 @@ def load(
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build
     elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
-    producer's, and a kernel that links a library from the Inductor cache (the
-    Halide runtime, CUTLASS or CK kernels) is rebuilt. Rebuilding needs a C++ compiler on the serving host:
+    producer's. A kernel that links a library from the Inductor cache (the Halide
+    runtime, CUTLASS or CK kernels) keeps the cache dir in its key: a host whose
+    cache dir is at the producer's path restores the frozen binary, which needs
+    that library at the same path, and any other host rebuilds it. Rebuilding needs a C++ compiler on the serving host:
     :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the

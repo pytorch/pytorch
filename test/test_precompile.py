@@ -9955,7 +9955,7 @@ class TestPrecompileCustomOpModules(TestCase):
         torch.library.custom_op(f"{ns}::nameless", mutates_args=())(body)
         with self.assertLogs("torch._precompile", "WARNING") as logs:
             self.assertEqual(_custom_op_modules({f"{ns}::nameless"}), {})
-        self.assertIn("not importable", logs.output[0])
+        self.assertIn("no __module__", logs.output[0])
 
     def test_custom_ops_registered_under_an_overload_name(self):
         from torch._precompile import (
@@ -10131,6 +10131,21 @@ class TestPrecompileCustomOpModules(TestCase):
         with self.assertLogs("torch._precompile", "WARNING") as logs:
             self.assertEqual(_backend_custom_op_names(unreadable), (set(), set()))
         self.assertIn("regional", logs.output[0])
+        # Only the half it cannot read is reported; the other's ops are recorded.
+        half_readable = {
+            "inductor": artifact(
+                types.SimpleNamespace(
+                    compiled_fw=compiled("torch.ops.mylib.fw.default(x)"),
+                    compiled_bw=object(),
+                )
+            )
+        }
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self.assertEqual(
+                _backend_custom_op_names(half_readable), ({"mylib::fw"}, set())
+            )
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("backward", logs.output[0])
 
 
 if __name__ == "__main__":

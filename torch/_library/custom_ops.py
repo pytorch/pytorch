@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import inspect
 import logging
 import warnings
@@ -496,6 +497,7 @@ class CustomOpDef:
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
                 @torch._disable_dynamo
+                @functools.wraps(fn)
                 def wrapped_fn(*args, **kwargs):
                     if device_type in self._disabled_kernel:
                         return self._init_fn(*args, **kwargs)
