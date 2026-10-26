@@ -3,6 +3,7 @@ import collections
 import contextlib
 import copy
 import functools
+import importlib
 import inspect
 import logging
 import math
@@ -1280,12 +1281,42 @@ def _maybe_revert_all_patches() -> Iterator[None]:
             )
 
 
+def _resolve_lazy_imports(
+    patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
+) -> None:
+    """Resolve the unresolved lazy imports among ``names`` (default: every global of
+    ``frame_dict``) with ``patcher``'s patches reverted.
+
+    Reading an unresolved lazy import runs its module body, which must not see the
+    globals FX patches mid-trace. ``importlib.is_lazy_import`` exists only on PEP
+    690-style lazy-import runtimes (e.g. Cinder). Only ``patcher``'s own patches are
+    reverted: an enclosing trace's patcher stays applied.
+    """
+    is_lazy_import = getattr(importlib, "is_lazy_import", None)
+    if is_lazy_import is None:
+        return
+    lazy_names = [
+        name
+        for name in (frame_dict if names is None else names)
+        if name in frame_dict and is_lazy_import(frame_dict, name)
+    ]
+    if not lazy_names:
+        return
+    patcher.revert_all_patches()
+    try:
+        for name in lazy_names:
+            _ = frame_dict[name]
+    finally:
+        patcher.reapply_all_patches()
+
+
 def _patch_wrapped_functions(patcher: _Patcher) -> None:
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
     for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
+        _resolve_lazy_imports(patcher, frame_dict, (name,))
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:
@@ -1304,6 +1335,7 @@ def _autowrap_check(
     This method searches a scope for them and patches them if found.
     """
     if patcher.visit_once(frame_dict):
+        _resolve_lazy_imports(patcher, frame_dict)
         for name, value in frame_dict.items():
             if (
                 not name.startswith("_")
