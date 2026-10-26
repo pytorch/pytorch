@@ -1269,25 +1269,38 @@ def _new_patcher() -> Iterator[_Patcher]:
         CURRENT_PATCHER = prior_patcher
 
 
+def _applied_patchers(patcher: _Patcher | None) -> list[_Patcher]:
+    """``patcher`` and the patchers of the traces it is nested in, innermost first,
+    leaving out any already suspended (resolving a lazy import, say)."""
+    patchers = []
+    while patcher is not None:
+        if patcher.applied:
+            patchers.append(patcher)
+        patcher = patcher.outer
+    return patchers
+
+
 @contextlib.contextmanager
-def _maybe_revert_all_patches() -> Iterator[None]:
-    # A patcher already suspended (resolving a lazy import, say) stays suspended.
-    current_patcher = CURRENT_PATCHER
-    if current_patcher is not None and not current_patcher.applied:
-        current_patcher = None
-    patches_made = None
-    patches_removed = None
+def _suspend_patches(patchers: list[_Patcher]) -> Iterator[None]:
+    # Innermost first: a nested patcher recorded the outer one's wrappers as the
+    # originals it restores.
+    patches_removed = [patcher.revert_all_patches() for patcher in patchers]
     try:
-        if current_patcher is not None:
-            patches_removed = current_patcher.revert_all_patches()
         yield
     finally:
-        if current_patcher is not None:
-            patches_made = current_patcher.reapply_all_patches()
+        patches_made = [
+            patcher.reapply_all_patches() for patcher in reversed(patchers)
+        ][::-1]
         if patches_made != patches_removed:
             raise AssertionError(
                 "CURRENT_PATCHER was changed during a revert_all_patches"
             )
+
+
+@contextlib.contextmanager
+def _maybe_revert_all_patches() -> Iterator[None]:
+    with _suspend_patches(_applied_patchers(CURRENT_PATCHER)):
+        yield
 
 
 def _resolve_lazy_imports(
@@ -1321,29 +1334,18 @@ def _resolve_lazy_imports(
     ]
     if not lazy_names:
         return
-    # Innermost first: a nested patcher recorded the outer one's wrappers as the
-    # originals it restores. A patcher already suspended (Dynamo compiles under
-    # _maybe_revert_all_patches) is left as it is.
-    chain: list[_Patcher] = []
-    current: _Patcher | None = patcher
-    while current is not None:
-        if current.applied:
-            chain.append(current)
-        current = current.outer
+    # FX only scans scopes while ``patcher`` is applied.
+    patchers = _applied_patchers(patcher)
+    if not patchers:
+        raise AssertionError("resolving lazy imports for a suspended patcher")
     wraps_before = set(_wrapped_fns_to_patch)
-    for suspended in chain:
-        suspended.revert_all_patches()
-    try:
-        with _is_fx_tracing_context(False):
-            for name in lazy_names:
-                _ = frame_dict[name]
-    finally:
-        for suspended in reversed(chain):
-            suspended.reapply_all_patches()
+    with _suspend_patches(patchers), _is_fx_tracing_context(False):
+        for name in lazy_names:
+            _ = frame_dict[name]
     # The outermost trace owns the patch, so an inner trace's exit does not revert
     # it; the inner patchers then see it as already patched and skip it. A new wrap
     # target still lazy is resolved through this patcher's own chain.
-    owner = (chain or [patcher])[-1]
+    owner = patchers[-1]
     for key, wrapped_globals in _wrapped_fns_to_patch.copy().items():
         if key not in wraps_before:
             _resolve_lazy_imports(patcher, wrapped_globals, (key[1],))

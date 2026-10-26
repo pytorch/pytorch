@@ -2112,6 +2112,30 @@ print("lazy trace ok")
         targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
         self.assertIn(bar_fn, targets)
 
+    def test_maybe_revert_all_patches_suspends_every_enclosing_trace(self):
+        from torch.fx._symbolic_trace import _maybe_revert_all_patches, _new_patcher
+
+        def leaf(x):
+            return x
+
+        def outer_patched(x):
+            return x
+
+        def inner_patched(x):
+            return x
+
+        outer_dict, inner_dict = {"leaf": leaf}, {"leaf": leaf}
+        with _new_patcher() as outer:
+            outer.patch(outer_dict, "leaf", outer_patched)
+            with _new_patcher() as inner:
+                inner.patch(inner_dict, "leaf", inner_patched)
+                with _maybe_revert_all_patches():
+                    self.assertIs(outer_dict["leaf"], leaf)
+                    self.assertIs(inner_dict["leaf"], leaf)
+                self.assertIs(outer_dict["leaf"], outer_patched)
+                self.assertIs(inner_dict["leaf"], inner_patched)
+        self.assertIs(outer_dict["leaf"], leaf)
+
     def test_lazy_module_bodies_run_without_the_fx_tracing_flag(self):
         from torch.fx._symbolic_trace import _get_is_fx_tracing
 
