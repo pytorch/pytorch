@@ -4163,20 +4163,17 @@ class CppCodeCache:
             restore_cpp_kernel,
         )
 
-        # Both keys hash the same inputs; only the command's paths differ.
-        def hashed_extra(cmd_line: str) -> str:
-            return f"{optimized_code} {cmd_line}"
+        # Both keys come from here; only the command line passed in differs.
+        def kernel_key(cmd_line: str) -> str:
+            return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
 
-        key, main_path = write(main_code, "main.cpp", extra=hashed_extra(main_cmd_line))
+        key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
         # The key a capture freezes this kernel's binary under, and a replay finds it
         # by, on a host that may put torch elsewhere. The source and any cache-dir
         # path in the command stay in it (see _relocatable_command_line). The binary
         # itself stays under key, which this host's paths tell apart.
         frozen_key = relocatable_cpp_key(
-            lambda: get_hash(
-                main_code.strip(),
-                hashed_extra(_relocatable_command_line(main_cmd_line)),
-            ),
+            lambda: kernel_key(_relocatable_command_line(main_cmd_line)),
             loaded=key in cls.cache,
         )
 

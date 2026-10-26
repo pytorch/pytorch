@@ -117,11 +117,15 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             # init_process_group was configured with.
             default_pg = dist.distributed_c10d._get_default_group()
             coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
-            default_backend = default_pg._get_backend(torch.device(coll_device))
-            # A fake backend built without options has none, even when the group
-            # syncs over gloo (cpu:fake,cuda:nccl).
-            options = default_backend.options
-            timeout = options._timeout if options is not None else None
+            # A fake backend built without options has none, so fall back to another
+            # device's backend (cuda's in cpu:fake,cuda:nccl); none has options only
+            # in a fake world.
+            timeout = None
+            for device in (torch.device(coll_device), *default_pg._device_types):
+                options = default_pg._get_backend(device).options
+                if options is not None:
+                    timeout = options._timeout
+                    break
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend=backend, timeout=timeout, pg_tag="pt2_compile_sync_pg"
             )
