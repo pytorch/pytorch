@@ -478,9 +478,9 @@ class PythonMod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
-        # sympy.Mod runs the same r.is_integer test, so skip it when we just
-        # declined to trust that test.
-        if r.is_integer is not True and sympy.Mod(p, q) == 0:
+        # sympy.Mod runs the same is_integer test on p / q and on each term of
+        # a sum, so on affected sympy versions it can fold to a wrong 0 too.
+        if not _SYMPY_HAS_INTEGER_QUOTIENT_BUG and sympy.Mod(p, q) == 0:
             return S.Zero
 
         return None

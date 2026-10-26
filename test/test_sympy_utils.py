@@ -1155,6 +1155,8 @@ class TestSympyFunctions(TestCase):
             (TorchSymMax(6, 2 * x - 12), 6, lambda v: max(6, 2 * v - 12)),
             (TorchSymMax(2 * x, 4) ** 2, 12, lambda v: max(2 * v, 4) ** 2),
             (2**x * (x + 1), 6, lambda v: 2**v * (v + 1)),
+            # PythonMod's sympy.Mod fallback reduces each term of a sum.
+            (2**x + 3 * x * (x + 1), 6, lambda v: 2**v + 3 * v * (v + 1)),
         ]
         for p, q, fn in cases:
             for mod in (Mod, PythonMod):

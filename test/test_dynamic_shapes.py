@@ -2793,6 +2793,14 @@ class TestSympyMod(TestCase):
         r = torch.sym_max(6, 2 * s0 - 12) % 6
         self.assertEqual(guard_int(r), 2)
 
+    def test_python_mod_of_sum_with_even_args(self):
+        # The sign of the dividend is unknown, so % lowers to PythonMod, whose
+        # sympy.Mod fallback used to fold this to 0 on sympy < 1.15.
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 10)
+        r = (3 * s0 * (s0 + 1) + torch.sym_max(6, 2 * s0 - 12) - 996) % 6
+        self.assertEqual(guard_int(r), 2)
+
 
 class TestDimConstraints(TestCase):
     hw_classification = HardwareClassification.GENERIC
