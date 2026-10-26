@@ -5806,16 +5806,16 @@ class TestCppCodeCacheKey(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _key(self, extra_flags: tuple[str, ...] = ()) -> str:
-        CppCodeCache.load_async(self.CODE, extra_flags=extra_flags)
+    def _key(self) -> str:
+        CppCodeCache.load_async(self.CODE)
         (key,) = CppCodeCache.cache
         return key
 
-    def _frozen_key(self, extra_flags: tuple[str, ...] = ()) -> str:
+    def _frozen_key(self) -> str:
         """The key a capture records the kernel under; call inside capture_scope()."""
         from torch.compiler import _runtime_cache
 
-        CppCodeCache.load_async(self.CODE, extra_flags=extra_flags)
+        CppCodeCache.load_async(self.CODE)
         (key,) = _runtime_cache._capture.cpp_kernels
         return key
 

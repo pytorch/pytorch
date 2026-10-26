@@ -2101,6 +2101,17 @@ def _custom_op_modules(
     def torch_wrapper(name: str) -> bool:
         return name == "torch._library" or name.startswith("torch._library.")
 
+    def unusable(name: str | None) -> str | None:
+        if name is None:
+            return "no __module__"
+        if name == "__main__":
+            return "__main__"
+        if torch_wrapper(name):
+            return "a torch wrapper"
+        if not _importable_by_name(name):
+            return "not importable by that name"
+        return None
+
     modules: dict[str, list[str]] = {}
     # An op custom_op registered under an overload name (ns::op.overload) is keyed
     # that way, while a graph can call it through its packet, ns::op.
@@ -2125,17 +2136,6 @@ def _custom_op_modules(
         if defined_in[0] is not None and torch_wrapper(defined_in[0]):
             # triton_op: the user's function is the fake; torch wrapped it.
             defined_in.append(module_of(opdef._abstract_fn))
-
-        def unusable(name: str | None) -> str | None:
-            if name is None:
-                return "no __module__"
-            if name == "__main__":
-                return "__main__"
-            if torch_wrapper(name):
-                return "a torch wrapper"
-            if not _importable_by_name(name):
-                return "not importable by that name"
-            return None
 
         reasons = {n: unusable(n) for n in dict.fromkeys(defined_in)}
         name = next((n for n, reason in reasons.items() if reason is None), None)
@@ -2381,9 +2381,9 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 #
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state,
 # which has no readable source form here. Everything else is meant to be read and
-# reviewed. Beyond torch it imports only those CUSTOM_OP_MODULES, the modules
-# registering the custom ops its compiled subgraphs call, whose ops are not registered
-# yet.
+# reviewed. Beyond torch it imports the modules of the frames it serves, and those
+# CUSTOM_OP_MODULES, the modules registering the custom ops its compiled subgraphs
+# call, whose ops are not registered yet.
 """
 
 
@@ -3929,16 +3929,17 @@ def load(
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process
-    (for example, a captured source changed since capture). ``load`` imports a
-    module in the artifact's ``CUSTOM_OP_MODULES`` (user code) only when one of the
-    custom ops it registers is not registered yet. If the module cannot be imported
-    or, imported, leaves one of its ops unregistered, ``load`` warns, and the op
-    must be registered by its first call. The recorded module is the one defining
-    the op's function, which is not always the one calling
-    ``torch.library.custom_op`` on it. A cache whose
+    (for example, a captured source changed since capture). A cache whose
     ``format``/``version`` does not match (a foreign or different-build envelope)
     is NOT fatal: the cache is acceleration only, so ``load`` degrades to JIT'ing
     from ``python_code`` rather than crashing.
+
+    ``load`` imports a module in the artifact's ``CUSTOM_OP_MODULES`` (user code)
+    only when one of the custom ops it registers is not registered yet. If the
+    module cannot be imported or, imported, leaves one of its ops unregistered,
+    ``load`` warns, and the op must be registered by its first call. The recorded
+    module is the one defining the op's function, which is not always the one
+    calling ``torch.library.custom_op`` on it.
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)

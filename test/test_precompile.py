@@ -10028,13 +10028,13 @@ class TestPrecompileCustomOpModules(TestCase):
         # triton_op wraps the user's function in its own, which it passes to
         # custom_op, and registers the user's function as the op's fake.
         ns = f"precompile_triton_op_{uuid.uuid4().hex}"
-        op = self._define_op(ns, "kernel", module="torch._library.triton", fake=False)
 
-        def user_fn(x):
-            return torch.empty_like(x)
+        def user_fn(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
 
         user_fn.__module__ = "unittest"
-        op.register_fake(user_fn)
+        torch.library.triton_op(f"{ns}::kernel", mutates_args=())(user_fn)
+        self.addCleanup(_undefine_custom_op, f"{ns}::kernel")
         self.assertEqual(
             _custom_op_modules({f"{ns}::kernel"}), {"unittest": (f"{ns}::kernel",)}
         )
