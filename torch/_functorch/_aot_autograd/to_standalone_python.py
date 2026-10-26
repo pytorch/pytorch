@@ -877,6 +877,7 @@ def compile_to_python(
     import torch
     from torch._higher_order_ops.effects import _get_effect
     from torch._inductor import compile_to_python as _inductor_compile_to_python
+    from torch._inductor.codegen.common import patch_compile_options
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.standalone_compile import (
         _resolve_ignore_shape_env,
@@ -961,7 +962,7 @@ def compile_to_python(
         # The options cover this step too, which alone runs the pre-grad, joint-graph
         # and freezing passes; _standalone_context's pins, inside them, still win.
         with (
-            torch._inductor.config.patch(options or {}),
+            patch_compile_options(options),
             torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),
