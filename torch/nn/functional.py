@@ -7296,9 +7296,10 @@ def quantize_tensor(
 ) -> tuple[Tensor, Tensor]:
     r"""quantize_tensor(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
 
-    Quantize a tensor along the second axis of ``dim=(outer_axis, inner_axis)``.
-    All other axes are independent batch dimensions.
-    Returns ``(qdata, scale)`` for use with :func:`scaled_mm`.
+    Subdivide ``input`` into 2D regions of ``scaling_type`` along the axes
+    specified in ``dim``, then quantize according to ``scaling_algorithm``
+    and ``qdata_dtype`` and return ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.
     Currently supported formats: ``mxfp8``. See the code samples at the bottom
     of this docblock for how to configure supported formats.
 
@@ -7398,9 +7399,12 @@ def quantize_tensor_dual(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     r"""quantize_tensor_dual(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize a tensor along both the 2d axis in ``dim`` as well as the reversed
-    2d axis in ``dim``. See :func:`quantize_tensor` to quantize along only one
-    direction.
+    Subdivide ``input`` into 2D regions of ``scaling_type`` along the axes
+    specified in ``dim`` as well as ``dim[::-1]``, then quantize according to
+    ``scaling_algorithm`` and ``qdata_dtype`` and return
+    ``(qdata0, scale0, qdata1, scale1)`` for use with :func:`scaled_mm`.
+
+    See :func:`quantize_tensor` to quantize along only one direction.
 
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
