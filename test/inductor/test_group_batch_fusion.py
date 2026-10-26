@@ -887,7 +887,7 @@ class TestGroupBatchFusion(TestCase):
             ("contiguous_mutation", True),
             ("log_softmax", False),
             ("softmin", False),
-            ("softmax_no_dim", True),
+            ("softmax_no_dim", False),
             ("relu_not_inplace", False),
             ("tensor_method_relu", False),
             ("iadd", True),

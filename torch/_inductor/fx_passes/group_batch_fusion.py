@@ -531,7 +531,7 @@ class BatchLinearLHSFusion(BatchFusion):
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
-        ) and is_linear_node_can_be_fused(node, check_mutation=False):
+        ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
@@ -684,12 +684,13 @@ _OPERATOR_TO_ATEN = {
     operator.invert: torch.ops.aten.bitwise_not,
 }
 
+# Fresh-output or stride-order-preserving ops for a 2-D tensor. Batch and
+# attention ops need >=3-D inputs, which this pass never produces.
 _LAYOUT_INDEPENDENT_OPS = OrderedSet(
     [
         "cat",
         "stack",
         "mm",
-        "bmm",
         "matmul",
         "linear",
         "sum",
@@ -699,11 +700,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "layer_norm",
         "native_layer_norm",
         "rms_norm",
-        "scaled_dot_product_attention",
-        "_scaled_dot_product_flash_attention",
-        "_scaled_dot_product_efficient_attention",
-        "_scaled_dot_product_cudnn_attention",
-        "_scaled_dot_product_attention_math",
         "log_softmax",
         "rsub",
         "where",
@@ -714,7 +710,6 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "std",
         "cumsum",
         "addmm",
-        "baddbmm",
         "size",
         "sym_size",
         "dim",
@@ -797,9 +792,9 @@ def _compute_user_overload(user: torch.fx.Node):
     if target is torch.nn.functional.softmax or target is (
         torch.nn.functional.log_softmax
     ):
-        if get_arg_value(user, 1, "dim") is None:
-            return None
-        args = (*args[:2], *args[3:])
+        dim = get_arg_value(user, 1, "dim")
+        args = (args[0], -1 if dim is None else dim, *args[3:])
+        kwargs.pop("dim", None)
         name = "softmax" if target is torch.nn.functional.softmax else "log_softmax"
         target = getattr(torch.ops.aten, name)
     elif target is torch.nn.functional.softmin:
@@ -1037,8 +1032,9 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     """Return True if a reachable consumer of ``node`` rejects the fusion.
 
-    Direct users and non-merging aliases are inspected. Copies and training
-    dropout stay conservative until the next split.
+    Direct users and non-merging aliases are inspected. Resolved pointwise
+    Tensor methods and layout-independent ops stay eligible. Copies, dropout
+    and unresolved ops stay conservative until the next split.
     """
     pending = [(user, False) for user in node.users]
     visited = OrderedSet()
@@ -1058,9 +1054,6 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
                 log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
                 return True
             continue
-        if user.target is torch.nn.functional.dropout:
-            log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
-            return True
         if _is_mutable_user(user, op):
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
@@ -1082,7 +1075,7 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     return False
 
 
-def is_linear_node_can_be_fused(node: torch.fx.Node, check_mutation=True):
+def is_linear_node_can_be_fused(node: torch.fx.Node):
     input = get_arg_value(node, 0, "input")
     weight = get_arg_value(node, 1, "weight")
     return (
@@ -1094,10 +1087,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node, check_mutation=True):
         # the mm -> bmm transform adds an unbind() op,
         # which is not safe for autograd when the output of the mm is mutated.
         # don't pattern match if any users of the mm mutate the input.
-        and (
-            not check_mutation
-            or not any(_is_mutable_node(user.target) for user in node.users)
-        )
+        and not any(_is_mutable_node(user.target) for user in node.users)
     )
 
 
