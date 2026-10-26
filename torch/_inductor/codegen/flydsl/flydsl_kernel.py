@@ -151,6 +151,23 @@ class FlyDSLTemplateKernel(Kernel):
 
     def call_kernel(self, name: str, node=None):
         wrapper = V.graph.wrapper_code
+        if getattr(V.graph, "aot_mode", False):
+            from .flydsl_aot import generate_aot_kernel_call
+
+            kernel_args = [self.output_node]
+            for _, input_node in self._template_input_args:
+                reinterpret_view = self._get_reinterpret_view(input_node)
+                kernel_args.append(
+                    reinterpret_view if reinterpret_view is not None else input_node
+                )
+            generate_aot_kernel_call(
+                wrapper,
+                name,
+                kernel_args,
+                device=self.output_node.get_device(),
+            )
+            return
+
         call_args = []
         arg_types = []
 

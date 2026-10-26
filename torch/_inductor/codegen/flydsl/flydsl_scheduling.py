@@ -87,22 +87,39 @@ class FlyDSLScheduling(BaseScheduling):
 
             _, _, kernel_path = get_path(code_hash(src_code_str), "py")
 
-            compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline(f"async_compile.flydsl({kernel_name!r}, r'''")
-            compile_wrapper.splice(src_code_str, strip=True)
-            if precompile_metadata is not None:
-                compile_wrapper.writeline(
-                    f"''', precompile_metadata={precompile_metadata!r})"
+            if getattr(V.graph, "aot_mode", False):
+                if precompile_metadata is None:
+                    raise NotImplementedError(
+                        "FlyDSL AOT requires static tensor metadata"
+                    )
+                from .flydsl_aot import (
+                    compile_aot_source,
+                    register_aot_artifact,
                 )
-            else:
-                compile_wrapper.writeline("''')")
 
-            metadata_comment = f"# kernel path: {kernel_path}"
-            origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment += "\n" + origins + "\n" + detailed_origins
-            wrapper.define_kernel(
-                kernel_name, compile_wrapper.getvalue(), metadata_comment
-            )
+                artifact = compile_aot_source(
+                    kernel_name,
+                    src_code_str,
+                    precompile_metadata,
+                )
+                register_aot_artifact(wrapper, kernel_name, artifact)
+            else:
+                compile_wrapper = IndentedBuffer()
+                compile_wrapper.writeline(f"async_compile.flydsl({kernel_name!r}, r'''")
+                compile_wrapper.splice(src_code_str, strip=True)
+                if precompile_metadata is not None:
+                    compile_wrapper.writeline(
+                        f"''', precompile_metadata={precompile_metadata!r})"
+                    )
+                else:
+                    compile_wrapper.writeline("''')")
+
+                metadata_comment = f"# kernel path: {kernel_path}"
+                origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+                metadata_comment += "\n" + origins + "\n" + detailed_origins
+                wrapper.define_kernel(
+                    kernel_name, compile_wrapper.getvalue(), metadata_comment
+                )
         return kernel_name
 
     def codegen_template(
@@ -186,6 +203,10 @@ class FlyDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
+            "tensor_names": tuple(
+                arg_name.removeprefix("arg_")
+                for arg_name, _ in kernel._template_input_args
+            ),
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
