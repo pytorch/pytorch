@@ -573,26 +573,30 @@ def _has_cudnn_dll(path: str) -> bool:
 
 
 def _cudnn_library_file(version: str | None) -> str | None:
-    # Linux cuDNN packages are flat. Versioned lib/<ver>/ is a Windows layout.
+    # An existing import library, or None. Linux packages are flat.
     if not IS_WINDOWS:
         if version is not None:
             return None
-        for directory in (
-            os.path.join(CUDNN_HOME, 'lib64'),
-            os.path.join(CUDNN_HOME, 'lib'),
-        ):
-            candidate = os.path.join(directory, 'libcudnn.so')
-            if os.path.isfile(candidate):
-                return candidate
-        return None
-    libname = 'cudnn.lib'
-    if version is None:
-        flat = os.path.join(CUDNN_HOME, 'lib', _windows_arch(), libname)
-        return flat if os.path.isfile(flat) else None
-    return os.path.join(CUDNN_HOME, 'lib', version, _windows_arch(), libname)
+        candidates = (
+            os.path.join(CUDNN_HOME, 'lib64', 'libcudnn.so'),
+            os.path.join(CUDNN_HOME, 'lib', 'libcudnn.so'),
+        )
+    elif version is None:
+        candidates = (
+            os.path.join(CUDNN_HOME, 'lib', _windows_arch(), 'cudnn.lib'),
+        )
+    else:
+        candidates = (
+            os.path.join(
+                CUDNN_HOME, 'lib', version, _windows_arch(), 'cudnn.lib'),
+        )
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
-def _qualified_cudnn_versions() -> list[tuple[tuple[int, int], str]]:
+def _qualified_cudnn_versions() -> list[tuple[tuple[int, int], str, str]]:
     if not IS_WINDOWS:
         return []
     include_root = os.path.join(CUDNN_HOME, 'include')
@@ -605,18 +609,15 @@ def _qualified_cudnn_versions() -> list[tuple[tuple[int, int], str]]:
         key = _cuda_version_key(name)
         header = os.path.join(include_root, name, 'cudnn.h')
         library = _cudnn_library_file(name)
-        if (
-            key is None
-            or library is None
-            or not os.path.isfile(header)
-            or not os.path.isfile(library)
-        ):
+        if key is None or library is None or not os.path.isfile(header):
             continue
-        qualified.append((key, name))
+        qualified.append((key, name, library))
     return qualified
 
 
-def _pick_cudnn_version(qualified: list[tuple[tuple[int, int], str]]) -> str | None:
+def _pick_cudnn_version(
+    qualified: list[tuple[tuple[int, int], str, str]],
+) -> str | None:
     # Exact torch CUDA version, else the newest minor of that same major.
     # 13.10 ranks after 13.2. A different major is not used.
     if not qualified:
@@ -624,7 +625,7 @@ def _pick_cudnn_version(qualified: list[tuple[tuple[int, int], str]]) -> str | N
     wanted = _cuda_version_key(_cuda_major_minor() or '')
     if wanted is None:
         return None
-    for key, name in qualified:
+    for key, name, _library in qualified:
         if key == wanted:
             return name
     same_major = [item for item in qualified if item[0][0] == wanted[0]]
@@ -633,11 +634,33 @@ def _pick_cudnn_version(qualified: list[tuple[tuple[int, int], str]]) -> str | N
     return max(same_major)[1]
 
 
-def _flat_cudnn_pair() -> bool:
-    if not os.path.isfile(os.path.join(CUDNN_HOME, 'include', 'cudnn.h')):
-        return False
+_CUDNN_MAJOR_MISMATCH_WARNED: set[tuple[str, str]] = set()
+
+
+def _warn_rejected_cudnn_major(
+    qualified: list[tuple[tuple[int, int], str, str]],
+) -> None:
+    cuda = getattr(torch.version, 'cuda', None) or 'unknown'
+    found = ', '.join(name for _key, name, _library in sorted(qualified))
+    if (str(cuda), found) in _CUDNN_MAJOR_MISMATCH_WARNED:
+        return
+    _CUDNN_MAJOR_MISMATCH_WARNED.add((str(cuda), found))
+    logger.warning(
+        "cuDNN install has CUDA %s, which does not match torch CUDA %s. "
+        "Those version directories are not used.",
+        found,
+        cuda,
+    )
+
+
+def _flat_cudnn_paths() -> tuple[str, str] | None:
+    include = os.path.join(CUDNN_HOME, 'include')
+    if not os.path.isfile(os.path.join(include, 'cudnn.h')):
+        return None
     library = _cudnn_library_file(None)
-    return library is not None and os.path.isfile(library)
+    if library is None:
+        return None
+    return include, os.path.dirname(library)
 
 
 def _windows_cudnn_bin(version: str | None) -> str | None:
@@ -658,6 +681,27 @@ def _windows_cudnn_bin(version: str | None) -> str | None:
     return None
 
 
+def _fallback_include() -> str | None:
+    flat = os.path.join(CUDNN_HOME, 'include')
+    return flat if os.path.isdir(flat) else None
+
+
+def _fallback_library() -> str | None:
+    # Prefer the import library found above. libcudnn.so.9 is not that file,
+    # so a directory that only contains the soname is still returned.
+    library = _cudnn_library_file(None)
+    if library is not None:
+        return os.path.dirname(library)
+    if IS_WINDOWS:
+        flat = os.path.join(CUDNN_HOME, 'lib', _windows_arch())
+        return flat if os.path.isdir(flat) else None
+    for name in ('lib64', 'lib'):
+        flat = os.path.join(CUDNN_HOME, name)
+        if os.path.isdir(flat):
+            return flat
+    return None
+
+
 def _resolve_cudnn_dirs() -> tuple[str | None, str | None, str | None]:
     # Windows cuDNN 9 packages for CUDA 13+ nest include, lib, and bin under
     # one <major.minor>. That version is used only when the header and the
@@ -665,42 +709,22 @@ def _resolve_cudnn_dirs() -> tuple[str | None, str | None, str | None]:
     # are flat, so they never take the versioned scan.
     if CUDNN_HOME is None:
         return None, None, None
+    flat = _flat_cudnn_paths()
+    if flat is not None:
+        include, library = flat
+        bin_dir = _windows_cudnn_bin(None) if IS_WINDOWS else None
+        return include, library, bin_dir
     if not IS_WINDOWS:
-        if _flat_cudnn_pair():
-            library = os.path.dirname(_cudnn_library_file(None))
-            return os.path.join(CUDNN_HOME, 'include'), library, None
         return _fallback_include(), _fallback_library(), None
-    if _flat_cudnn_pair():
-        library = os.path.dirname(_cudnn_library_file(None))
-        return (
-            os.path.join(CUDNN_HOME, 'include'),
-            library,
-            _windows_cudnn_bin(None),
-        )
-    chosen = _pick_cudnn_version(_qualified_cudnn_versions())
-    if chosen is not None:
-        include = os.path.join(CUDNN_HOME, 'include', chosen)
-        library = os.path.dirname(_cudnn_library_file(chosen))
-        return include, library, _windows_cudnn_bin(chosen)
-    return _fallback_include(), _fallback_library(), _windows_cudnn_bin(None)
-
-
-def _fallback_include() -> str | None:
-    flat = os.path.join(CUDNN_HOME, 'include')
-    return flat if os.path.isdir(flat) else None
-
-
-def _fallback_library() -> str | None:
-    library = _cudnn_library_file(None)
-    if library is not None:
-        return os.path.dirname(library)
-    if IS_WINDOWS:
-        flat = os.path.join(CUDNN_HOME, 'lib', _windows_arch())
-        return flat if os.path.isdir(flat) else None
-    for flat in (os.path.join(CUDNN_HOME, 'lib64'), os.path.join(CUDNN_HOME, 'lib')):
-        if os.path.isdir(flat):
-            return flat
-    return None
+    qualified = _qualified_cudnn_versions()
+    chosen = _pick_cudnn_version(qualified)
+    if chosen is None:
+        if qualified:
+            _warn_rejected_cudnn_major(qualified)
+        return _fallback_include(), _fallback_library(), _windows_cudnn_bin(None)
+    library_file = next(item[2] for item in qualified if item[1] == chosen)
+    include = os.path.join(CUDNN_HOME, 'include', chosen)
+    return include, os.path.dirname(library_file), _windows_cudnn_bin(chosen)
 
 
 def _cudnn_include_dir() -> str | None:

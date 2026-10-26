@@ -371,14 +371,17 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 mock.patch.object(cpp, "CUDA_HOME", cuda_home),
                 mock.patch("torch.version.cuda", "12.6"),
             ):
-                self.assertEqual(
-                    cpp._cudnn_include_dir(), os.path.join(root, "include", "12.8")
-                )
-                library = os.path.join(root, "lib", "12.8", cpp._windows_arch())
-                self.assertEqual(cpp._cudnn_library_dir(), library)
-                if not cpp.IS_HIP_EXTENSION:
-                    flags = cpp._prepare_ldflags([], True, False, False, False)
-                    self.assertIn(f"/LIBPATH:{library}", flags)
+                cpp._CUDNN_MAJOR_MISMATCH_WARNED.clear()
+                with self.assertNoLogs(cpp.__name__, level="WARNING"):
+                    self.assertEqual(
+                        cpp._cudnn_include_dir(),
+                        os.path.join(root, "include", "12.8"),
+                    )
+                    library = os.path.join(root, "lib", "12.8", cpp._windows_arch())
+                    self.assertEqual(cpp._cudnn_library_dir(), library)
+                    if not cpp.IS_HIP_EXTENSION:
+                        flags = cpp._prepare_ldflags([], True, False, False, False)
+                        self.assertIn(f"/LIBPATH:{library}", flags)
         with tempfile.TemporaryDirectory() as root:
             cuda_home = os.path.join(root, "cuda-home")
             os.makedirs(cuda_home)
@@ -390,8 +393,13 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 mock.patch.object(cpp, "CUDA_HOME", cuda_home),
                 mock.patch("torch.version.cuda", "12.6"),
             ):
-                include = cpp._cudnn_include_dir()
-                library = cpp._cudnn_library_dir()
+                cpp._CUDNN_MAJOR_MISMATCH_WARNED.clear()
+                with self.assertLogs(cpp.__name__, level="WARNING") as caught:
+                    include = cpp._cudnn_include_dir()
+                    library = cpp._cudnn_library_dir()
+                message = "\n".join(caught.output)
+                self.assertIn("13.0", message)
+                self.assertIn("12.6", message)
                 self.assertEqual(include, os.path.join(root, "include"))
                 self.assertNotEqual(include, other)
                 self.assertIsNone(library)
@@ -1886,33 +1894,6 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
         with self.assertRaisesRegex(RuntimeError, "same size"):
             y_incorrect = torch.zeros(20, device="cuda", dtype=torch.float32)
             module.cudnn_relu(x, y_incorrect)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
-    @unittest.skipIf(not IS_WINDOWS, "versioned cuDNN layout is Windows-only")
-    def test_cudnn_cuda_versioned_layout_paths(self):
-        # cuDNN 9 Windows CUDA 13+ packages nest headers and libs under
-        # include/<cuda>/ and lib/<cuda>/<arch>/. Flat include/cudnn.h is absent.
-        with tempfile.TemporaryDirectory() as root:
-            ver = "13.4"
-            arch = torch.utils.cpp_extension._windows_arch()
-            lib = os.path.join(root, "lib", ver, arch)
-            inc = os.path.join(root, "include", ver)
-            os.makedirs(inc)
-            os.makedirs(lib)
-            with open(os.path.join(inc, "cudnn.h"), "w"):
-                pass
-            with open(os.path.join(lib, "cudnn.lib"), "w"):
-                pass
-            with (
-                mock.patch.object(torch.utils.cpp_extension, "CUDNN_HOME", root),
-                mock.patch("torch.version.cuda", ver),
-            ):
-                includes = torch.utils.cpp_extension.include_paths(device_type="cuda")
-                libs = torch.utils.cpp_extension.library_paths(device_type="cuda")
-                self.assertIn(inc, includes)
-                self.assertNotIn(os.path.join(root, "include"), includes)
-                self.assertIn(lib, libs)
 
     @unittest.skip("Temporarily disabled")
     def test_inline_jit_compile_extension_cuda(self):
