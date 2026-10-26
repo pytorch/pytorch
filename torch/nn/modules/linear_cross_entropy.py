@@ -531,7 +531,11 @@ class _ChunkContext:
         # savings come from skipping the weight_grad_chunk scratch, not dtype.
         is_memory_like = acc_policy == "compact"
         if use_acc_dtype:
-            output_dtype = acc_dtype if dtype == torch.float16 else dtype
+            # Accumulate the scalar loss in acc_dtype: bf16's 8-bit
+            # mantissa rounds the running sum once per chunk (several
+            # percent drift over ~V/F chunks). The forward returns
+            # output.to(dtype), so the caller's dtype is unchanged.
+            output_dtype = acc_dtype
             grad_input_dtype = dtype if is_memory_like else acc_dtype
             # fp16 + memory-like keeps logits at fp16 (2BC vs 4BC);
             # everything else upcasts for softmax stability.

@@ -14963,6 +14963,35 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(input_grads[i], input_grads[0])
             self.assertEqual(linear_weight_grads[i], linear_weight_grads[0])
 
+    def test_linear_cross_entropy_chunked_bf16_loss_acc_dtype(self, device):
+        """Chunked bf16 loss accumulates in acc_dtype, not bf16.
+
+        Regression test for pytorch#201659: with bf16 inputs and
+        float32 acc_dtype, the scalar loss used to accumulate one
+        chunk at a time in bf16, rounding the running sum once per
+        chunk -- about 9% drift over 128 chunks at LLM-head aspect
+        ratios. The fp64 reference below is computed in row blocks
+        so the test never materializes the full logits matrix.
+        """
+        if "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        torch.manual_seed(0)
+        N, F, C = 4096, 128, 16384
+        x = (torch.randn(N, F, device=device) / F**0.5).bfloat16()
+        w = torch.randn(C, F, device=device).bfloat16()
+        target = torch.randint(0, C, (N,), device=device)
+        options = nn.LinearCrossEntropyOptions(batch_chunk_size=32)
+        out = nn.functional.linear_cross_entropy(x, w, target, options=options)
+        self.assertEqual(out.dtype, torch.bfloat16)
+        total = 0.0
+        for s in range(0, N, 256):
+            logits = x[s : s + 256].double() @ w.double().T
+            total += torch.nn.functional.cross_entropy(
+                logits, target[s : s + 256], reduction="sum"
+            ).item()
+        ref = total / N
+        self.assertLess(abs(out.item() - ref) / abs(ref), 0.02)
+
     @tf32_on_and_off(0.005)
     def test_linear_cross_entropy_batch_invariance(self, device):
         """Sum over per-item evaluations equals batched evaluation."""
