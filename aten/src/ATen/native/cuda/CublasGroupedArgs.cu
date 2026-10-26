@@ -17,54 +17,6 @@ namespace at::native {
 
 namespace {
 
-void check_cublaslt_grouped_alignment(
-    bool a_is_2d,
-    bool b_is_2d,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    int64_t alignment,
-    char transa,
-    char transb) {
-  if (a_is_2d && b_is_2d) {
-    TORCH_CHECK(
-        k % alignment == 0 || (transa == 't' && transb == 'n'),
-        "cublasLt grouped GEMM with jagged K not aligned to 16 bytes requires transa=t and transb=n, got transa=",
-        transa,
-        " transb=",
-        transb,
-        " K=",
-        k);
-  } else if (a_is_2d && !b_is_2d) {
-    TORCH_CHECK(
-        m % alignment == 0 || !(transa == 't' && transb == 't'),
-        "cublasLt grouped GEMM with jagged M not aligned to 16 bytes does not support transa=t and transb=t, got transa=",
-        transa,
-        " transb=",
-        transb,
-        " M=",
-        m);
-  } else if (!a_is_2d && b_is_2d) {
-    TORCH_CHECK(
-        n % alignment == 0 || !(transa == 'n' && transb == 'n'),
-        "cublasLt grouped GEMM with jagged N not aligned to 16 bytes does not support transa=n and transb=n, got transa=",
-        transa,
-        " transb=",
-        transb,
-        " N=",
-        n);
-  } else {
-    TORCH_CHECK(
-        k % alignment == 0 || (transa == 't' && transb == 'n'),
-        "cublasLt grouped GEMM with K not aligned to 16 bytes requires transa=t and transb=n, got transa=",
-        transa,
-        " transb=",
-        transb,
-        " K=",
-        k);
-  }
-}
-
 template <typename IndexType>
 __global__ void populate_cublas_grouped_args_kernel(
     const int32_t* __restrict__ offs,
@@ -273,17 +225,6 @@ cublasGroupedArgs::cublasGroupedArgs(
     n = cublas_n;
     k = cublas_k;
   }
-
-  const int64_t alignment = 16 / element_size;
-  check_cublaslt_grouped_alignment(
-      a_is_2d,
-      b_is_2d,
-      cublas_m,
-      cublas_n,
-      cublas_k,
-      alignment,
-      transa,
-      transb);
 
   // Determine element size for dimension arrays
   const size_t dim_elem_size = use_int64 ? sizeof(int64_t) : sizeof(int32_t);

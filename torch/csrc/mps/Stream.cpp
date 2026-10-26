@@ -63,7 +63,23 @@ static PyObject* THPMPSStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     auto self = (THPMPSStream*)_self;
-    self->mps_stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+    // Synchronize on the stream's serial queue to avoid racing with other
+    // threads that are encoding on it.
+    struct Context {
+      at::mps::MPSStream* stream;
+      std::exception_ptr exception;
+    } ctx{self->mps_stream, nullptr};
+    dispatch_sync_f(self->mps_stream->queue(), &ctx, [](void* arg) {
+      auto ctx = static_cast<Context*>(arg);
+      try {
+        ctx->stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+      } catch (...) {
+        ctx->exception = std::current_exception();
+      }
+    });
+    if (ctx.exception) {
+      std::rethrow_exception(ctx.exception);
+    }
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

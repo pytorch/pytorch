@@ -25,7 +25,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -64,10 +65,12 @@ for p1 in TWO_D_PLACEMENTS:
 
 
 @instantiate_parametrized_tests
-class TestDTensorReshardPlacementChange(DTensorTestBase):
+class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
+
+    world_size = NUM_DEVICES
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -174,10 +177,12 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
 
 
-class TestDTensorReshardMeshChange(DTensorTestBase):
+class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
     """
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
+
+    world_size = NUM_DEVICES
 
     @with_comms
     @with_temp_dir
@@ -433,10 +438,12 @@ class CheckpointableDistTensor(torch.Tensor):
         )
 
 
-class TestCheckpointableReshard(DTensorTestBase):
+class TestCheckpointableReshard(DTensorContinuousTestBase):
     """
     Test DCP reshard loads when shard sizes are uneven across the ranks.
     """
+
+    world_size = NUM_DEVICES
 
     @with_comms
     @with_temp_dir
