@@ -1771,6 +1771,72 @@ class TestFX(JitTestCase):
         finally:
             del _wrapped_fns_to_patch[key]
 
+    def _lazy_globals(self, lazy, seen):
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name == "helper" and dict.__getitem__(self, name) is lazy:
+                    seen.append(torch.nn.Module.__call__ is _orig_module_call)
+                    dict.__setitem__(self, name, math.sqrt)
+                return super().__getitem__(name)
+
+        return Globals(helper=lazy, __builtins__=builtins)
+
+    def _patch_is_lazy_import(self, lazy):
+        return unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: name in d and dict.__getitem__(d, name) is lazy,
+            create=True,
+        )
+
+    def test_symbolic_trace_registers_wraps_that_resolving_a_lazy_global_runs(self):
+        from torch.fx._symbolic_trace import _wrapped_fns_to_patch
+
+        lazy = object()
+
+        def leaf_fn(x):
+            return x * 3
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name == "helper" and dict.__getitem__(self, name) is lazy:
+                    # What a module body calling torch.fx.wrap("leaf_fn") records.
+                    _wrapped_fns_to_patch[(id(self), "leaf_fn")] = self
+                    dict.__setitem__(self, name, 1)
+                return super().__getitem__(name)
+
+        frame_dict = Globals(helper=lazy, leaf_fn=leaf_fn, __builtins__=builtins)
+        exec("def f(x):\n    return leaf_fn(x) + helper\n", frame_dict)  # noqa: S102
+        traced_fn = dict.__getitem__(frame_dict, "f")
+        try:
+            with self._patch_is_lazy_import(lazy):
+                gm = torch.fx.symbolic_trace(traced_fn)
+        finally:
+            _wrapped_fns_to_patch.pop((id(frame_dict), "leaf_fn"), None)
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(leaf_fn, targets)
+
+    def test_nested_symbolic_trace_resolves_lazy_globals_with_every_patch_reverted(
+        self,
+    ):
+        lazy, seen = object(), []
+
+        def f(x):
+            return x * 2
+
+        inner_fn = types.FunctionType(f.__code__, self._lazy_globals(lazy, seen))
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.symbolic_trace(inner_fn)
+                return x + 1
+
+        with self._patch_is_lazy_import(lazy):
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
             return x[0]
