@@ -21,7 +21,6 @@ constexpr int elems_per_call = sizeof(scalar_t) == 8 ? 2 : 4;
 // reduction scales as range / 2^32; this bounds it to ~6%.
 constexpr uint64_t kMaxRange32 = uint64_t{1} << 28;
 
-// Checks that a tensor bound can supply a value for each element of self.
 inline void philox_check_bound(
     const char* op_name, const char* name, const Tensor& bound, const Tensor& self) {
   TORCH_CHECK(bound.is_floating_point(),
