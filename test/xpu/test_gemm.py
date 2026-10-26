@@ -1487,7 +1487,7 @@ class TestBasicGEMM(TestCase):
         bias = torch.rand(n, dtype=out_dtype, device=device) if use_bias else None
 
         mat_a, mat_a_scale, mat_a_zero_point = self._quantize_rowwise(a_fp32, act_dtype)
-        b_uint8, mat_b_scales, mat_b_zero_points = self._group_quantize_tensor(
+        b_uint8, mat_b_scale, mat_b_zero_point = self._group_quantize_tensor(
             b_fp32, n_bit=4, q_group_size=q_group
         )
         mat_b = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
@@ -1496,9 +1496,9 @@ class TestBasicGEMM(TestCase):
             mat_a,
             mat_b,
             mat_a_scale,
-            mat_b_scales,
+            mat_b_scale,
             mat_a_zero_point,
-            mat_b_zero_points,
+            mat_b_zero_point,
             q_group,
             out_dtype,
             bias,

@@ -266,11 +266,11 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
 //     `torch.uint8`, shape [M, K]
 //   - `mat_b`: the int4 weight packed as int32, 2D, shape [N, K/8]
 //   - `mat_a_scale`: rowwise float32 scale for `mat_a`, shape [M, 1]
-//   - `mat_b_scales`: per-block float32 scale for `mat_b`, shape
+//   - `mat_b_scale`: per-block float32 scale for `mat_b`, shape
 //     [K/group_size, N]
 //   - `mat_a_zero_point`: rowwise int32 zero-point for `mat_a`, shape
 //     [M, 1]
-//   - `mat_b_zero_points`: per-block int8 zero-point for `mat_b`, shape
+//   - `mat_b_zero_point`: per-block int8 zero-point for `mat_b`, shape
 //     [K/group_size, N]
 //   - `group_size`: the quantization block size along K for `mat_b`; must
 //     be a multiple of 32 and divide K
@@ -281,9 +281,9 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
     Tensor mat_a,
     Tensor mat_b,
     Tensor mat_a_scale,
-    Tensor mat_b_scales,
+    Tensor mat_b_scale,
     Tensor mat_a_zero_point,
-    Tensor mat_b_zero_points,
+    Tensor mat_b_zero_point,
     int64_t group_size,
     std::optional<c10::ScalarType> out_dtype,
     std::optional<Tensor> bias) {
@@ -310,9 +310,9 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       {mat_a, "mat_a", 1},
       {mat_b, "mat_b", 2},
       {mat_a_scale, "mat_a_scale", 3},
-      {mat_b_scales, "mat_b_scales", 4},
+      {mat_b_scale, "mat_b_scale", 4},
       {mat_a_zero_point, "mat_a_zero_point", 5},
-      {mat_b_zero_points, "mat_b_zero_points", 6}};
+      {mat_b_zero_point, "mat_b_zero_point", 6}};
   checkAllSameGPU(__func__, targs);
 
   int64_t M = mat_a.size(0);
@@ -367,30 +367,30 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       mat_a_zero_point.sizes());
 
   TORCH_CHECK(
-      mat_b_scales.dtype() == c10::kFloat,
+      mat_b_scale.dtype() == c10::kFloat,
       __func__,
-      " : expect mat_b_scales to be float32 tensor, but got ",
-      mat_b_scales.dtype());
+      " : expect mat_b_scale to be float32 tensor, but got ",
+      mat_b_scale.dtype());
   TORCH_CHECK(
-      mat_b_zero_points.dtype() == c10::kChar,
+      mat_b_zero_point.dtype() == c10::kChar,
       __func__,
-      " : expect mat_b_zero_points to be int8 tensor, but got ",
-      mat_b_zero_points.dtype());
+      " : expect mat_b_zero_point to be int8 tensor, but got ",
+      mat_b_zero_point.dtype());
   TORCH_CHECK(
-      mat_b_scales.dim() == 2 && mat_b_scales.size(0) == K / group_size &&
-          mat_b_scales.size(1) == N,
+      mat_b_scale.dim() == 2 && mat_b_scale.size(0) == K / group_size &&
+          mat_b_scale.size(1) == N,
       __func__,
-      " : expect mat_b_scales to be 2D tensor with sizes [",
+      " : expect mat_b_scale to be 2D tensor with sizes [",
       K / group_size,
       ", ",
       N,
       "]");
   TORCH_CHECK(
-      mat_b_zero_points.dim() == 2 &&
-          mat_b_zero_points.size(0) == K / group_size &&
-          mat_b_zero_points.size(1) == N,
+      mat_b_zero_point.dim() == 2 &&
+          mat_b_zero_point.size(0) == K / group_size &&
+          mat_b_zero_point.size(1) == N,
       __func__,
-      " : expect mat_b_zero_points to be 2D tensor with sizes [",
+      " : expect mat_b_zero_point to be 2D tensor with sizes [",
       K / group_size,
       ", ",
       N,
@@ -426,9 +426,9 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       mat_a.contiguous(),
       mat_b.contiguous(),
       mat_a_scale,
-      mat_b_scales,
+      mat_b_scale,
       mat_a_zero_point,
-      mat_b_zero_points,
+      mat_b_zero_point,
       group_size,
       bias);
 
