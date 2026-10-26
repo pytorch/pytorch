@@ -563,6 +563,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fix_auto_functionalized_dtype_views
     )
 
+    from torch._inductor.codegen.flydsl.user_defined_kernel import (
+        decompose_portable_functional,
+    )
+
+    GraphTransformObserver(
+        gm, "decompose_flydsl_portable_functional"
+    ).apply_graph_pass(decompose_portable_functional)
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
