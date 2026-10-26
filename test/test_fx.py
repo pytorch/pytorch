@@ -2136,6 +2136,15 @@ print("lazy trace ok")
                 self.assertIs(inner_dict["leaf"], inner_patched)
         self.assertIs(outer_dict["leaf"], leaf)
 
+    def test_maybe_revert_all_patches_rejects_a_changed_current_patcher(self):
+        import torch.fx._symbolic_trace as symbolic_trace
+
+        with symbolic_trace._new_patcher() as patcher:
+            with self.assertRaisesRegex(AssertionError, "CURRENT_PATCHER was changed"):
+                with symbolic_trace._maybe_revert_all_patches():
+                    symbolic_trace.CURRENT_PATCHER = symbolic_trace._Patcher()
+            symbolic_trace.CURRENT_PATCHER = patcher
+
     def test_lazy_module_bodies_run_without_the_fx_tracing_flag(self):
         from torch.fx._symbolic_trace import _get_is_fx_tracing
 
