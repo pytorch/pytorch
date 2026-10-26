@@ -1277,7 +1277,10 @@ def _new_patcher() -> Iterator[_Patcher]:
 
 @contextlib.contextmanager
 def _maybe_revert_all_patches() -> Iterator[None]:
+    # A patcher already suspended (resolving a lazy import, say) stays suspended.
     current_patcher = CURRENT_PATCHER
+    if current_patcher is not None and not current_patcher.applied:
+        current_patcher = None
     patches_made = None
     patches_removed = None
     try:
@@ -1304,10 +1307,14 @@ def _resolve_lazy_imports(
     globals FX patches mid-trace. A ``torch.fx.wrap`` that body runs is patched for
     this trace, as it would be had the module been imported eagerly.
 
+    Only the scopes FX itself scans get this: a lazy name first read inside some
+    other function the trace calls still resolves with the patches applied.
+
     ``importlib.is_lazy_import(globals, name)`` exists only on PEP 690-style
     lazy-import runtimes (Cinder and builds derived from it). It reports an
     unresolved lazy name without resolving it, and reading ``globals[name]``
-    resolves it. On other runtimes this does nothing.
+    resolves it. On other runtimes this does nothing; PEP 810's lazy imports
+    (``types.LazyImportType`` proxies, not resolved by a dict read) are not handled.
     """
     is_lazy_import = getattr(importlib, "is_lazy_import", None)
     if is_lazy_import is None:
