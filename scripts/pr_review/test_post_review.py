@@ -126,6 +126,9 @@ class FakeGitHub(GitHub):
                 if r["id"] == rid:
                     r["body"] = body["body"]
             return {}
+        if method == "GET" and re.fullmatch(r"/repos/o/r/pulls/1/reviews/\d+", path):
+            rid = int(path.split("/")[-1])
+            return next((dict(r) for r in self.reviews if r["id"] == rid), None)
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews"):
             return self.reviews if page(path) == 1 else []
         if method == "POST" and path == "/repos/o/r/pulls/1/reviews":
@@ -1558,6 +1561,32 @@ class TestAReviewInProgressIsMarked(unittest.TestCase):
         posted = gh.posted()[0]["body"]
         post_review.restore_pending(gh, 1, AUTHOR, "88")
         self.assertEqual(new["body"], posted)
+
+    def test_a_mark_put_back_or_taken_over_meanwhile_is_not_passed(self):
+        source = old_review(5, body=ORIGINAL)
+        source["body"] = post_review.pending(source, "88", SHA, "o/r")
+        target = old_review(6, body=ORIGINAL)
+        # The owner put its mark back after the listing.
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL), target])
+        post_review.pass_mark(gh, 1, 6, "88", SHA, [5])
+        self.assertEqual(folds(gh), [])
+        # A newer run marked the target after the listing.
+        newer = old_review(6, body=ORIGINAL)
+        newer["body"] = post_review.pending(newer, "99", SHA, "o/r")
+        gh = FakeGitHub(reviews=[source, newer])
+        post_review.pass_mark(gh, 1, 6, "88", SHA, [5])
+        self.assertEqual(folds(gh), [])
+        # Neither: the mark moves.
+        gh = FakeGitHub(reviews=[source, target])
+        post_review.pass_mark(gh, 1, 6, "88", SHA, [5])
+        self.assertEqual(post_review.pending_run(target["body"]), "88")
+        self.assertEqual(post_review.unwrapped(target["body"]), ORIGINAL)
+
+    def test_the_mark_moves_before_the_old_review_is_folded(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "88")
+        run(gh, row(), 1, SHA, "no automated review", AUTHOR, "77")
+        self.assertEqual(folds(gh)[-2:], [999, 5])
 
     def test_an_older_mark_or_an_unknown_run_passes_nothing_on(self):
         for owner, run_id in (("66", "77"), ("88", None)):

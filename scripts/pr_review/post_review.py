@@ -1177,14 +1177,17 @@ def hide_earlier(gh, pr, author, new, sha=None, run_id=None):
     visible = [r for r in visible if r.get("state") != "CHANGES_REQUESTED" or replaced]
     comments = pr_comments(gh, pr) if visible else None
     heir = newer_mark(visible, run_id)
+    if heir is not None and sha:
+        # Before the take-downs drop the mark, so the owner's restore finds it
+        # on one review or the other.
+        sources = [r["id"] for r in visible if pending_run(r.get("body") or "") == heir]
+        pass_mark(gh, pr, new["id"], heir, sha, sources)
     # Newest first; one failure does not stop the rest.
     for old in sorted(visible, key=lambda r: r["id"], reverse=True):
         try:
             take_down(gh, pr, old, comments)
         except GitHubError as exc:
             warn(f"could not hide review {old['id']}: {exc}")
-    if heir is not None and sha:
-        pass_mark(gh, pr, now, heir, sha)
 
 
 def newer_mark(reviews: list[dict], run_id) -> str | None:
@@ -1196,20 +1199,36 @@ def newer_mark(reviews: list[dict], run_id) -> str | None:
     return str(max(newer)) if newer else None
 
 
-def pass_mark(gh: GitHub, pr: int, review: dict, owner: str, sha: str) -> None:
-    """Mark `review` in progress for `owner`, unless a run as new already has."""
-    current = pending_run(review.get("body") or "")
-    if current is not None and int(current) >= int(owner):
-        return
+def pass_mark(
+    gh: GitHub, pr: int, target: int, owner: str, sha: str, sources: list[int]
+) -> None:
+    """Mark review `target` in progress for `owner`, whose mark `sources` carry.
+
+    Both are read again first: if the owner has since put its mark back, or a
+    run at least as new has marked `target`, nothing is written.
+    """
+
+    def read(rid: int) -> dict:
+        return gh.request("GET", f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}") or {}
+
     try:
+        held = (pending_run(read(rid).get("body") or "") for rid in sources)
+        if owner not in held:
+            return
+        review = read(target)
+        current = pending_run(review.get("body") or "")
+        if not review.get("body") or (
+            current is not None and int(current) >= int(owner)
+        ):
+            return
         gh.request(
             "PUT",
-            f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}",
+            f"/repos/{gh.repo}/pulls/{pr}/reviews/{target}",
             {"body": pending(review, owner, sha, gh.repo)},
         )
-        print(f"passed run {owner}'s in-progress mark to review {review['id']}")
+        print(f"passed run {owner}'s in-progress mark to review {target}")
     except GitHubError as exc:
-        warn(f"could not pass run {owner}'s mark to review {review['id']}: {exc}")
+        warn(f"could not pass run {owner}'s mark to review {target}: {exc}")
 
 
 def main() -> int:
