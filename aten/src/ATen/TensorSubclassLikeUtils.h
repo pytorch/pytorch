@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -44,25 +45,42 @@ constexpr auto kTensorSubclassLike =
          DispatchKey::Batched,
          DispatchKey::Sparse,
          DispatchKey::SparseCsr,
-         DispatchKey::Python}) |
+         DispatchKey::Python,
+         // isTensorSubclassLike decides whether a kernel can take a fast path
+         // for plain dense tensors that skips the dispatcher. That is unsafe
+         // for FakeTensors, which Python FakeTensor gets via the Python key.
+         // C++ FakeTensor only has the Fake key but is still a FakeTensor (its
+         // ops must reach the Fake fallback), so Fake is listed to match.
+         DispatchKey::Fake}) |
     DispatchKeySet(BackendComponent::MetaBit);
 
+// Like a Python mode (dispatch_mode_enabled()), an active C++ FakeTensorMode
+// intercepts ops on every tensor, including non-fake ones, so all tensors are
+// subclass-like while it is active. It is not on the Python mode stack; it is
+// active when Fake is in the TLS include set and not excluded (the Fake
+// fallback excludes Fake while it runs meta/real kernels).
+inline bool anyModeEnabled() {
+  return c10::impl::dispatch_mode_enabled() ||
+      (c10::impl::tls_is_dispatch_key_included(DispatchKey::Fake) &&
+       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake));
+}
+
 inline bool isTensorSubclassLike(const Tensor& tensor) {
-  if (c10::impl::dispatch_mode_enabled())
+  if (anyModeEnabled())
     return true;
   auto key_set = tensor.unsafeGetTensorImpl()->key_set();
   return !(key_set & kTensorSubclassLike).empty();
 }
 
 inline bool areAnyTensorSubclassLike(TensorList tensors) {
-  if (c10::impl::dispatch_mode_enabled())
+  if (anyModeEnabled())
     return true;
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
 }
 
 inline bool areAnyOptionalTensorSubclassLike(
     const c10::List<std::optional<Tensor>>& tensors) {
-  if (c10::impl::dispatch_mode_enabled())
+  if (anyModeEnabled())
     return true;
   return std::any_of(
       tensors.begin(),
