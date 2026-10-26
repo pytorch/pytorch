@@ -683,32 +683,6 @@ _OPERATOR_TO_ATEN = {
     operator.invert: torch.ops.aten.bitwise_not,
 }
 
-_STORAGE_SENSITIVE_OPS = OrderedSet(
-    [
-        "as_strided",
-        "as_strided_copy",
-        "storage_offset",
-        "sym_storage_offset",
-        "_reshape_alias",
-        "is_set_to",
-        "_has_same_storage_numel",
-    ]
-)
-
-_LAYOUT_SENSITIVE_OPS = _STORAGE_SENSITIVE_OPS | OrderedSet(
-    [
-        "view_as",
-        "view_as_complex",
-        "unsafe_chunk",
-        "unsafe_split",
-        "unsafe_split_with_sizes",
-        "stride",
-        "sym_stride",
-        "is_contiguous",
-        "sym_is_contiguous",
-    ]
-)
-
 _LAYOUT_INDEPENDENT_OPS = OrderedSet(
     [
         "cat",
@@ -734,14 +708,12 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "where",
         "amax",
         "amin",
-        "norm",
         "linalg_vector_norm",
         "var",
         "std",
         "cumsum",
         "addmm",
         "baddbmm",
-        "einsum",
         "size",
         "sym_size",
         "dim",
@@ -814,14 +786,6 @@ def _resolve_overload(packet, args, kwargs):
     return overload
 
 
-def _resolve_user_overload(user: torch.fx.Node, cache):
-    if user in cache:
-        return cache[user]
-    overload = _compute_user_overload(user)
-    cache[user] = overload
-    return overload
-
-
 def _compute_user_overload(user: torch.fx.Node):
     target = user.target
     args = tuple(user.args)
@@ -867,37 +831,25 @@ def _is_contiguous_user(user: torch.fx.Node, op) -> bool:
     return op is not None and op.overloadpacket.__name__ == "contiguous"
 
 
-def _contiguous_aliases(user: torch.fx.Node) -> bool:
-    # Eager linears are contiguous, so default contiguous() returns self.
-    # On a fused slice it returns a copy, which hides mutations from the
-    # original consumers.
+def _eager_contiguous_aliases(user: torch.fx.Node) -> bool:
+    # Default contiguous() returns the eager linear output itself; on the fused
+    # slice it copies.
     memory_format = user.kwargs.get("memory_format")
     if memory_format is None and len(user.args) > 1:
         memory_format = user.args[1]
     return memory_format in (None, torch.contiguous_format)
 
 
-def _fused_copy_matches_eager(source, root) -> bool:
-    root_value = _node_value(root)
-    root_shape = getattr(root_value, "shape", ())
-    if not root_shape or not statically_known_true(root_shape[0] > 1):
-        return False
-    source_value = _node_value(source)
-    source_shape = getattr(source_value, "shape", ())
-    return bool(source_shape) and all(
-        statically_known_true(dim > 1) for dim in source_shape
-    )
+def _fused_copy_matches_eager(node) -> bool:
+    shape = getattr(_node_value(node), "shape", ())
+    return bool(shape) and all(statically_known_true(dim > 1) for dim in shape)
 
 
 def _is_mutable_user(user: torch.fx.Node, op) -> bool:
-    if user.op == "output":
-        return False
-    if user.op == "call_module":
-        return True
-    if user.op not in ("call_method", "call_function"):
-        return True
     if op is not None:
         return op._schema.is_mutable
+    if isinstance(user.target, torch._ops.OpOverload):
+        return user.target._schema.is_mutable
     return True
 
 
@@ -916,25 +868,26 @@ def _direct_layout_user_is_sensitive(user: torch.fx.Node, op, root) -> bool:
         return True
     if user.op not in ("call_method", "call_function"):
         return True
-    if _is_contiguous_user(user, op):
-        if not _contiguous_aliases(user):
-            return True
-        source = get_arg_value(user, 0, "input")
-        return not _fused_copy_matches_eager(source, root)
-    # Tensor methods are views, aliases or conversions until a later split
-    # classifies them.
-    if user.op == "call_method":
+    if _is_mutable_user(user, op):
         return True
+    if _is_contiguous_user(user, op):
+        if not _eager_contiguous_aliases(user):
+            return True
+        for next_user in user.users:
+            next_op = (
+                _compute_user_overload(next_user)
+                if next_user.op in ("call_method", "call_function")
+                else None
+            )
+            if _is_mutable_user(next_user, next_op):
+                return True
+        return not _fused_copy_matches_eager(root)
     if op is None:
         return True
     name = op.overloadpacket.__name__
-    if name in ("clone", "pad", "constant_pad_nd", "_to_copy", "to", "type_as"):
+    if name == "clone":
         return True
-    if (
-        name in _LAYOUT_SENSITIVE_OPS
-        or op.is_view
-        or (torch.Tag.maybe_aliasing_or_mutating in op.tags)
-    ):
+    if op.is_view or (torch.Tag.maybe_aliasing_or_mutating in op.tags):
         return True
     return not (torch.Tag.pointwise in op.tags or name in _LAYOUT_INDEPENDENT_OPS)
 
@@ -946,10 +899,9 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     aliases, copies and training dropout are conservatively rejected until
     later splits add traversal.
     """
-    cache: dict[torch.fx.Node, Any] = {}
     for user in node.users:
         op = (
-            _resolve_user_overload(user, cache)
+            _compute_user_overload(user)
             if user.op in ("call_method", "call_function")
             else None
         )
@@ -961,9 +913,7 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         if user.target is torch.nn.functional.dropout:
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
-        if _is_mutable_user(user, op) or _direct_layout_user_is_sensitive(
-            user, op, node
-        ):
+        if _direct_layout_user_is_sensitive(user, op, node):
             log.debug("batch_linear_lhs: layout-sensitive %s -> %s", node, user)
             return True
     return False
