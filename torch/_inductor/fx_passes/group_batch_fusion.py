@@ -683,13 +683,15 @@ _OPERATOR_TO_ATEN = {
     operator.invert: torch.ops.aten.bitwise_not,
 }
 
-# Fresh-output or stride-order-preserving ops for a 2-D tensor. Batch and
-# attention ops need >=3-D inputs, which this pass never produces.
+# Ops whose output allocation or stride order does not depend on the input's
+# strides. Consumers may reshape the 2-D linear result, so bmm and SDPA are
+# included; internal fused-attention variants are not present in pre-grad IR.
 _LAYOUT_INDEPENDENT_OPS = OrderedSet(
     [
         "cat",
         "stack",
         "mm",
+        "bmm",
         "matmul",
         "linear",
         "sum",
@@ -699,6 +701,7 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "layer_norm",
         "native_layer_norm",
         "rms_norm",
+        "scaled_dot_product_attention",
         "log_softmax",
         "rsub",
         "where",
@@ -709,6 +712,7 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "std",
         "cumsum",
         "addmm",
+        "baddbmm",
         "size",
         "sym_size",
         "dim",
