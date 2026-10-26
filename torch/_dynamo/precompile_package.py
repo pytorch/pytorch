@@ -1599,7 +1599,9 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
-        self.custom_op_names: set[str] = set()
+        # Keyed by backend id, so a graph the artifact does not serve (bypassed, or
+        # dropped after registering) adds no ops to it.
+        self.custom_op_names: dict[str, set[str]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1614,7 +1616,14 @@ class _CapturePackage(CompilePackage):
     def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
         from torch._precompile import _custom_op_names
 
-        self.custom_op_names |= _custom_op_names(gm)
+        self.custom_op_names[backend_id] = _custom_op_names(gm)
+
+    def custom_op_names_for(self, backend_ids: Iterable[str]) -> set[str]:
+        """The custom ops the graphs registered under ``backend_ids`` call."""
+        names: set[str] = set()
+        for backend_id in backend_ids:
+            names |= self.custom_op_names.get(backend_id, set())
+        return names
 
     def add_resume_function(
         self,
@@ -2136,7 +2145,7 @@ class PrecompileSession(Generic[_P, _R]):
             summary,
             self._backend,
             self._fn,
-            self._package.custom_op_names,
+            self._package.custom_op_names_for(backends),
         )
 
 

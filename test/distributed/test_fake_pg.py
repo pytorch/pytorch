@@ -68,10 +68,43 @@ class TestFakePG(TestCase):
         from torch._dynamo import distributed as dynamo_distributed
 
         dist.init_process_group(backend="fake", rank=0, world_size=16)
-        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            # A fake world needs no gloo, even where the build has none.
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+        ):
             pg = dynamo_distributed.get_compile_sync_pg()
-            self.assertEqual(dist.get_backend(pg), "fake")
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
             self.assertEqual(pg.size(), 16)
+
+    def test_compile_sync_decisions_stay_local(self):
+        # Over a fake world, the compile time syncs return this rank's own
+        # decisions instead of waiting on ranks that do not exist.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch import config as functorch_config
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            with functorch_config.patch(_sync_cache_decision_cross_ranks=True):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+                self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.empty(4)
+            reduced = graph.call_function(
+                torch.ops._c10d_functional.all_reduce.default, (x, "sum", "0")
+            )
+            reduced.meta["val"] = torch.empty(4)
+            graph.output(reduced)
+            self.assertEqual(_sync_decision_cross_ranks(graph, [x]), [x])
+            self.assertEqual(
+                _sync_decision_cross_ranks(graph, [x, reduced]), [x, reduced]
+            )
 
     def test_set_timeout(self):
         # FakeProcessGroup used to inherit Backend's default set_timeout, which
