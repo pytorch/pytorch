@@ -270,7 +270,6 @@ class AOTInductorModelContainer {
           "Unknown constant state: " + toStringConstantState(const_folded));
     }
 
-    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
     auto lease = pool_.checkout(stream);
     lease->run(input_handles, output_handles, stream, proxy_executor);
     lease.mark_in_flight();
@@ -427,7 +426,6 @@ class AOTInductorModelContainer {
       lease.mark_in_flight();
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
-      [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
       auto lease = pool_.checkout(stream);
 
       // We swap the constant mapping to the inactive buffer in the model to run
