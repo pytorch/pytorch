@@ -604,6 +604,31 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 6, 3), (t, 12, 10)], expected_frames=1)
 
+    def test_unused_computed_inplace_division_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def floordiv(t, a):
+            a //= 2
+            return t.sin(), a
+
+        def mod(t, a):
+            a %= 4
+            return t.sin(), a
+
+        def truediv(t, a):
+            a /= 2.0
+            return t.sin(), a
+
+        cases = [
+            (floordiv, [(t, 7), (t, 9)]),
+            (mod, [(t, 7), (t, 9)]),
+            (truediv, [(t, 7.0), (t, 9.0)]),
+        ]
+        for fn, arg_sets in cases:
+            with self.subTest(name=fn.__name__):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
     def test_unused_unary_ops_do_not_recompile(self):
         t = torch.ones(2)
         cases = [
@@ -752,19 +777,28 @@ class ComputedLazyConstantTests(TestCase):
             ("mod_float", lambda t, a: (t.sin(), a % 2.0), [(t, 7.5), (t, 9.5)]),
             ("truediv_float_int", lambda t, a: (t.sin(), a / 2), [(t, 7.0), (t, 9.0)]),
             ("floordiv_sum", lambda t, a: (t.sin(), (a + 1) // 2), [(t, 7), (t, 9)]),
+            ("floordiv_by_int", lambda t, a: (t.sin(), a // 2), [(t, 7.5), (t, 9.5)]),
+            ("mod_by_int", lambda t, a: (t.sin(), a % 4), [(t, 7.5), (t, 9.5)]),
         ]
         for name, fn, arg_sets in cases:
             with self.subTest(name=name):
                 torch._dynamo.reset()
                 self._check(fn, arg_sets, expected_frames=1)
 
-    def test_unused_mixed_type_division_recompiles(self):
+    def test_unused_int_float_mix_recompiles(self):
         t = torch.ones(2)
-
-        def fn(t, a):
-            return t.sin(), a // 2.0
-
-        self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
+        cases = [
+            ("floordiv", lambda t, a: (t.sin(), a // 2.0), [(t, 7), (t, 9)]),
+            ("mod", lambda t, a: (t.sin(), a % 2.0), [(t, 7), (t, 9)]),
+            ("bool", lambda t, a: (t.sin(), a // 2.0), [(t, True), (t, False)]),
+            ("add", lambda t, a: (t.sin(), a + 1.0), [(t, 7), (t, 9)]),
+            ("sub", lambda t, a: (t.sin(), 1.0 - a), [(t, 7), (t, 9)]),
+            ("mul", lambda t, a: (t.sin(), a * 2.0), [(t, 7), (t, 9)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=2)
 
     def test_unused_int_truediv_recompiles(self):
         t = torch.ones(2)
