@@ -52,6 +52,9 @@ if TYPE_CHECKING:
     _ALLOW_SERVE_TIME_COMPILES: bool = False
     # The inductor CUDA graph config the subgraphs are post-compiled under.
     CUDAGRAPH_CONFIG: dict[str, bool] = {}
+    # The capture's normalized mode/options, which a serve-time compile uses;
+    # None when they have no literal form.
+    INDUCTOR_OPTIONS: dict[str, object] | None = {}
     BACKEND: str = ""
     FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
@@ -829,9 +832,12 @@ def _build_installed_forward():
         # A serve-time compile is not part of the artifact: record it nowhere.
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
+        backend: object = BACKEND
+        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
+            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
-                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
+                backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
             )
             if not isinstance(context, OptimizeContext):
                 raise _PrecompileError(

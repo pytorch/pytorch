@@ -252,6 +252,7 @@ it.
 
 from __future__ import annotations
 
+import ast
 import base64
 import contextlib
 import dataclasses
@@ -319,6 +320,9 @@ __all__: list[str] = []
 # model], invariant 7.
 _CACHE_FORMAT = "torch.compiler.precompile"
 _CACHE_VERSION = 1
+
+# What PrecompiledModule._compile pins over a make_fx capture's options (see there).
+_MAKE_FX_ASSERT_PINS = {"size_asserts": True, "scalar_asserts": True}
 
 
 # Index into the caller's positional nn.Module arguments (0-based over the modules,
@@ -1813,8 +1817,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     lock them, _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION
     for the pickled guard state.
     """
-    import ast
-
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1890,6 +1892,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "SERVING_MODE",
         "_ALLOW_SERVE_TIME_COMPILES",
         "CUDAGRAPH_CONFIG",
+        "INDUCTOR_OPTIONS",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
     }
@@ -2292,6 +2295,7 @@ def _build_multigraph_python_source(
     mode: str,
     unreachable: list[str],
     cudagraph_config: dict[str, bool],
+    inductor_options: Mapping[str, object] | None,
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2318,6 +2322,14 @@ def _build_multigraph_python_source(
     if mode == "installed":
         # load(allow_serve_time_compiles=True) flips this to True before exec.
         buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
+        # What a serve-time compile is configured with: the capture's options, or
+        # None when they have no literal form (a custom pass), which load() refuses.
+        options = dict(inductor_options or {})
+        try:
+            recordable = ast.literal_eval(repr(options)) == options
+        except (ValueError, SyntaxError):
+            recordable = False
+        buf.writeline(f"INDUCTOR_OPTIONS = {options if recordable else None!r}")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(
         "# The inductor CUDA graph config the capture compiled under. Load wraps"
@@ -2446,6 +2458,7 @@ def _build_multigraph_artifact(
     backend: str,
     entry_fn: object,
     cudagraph_config: dict[str, bool],
+    inductor_options: Mapping[str, object] | None = None,
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2474,6 +2487,7 @@ def _build_multigraph_artifact(
         mode,
         unreachable,
         cudagraph_config,
+        inductor_options,
     )
     inductor_bundle = None
     if backend != "eager":
@@ -2683,7 +2697,6 @@ class PrecompiledModule(PrecompiledRunnable):
         # aliasing -- composed in, not reimplemented here) plus an opaque cache (the
         # save_cache_artifacts bundle that primes the inductor cache on load, or None
         # for uncacheable graphs).
-        import torch._inductor.config as _ind_config
         from torch._functorch import aot_autograd
         from torch._inductor.exc import InductorError
         from torch._inductor.standalone_compile import NoRunnableInductorModuleError
@@ -2695,9 +2708,9 @@ class PrecompiledModule(PrecompiledRunnable):
         # guard is conservative (see the inlined driver checks): an input the graph never
         # reads gets no assert and stays layout-flexible, but a read input is asserted on
         # the example layout even for layout-agnostic ops (matmul/addmm), since precompile
-        # cannot recompile to specialize a new layout the way torch.compile would. A
-        # dynamic (unbacked) capture additionally pins scalar_asserts so the make_fx
-        # ShapeEnv's runtime range asserts survive into the artifact.
+        # cannot recompile to specialize a new layout the way torch.compile would.
+        # scalar_asserts keeps a dynamic (unbacked) capture's make_fx ShapeEnv range
+        # asserts in the artifact; a static capture has none to emit.
         #
         # These are inductor config keys, so they ride in as ``options`` (aot_autograd.
         # compile_to_python merges them into the inductor config.patch it wraps the
@@ -2706,9 +2719,7 @@ class PrecompiledModule(PrecompiledRunnable):
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, object] = {**self._inductor_options, "size_asserts": True}
-        if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
-            options["scalar_asserts"] = True
+        options = {**self._inductor_options, **_MAKE_FX_ASSERT_PINS}
         try:
             self._graph_python, self._artifact_bytes = aot_autograd.compile_to_python(
                 capture.gm, capture.flat_args, options=options
@@ -3264,6 +3275,13 @@ def _runnable_from_pair(
             "flag and would still refuse every uncovered call. Recapture it under "
             "this torch."
         )
+    if allow_serve_time_compiles and meta.get("INDUCTOR_OPTIONS", {}) is None:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True: this artifact's capture took options "
+            "that are not all Python literals (such as a custom pass), so a "
+            "serve-time compile could not use them. Load it without the flag, or "
+            "recapture with literal options."
+        )
     if meta.get("_ALLOW_SERVE_TIME_COMPILES", False) is not False:
         raise PrecompileError(
             "this artifact sets _ALLOW_SERVE_TIME_COMPILES to something other than "
@@ -3476,9 +3494,9 @@ def capture(
     flag, as before), refuses ``freezing``, whose compiler hides the inner
     compile its standalone module is built from, and refuses options that
     module pins: ``size_asserts`` or ``scalar_asserts`` off (it compiles with
-    ``size_asserts`` on, and with ``scalar_asserts`` on for a dynamic
-    capture), ``cpp_wrapper``, ``benchmark_harness`` and
-    ``triton.autotune_at_compile_time`` off.
+    ``size_asserts`` and ``scalar_asserts`` on), ``cpp_wrapper`` or
+    ``benchmark_harness`` on, and ``triton.autotune_at_compile_time`` off.
+    Other options pass through unchecked, as under :func:`torch.compile`.
 
     .. note::
 
@@ -3494,6 +3512,11 @@ def capture(
             "the artifact rebuilds the call from the function's own parameters, so a "
             "pre-bound model or argument would not be one of them. Pass them as call "
             "arguments instead."
+        )
+    if not isinstance(tracer, (MakeFxTracer, DynamoTracer)):
+        raise TypeError(
+            "precompile.capture tracer must be a MakeFxTracer or DynamoTracer, "
+            f"got {type(tracer).__name__}."
         )
     # Without mode or options the backend string compiles, as it always has.
     inductor: torch._TorchCompileInductorWrapper | None = None
@@ -3568,22 +3591,17 @@ def capture(
                 )
     if isinstance(tracer, MakeFxTracer):
         inductor_options = inductor.config if inductor is not None else {}
-        # compile_to_python pins these whatever the options say.
-        pins = {
-            "size_asserts": True,
-            "scalar_asserts": True,
-            "cpp_wrapper": False,
-            "benchmark_harness": False,
-            "triton.autotune_at_compile_time": True,
-        }
-        overridden = {k: v for k, v in pins.items() if inductor_options.get(k, v) != v}
+        from torch._inductor.standalone_compile import STANDALONE_PYTHON_PINS
+
+        pins = {**_MAKE_FX_ASSERT_PINS, **STANDALONE_PYTHON_PINS}.items()
+        overridden = {k: v for k, v in pins if inductor_options.get(k, v) != v}
         if overridden:
             raise PrecompileError(
                 f"a MakeFxTracer capture always compiles with {overridden}: its "
                 "standalone module is a plain Python wrapper whose kernels are tuned "
-                "at compile time, and its size_asserts (and, for a dynamic capture, "
-                "scalar_asserts) check at load that a call's inputs have the layout "
-                "and ranges its graph was compiled for."
+                "at compile time, and its size_asserts and scalar_asserts check at "
+                "load that a call's inputs have the layout and ranges its graph was "
+                "compiled for."
             )
         return _MakeFxCapture(
             fn,
@@ -3592,11 +3610,6 @@ def capture(
             backend=backend,
             decompositions=tracer.decompositions,
             inductor_options=inductor_options,
-        )
-    if not isinstance(tracer, DynamoTracer):
-        raise TypeError(
-            "precompile.capture tracer must be a MakeFxTracer or DynamoTracer, "
-            f"got {type(tracer).__name__}."
         )
     # The make_fx front-end validates backend when it builds its PrecompiledModule;
     # the Dynamo front-end builds no PrecompiledModule, so it is checked here.
@@ -3698,9 +3711,10 @@ def load(
     The graphs a :class:`DynamoTracer` artifact ships run as CUDA graphs
     exactly when its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading
     process's ``torch._inductor.config.triton.cudagraphs``,
-    ``triton.cudagraph_trees`` and ``graph_partition`` say; the rest of the CUDA graph config is the
-    loading process's, and so is all of it for a serve-time compile
-    (``allow_serve_time_compiles``), like the rest of the Inductor config.
+    ``triton.cudagraph_trees`` and ``graph_partition`` say; the rest of the
+    CUDA graph config is the loading process's. A serve-time compile
+    (``allow_serve_time_compiles``) takes the capture's ``mode`` or
+    ``options``, CUDA graph keys included, over the loading process's config.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve
@@ -3710,10 +3724,12 @@ def load(
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
-    backend (with Inductor's default options, not the capture's ``mode`` or
-    ``options``), as ``torch.compile`` would, under the process-wide stance like any
-    other compile. The captured variants are still served first and do not
-    count toward ``torch._dynamo.config.recompile_limit``, so each frame gets
+    backend and the capture's ``mode`` or ``options`` (recorded in the
+    artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
+    process-wide stance like any other compile. An artifact whose options are
+    not all Python literals (such as a custom pass) refuses the flag. The
+    captured variants are still served first and do not count toward
+    ``torch._dynamo.config.recompile_limit``, so each frame gets
     that many serve-time compiles on top of them; a missed call past the limit
     runs eagerly instead of compiling.
     Serve-time compiles are recorded nowhere, but they are built under the

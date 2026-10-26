@@ -520,6 +520,15 @@ def _resolve_fake_mode(
         )
 
 
+# What compile_to_python pins over the caller's options (see there);
+# _standalone_context pins autotune_at_compile_time for every standalone compile.
+STANDALONE_PYTHON_PINS: dict[str, Any] = {
+    "benchmark_harness": False,
+    "cpp_wrapper": False,
+    "triton.autotune_at_compile_time": True,
+}
+
+
 @contextlib.contextmanager
 def _standalone_context(
     gm: GraphModule,
@@ -791,20 +800,16 @@ def compile_to_python(
     # on disk, which holds for a same-machine warm cache but NOT the cold/cross-container
     # load this cache targets -- keeping it lets ``load_from_python`` rehydrate the cubin
     # from the bundle so the static CUDA launcher survives a fresh-dir load instead of
-    # silently falling back to the slower dynamic launch. The two output pins are applied
-    # AFTER the user options so they override any conflicting key: benchmark_harness=False
-    # keeps the emitted module runnable (no get_args()/benchmark_compiled_module()/__main__),
-    # and cpp_wrapper=False keeps it a python wrapper (the C++ backend emits a C++ ``call``
-    # we cannot inline). A caller must not be able to break either.
+    # silently falling back to the slower dynamic launch. STANDALONE_PYTHON_PINS are
+    # applied AFTER the user options so they override any conflicting key:
+    # benchmark_harness=False keeps the emitted module runnable (no get_args()/
+    # benchmark_compiled_module()/__main__), and cpp_wrapper=False keeps it a python
+    # wrapper (the C++ backend emits a C++ ``call`` we cannot inline). A caller must not
+    # be able to break either.
     config_patches: dict[str, Any] = {"keep_static_cubin_raw": True}
     if options is not None:
         config_patches.update(options)
-    config_patches.update(
-        {
-            "benchmark_harness": False,
-            "cpp_wrapper": False,
-        }
-    )
+    config_patches.update(STANDALONE_PYTHON_PINS)
     # ``gm`` is a POST-AOTAutograd inner graph: already functionalized and decomposed
     # against the inductor decomposition table. That precondition lets us drive the
     # inductor codegen entry point (``compile_fx_inner``) DIRECTLY on the dense graph
@@ -843,13 +848,13 @@ def compile_to_python(
             "compile_to_python could not detect a FakeTensorMode on the graph's "
             "placeholders; expected a post-AOTAutograd graph traced under one."
         )
-    # no_grad pins the inference path; autotune_at_compile_time keeps the emitted source
-    # self-contained (autotuning resolved at compile, not deferred to runtime). The fresh
-    # CacheArtifactManager isolates the cache bundle ``_acceleration_cache_bytes`` returns.
+    # no_grad pins the inference path; the autotune_at_compile_time pin keeps the
+    # emitted source self-contained (autotuning resolved at compile, not deferred to
+    # runtime). The fresh CacheArtifactManager isolates the cache bundle
+    # ``_acceleration_cache_bytes`` returns.
     with (
         torch.no_grad(),
         patch_compile_options(config_patches),
-        config.patch("triton.autotune_at_compile_time", True),
         tracing(TracingContext(fake_mode)),
         V.set_fake_mode(fake_mode),
         CacheArtifactManager.with_fresh_cache(),

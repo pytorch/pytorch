@@ -32,6 +32,7 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._precompile import _parse_artifact_metadata, _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -4861,6 +4862,14 @@ print("served", mod.STANCES)
 """
 
 
+class _NoOpPostGradPass(CustomGraphPass):
+    def __call__(self, graph):
+        pass
+
+    def uuid(self):
+        return "no-op"
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileDynamoCapture(TestCase):
@@ -4940,6 +4949,8 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, options={"no_such_option": True})
         with self.assertRaisesRegex(RuntimeError, "Unrecognized mode"):
             self._capture(single, mode="no-such-mode")
+        with self.assertRaisesRegex(TypeError, "tracer must be"):
+            self._capture(single, tracer=object(), mode="reduce-overhead")
         make_fx = MakeFxTracer()
         reason = "outside Inductor's CUDA graph wrapper"
         with self.assertRaisesRegex(PrecompileError, f"{reason}.*or use mode="):
@@ -5745,6 +5756,60 @@ class TestPrecompileDynamoCapture(TestCase):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("compiled at serve time", out.stdout)
+
+    @skipIfCrossRef
+    def test_serve_time_compiles_take_the_capture_options(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        options = {"max_autotune_gemm_backends": "ATEN"}
+        with (
+            torch.no_grad(),
+            self._capture(self.mod.tags_compiled, options=options) as cap,
+        ):
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            self.assertEqual(
+                _parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"], options
+            )
+        script = (
+            "import sys, torch\n"
+            "from torch._inductor import compile_fx\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "patches = []\n"
+            "real_compile_fx = compile_fx.compile_fx\n"
+            "def spy(*args, **kwargs):\n"
+            "    patches.append(kwargs.get('config_patches') or {})\n"
+            "    return real_compile_fx(*args, **kwargs)\n"
+            "compile_fx.compile_fx = spy\n"
+            "f = torch.compiler.precompile.load(\n"
+            "    sys.argv[2], sys.argv[3], allow_serve_time_compiles=True\n"
+            ")\n"
+            "with torch.no_grad():\n"
+            "    f(mod.Model(), torch.randn(3, 4))\n"
+            "options = {'max_autotune_gemm_backends': 'ATEN'}\n"
+            "assert any(p.items() >= options.items() for p in patches), patches\n"
+            "print('compiled with the capture options')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("compiled with the capture options", out.stdout)
+
+    def test_serve_time_compiles_refuse_options_without_a_literal_form(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        options = {"post_grad_custom_post_pass": _NoOpPostGradPass()}
+        with (
+            torch.no_grad(),
+            self._capture(self.mod.tags_compiled, options=options) as cap,
+        ):
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            self.assertIsNone(_parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"])
+        with self.assertRaisesRegex(PrecompileError, "not all Python literals"):
+            load(self.artifact, self.cache, allow_serve_time_compiles=True)
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
