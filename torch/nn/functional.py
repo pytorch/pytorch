@@ -7287,22 +7287,23 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
 def quantize_tensor(
     input: Tensor,
     *,
+    dim: tuple[int, int],
     scaling_type: ScalingType,
     qdata_dtype: torch.dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    r"""quantize_tensor(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
+    r"""quantize_tensor(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
 
-    Quantize a 2D tensor of shape :math:`(M, K)` along the ``K`` dimension.
+    Quantize a tensor along the second axis of ``dim=(row_axis, quant_axis)``.
+    All other axes are independent batch dimensions.
     Returns ``(qdata, scale)`` for use with :func:`scaled_mm`.
     Currently supported formats: ``mxfp8``. See the code samples at the bottom
     of this docblock for how to configure supported formats.
 
-    A contiguous input is quantized along its last dimension (dim-k). Pass a
-    transposed view of a contiguous tensor to quantize along its last dimension
-    using the dim-m kernel.
+    Positive and negative axis indices are accepted. The output retains the
+    input's logical axis order, with the quantized axis contiguous.
 
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
@@ -7312,9 +7313,11 @@ def quantize_tensor(
     expand in the future.
 
     Args:
-        input (Tensor): Contiguous 2D tensor or a transposed view of one, with
-          shape :math:`(M, K)` and dtype ``float16``, ``bfloat16``, or
-          ``float32``. The data pointer must be 16-byte aligned.
+        input (Tensor): Tensor with at least two dimensions and dtype
+          ``float16``, ``bfloat16``, or ``float32``.
+        dim (tuple[int, int]): Ordered row and quantization axes. The second
+          axis must have a size divisible by 32. Dim-m quantization also
+          requires the other axis to have a size divisible by 16.
         scaling_type (ScalingType): The size of the local region corresponding to
           a single inner scale, as well as the layout of the output inner scale.
           Currently supported values: ``ScalingType.BlockWise1x32``.
@@ -7329,22 +7332,24 @@ def quantize_tensor(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
-          ``SwizzleType.SWIZZLE_32_4_4``. If the input is not contiguous, currently
-          only ``SwizzleType.SWIZZLE_32_4_4`` is supported.
+          ``SwizzleType.SWIZZLE_32_4_4``. Compact scales require a layout
+          supported by the dim-k kernel.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
           Note that the output scale size is still controlled by ``scaling_type``
           and ``swizzle_type``. If this flag is ``True``, currently
-          ``SwizzleType.SWIZZLE_32_4_4`` and a contiguous input are required.
+          ``SwizzleType.SWIZZLE_32_4_4`` and a dim-k kernel layout are required.
           Default: ``False``.
 
     Returns:
         tuple[Tensor, Tensor]: Quantized data in the logical input shape and
           scales with the dtype and layout honoring the ``scaling_algorithm``,
           ``scaling_type``, and ``swizzle_type`` settings. For example, for
-          ``mxfp8``, compact dim-k scales have shape ``(rows, cols // 32)``;
-          swizzled scales have shape ``(ceil(rows / 128), ceil(cols / 128), 32, 16)``.
+          ``mxfp8`` on a 2D tensor with ``dim=(0, 1)``, compact scales have
+          shape ``(rows, cols // 32)``; swizzled scales have shape ``(1, L)``, where
+          ``L = 512 * ceil(rows / 128) * ceil(cols / 128)``. Batch axes retain
+          their positions in both results.
 
     Examples::
 
@@ -7359,20 +7364,21 @@ def quantize_tensor(
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
         >>> # mxfp8 dim-k with swizzled scales
-        >>> qdata_k, scale_k = F.quantize_tensor(x, **mxfp8_kwargs)
-        >>> # mxfp8 dim-m: pass a transposed view of the contiguous input
-        >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mxfp8_kwargs)
+        >>> qdata_k, scale_k = F.quantize_tensor(x, dim=(-2, -1), **mxfp8_kwargs)
+        >>> # mxfp8 dim-m on the same tensor
+        >>> qdata_m, scale_m = F.quantize_tensor(x, dim=(-1, -2), **mxfp8_kwargs)
         >>> # mxfp8 dim-k with scales shared over 32x32 blocks
         >>> qdata_square, scale_square = F.quantize_tensor(
-        ...     x, **mxfp8_kwargs, scaling_type_use_square_block_size=True
+        ...     x, dim=(-2, -1), **mxfp8_kwargs, scaling_type_use_square_block_size=True
         ... )
         >>> # mxfp8 dim-k with compact, unswizzled scales
         >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
-        >>> qdata_plain, scale_plain = F.quantize_tensor(x, **plain_kwargs)
+        >>> qdata_plain, scale_plain = F.quantize_tensor(x, dim=(-2, -1), **plain_kwargs)
     """
     # TODO(future PR): add torch.export support for the native quantization op.
     outputs = torch.ops.aten._quantize_tensor.default(
         input,
+        dim=dim,
         scaling_type=scaling_type.value,
         qdata_dtype=qdata_dtype,
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
@@ -7385,17 +7391,19 @@ def quantize_tensor(
 def quantize_tensor_dual(
     input: Tensor,
     *,
+    dim: tuple[int, int],
     scaling_type: ScalingType,
     qdata_dtype: torch.dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""quantize_tensor_dual(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""quantize_tensor_dual(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize a contiguous 2D tensor of shape :math:`(M, K)` along both
-    ``K`` and ``M`` dimensions. See :func:`quantize_tensor` to
-    quantize along one dimension.
+    Quantize a tensor along both axes in ``dim`` with one kernel launch.
+    Return the result quantized along the second axis first, followed by the
+    result quantized along the first axis. See :func:`quantize_tensor` to
+    quantize along only one axis.
 
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
@@ -7405,9 +7413,10 @@ def quantize_tensor_dual(
     expand in the future.
 
     Args:
-        input (Tensor): Contiguous 2D tensor of shape :math:`(M, K)` with dtype
-          ``float16``, ``bfloat16``, or ``float32``. The data pointer must
-          be 16-byte aligned.
+        input (Tensor): Tensor with at least two dimensions and dtype
+          ``float16``, ``bfloat16``, or ``float32``.
+        dim (tuple[int, int]): Ordered row and quantization axes, supporting
+          positive or negative indices. Both axis sizes must be divisible by 32.
         scaling_type (ScalingType): The size of the local region corresponding to
           a single inner scale, as well as the layout of the output inner scale.
           Currently supported values: ``ScalingType.BlockWise1x32``.
@@ -7430,12 +7439,13 @@ def quantize_tensor_dual(
           Default: ``False``.
 
     Returns:
-        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata_k, scale_k, qdata_m, scale_m)``.
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata, scale, qdata_reverse, scale_reverse)``.
           For example, for input of shape ``(M, K)`` and the
-          ``mxfp8`` format, the quantized tensors have shapes ``(M, K)`` and
-          ``(K, M)``. Their E8M0 scales have shapes
-          ``(ceil(M / 128), ceil(K / 128), 32, 16)`` and
-          ``(ceil(K / 128), ceil(M / 128), 32, 16)``, respectively.
+          ``mxfp8`` format, both quantized tensors have shape ``(M, K)``.
+          When ``dim=(0, 1)``, the dim-K result is contiguous; the dim-M result has strides
+          ``(1, M)``. Their E8M0 scales have shapes ``(1, L)`` and
+          ``(L, 1)``, respectively, where
+          ``L = 512 * ceil(M / 128) * ceil(K / 128)``.
 
     Examples::
 
@@ -7450,10 +7460,11 @@ def quantize_tensor_dual(
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
         >>> # mxfp8 dim-km with swizzled scales
-        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mxfp8_kwargs)
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, dim=(-2, -1), **mxfp8_kwargs)
     """
     outputs = torch.ops.aten._quantize_tensor_dual.default(
         input,
+        dim=dim,
         scaling_type=scaling_type.value,
         qdata_dtype=qdata_dtype,
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),

@@ -1,23 +1,23 @@
 """PyTorch-facing implementation for TMA-based block-scaled quantization."""
 
-from typing import NamedTuple, TypeAlias
+from typing import cast, NamedTuple, TypeAlias
 
 import torch
 
 from ..utils import _device_capability
-from .blockscaled_tma_kernels import (
-    _compile_blockscaled_tma,
-    _QUANT_ORIENTATION_DIM_K,
-    _QUANT_ORIENTATION_DIM_KM,
-    _QUANT_ORIENTATION_DIM_M,
+from .blockscaled_tma_kernels import _compile_blockscaled_tma
+from .blockscaled_tma_layout import (
+    _BlockscaledTmaSpec,
+    _canonicalize_matrix_input,
+    _checked_blockscaled_tma_plan,
+    _QuantDim,
+    _restore_matrix_output,
+    _SingleQuantDim,
+    _validate_and_normalize_blockscaled_tma,
 )
-from .blockscaled_tma_plan import BlockscaledTmaPlan, select_blockscaled_tma_plan
-from .utils import _ceil_div
+from .blockscaled_tma_plan import BlockscaledTmaPlan
 
 
-_CUDA_GRID_X_MAX = 2**31 - 1
-_CUDA_GRID_Y_MAX = 2**16 - 1
-_CUDA_TMA_MAX_DIM = 2**32
 _INPUT_ALIGNMENT_BYTES = 16
 
 _TwoTensorOutput: TypeAlias = tuple[torch.Tensor, torch.Tensor]
@@ -30,23 +30,6 @@ _FourTensorOutput: TypeAlias = tuple[
 _BlockscaledTmaOutput: TypeAlias = _TwoTensorOutput | _FourTensorOutput
 
 
-class _BlockscaledTmaSpec(NamedTuple):
-    """Validated, normalized host-side description of one quantization request."""
-
-    M: int
-    K: int
-    quant_orientation: str
-    quant_orientation_id: int
-    do_dim_k: bool
-    do_dim_m: bool
-    is_square_scaling: bool
-    is_scale_swizzled: bool
-    s_num_row_blk_k: int | None
-    s_num_col_blk_k: int | None
-    s_num_row_blk_m: int | None
-    s_num_col_blk_m: int | None
-
-
 class _PreparedBlockscaledTmaLaunch(NamedTuple):
     """Host-side launch plan, allocated outputs, and normalized optional operands."""
 
@@ -57,115 +40,13 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
     scale_m: torch.Tensor | None
 
 
-def _validate_and_normalize_blockscaled_tma(
-    input: torch.Tensor,
-    *,
-    quant_orientation: str,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-) -> _BlockscaledTmaSpec:
-    """Validate public arguments and return their canonical host-side form."""
-
-    if quant_orientation not in ("dim_k", "dim_m", "dim_km"):
-        raise ValueError(f"unsupported quant_orientation: {quant_orientation}")
-    do_dim_k = quant_orientation != "dim_m"
-    do_dim_m = quant_orientation != "dim_k"
-
-    if not is_scale_swizzled:
-        if quant_orientation != "dim_k":
-            raise ValueError("compact scales currently support only dim-k output")
-        if is_square_scaling:
-            raise ValueError("compact scales do not support square scaling")
-
-    if input.dim() != 2:
-        raise ValueError(
-            f"blockscaled TMA requires a 2D input; got {input.dim()} dimensions"
-        )
-    if not input.is_contiguous():
-        raise ValueError("blockscaled TMA requires a contiguous input")
-    if input.dtype not in (torch.bfloat16, torch.float16, torch.float32):
-        raise ValueError("blockscaled TMA supports only bf16, fp16, and fp32 input")
-    if input.data_ptr() % _INPUT_ALIGNMENT_BYTES != 0:
-        raise ValueError("blockscaled TMA requires a 16-byte-aligned input")
-
-    if is_square_scaling:
-        if quant_orientation != "dim_k":
-            raise ValueError("square scaling currently supports only dim-k output")
-    M, K = input.shape
-    if is_square_scaling and M % 32 != 0:
-        raise ValueError("32x32 requires M % 32 == 0")
-    if do_dim_m:
-        if M % 32 != 0:
-            raise ValueError("dim-M requires M % 32 == 0")
-        if K % 16 != 0:
-            raise ValueError("dim-M requires K % 16 == 0")
-        if do_dim_k and K % 32 != 0:
-            raise ValueError("dim-K requires K % 32 == 0")
-    elif K % 32 != 0:
-        raise ValueError("requires K % 32 == 0")
-
-    s_num_row_blk_k = s_num_col_blk_k = None
-    if do_dim_k:
-        s_num_row_blk_k = _ceil_div(M, 128)
-        s_num_col_blk_k = _ceil_div(K, 128)
-
-    s_num_row_blk_m = s_num_col_blk_m = None
-    if do_dim_m:
-        s_num_row_blk_m = _ceil_div(K, 128)
-        s_num_col_blk_m = _ceil_div(M, 128)
-
-    quant_orientation_id = {
-        "dim_k": _QUANT_ORIENTATION_DIM_K,
-        "dim_m": _QUANT_ORIENTATION_DIM_M,
-        "dim_km": _QUANT_ORIENTATION_DIM_KM,
-    }[quant_orientation]
-
-    return _BlockscaledTmaSpec(
-        M=M,
-        K=K,
-        quant_orientation=quant_orientation,
-        quant_orientation_id=quant_orientation_id,
-        do_dim_k=do_dim_k,
-        do_dim_m=do_dim_m,
-        is_square_scaling=is_square_scaling,
-        is_scale_swizzled=is_scale_swizzled,
-        s_num_row_blk_k=s_num_row_blk_k,
-        s_num_col_blk_k=s_num_col_blk_k,
-        s_num_row_blk_m=s_num_row_blk_m,
-        s_num_col_blk_m=s_num_col_blk_m,
-    )
-
-
 def _prepare_blockscaled_tma_launch(
     input: torch.Tensor,
     spec: _BlockscaledTmaSpec,
 ) -> _PreparedBlockscaledTmaLaunch:
     """Select the launch plan and allocate its output storage."""
 
-    plan = None
-    if spec.M != 0 and spec.K != 0:
-        if spec.M > _CUDA_TMA_MAX_DIM or spec.K > _CUDA_TMA_MAX_DIM:
-            raise ValueError(
-                "blockscaled TMA requires each nonempty input dimension to be at most "
-                f"{_CUDA_TMA_MAX_DIM}; got shape ({spec.M}, {spec.K})"
-            )
-        plan = select_blockscaled_tma_plan(
-            spec.M,
-            spec.K,
-            input_dtype=input.dtype,
-            quant_orientation=spec.quant_orientation,
-            is_square_scaling=spec.is_square_scaling,
-        )
-    if plan is not None and (
-        # K <= 2**32 and tile_k_size >= 32 keep grid_k below the X limit.
-        # Large M can still exceed the Y limit.
-        plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX
-    ):
-        raise ValueError(
-            "blockscaled TMA launch grid exceeds CUDA limits: "
-            f"grid=({plan.grid_k}, {plan.grid_m}, 1), "
-            f"maximum=({_CUDA_GRID_X_MAX}, {_CUDA_GRID_Y_MAX}, 65535)"
-        )
+    plan = _checked_blockscaled_tma_plan(input, spec)
 
     output_m = scale_m = None
     if spec.do_dim_m:
@@ -178,13 +59,12 @@ def _prepare_blockscaled_tma_launch(
                 f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
             )
         output_m = torch.empty(
-            spec.K,
-            spec.M,
+            (spec.B_product, spec.K, spec.M) if spec.is_batched else (spec.K, spec.M),
             dtype=torch.float8_e4m3fn,
             device=input.device,
         )
         scale_m = torch.empty(
-            spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
+            spec.B_product * spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
             dtype=torch.uint8,
             device=input.device,
         )
@@ -200,8 +80,7 @@ def _prepare_blockscaled_tma_launch(
                 f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
             )
         output_k = torch.empty(
-            spec.M,
-            spec.K,
+            (spec.B_product, spec.M, spec.K) if spec.is_batched else (spec.M, spec.K),
             dtype=torch.float8_e4m3fn,
             device=input.device,
         )
@@ -209,13 +88,13 @@ def _prepare_blockscaled_tma_launch(
         # memset.
         if spec.is_scale_swizzled:
             scale_k = torch.empty(
-                spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16,
+                spec.B_product * spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16,
                 dtype=torch.uint8,
                 device=input.device,
             )
         else:
             scale_k = torch.empty(
-                spec.M * (spec.K // 32),
+                spec.B_product * spec.M * (spec.K // 32),
                 dtype=torch.uint8,
                 device=input.device,
             )
@@ -251,9 +130,12 @@ def _format_blockscaled_tma_output(
             raise AssertionError(
                 f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
             )
-        scale_m = scale_m.view(spec.s_num_row_blk_m, spec.s_num_col_blk_m, 32, 16).view(
-            torch.float8_e8m0fnu
-        )
+        scale_m_shape = (1, spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16)
+        scale_m = scale_m.view(
+            (spec.B_product, *scale_m_shape) if spec.is_batched else scale_m_shape
+        ).view(torch.float8_e8m0fnu)
+        scale_m = scale_m.transpose(-2, -1)
+        output_m = output_m.transpose(-2, -1)
     if spec.do_dim_k:
         if output_k is None:
             raise AssertionError("expected output_k, got None")
@@ -268,18 +150,31 @@ def _format_blockscaled_tma_output(
                 f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
             )
         if spec.is_scale_swizzled:
-            scale_k = scale_k.view(spec.s_num_row_blk_k, spec.s_num_col_blk_k, 32, 16)
+            scale_k_shape = (1, spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16)
         else:
-            scale_k = scale_k.view(spec.M, spec.K // 32)
+            scale_k_shape = (spec.M, spec.K // 32)
+        scale_k = scale_k.view(
+            (spec.B_product, *scale_k_shape) if spec.is_batched else scale_k_shape
+        )
         scale_k = scale_k.view(torch.float8_e8m0fnu)
 
-    if spec.quant_orientation == "dim_k":
+    if spec.input_transposed:
+        if output_k is not None:
+            output_k = output_k.transpose(-2, -1)
+            if scale_k is not None:
+                scale_k = scale_k.transpose(-2, -1)
+        if output_m is not None:
+            output_m = output_m.transpose(-2, -1)
+            if scale_m is not None:
+                scale_m = scale_m.transpose(-2, -1)
+
+    if spec.do_dim_k and not spec.do_dim_m:
         if output_k is None:
             raise AssertionError("expected output_k, got None")
         if scale_k is None:
             raise AssertionError("expected scale_k, got None")
         return output_k, scale_k
-    if spec.quant_orientation == "dim_m":
+    if spec.do_dim_m and not spec.do_dim_k:
         if output_m is None:
             raise AssertionError("expected output_m, got None")
         if scale_m is None:
@@ -293,30 +188,41 @@ def _format_blockscaled_tma_output(
         raise AssertionError("expected output_m, got None")
     if scale_m is None:
         raise AssertionError("expected scale_m, got None")
+    if spec.input_transposed:
+        return output_m, scale_m, output_k, scale_k
     return output_k, scale_k, output_m, scale_m
 
 
 def _blockscaled_tma_impl_on_current_device(
     input: torch.Tensor,
-    quant_orientation: str,
+    dim: _QuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaOutput:
+    canonical = _canonicalize_matrix_input(
+        input, dim, is_square_scaling, is_scale_swizzled
+    )
+    input, dim = canonical.input, canonical.dim
+    if input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
+        input = input.clone()
     spec = _validate_and_normalize_blockscaled_tma(
         input,
-        quant_orientation=quant_orientation,
+        dim=dim,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
-    launch = _prepare_blockscaled_tma_launch(input, spec)
+    tma_input = input.transpose(-2, -1) if spec.input_transposed else input
+    launch = _prepare_blockscaled_tma_launch(tma_input, spec)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
     if launch.plan is None:
-        return _format_blockscaled_tma_output(spec, launch)
+        return _restore_matrix_output(
+            _format_blockscaled_tma_output(spec, launch), canonical
+        )
 
     fn = _compile_blockscaled_tma(
-        input.dtype,
+        tma_input.dtype,
         launch.plan.tile_m_size,
         launch.plan.tile_k_size,
         launch.plan.cluster_k,
@@ -324,24 +230,41 @@ def _blockscaled_tma_impl_on_current_device(
         spec.quant_orientation_id,
         spec.is_square_scaling,
         spec.is_scale_swizzled,
+        spec.is_batched,
     )
+    output_k, output_m = launch.output_k, launch.output_m
+    if spec.is_batched:
+        B0, _, B1, _ = tma_input.shape
+        tma_input = tma_input.permute(1, 3, 2, 0)
+        output_k = (
+            output_k.view(B0, B1, spec.M, spec.K).permute(2, 3, 1, 0)
+            if output_k is not None
+            else None
+        )
+        output_m = (
+            output_m.view(B0, B1, spec.K, spec.M).permute(2, 3, 1, 0)
+            if output_m is not None
+            else None
+        )
     fn(
-        input,
-        launch.output_k,
+        tma_input,
+        output_k,
         launch.scale_k,
-        launch.output_m,
+        output_m,
         launch.scale_m,
         spec.M,
         spec.K,
         launch.plan.grid_m,
         launch.plan.grid_k,
     )
-    return _format_blockscaled_tma_output(spec, launch)
+    return _restore_matrix_output(
+        _format_blockscaled_tma_output(spec, launch), canonical
+    )
 
 
-def _blockscaled_tma_impl(
+def _run_blockscaled_tma(
     input: torch.Tensor,
-    quant_orientation: str,
+    dim: _QuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
     **kwargs: object,
@@ -365,7 +288,7 @@ def _blockscaled_tma_impl(
     def launch_on_current_device() -> _BlockscaledTmaOutput:
         return _blockscaled_tma_impl_on_current_device(
             input,
-            quant_orientation=quant_orientation,
+            dim=dim,
             is_square_scaling=is_square_scaling,
             is_scale_swizzled=is_scale_swizzled,
         )
@@ -374,3 +297,40 @@ def _blockscaled_tma_impl(
         return launch_on_current_device()
     with torch.cuda.device(device):
         return launch_on_current_device()
+
+
+def _blockscaled_tma_impl(
+    input: torch.Tensor,
+    dim: _SingleQuantDim,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+    **kwargs: object,
+) -> _TwoTensorOutput:
+    if isinstance(dim, tuple) and len(dim) == 2 and isinstance(dim[0], tuple):
+        raise ValueError("dual quantization dims require the dual entrypoint")
+    return cast(
+        _TwoTensorOutput,
+        _run_blockscaled_tma(
+            input, dim, is_square_scaling, is_scale_swizzled, **kwargs
+        ),
+    )
+
+
+def _blockscaled_tma_impl_dual(
+    input: torch.Tensor,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+    *,
+    dim: tuple[_SingleQuantDim, _SingleQuantDim] = ((-2, -1), (-1, -2)),
+    **kwargs: object,
+) -> _FourTensorOutput:
+    return cast(
+        _FourTensorOutput,
+        _run_blockscaled_tma(
+            input,
+            dim,
+            is_square_scaling,
+            is_scale_swizzled,
+            **kwargs,
+        ),
+    )

@@ -47,7 +47,6 @@ from torch.utils._quantize_tensor_validation import (
     _get_quant_format,
     _quantize_tensor_dual_validate_inputs,
     _quantize_tensor_validate_inputs,
-    _TensorQuantFormat,
 )
 
 
@@ -7530,12 +7529,16 @@ def meta_scaled_mm(
 @register_meta([aten._quantize_tensor.default])
 def meta_quantize_tensor(
     input: torch.Tensor,
+    dim: list[int],
     scaling_type: int,
     qdata_dtype: torch.dtype,
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        infer_blockscaled_tma_outputs,
+    )
     from torch.nn.functional import SwizzleType
 
     if input.device.type not in ("cuda", "meta") or (
@@ -7546,88 +7549,46 @@ def meta_quantize_tensor(
         input.dtype in (torch.float16, torch.bfloat16, torch.float32),
         lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
     )
-    torch._check_value(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
-
     quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
-
-    if quant_format == _TensorQuantFormat.MXFP8:
-        _quantize_tensor_validate_inputs(
-            quant_format,
-            input,
-            scaling_type,
-            qdata_dtype,
-            scaling_algorithm,
-            swizzle_type,
-            scaling_type_use_square_block_size,
-        )
-        rows, cols = input.shape
-        is_scale_swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
-
-        scale_shape = (
-            ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
-            if is_scale_swizzled
-            else (rows, cols // 32)
-        )
-        return [
-            torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
-            torch.empty(scale_shape, device=input.device, dtype=torch.float8_e8m0fnu),
-        ]
-
-    else:
-        raise AssertionError(f"Unknown {quant_format=}")
+    axes = _quantize_tensor_validate_inputs(
+        quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
+    )
+    return infer_blockscaled_tma_outputs(
+        input,
+        axes,
+        scaling_type_use_square_block_size,
+        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
+        False,
+    )
 
 
 @register_meta([aten._quantize_tensor_dual.default])
 def meta_quantize_tensor_dual(
     input: torch.Tensor,
+    dim: list[int],
     scaling_type: int,
     qdata_dtype: torch.dtype,
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        infer_blockscaled_tma_outputs,
+    )
+
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
     ):
         raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
     torch._check_value(
-        input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input"
-    )
-    torch._check_value(
         input.dtype in (torch.float16, torch.bfloat16, torch.float32),
         lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
     )
-
     quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
-
-    if quant_format == _TensorQuantFormat.MXFP8:
-        _quantize_tensor_dual_validate_inputs(
-            quant_format,
-            input,
-            scaling_type,
-            qdata_dtype,
-            scaling_algorithm,
-            swizzle_type,
-            scaling_type_use_square_block_size,
-        )
-        rows, cols = input.shape
-        return [
-            torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
-            torch.empty(
-                ((rows + 127) // 128, (cols + 127) // 128, 32, 16),
-                device=input.device,
-                dtype=torch.float8_e8m0fnu,
-            ),
-            torch.empty((cols, rows), device=input.device, dtype=qdata_dtype),
-            torch.empty(
-                ((cols + 127) // 128, (rows + 127) // 128, 32, 16),
-                device=input.device,
-                dtype=torch.float8_e8m0fnu,
-            ),
-        ]
-
-    else:
-        raise AssertionError(f"Unknown {quant_format=}")
+    axes = _quantize_tensor_dual_validate_inputs(
+        quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
+    )
+    return infer_blockscaled_tma_outputs(input, axes, False, True, True)
 
 
 @register_meta([aten._scaled_mm_v2.default])

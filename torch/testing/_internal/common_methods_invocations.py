@@ -7474,6 +7474,7 @@ def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad,
     # Dtype probes request gradients even for ops that do not support autograd.
     input = make_tensor((160, 160), device=device, dtype=dtype, requires_grad=False)
     recipe = {
+        "dim": (-2, -1),
         "qdata_dtype": torch.float8_e4m3fn,
         "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
         "scaling_type": F.ScalingType.BlockWise1x32,
@@ -7490,6 +7491,7 @@ def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_
 
     input = make_tensor((160, 192), device=device, dtype=dtype, requires_grad=False)
     yield SampleInput(input, kwargs={
+        "dim": (-2, -1),
         "qdata_dtype": torch.float8_e4m3fn,
         "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
         "scaling_type": F.ScalingType.BlockWise1x32,
@@ -23170,7 +23172,7 @@ if "cutedsl" in dsl_ops_by_dsl:
                 DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
             ],
             skips=(
-                DecorateInfo(unittest.skip("requires supported input layout"), "TestCommon", "test_noncontiguous_samples"),
+                DecorateInfo(unittest.skip("generic samples may violate matrix-size constraints"), "TestCommon", "test_noncontiguous_samples"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
             ),
@@ -23197,7 +23199,7 @@ if "cutedsl" in dsl_ops_by_dsl:
             ],
             skips=(
                 DecorateInfo(
-                    unittest.skip("requires contiguous input"), "TestCommon", "test_noncontiguous_samples"
+                    unittest.skip("generic samples may violate matrix-size constraints"), "TestCommon", "test_noncontiguous_samples"
                 ),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),

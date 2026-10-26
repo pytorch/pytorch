@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
 #include <vector>
@@ -8,6 +9,7 @@ namespace at::native {
 
 std::vector<Tensor> _quantize_tensor_cuda(
     const Tensor& /*input*/,
+    at::IntArrayRef /*dim*/,
     int64_t /*scaling_type*/,
     ScalarType /*qdata_dtype*/,
     int64_t /*scaling_algorithm*/,
@@ -23,6 +25,7 @@ std::vector<Tensor> _quantize_tensor_cuda(
 
 std::vector<Tensor> _quantize_tensor_dual_cuda(
     const Tensor& /*input*/,
+    at::IntArrayRef /*dim*/,
     int64_t /*scaling_type*/,
     ScalarType /*qdata_dtype*/,
     int64_t /*scaling_algorithm*/,
