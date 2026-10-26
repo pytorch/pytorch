@@ -39,9 +39,10 @@ from torch._inductor.codegen.wrapper import (
     user_defined_triton_kernel_transitive_closure,
     user_defined_triton_kernel_transitive_closure_source_code,
 )
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
-from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties, ReductionHint
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -251,6 +252,65 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(can_use(shape=(size,), storage=size))
         self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
         self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
+
+    @inductor_config.patch({"triton.native_matmul": True})
+    @parametrize(
+        "shape,a_strides,b_strides,expected",
+        [
+            ((1024, 1024, 4096), None, None, torch.int32),
+            ((50000, 1, 50000), None, None, torch.int64),
+            ((1, 50000, 50000), None, None, torch.int64),
+            ((50000, 50000, 1), None, None, torch.int64),
+            ((2, 16, 16), (2**31, 1), None, torch.int64),
+            ((1, 1, 2**31), (0, 0), (0, 0), torch.int64),
+        ],
+    )
+    def test_native_matmul_index_dtype(self, shape, a_strides, b_strides, expected):
+        m, n, k = map(sympy.Integer, shape)
+        device = torch.device("cpu")
+        dtype = torch.bfloat16
+        a = ir.Buffer(
+            name="a", layout=ir.FixedLayout(device, dtype, [m, k], a_strides or [k, 1])
+        )
+        b = ir.Buffer(
+            name="b", layout=ir.FixedLayout(device, dtype, [k, n], b_strides or [n, 1])
+        )
+        out = ir.ComputedBuffer(
+            name="out",
+            layout=ir.FixedLayout(device, dtype, [m, n], [n, 1]),
+            data=ir.Reduction(
+                device=device,
+                dtype=dtype,
+                inner_fn=lambda index, reduction_index: 0,
+                ranges=[m, n],
+                reduction_ranges=[k],
+                reduction_type="dot",
+                src_dtype=dtype,
+                reduction_hint=ReductionHint.DEFAULT,
+            ),
+        )
+        self._graph.graph_inputs.update(a=a, b=b)
+        self._graph.name_to_buffer["out"] = out
+        y, x, r = sympy.symbols("y x r", integer=True, nonnegative=True)
+        a_stride, b_stride = a.get_stride(), b.get_stride()
+        node = SimpleNamespace(
+            node=out,
+            get_buffer_names=lambda: ["out"],
+            used_buffer_names=lambda: ["a", "b"],
+            read_writes=SimpleNamespace(
+                reads=[
+                    MemoryDep("a", y * a_stride[0] + r * a_stride[1], (y, r), (m, k)),
+                    MemoryDep("b", r * b_stride[0] + x * b_stride[1], (r, x), (k, n)),
+                ],
+                writes=[MemoryDep("out", y * n + x, (y, x), (m, n))],
+            ),
+        )
+        features = SIMDKernelFeatures([node], m * n, k)
+        self.assertEqual(features.select_index_dtype(), expected)
+        if expected == torch.int32:
+            with inductor_config.patch({"triton.native_matmul": False}):
+                features = SIMDKernelFeatures([node], m * n, k)
+                self.assertEqual(features.select_index_dtype(), torch.int64)
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):
