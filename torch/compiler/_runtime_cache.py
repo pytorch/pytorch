@@ -412,7 +412,10 @@ def _triton_export_diagnostic(
         "kernel_name": kernel.inductor_meta.get("kernel_name"),
         "filename": getattr(kernel, "filename", None),
         "compile_id": str(compile_id) if compile_id is not None else None,
+        # direction is the latest compile's; these two decide an untuned freeze.
         "direction": direction,
+        "forward_use": kernel._forward_use,
+        "launched": kernel._launched,
         "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
         "config_count": len(kernel.compile_results if configs is None else configs),
         "launcher_count": len(kernel.launchers),
