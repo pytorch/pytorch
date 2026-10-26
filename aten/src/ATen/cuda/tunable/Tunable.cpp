@@ -350,7 +350,10 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
 void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry entry) {
-  // Honoured for every caller, not just one that remembers to ask.
+  // Honoured for every caller, not just one that remembers to ask. Drops the
+  // record entirely, map included, rather than only skipping the file write:
+  // a kill switch that still mutated shared state would be a worse contract
+  // than one that does nothing.
   if (RecordBorrowedDisabledByEnv()) {
     return;
   }
