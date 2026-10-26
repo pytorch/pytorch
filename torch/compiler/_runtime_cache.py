@@ -611,7 +611,7 @@ def _pickle_snapshot(
 
 
 class _RuntimeCapture:
-    def __init__(self, freeze_never_run_backward: bool | None = None) -> None:
+    def __init__(self, freeze_never_run_backward: bool = False) -> None:
         self.pid = os.getpid()
         self.freeze_never_run_backward = freeze_never_run_backward
         # The precompile.capture blocks open in this process. Overlapping
@@ -730,17 +730,15 @@ def capture_scope(*, freeze_never_run_backward: bool | None = None) -> Iterator[
 
     ``freeze_never_run_backward`` lets the scope's finalize freeze a backward
     Triton kernel no captured step ran with its first usable config, which is
-    never benchmarked (see ``_freeze_never_run_backward``). ``None`` states no
-    preference; the first block that states one sets it for the scope, and a
-    block that states the other raises.
+    never benchmarked (see ``_freeze_never_run_backward``). The block that opens
+    the scope sets it; a block that joins must leave it ``None`` or agree. A
+    precompile.capture states its own choice to ``freeze_runtime_cache`` instead.
     """
     global _capture
     with _capture_lock:
         owner = _active_capture()
         if owner is None:
-            owner = _capture = _RuntimeCapture(freeze_never_run_backward)
-        elif owner.freeze_never_run_backward is None:
-            owner.freeze_never_run_backward = freeze_never_run_backward
+            owner = _capture = _RuntimeCapture(bool(freeze_never_run_backward))
         elif freeze_never_run_backward not in (
             None,
             owner.freeze_never_run_backward,
@@ -803,7 +801,9 @@ def _current_root(cache: ModuleType) -> str | None:
 
 
 def freeze_runtime_cache(
-    snapshot: Callable[[], bytes | None], write: Callable[[bytes | None], None]
+    snapshot: Callable[[], bytes | None],
+    write: Callable[[bytes | None], None],
+    freeze_never_run_backward: bool | None = None,
 ) -> None:
     """Freeze the scope's static Triton kernels, C++ kernel binaries and Triton
     JIT cache into the cache artifact and pass it to ``write``.
@@ -813,6 +813,8 @@ def freeze_runtime_cache(
     kernel that cannot be frozen raises, since precompile.load could not serve
     it without compiling. The caller must stop compiling before calling this: a
     kernel compiled on another thread meanwhile is neither waited on nor frozen.
+    ``freeze_never_run_backward`` is the caller's choice for this artifact; when
+    ``None``, the scope's applies.
     """
     owner = _active_capture()
     if owner is None:
@@ -847,9 +849,9 @@ def freeze_runtime_cache(
         with _capture_lock:
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
-        static_payload = _freeze_triton_kernels(
-            kernels, bool(owner.freeze_never_run_backward)
-        )
+        if freeze_never_run_backward is None:
+            freeze_never_run_backward = owner.freeze_never_run_backward
+        static_payload = _freeze_triton_kernels(kernels, freeze_never_run_backward)
         cpp_payload = _freeze_cpp_kernels(cpp_kernels)
         if cache is not None:
             payload = cache.export_runtime_cache(context=_runtime_context())
