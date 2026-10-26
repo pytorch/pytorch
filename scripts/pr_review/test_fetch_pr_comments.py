@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -589,9 +590,14 @@ class TestReactions(unittest.TestCase):
                 raise RuntimeError("gh api failed: HTTP 403 secondary rate limit")
             return real(endpoint)
 
-        out = fpc.collect(throttled, REPO, PR)
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            out = fpc.collect(throttled, REPO, PR)
         self.assertEqual([i["id"] for i in out["items"]], [20])
         self.assertTrue(out["reactions_truncated"])
+        self.assertIn(
+            "::warning::could not read the reactions of issue_comment 20:",
+            err.getvalue(),
+        )
 
     def test_a_failed_reactor_permission_check_keeps_the_comment(self):
         api = FakeApi(
@@ -736,8 +742,9 @@ class TestReactions(unittest.TestCase):
         self.assertFalse(out["reactions_truncated"])
 
     def test_an_unchecked_reactor_marks_only_its_own_comment(self):
-        # The newest finding exhausts the checks and is then left out; the older
-        # comment's author reaction needs no check, so nothing kept is partial.
+        # The finding is looked up first, exhausts the checks, and is then left
+        # out for the review body; the comment looked up after it has only the
+        # author's reaction, which needs no check, so nothing kept is partial.
         api = FakeApi(
             reviews=[ours()],
             inline=[finding(reactions={"total_count": 2})],
@@ -750,10 +757,18 @@ class TestReactions(unittest.TestCase):
         )
         with (
             mock.patch.object(fpc, "MAX_REACTOR_CHECKS", 1),
-            mock.patch.object(fpc, "MAX_ITEMS", 1),
+            mock.patch.object(fpc, "MAX_ITEMS", 2),
         ):
             out = fpc.collect(api, REPO, PR)
-        self.assertEqual([i["id"] for i in out["items"]], [20])
+        self.assertEqual([i["id"] for i in out["items"]], [50, 20])
+        lookups = [c.split("?")[0] for c in api.calls if "/reactions" in c]
+        self.assertEqual(
+            lookups,
+            [
+                f"repos/{REPO}/pulls/comments/10/reactions",
+                f"repos/{REPO}/issues/comments/20/reactions",
+            ],
+        )
         self.assertFalse(out["reactions_truncated"])
 
     def test_a_partial_comment_left_out_is_not_reported(self):
@@ -764,6 +779,91 @@ class TestReactions(unittest.TestCase):
             out = fpc.collect(self.reacted_comments(3), REPO, PR)
         self.assertEqual([i["id"] for i in out["items"]], [22, 23])
         self.assertFalse(out["reactions_truncated"])
+
+    def test_a_comment_left_out_costs_no_lookup(self):
+        with mock.patch.object(fpc, "MAX_ITEMS", 1):
+            api = self.reacted_comments(3)
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [23])
+        self.assertEqual(
+            [c for c in api.calls if "/reactions" in c],
+            [f"repos/{REPO}/issues/comments/23/reactions?per_page={fpc.PER_PAGE}"],
+        )
+
+    def test_a_finding_with_only_drive_by_reactions_is_selected_again(self):
+        # Kept at first as possibly answered, the newer finding turns out to
+        # have no reaction that counts, so the answered one takes its place.
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[
+                finding(cid=11, when="2026-01-02", reactions={"total_count": 1}),
+                finding(cid=12, when="2026-01-03", reactions={"total_count": 1}),
+            ],
+            reactions={
+                "pulls/comments/11": [reaction("author", "-1")],
+                "pulls/comments/12": [reaction("drive-by", "+1")],
+            },
+        )
+        with mock.patch.object(fpc, "MAX_ITEMS", 2):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [50, 11])
+        self.assertTrue(out["truncated"])
+        self.assertFalse(out["reactions_truncated"])
+
+    def test_findings_settle_before_people_spend_the_lookups(self):
+        # The newer finding has only a drive-by reaction; finding that out must
+        # free its place for the older, answered one before the remaining
+        # lookup goes to a person's comment.
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[
+                finding(cid=11, when="2026-01-02", reactions={"total_count": 1}),
+                finding(cid=12, when="2026-01-03", reactions={"total_count": 1}),
+            ],
+            issue=[
+                comment("maint", id=20, when="2026-01-04", reactions={"total_count": 1})
+            ],
+            maintainers={"maint"},
+            reactions={
+                "pulls/comments/11": [reaction("author", "-1")],
+                "pulls/comments/12": [reaction("drive-by", "+1")],
+                "issues/comments/20": [reaction("author", "+1")],
+            },
+        )
+        with (
+            mock.patch.object(fpc, "MAX_ITEMS", 2),
+            mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2),
+        ):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [11, 20])
+        self.assertIn("reactions", out["items"][0])
+        self.assertTrue(out["reactions_truncated"])
+
+    def test_each_lookup_is_followed_by_a_new_selection(self):
+        # A is answered by a kept reply, B by the author's reaction, and C has
+        # only a drive-by one. Once C turns out unanswered, B takes its place
+        # and the last lookup goes to B, not to A, whose reply already counts.
+        api = FakeApi(
+            reviews=[ours()],
+            inline=[
+                finding(cid=11, when="2026-01-02", reactions={"total_count": 1}),
+                finding(cid=12, when="2026-01-03", reactions={"total_count": 1}),
+                finding(cid=13, when="2026-01-04", reactions={"total_count": 1}),
+                comment("author", id=30, when="2026-01-05", in_reply_to_id=11),
+            ],
+            reactions={
+                "pulls/comments/11": [reaction("author", "+1")],
+                "pulls/comments/12": [reaction("author", "-1")],
+                "pulls/comments/13": [reaction("drive-by", "+1")],
+            },
+        )
+        with (
+            mock.patch.object(fpc, "MAX_ITEMS", 3),
+            mock.patch.object(fpc, "MAX_REACTION_LOOKUPS", 2),
+        ):
+            out = fpc.collect(api, REPO, PR)
+        self.assertEqual([i["id"] for i in out["items"]], [11, 12, 30])
+        self.assertIn("reactions", out["items"][1])
 
 
 class TestFailsClosed(unittest.TestCase):

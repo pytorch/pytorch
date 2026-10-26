@@ -15,24 +15,28 @@ reacted to, so those are normally not shown. Each inline comment's
 ``original_commit_id`` is the commit it was written against, and ``head_sha``,
 passed in by the caller, is the commit under review. Other bots and other users
 are dropped. A comment's ``reactions`` are the emoji reactions of the author
-and maintainers, read for up to ``MAX_REACTION_LOOKUPS`` reacted comments,
-earlier findings first and newest first within each (reactions to a review
-body have no REST endpoint and are not read), and
-``reactions_truncated`` is set when a limit or a failed lookup may have left
-some out. Bodies are capped. If the conversation is too long, ``truncated`` is
-set and items are selected in two phases. First, people's comments alone,
-newest first; the first that does not fit ends selection, and older comments
-and every finding are left out. Then, only if all of them fit, earlier
-findings are considered in this order, each kept if it fits and skipped if
-not: those a kept reply answers (in the order of the replies), then those with
-a reaction seen and the latest review body, then the rest, each group newest
-first. Kept items are written in time order.
+and maintainers. They are read only for reacted comments the selection below
+keeps, so a comment left out costs no API call, and for at most
+``MAX_REACTION_LOOKUPS`` of them, earlier findings first and newest first
+within each (reactions to a review body have no REST endpoint and are not
+read). ``reactions_truncated`` is set when a limit or a failed lookup may have
+left some out of a kept comment. Bodies are capped. If the conversation is too
+long, ``truncated`` is set and items are selected in two phases. First,
+people's comments alone, newest first; the first that does not fit ends
+selection, and older comments and every finding are left out. Then, only if
+all of them fit, earlier findings are considered in this order, each kept if
+it fits and skipped if not: those a kept reply answers (in the order of the
+replies), then those with a reaction seen (or not yet looked up while lookups
+remain) and the latest review body, then the rest, each group newest first.
+One comment is looked up at a time and selection is repeated after each, since
+reactions change what fits and what counts as answered. Kept items are written in time order.
 
 Every failure is fatal except a 404 on a permission check (that user is not a
 maintainer) and any failure while reading a comment's reactions, including the
 reactors' permission checks: the comment is kept with ``reactions_truncated``
 set. Reactions are context, while a review that silently saw no comments would
 approve a PR whose maintainer feedback it was never shown.
+Each failed lookup is logged as a workflow warning.
 """
 
 from __future__ import annotations
@@ -71,8 +75,8 @@ REVIEW_AUTHOR = "github-actions[bot]"
 MARKER = "<!-- hardened-pr-review -->"
 AUTOMATED = "automated_review"
 REACTIONS = {"issue_comment": "issues/comments", "review_comment": "pulls/comments"}
-# Reactions are read for a bounded number of reacted comments, one page each: every
-# lookup is an API call on a token the repository's other workflows share.
+# Reactions are read for a bounded number of kept, reacted comments, one page each:
+# every lookup is an API call on a token the repository's other workflows share.
 MAX_REACTION_LOOKUPS = 50
 # Permission checks for reactors not already known from the conversation; a
 # reactor beyond them is left out.
@@ -272,46 +276,12 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
             items.append(item)
 
     items.sort(key=lambda i: i["created_at"])
-    # Earlier findings first, so a reaction to one is never crowded out by
-    # people's comments; newest first within each.
-    newest = sorted(
-        (i for i in reversed(items) if id(i) in lookups),
-        key=lambda i: i["role"] != AUTOMATED,
-    )
-    # Items whose reactions some limit may have left out.
-    partial = {id(i) for i in newest[MAX_REACTION_LOOKUPS:]}
-    for item in newest[:MAX_REACTION_LOOKUPS]:
-        unchecked = False
-        try:
-            reactions, full = reactions_of(api, repo, *lookups[id(item)], reactor_role)
-        except (RuntimeError, ValueError):
-            # Deleted since it was listed, rate-limited, or any other failure:
-            # keep the comment and report its reactions as unknown.
-            reactions, full = [], True
-        if full or unchecked:
-            partial.add(id(item))
-        if reactions:
-            item["reactions"] = reactions
-    # Answered: a finding with reactions or a reply people wrote, and the latest
-    # review's body, whose findings are not inline and so cannot be answered.
     replied = {i.get("in_reply_to_id") for i in items if i["role"] != AUTOMATED}
-    answered = {
-        id(i)
-        for i in items
-        if i["role"] == AUTOMATED
-        and (i.get("reactions") or i["id"] in replied or i["kind"] == "review")
+    findings = {
+        i["id"]: n
+        for n, i in enumerate(items)
+        if i["role"] == AUTOMATED and i["kind"] == "review_comment"
     }
-    newest_first = list(reversed(range(len(items))))
-    groups = [
-        [n for n in newest_first if items[n]["role"] != AUTOMATED],
-        [n for n in newest_first if id(items[n]) in answered],
-        [
-            n
-            for n in newest_first
-            if items[n]["role"] == AUTOMATED and id(items[n]) not in answered
-        ],
-    ]
-    kept: list[int] = []
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
         **head,
@@ -320,32 +290,98 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         "omitted_items": len(items),
         "items": [],
     }
-    size = len(dumps(envelope))
-    findings = {
-        i["id"]: n
-        for n, i in enumerate(items)
-        if i["role"] == AUTOMATED and i["kind"] == "review_comment"
-    }
+    base = len(dumps(envelope))
+    # Serialized sizes, recomputed only when an item gains reactions.
+    sizes = {id(i): len(dumps(i)) for i in items}
+    newest_first = list(reversed(range(len(items))))
+    looked: set[int] = set()
+    # Items whose reactions some limit or failure may have left out.
+    partial: set[int] = set()
 
-    def take(n: int) -> bool:
-        nonlocal size
-        if n in kept:
+    def select(optimistic: bool) -> list[int]:
+        # Answered: a finding with reactions or a reply people wrote, and the
+        # latest review's body, whose findings are not inline and so cannot be
+        # answered. A reacted finding not yet looked up counts as answered while
+        # lookups remain, so that it is kept and then looked up.
+        answered = {
+            id(i)
+            for i in items
+            if i["role"] == AUTOMATED
+            and (
+                i.get("reactions")
+                or i["id"] in replied
+                or i["kind"] == "review"
+                or (optimistic and id(i) in lookups and id(i) not in looked)
+            )
+        }
+        kept: list[int] = []
+        size = base
+
+        def take(n: int) -> bool:
+            nonlocal size
+            if n in kept:
+                return True
+            grow = sizes[id(items[n])] + 1
+            if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
+                return False
+            size += grow
+            kept.append(n)
             return True
-        grow = len(dumps(items[n])) + 1
-        if len(kept) == MAX_ITEMS or size + grow > MAX_TOTAL_BYTES:
-            return False
-        size += grow
-        kept.append(n)
-        return True
 
-    # People's comments alone, cut strictly oldest first, so a finding never
-    # takes a person's place. Earlier findings follow only if every person's
-    # comment fit: first those a kept reply answers, then the groups above, and
-    # one that does not fit is skipped so that smaller ones can still be kept.
-    if all(take(n) for n in groups[0]):
+        # People's comments alone, cut strictly oldest first: the first that
+        # does not fit ends selection, so a finding never takes a person's place.
+        for n in newest_first:
+            if items[n]["role"] != AUTOMATED and not take(n):
+                return kept
+        # Then earlier findings: first those a kept reply answers, then the
+        # answered, then the rest, each newest first. One that does not fit is
+        # skipped so that smaller ones can still be kept.
         replied_to = [findings.get(items[n].get("in_reply_to_id")) for n in kept]
-        for n in [m for m in replied_to if m is not None] + groups[1] + groups[2]:
+        for n in [m for m in replied_to if m is not None] + [
+            n for n in newest_first if id(items[n]) in answered
+        ]:
             take(n)
+        for n in newest_first:
+            if items[n]["role"] == AUTOMATED:
+                take(n)
+        return kept
+
+    # Reactions are read only for comments selection keeps, so a comment left
+    # out costs no API call. Reactions change what fits and what counts as
+    # answered, so one comment is looked up at a time and selection is repeated
+    # after each; this ends once no kept comment is pending or the lookups run
+    # out. Earlier findings are looked up before people's comments, so a
+    # reaction to one is never crowded out; newest first within each.
+    budget = MAX_REACTION_LOOKUPS
+    while True:
+        kept = select(optimistic=budget > 0)
+        pending = [
+            n for n in kept if id(items[n]) in lookups and id(items[n]) not in looked
+        ]
+        if not pending or not budget:
+            break
+        item = items[max(pending, key=lambda n: (items[n]["role"] == AUTOMATED, n))]
+        kind, obj = lookups[id(item)]
+        looked.add(id(item))
+        budget -= 1
+        unchecked = False
+        try:
+            reactions, full = reactions_of(api, repo, kind, obj, reactor_role)
+        except (RuntimeError, ValueError) as e:
+            # Deleted since it was listed, rate-limited, or any other failure:
+            # keep the comment and report its reactions as unknown.
+            print(
+                f"::warning::could not read the reactions of {kind} "
+                f"{obj.get('id')}: {e}",
+                file=sys.stderr,
+            )
+            reactions, full = [], True
+        if full or unchecked:
+            partial.add(id(item))
+        if reactions:
+            item["reactions"] = reactions
+            sizes[id(item)] = len(dumps(item))
+    partial |= {id(items[n]) for n in kept if id(items[n]) in lookups} - looked
     omitted = len(items) - len(kept)
     return {
         **head,
