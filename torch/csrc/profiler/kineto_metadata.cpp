@@ -226,8 +226,7 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    const auto arg_data =
-        parseArgData(op_event.inputs_, op_event.concrete_inputs_);
+    const auto arg_data = parseArgData(op_event.inputs_);
 
     if (arg_data.hasData) {
       if (get_record_concrete_inputs_enabled()) {

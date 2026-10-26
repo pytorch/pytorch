@@ -24,6 +24,7 @@ from c10d_backend_common import (
 )
 
 from torch._C._distributed_c10d import NanCheckHook
+from torch.testing._internal.common_distributed import core_dumps_disabled
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -45,14 +46,15 @@ class AbstractNanCheckHookTest(C10dBackendTest):
 
     def _assert_nan_detected(self, tensor):
         if self.device_type == "cuda":
-            try:
-                dist.all_reduce(tensor)
-                torch.cuda.synchronize()
-            except Exception:
-                # os._exit, not sys.exit: the CUDA context is poisoned, so
-                # unwinding through tearDown's destroy_process_group can hang
-                # waiting on collectives that will never complete.
-                os._exit(signal.SIGABRT)
+            with core_dumps_disabled():
+                try:
+                    dist.all_reduce(tensor)
+                    torch.cuda.synchronize()
+                except Exception:
+                    # os._exit, not sys.exit: the CUDA context is poisoned, so
+                    # unwinding through tearDown's destroy_process_group can hang
+                    # waiting on collectives that will never complete.
+                    os._exit(signal.SIGABRT)
             self.fail("NaN in collective input was not detected")
         else:
             with self.assertRaisesRegex(RuntimeError, "NaN"):

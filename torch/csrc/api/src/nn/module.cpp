@@ -62,7 +62,7 @@ const std::string& Module::name() const noexcept {
 }
 
 std::shared_ptr<Module> Module::clone(
-    const std::optional<Device>& device) const {
+    const std::optional<Device>& /*device*/) const {
   TORCH_CHECK(
       false,
       "clone() has not been implemented for ",
