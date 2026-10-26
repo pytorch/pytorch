@@ -299,7 +299,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
       ? act.contiguous(c10::MemoryFormat::ChannelsLast)
       : at::native::fbgemm_utils::ConvertToChannelsLast3dTensor(act);
   const uint8_t* act_data =
-      reinterpret_cast<uint8_t*>(act_ndhwc.data_ptr<c10::quint8>());
+      reinterpret_cast<const uint8_t*>(act_ndhwc.const_data_ptr<c10::quint8>());
   auto* pack_w = w.get();
 
   const int M = pack_w->outputChannels();
@@ -499,8 +499,8 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
             conv_p,
             act_data,
             *pack_w,
-            reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-            buffer.data_ptr<int32_t>(),
+            reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()),
+            buffer.mutable_data_ptr<int32_t>(),
             output_proc_obj,
             task_id /* thread_id*/,
             num_tasks /* num_threads */);
@@ -526,8 +526,8 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
             conv_p,
             act_data,
             *pack_w,
-            reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-            buffer.data_ptr<int32_t>(),
+            reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()),
+            buffer.mutable_data_ptr<int32_t>(),
             output_proc_obj,
             task_id /* thread_id*/,
             num_tasks /* num_threads */);
@@ -897,10 +897,10 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight.contiguous(channels_last);
     auto bias_fp32 = bias;
-    int8_t* w_data =
-        reinterpret_cast<int8_t*>(weight_contig.template mutable_data_ptr<c10::qint8>());
+    const int8_t* w_data =
+        reinterpret_cast<const int8_t*>(weight_contig.template const_data_ptr<c10::qint8>());
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
+    const float* weight_scales_data = w_scales.const_data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
@@ -916,7 +916,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         weight_scales_data[0],
         w_zero_points[0],
         std::nullopt);
-    auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
+    auto* qnnp_w_data = qnnp_weight.template mutable_data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);

@@ -778,10 +778,12 @@ void Unpickler::readGlobal(
   } else if (
       module_name == "torch._utils" &&
       (class_name == "_rebuild_tensor_v2" ||
+       class_name == "_rebuild_tensor_v3" ||
        class_name == "_rebuild_qtensor")) {
     // Unpickle a tensor
-    bool quantized = class_name == "_rebuild_qtensor";
-    rebuildTensor(quantized);
+    const bool quantized = class_name == "_rebuild_qtensor";
+    const bool has_explicit_dtype = class_name == "_rebuild_tensor_v3";
+    rebuildTensor(quantized, has_explicit_dtype);
   } else if (
       module_name == "torch._tensor" &&
       (class_name == "_rebuild_from_type_v2")) {
@@ -830,6 +832,9 @@ void Unpickler::readGlobal(
         false,
         "RRef unpickling is only supported with the distributed package");
 #endif
+  } else if (module_name == "torch.storage" && class_name == "UntypedStorage") {
+    stack_.emplace_back(int64_t(c10::kByte));
+    return;
   } else if (module_name == "torch") {
     // Try to manually resolve several global enums
     // NOTE: this does not put a global into the global table,
@@ -845,6 +850,13 @@ void Unpickler::readGlobal(
 #undef CHECK_SCALAR
     if (scalar_type.has_value()) {
       stack_.emplace_back(int64_t(*scalar_type));
+      return;
+    }
+
+    const auto& dtype_map = c10::getStringToDtypeMap();
+    const auto dtype = dtype_map.find(class_name);
+    if (dtype != dtype_map.end()) {
+      stack_.emplace_back(int64_t(dtype->second));
       return;
     }
 
@@ -945,8 +957,8 @@ void Unpickler::rebuildSparseTensor() {
   });
 }
 
-void Unpickler::rebuildTensor(bool quantized) {
-  globals_.emplace_back([this, quantized] {
+void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
+  globals_.emplace_back([this, quantized, has_explicit_dtype] {
     auto tup = pop(stack_).toTuple();
     const auto& elements = tup->elements();
     size_t idx = 0;
@@ -981,11 +993,16 @@ void Unpickler::rebuildTensor(bool quantized) {
               toString(qscheme));
           break;
       }
-    } else {
-      result = at::empty({0}, storage_tensor.options());
     }
     bool requires_grad = elements.at(idx++).toBool();
     idx++; // backwards hooks is empty
+    auto scalar_type = storage_tensor.scalar_type();
+    if (has_explicit_dtype) {
+      scalar_type = elements.at(idx++).toScalarType();
+    }
+    if (!quantized) {
+      result = at::empty({0}, storage_tensor.options().dtype(scalar_type));
+    }
     // Validate size/stride/storage_offset against the storage extent before
     // installing them via the unchecked TensorImpl setters below. The Python
     // pickle path goes through Tensor.set_() which performs these checks; the
@@ -1005,7 +1022,7 @@ void Unpickler::rebuildTensor(bool quantized) {
       TORCH_CHECK(
           stride[i] >= 0, "Tensor: negative stride ", stride[i], " at dim ", i);
     }
-    const size_t itemsize = storage_tensor.dtype().itemsize();
+    const size_t itemsize = result.dtype().itemsize();
     const size_t storage_nbytes = storage_tensor.storage().nbytes();
     // Bound storage_offset independently: computeStorageNbytes returns 0 when
     // any dim is 0, so without this check a zero-numel tensor with a huge
@@ -1052,13 +1069,20 @@ void Unpickler::rebuildTensor(bool quantized) {
     // Tensors pickled before this patch didn't
     // have this argument for storing MathBits,
     // in that case, we do nothing.
-    // NOTE: `math_bits` is the 7th arg.
+    // NOTE: `math_bits` is the 7th arg for v2 and the 8th arg for v3.
     // NOTE: This is only meant for regular tensor and not quantized
     //       which also has 7 args serialized.
-    if (!quantized && elements.size() == 7) {
+    if (!quantized && idx < elements.size() &&
+        elements.at(idx).isGenericDict()) {
       auto math_bits = elements.at(idx++).toGenericDict();
       torch::jit::setTensorMetadata(result, math_bits);
     }
+    TORCH_CHECK(
+        idx == elements.size(),
+        "Tensor: unexpected number of rebuild arguments, got ",
+        elements.size(),
+        " args, consumed ",
+        idx);
 
     stack_.emplace_back(std::move(result));
   });

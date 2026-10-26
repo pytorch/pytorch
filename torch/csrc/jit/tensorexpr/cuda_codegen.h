@@ -251,9 +251,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   void CompileToNVRTC(const std::string& code, const std::string& func_name);
 
   UniqueNameManager* name_manager() {
-    if (!printer_) {
-      throw std::runtime_error("Null IRPrinter is not expected");
-    }
+    TORCH_CHECK(printer_, "Null IRPrinter is not expected");
     return printer_->name_manager();
   }
 
