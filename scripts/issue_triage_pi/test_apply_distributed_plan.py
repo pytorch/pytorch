@@ -68,6 +68,35 @@ class DistributedPlanEffectsTest(unittest.TestCase):
         # Only the marker, so the daily sweep does not re-dispatch the issue.
         self.assertEqual(result.add_labels, [MARKER])
 
+    def test_infra_and_checkpointing_routes_can_complete_without_modules(self):
+        for queue in ("oncall: distributed infra", "oncall: distributed checkpointing"):
+            with self.subTest(queue=queue):
+                result = effects("route", [queue, "triaged"])
+                self.assertEqual(result.add_labels, [queue, "triaged", MARKER])
+
+    def test_existing_triaged_does_not_skip_second_level_routing_or_review(self):
+        existing = ROUTED | {"triaged"}
+        routed = effects("route", ["oncall: distributed infra"], existing=existing)
+        self.assertEqual(routed.add_labels, ["oncall: distributed infra", MARKER])
+        review = effects("low_confidence", ["triage review"], existing=existing)
+        self.assertEqual(review.add_labels, ["triage review", MARKER])
+
+    def test_completed_status_requires_a_valid_sub_queue(self):
+        for decision in ("route", "classify", "already_classified"):
+            with self.subTest(decision=decision):
+                result = effects(
+                    decision,
+                    ["module: fsdp", "triaged"],
+                    existing=ROUTED | {"oncall: distributed typo"},
+                )
+                self.assertEqual(
+                    result.add_labels, ["module: fsdp", "triage review", MARKER]
+                )
+
+    def test_route_without_a_sub_queue_goes_to_review(self):
+        result = effects("route", ["oncall: distributed typo"])
+        self.assertEqual(result.add_labels, ["triage review", MARKER])
+
     def test_two_requested_sub_queues_go_to_review(self):
         result = effects(
             "route", ["oncall: distributed infra", "oncall: distributed checkpointing"]
@@ -107,9 +136,24 @@ class DistributedPlanEffectsTest(unittest.TestCase):
         )
         self.assertFalse(result.mutates)
 
-    def test_classification_without_an_allowlisted_module_goes_to_review(self):
-        result = effects("classify", ["module: typo", "triaged"])
-        self.assertEqual(result.add_labels, ["triage review", MARKER])
+    def test_classification_without_a_distributed_module_goes_to_review(self):
+        for existing_modules, requested_modules in (
+            (set(), ["module: typo"]),
+            ({"module: cuda"}, ["module: typo"]),
+            ({"module: performance"}, []),
+            (set(), ["module: performance"]),
+        ):
+            with self.subTest(existing=existing_modules, requested=requested_modules):
+                result = effects(
+                    "classify",
+                    [*requested_modules, "triaged"],
+                    existing=ROUTED
+                    | {"oncall: distributed parallelisms"}
+                    | existing_modules,
+                )
+                self.assertNotIn("triaged", result.add_labels)
+                self.assertIn("triage review", result.add_labels)
+                self.assertIn(MARKER, result.add_labels)
 
     def test_schema_matches_the_templates_and_the_high_priority_decision(self):
         self.assertEqual(set(SCHEMA["templates"]["items"]["enum"]), set(TEMPLATES))

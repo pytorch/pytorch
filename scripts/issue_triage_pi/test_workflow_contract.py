@@ -68,6 +68,51 @@ class TriageWorkflowContract(unittest.TestCase):
                 ]
                 self.assertEqual(agents, [])
 
+    def test_handoffs_require_the_expected_workflow_and_event(self):
+        for workflow, jobs in CALLERS.items():
+            with self.subTest(workflow=workflow):
+                condition = jobs["prepare"]["if"]
+                self.assertIn(
+                    "github.event.workflow_run.conclusion == 'success'", condition
+                )
+                if workflow == "issue-triage-pi.yml":
+                    self.assertIn(
+                        "github.event.workflow.path == '.github/workflows/issue-triage.yml'",
+                        condition,
+                    )
+                    source_event = "issues"
+                else:
+                    self.assertIn(
+                        "github.event.workflow.path == '.github/workflows/issue-triage-pi.yml'",
+                        condition,
+                    )
+                    source_event = "workflow_run"
+                # Both entry points support a manual dispatch. PR-triggered runs
+                # must not be accepted as privileged handoffs.
+                self.assertEqual(
+                    set(
+                        re.findall(
+                            r"github\.event\.workflow_run\.event == '([^']+)'",
+                            condition,
+                        )
+                    ),
+                    {source_event, "workflow_dispatch"},
+                )
+                self.assertIn(
+                    f"(github.event.workflow_run.event == '{source_event}' || "
+                    "github.event.workflow_run.event == 'workflow_dispatch')",
+                    " ".join(condition.split()),
+                )
+
+    def test_distributed_apply_serializes_by_issue_without_cancelling_writes(self):
+        for workflow, jobs in CALLERS.items():
+            if workflow == "distributed-triage-pi.yml":
+                concurrency = jobs["apply"]["concurrency"]
+                self.assertIn(
+                    "${{ needs.prepare.outputs.issue }}", concurrency["group"]
+                )
+                self.assertIs(concurrency["cancel-in-progress"], False)
+
     def test_model_job_blocks_egress_before_anything_runs(self):
         first = steps(PLAN)[0]
         self.assertTrue(first["uses"].startswith("step-security/harden-runner@"))

@@ -1288,6 +1288,8 @@
 # /.github/workflows/distributed-triage-pi.yml
 # /.github/workflows/issue-triage-pi.yml
 # /.github/workflows/issue-triage.yml
+# /.github/workflows/pi-agent-tests.yml
+# /.github/workflows/pi-triage-tests.yml
 # /AGENTS.md
 # /AI_POLICY.md
 # /CLAUDE.md

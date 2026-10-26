@@ -4,7 +4,7 @@
 Second-level triage for issues routed to `oncall: distributed`. As with
 apply_plan.py, the plan is a request: only labels from the distributed skill's
 distributed-labels.json are added, an issue keeps at most one sub-queue label,
-`triaged` is never paired with `triage review` or `needs reproduction`,
+`triaged` is not added when `triage review` or `needs reproduction` is present,
 comments are limited to the skill's templates.json, and nothing is closed or
 removed.
 
@@ -35,13 +35,11 @@ from labels import (
     is_sub_queue,
     load_labels,
     load_templates,
+    PTD_TRIAGED,
 )
 
 
 TRIAGED = "triaged"
-# Distributed-bot marker; `bot-triaged` belongs to issue triage, which adds it
-# before handing off.
-PTD_TRIAGED = "ptd-bot-triaged"
 NEEDS_REPRODUCTION = "needs reproduction"
 
 
@@ -73,7 +71,7 @@ def plan_effects(
 
     # Exactly one sub-queue: keep an existing one, and refuse to guess between two.
     requested_queues = [label for label in labels if is_sub_queue(label)]
-    if any(is_sub_queue(label) for label in existing_labels):
+    if any(is_sub_queue(label) for label in existing_labels & valid_labels):
         if requested_queues:
             effects.notes.append(
                 f"issue already has a sub-queue; dropped {requested_queues}"
@@ -89,9 +87,10 @@ def plan_effects(
 
     if decision == "high_priority" and TRIAGE_REVIEW not in labels:
         labels.append(TRIAGE_REVIEW)
-    # A classification is only confident if a module label survived the allowlist.
+    # Performance describes the issue type, not a distributed module.
     if decision == "classify" and not any(
-        label.startswith("module: ") for label in existing_labels | set(labels)
+        label.startswith("module: ") and label != "module: performance"
+        for label in (existing_labels | set(labels)) & valid_labels
     ):
         effects.notes.append("no allowlisted module label; flagging for review")
         labels.append(TRIAGE_REVIEW)
@@ -101,6 +100,11 @@ def plan_effects(
             f"dropped {TRIAGED!r}: the issue needs a human or a reproduction"
         )
         labels.remove(TRIAGED)
+    if (decision == "route" or TRIAGED in labels) and not any(
+        is_sub_queue(label) for label in resulting & valid_labels
+    ):
+        effects.notes.append("no allowlisted sub-queue; flagging for review")
+        labels = [label for label in labels if label != TRIAGED] + [TRIAGE_REVIEW]
 
     effects.comment, posted = template_comment(
         list(dict.fromkeys(plan.get("templates", []))),
@@ -109,7 +113,9 @@ def plan_effects(
         effects.notes,
     )
 
-    effects.add_labels = [label for label in labels if label not in existing_labels]
+    effects.add_labels = [
+        label for label in dict.fromkeys(labels) if label not in existing_labels
+    ]
     # The marker records that the distributed bot processed the issue, even when
     # nothing else changed, so the daily sweep skips it. High-priority issues get
     # none, so the sweep re-surfaces them.

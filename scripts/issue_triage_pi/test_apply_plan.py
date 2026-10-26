@@ -43,6 +43,16 @@ class PlanEffectsTest(unittest.TestCase):
         self.assertFalse(result.close)
         self.assertEqual(result.comment, "")
 
+    def test_first_pass_cannot_add_the_distributed_completion_marker(self):
+        result = effects("label", ["module: nn", "bot-triaged", "ptd-bot-triaged"])
+        self.assertEqual(result.add_labels, ["module: nn", "bot-triaged"])
+
+    def test_high_priority_requires_review_not_triaged(self):
+        result = effects("label", ["module: nn", "high priority", "triaged"])
+        self.assertEqual(
+            result.add_labels, ["module: nn", "triage review", "bot-triaged"]
+        )
+
     def test_existing_oncall_label_wins_over_plan(self):
         result = effects("label", ["module: nn"], existing={"oncall: pt2"})
         self.assertFalse(result.mutates)

@@ -40,7 +40,10 @@ jobs:
     if: >-
       github.repository == 'pytorch/pytorch' &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.workflow_run.conclusion == 'success')
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow.path == '.github/workflows/issue-triage-pi.yml' &&
+        (github.event.workflow_run.event == 'workflow_run' ||
+         github.event.workflow_run.event == 'workflow_dispatch')))
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
@@ -162,6 +165,9 @@ jobs:
   apply:
     name: Apply distributed triage
     needs: [prepare, plan]
+    concurrency:
+      group: distributed-triage-apply-${{ github.repository }}-${{ needs.prepare.outputs.issue }}
+      cancel-in-progress: false
     if: needs.prepare.outputs.mode == 'apply' && needs.plan.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
