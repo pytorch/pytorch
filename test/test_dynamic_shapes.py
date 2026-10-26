@@ -697,7 +697,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(type(t), type(r3))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(Piecewise((s97, Eq(s97, 5)), (s26, True)), 5)""",
+            """Eq(Where(Eq(s97, 5), s97, s26), 5)""",
         )
         b4 = f == 5
         r4 = torch.sym_ite(b4, t, f)
@@ -706,7 +706,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(type(f), type(r4))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(Piecewise((s97, Eq(s26, 5)), (s26, True)), 4)""",
+            """Eq(Where(Eq(s26, 5), s97, s26), 4)""",
         )
 
     def test_sym_ite_mixed_python_literal(self):
