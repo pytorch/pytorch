@@ -79,10 +79,12 @@ void ensureTestDataGenerated() {
         "cd \"" + bindir + "\" && python \"" + test_script + "\"";
     std::cout << "Generating test data: " << test_data_cmd << std::endl;
     int result1 = std::system(test_data_cmd.c_str());
-    if (result1 != 0) {
-      std::cerr << "Warning: Test data generation failed with code " << result1
-                << std::endl;
-    }
+    TORCH_CHECK(
+        result1 == 0,
+        "Test data generation failed with status ",
+        result1,
+        ": ",
+        test_data_cmd);
 
     // Generate model files (script_*.pt) by running compile_model.py directly
     std::string compile_script = source_dir + "/compile_model.py";
@@ -90,10 +92,12 @@ void ensureTestDataGenerated() {
         compile_script + "\" \"" + AOTI_CUSTOM_CLASS_LIB + "\"";
     std::cout << "Generating model files: " << models_cmd << std::endl;
     int result2 = std::system(models_cmd.c_str());
-    if (result2 != 0) {
-      std::cerr << "Warning: Model generation failed with code " << result2
-                << std::endl;
-    }
+    TORCH_CHECK(
+        result2 == 0,
+        "Model generation failed with status ",
+        result2,
+        ": ",
+        models_cmd);
   });
 }
 
