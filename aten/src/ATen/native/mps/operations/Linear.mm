@@ -27,7 +27,7 @@ static bool needs_nd_workaround(const Tensor& input) {
 // corruption is allocator/session-state dependent and hits contiguous and transposed
 // operands alike. Apple9+ is fine. mm/addmm already divert such shapes to the
 // stride-aware metal kernels, but linear builds its own graph, so it has to test the
-// GEMM it would form and delegate instead. Mirrors use_metal_mm in LinearAlgebra.mm.
+// GEMM it would form and delegate instead. Mirrors use_metal_mm in Matmul.mm.
 static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
   static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
   constexpr int64_t max_mpsgraph_dim = 32768;
