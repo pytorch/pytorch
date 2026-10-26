@@ -5922,6 +5922,35 @@ class TestCppCodeCacheKey(TestCase):
                 self.assertNotIn(root, cmds[-1])
             self.assertEqual(cmds[0], cmds[1])
 
+    def test_a_load_a_capture_opens_during_is_recorded(self):
+        from torch.compiler import _runtime_cache
+
+        lookup = _runtime_cache.relocatable_cpp_key
+        scope = _runtime_cache.capture_scope()
+        keys = []
+
+        def capture_opens_after_the_first_lookup(compute, *, loaded):
+            keys.append(lookup(compute, loaded=loaded))
+            if len(keys) == 1:
+                scope.__enter__()
+            return keys[-1]
+
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                _runtime_cache,
+                "relocatable_cpp_key",
+                capture_opens_after_the_first_lookup,
+            ),
+        ):
+            try:
+                CppCodeCache.load_async(self.CODE)
+                recorded = list(_runtime_cache._capture.cpp_kernels)
+            finally:
+                scope.__exit__(None, None, None)
+        self.assertIsNone(keys[0])
+        self.assertEqual(recorded, [keys[-1]])
+
     def test_no_frozen_key_outside_precompile(self):
         from torch.compiler import _runtime_cache
 
