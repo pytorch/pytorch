@@ -27,6 +27,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     iter_indices,
     parametrize,
     run_tests,
@@ -131,6 +132,8 @@ def with_tf32_off(f):
 
 
 class TestBasicGEMM(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def _test_addmm_addmv(
         self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None
     ):
