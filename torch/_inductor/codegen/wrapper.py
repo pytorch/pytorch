@@ -4325,13 +4325,12 @@ class PythonWrapperCodegen(CodeGen):
         kernel_key = get_hash(src_code.strip())
         kernel_file = f"{kernel_key}.py"
         if async_compile.AsyncCompile.use_process_pool():
-            async_compile.AsyncCompile().triton(subs_name, src_code, optional=optional)
+            async_compile.AsyncCompile().triton(subs_name, src_code)
         autotune_body = (
             self.async_compile_triton_body(
                 subs_name,
                 _escape_triton_kernel_source_for_wrapper(src_code),
                 device_type,
-                optional=optional,
             )
             if config.triton.autotune_at_compile_time
             else None

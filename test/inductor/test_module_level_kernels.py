@@ -249,6 +249,9 @@ class TestModuleLevelKernels(TestCase):
             },
         )
         self.assertEqual(result, torch.nn.functional.silu(x))
+        # The baseline is defined at module level, and only the optional TMA variant stays a string for AsyncCompile.
+        self.assertTrue(re.search(r"^def triton_\w+\(", code, re.MULTILINE))
+        self.assertEqual(code.count("async_compile.triton("), 1)
         self.assertIn("optional=True", code)
 
     @requires_cuda_and_triton

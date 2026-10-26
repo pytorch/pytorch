@@ -14,7 +14,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import InputReader
 from torch._dynamo.utils import counters
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import (
     FixedTritonConfig,
@@ -2730,13 +2730,12 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             major=9,
             warp_size=32,
         )
-        expected = [
-            {"override_tensor_descriptor": False},
-            {"override_tensor_descriptor": True, "override_host_side_tma": True},
-        ]
         self.assertEqual(
             pins(cuda),
-            expected,
+            [
+                {"override_tensor_descriptor": False},
+                {"override_tensor_descriptor": True, "override_host_side_tma": True},
+            ],
         )
         self.assertEqual(pins(cuda._replace(cc=80, major=8)), [])
         self.assertEqual(pins(cuda._replace(type="hip")), [])
@@ -2756,27 +2755,35 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             with config.patch(patches):
                 self.assertEqual(pins(cuda), [], msg=str(patches))
 
-    def test_pool_benchmarks_pointer_loads_against_tma(self):
+    def test_auto_and_all_pool_contents(self):
         def fn(x):
             return torch.nn.functional.silu(x)
 
         x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
 
         def check_pool(pool, num_kernels, num_tma):
-            torch._dynamo.reset()
             with config.patch({"triton.autotune_tensor_descriptor": pool}):
                 result, (code,) = run_and_get_code(torch.compile(fn), x)
             self.assertEqual(result, fn(x), exact_device=True)
+            FileCheck().check("async_compile.multi_kernel").run(code)
             FileCheck().check_count("@triton.jit", num_kernels, exactly=True).run(code)
             FileCheck().check_count("'tma_variant': True", num_tma, exactly=True).run(
                 code
             )
-            FileCheck().check("async_compile.multi_kernel").run(code)
+            # Only the baseline keeps max-autotune's config search.
+            FileCheck().check_count(
+                "'max_autotune_pointwise': False", num_tma, exactly=True
+            ).run(code)
 
         check_pool("auto", 2, 1)
         check_pool("all", 3, 2)
 
-    def test_dynamic_shapes_use_pointer_loads(self):
+    @config.patch({"nvgemm_pdl": "auto", "triton.enable_pdl": False})
+    def test_dynamic_shapes_and_pdl_consumers_skip_the_pool(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
         def rmsnorm(x, weight):
             x_float = x.float()
             scale = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + 1e-6)
@@ -2788,9 +2795,23 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             torch.compile(rmsnorm, dynamic=True), x, weight
         )
         self.assertEqual(result, rmsnorm(x, weight), exact_device=True)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
         FileCheck().check_not("host_tma_descriptor_args").check_not(
             "tl.make_tensor_descriptor"
         ).run(code)
+
+        def scale_rows(x, y):
+            return y * x.amax(-1)
+
+        y = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        # A PDL-enabled NVGEMM needs NVFP4 on datacenter Blackwell, so the amax kernel stands in for one.
+        with mock.patch.object(
+            NVUniversalGemmScheduling, "is_pdl_enabled_template", return_value=True
+        ):
+            result, (code,) = run_and_get_code(torch.compile(scale_rows), x, y)
+        self.assertEqual(result, scale_rows(x, y), exact_device=True)
+        # Only a single launch takes selective PDL, so a pooled consumer would show none.
+        FileCheck().check_count("'launch_pdl': True", 1, exactly=True).run(code)
 
     @config.patch(
         {
@@ -2818,68 +2839,74 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         x = torch.randn(256, 4096, dtype=torch.bfloat16, device=GPU_TYPE)
         # The second compile loads the graph from the FX graph cache, with the dropped variants bundled.
         with mock.patch.object(CachingAutotuner, "_make_launchers", fail_tma_launchers):
-            for _ in range(2):
+            for cache_hits in range(2):
                 torch._dynamo.reset()
                 PyCodeCache.cache_clear(purge=True)
+                dropped = counters["inductor"]["multi_kernel_sub_kernel_dropped"]
                 self.assertEqual(torch.compile(fn)(x), fn(x), atol=1e-2, rtol=1.6e-2)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-        self.assertGreaterEqual(
-            counters["inductor"]["multi_kernel_sub_kernel_dropped"], 2
-        )
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], cache_hits)
+                self.assertGreater(
+                    counters["inductor"]["multi_kernel_sub_kernel_dropped"], dropped
+                )
 
-    def test_tma_variant_with_unsupported_dtype_is_dropped(self):
-        def fn(x):
-            return torch.logical_not(x)
+    @config.patch({"force_disable_caches": True})
+    def test_tma_variants_that_cannot_join_the_pool_are_dropped(self):
+        build_choices = TritonScheduling.create_kernel_choices
+        codegen_body = TritonScheduling.codegen_node_schedule_with_kernel
+        codegen_source = TritonKernel.codegen_kernel
+        choice_counts = []
 
-        x = torch.randint(0, 2, (1024, 1024), dtype=torch.bool, device=GPU_TYPE)
-        result, (code,) = run_and_get_code(torch.compile(fn), x)
-        self.assertEqual(result, fn(x), exact_device=True)
+        def count_choices(scheduling, *args, **kwargs):
+            choices = build_choices(scheduling, *args, **kwargs)
+            choice_counts.append(len(choices))
+            return choices
+
+        def check_baseline_only(fn, x):
+            choice_counts.clear()
+            metrics.reset()
+            with mock.patch.object(
+                TritonScheduling, "create_kernel_choices", count_choices
+            ):
+                result, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(result, fn(x), exact_device=True)
+            # The pool was built with a TMA choice, and only the baseline was emitted and counted.
+            self.assertEqual(choice_counts, [2])
+            FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+            FileCheck().check_not("async_compile.multi_kernel").run(code)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
         # Bool has no tensor-map dtype, so the TMA choice repeats the baseline.
-        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
-        FileCheck().check_not("async_compile.multi_kernel").run(code)
+        flags = torch.randint(0, 2, (1024, 1024), dtype=torch.bool, device=GPU_TYPE)
+        check_baseline_only(torch.logical_not, flags)
 
-    def test_tma_variant_with_different_call_args_is_dropped(self):
-        codegen = TritonScheduling.codegen_node_schedule_with_kernel
+        def fail_body(scheduling, node_schedule, kernel):
+            if kernel.optional:
+                raise RuntimeError("injected codegen failure")
+            codegen_body(scheduling, node_schedule, kernel)
 
-        def add_optional_arg(scheduling, node_schedule, kernel):
-            codegen(scheduling, node_schedule, kernel)
+        def add_call_arg(scheduling, node_schedule, kernel):
+            codegen_body(scheduling, node_schedule, kernel)
             if kernel.optional:
                 outer = next(iter(kernel.args.input_buffers))
                 kernel.args.output_buffers[outer] = "injected_out_ptr"
 
-        def fn(x):
-            return torch.nn.functional.silu(x)
-
-        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
-        # Only an Inductor bug gives a TMA variant other call args, so no input reaches this fallback.
-        with mock.patch.object(
-            TritonScheduling,
-            "codegen_node_schedule_with_kernel",
-            add_optional_arg,
-        ):
-            result, (code,) = run_and_get_code(torch.compile(fn), x)
-        self.assertEqual(result, fn(x), exact_device=True)
-        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
-        FileCheck().check_not("async_compile.multi_kernel").run(code)
-
-    @config.patch({"force_disable_caches": True})
-    def test_tma_variant_whose_codegen_fails_is_dropped(self):
-        codegen_kernel = TritonKernel.codegen_kernel
-
-        def fail_for_optional(kernel, *args, **kwargs):
+        def fail_source(kernel, *args, **kwargs):
             if kernel.optional:
                 raise RuntimeError("injected codegen failure")
-            return codegen_kernel(kernel, *args, **kwargs)
-
-        def fn(x):
-            return torch.nn.functional.silu(x) + 1
+            return codegen_source(kernel, *args, **kwargs)
 
         x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
-        # Only an Inductor bug fails codegen, so no input reaches this fallback.
-        with mock.patch.object(TritonKernel, "codegen_kernel", fail_for_optional):
-            result, (code,) = run_and_get_code(torch.compile(fn), x)
-        self.assertEqual(result, fn(x), exact_device=True)
-        FileCheck().check_not("async_compile.multi_kernel").run(code)
+        # Only an Inductor bug fails codegen or changes call args, so no input reaches these drops.
+        with mock.patch.object(
+            TritonScheduling, "codegen_node_schedule_with_kernel", fail_body
+        ):
+            check_baseline_only(torch.nn.functional.silu, x)
+        with mock.patch.object(
+            TritonScheduling, "codegen_node_schedule_with_kernel", add_call_arg
+        ):
+            check_baseline_only(torch.nn.functional.silu, x)
+        with mock.patch.object(TritonKernel, "codegen_kernel", fail_source):
+            check_baseline_only(torch.nn.functional.silu, x)
 
 
 if __name__ == "__main__":

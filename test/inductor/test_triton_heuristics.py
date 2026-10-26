@@ -166,7 +166,7 @@ class TestTritonHeuristics(TestCase):
 
         self.assertEqual(result, configs)
 
-    @parametrize("cc,xblock,num_warps", [(90, 1024, 4), (100, 2048, 2)])
+    @parametrize("cc,xblock,num_warps", [(90, 1024, 4), (100, 2048, 2), (103, 1024, 4)])
     def test_tma_pointwise_config_is_sm100_specific(self, cc, xblock, num_warps):
         device = DeviceProperties(
             type="cuda",

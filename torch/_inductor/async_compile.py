@@ -558,6 +558,7 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
+        from torch._precompile import PrecompileError
         from torch.compiler._no_compile import (
             check_compilation_allowed,
             is_compilation_forbidden,
@@ -603,13 +604,19 @@ class AsyncCompile:
                 return future.result()
 
         # Cache miss
-        check_compilation_allowed(
-            "Triton kernel cache miss",
-            "no_compilation() only serves Triton kernels already in Inductor's "
-            "in-process kernel cache (statically launchable ones restored from a "
-            "cache bundle); loading a kernel through triton.compile, even from "
-            "Triton's on-disk cache, counts as compilation.",
-        )
+        try:
+            check_compilation_allowed(
+                "Triton kernel cache miss",
+                "no_compilation() only serves Triton kernels already in Inductor's "
+                "in-process kernel cache (statically launchable ones restored from a "
+                "cache bundle); loading a kernel through triton.compile, even from "
+                "Triton's on-disk cache, counts as compilation.",
+            )
+        except PrecompileError as e:
+            # An artifact holds no kernel for an optional choice its build dropped, so serving drops it too.
+            if optional:
+                return e
+            raise
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()

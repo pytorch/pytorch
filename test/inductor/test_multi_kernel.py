@@ -11,6 +11,7 @@ from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._dynamo.utils import counters
 from torch._inductor import config, test_operators
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
@@ -130,12 +131,16 @@ class MultiKernelTest(TestCase):
         self.assertEqual(events, ["run_1", "run_0"])
 
     def test_failed_subkernels_remap_args_and_skip_single_survivor_benchmark(self):
+        # A failed optional sub-kernel comes back as its exception, as one missing under no_compilation() does.
+        with torch.compiler.precompile.no_compilation():
+            failed = AsyncCompile().triton(
+                "triton_missing", "def triton_missing():\n    pass\n", optional=True
+            )
         events = []
         call = self._benchmark_lock_call(events)
         k0, k1 = call._kernels
         call.multi_kernel_name = "multi_kernel_test"
-        # An optional sub-kernel that failed to compile comes back as its exception.
-        call._kernels = [k0, RuntimeError("compile failed"), k1]
+        call._kernels = [k0, failed, k1]
         call.arg_index = {i: [slice(i, i + 1)] for i in range(3)}
         self.assertEqual(call.kernels, [k0, k1])
         self.assertEqual(call.arg_index, {0: [slice(0, 1)], 1: [slice(2, 3)]})
@@ -143,7 +148,7 @@ class MultiKernelTest(TestCase):
 
         single = self._benchmark_lock_call(events)
         single.multi_kernel_name = "multi_kernel_test"
-        single._kernels[0] = RuntimeError("compile failed")
+        single._kernels[0] = failed
         single.arg_index = {0: [slice(0, 1)], 1: [slice(1, 2)]}
         single.picked_kernel, single._recorded = None, True
         with unittest.mock.patch.object(single, "benchmark_sub_kernels") as benchmark:
@@ -244,6 +249,7 @@ class MultiKernelTest(TestCase):
             "fx_graph_cache": True,
             "fx_graph_remote_cache": False,
             "compile_threads": 1,
+            "triton.multi_kernel": 1,
         }
     )
     def test_warm_fx_graph_cache(self):
@@ -254,8 +260,9 @@ class MultiKernelTest(TestCase):
         ref = torch.softmax(x, -1)
         for _ in range(2):
             codecache.PyCodeCache.cache_clear(purge=True)
-            torch._dynamo.reset()
-            self.assertEqual(torch.compile(torch.softmax)(x, -1), ref)
+            result, (code,) = run_and_get_code(torch.compile(torch.softmax), x, -1)
+            self.assertEqual(result, ref)
+            self.assertTrue(_contains_multi_kernel_code(code))
         # Otherwise a cache miss on the second compile would pass without restoring any sub-kernel.
         self.assertGreater(
             counters["inductor"]["triton_bundler_load_static_autotuner"], 0
@@ -278,8 +285,6 @@ class MultiKernelTest(TestCase):
         }
     )
     def test_multi_kernel_resolves_triton_futures_once(self):
-        from torch._inductor.async_compile import AsyncCompile
-
         if not AsyncCompile.wait_process_pool_ready():
             self.skipTest("requires the parallel compile pool")
 
@@ -294,10 +299,17 @@ class MultiKernelTest(TestCase):
         )
         with torch.no_grad():
             ref = fn(x, weight)
+
+        def forward_backward(x, weight):
+            out = torch.compile(fn)(x, weight)
+            out.float().pow(2).mean().backward()
+            return out
+
         counters.clear()
-        actual = torch.compile(fn)(x, weight)
-        actual.float().pow(2).mean().backward()
+        actual, codes = run_and_get_code(forward_backward, x, weight)
         self.assertEqual(actual, ref)
+        self.assertTrue(any(_contains_multi_kernel_code(code) for code in codes))
+        self.assertIn("'tma_variant': True", "\n".join(codes))
 
         submitted = (
             counters["inductor"]["async_compile_cache_miss"]
