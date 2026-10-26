@@ -112,7 +112,7 @@ vllm_language_model_test_extended_generation_28_failure_test:
   id: vllm_language_model_test_extended_generation_28_failure_test
   package_install:
     - --no-build-isolation
-    - git+https://github.com/Dao-AILab/causal-conv1d@da6dbaa9fd5a919967f14d3fd031da1288ad5025 # v1.6.0
+    - git+https://github.com/Dao-AILab/causal-conv1d@v1.6.0
   steps:
     - pytest -v -s models/language/generation/test_mistral.py
 
