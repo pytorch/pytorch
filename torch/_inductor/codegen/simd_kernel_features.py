@@ -12,9 +12,9 @@ import sympy
 import torch
 
 from ...utils._ordered_set import OrderedSet
-from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
+from ...utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
-from .. import ir
+from .. import config, ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
@@ -210,6 +210,14 @@ class SIMDKernelFeatures:
         return mutations
 
     @cache_on_self
+    def is_native_matmul(self) -> bool:
+        return config.triton.native_matmul and any(
+            isinstance(node.node, ir.ComputedBuffer)
+            and node.node.get_reduction_type() == "dot"
+            for node in self.scheduler_nodes()
+        )
+
+    @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
@@ -218,10 +226,13 @@ class SIMDKernelFeatures:
             buffer_names.update(node.used_buffer_names())
         buffers = [V.graph.get_buffer(name) for name in buffer_names]
 
-        # In theory we can separately check xnumel and rnumel are <= int_max
-        # but some indexers do use the full linear index so we need to be
-        # conservative here.
-        total_numel = self.numel * self.reduction_numel
+        # Native matmul keeps output and reduction indices separate. Buffer
+        # spans and fused address expressions are still checked below.
+        total_numel = (
+            Max(self.numel, self.reduction_numel)
+            if self.is_native_matmul()
+            else self.numel * self.reduction_numel
+        )
 
         from .simd import SIMDScheduling
 
