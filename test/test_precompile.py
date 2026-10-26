@@ -7298,6 +7298,7 @@ def _static_runtime_kernel(block):
     kernel._cached_launcher = kernel.launchers[0]
     kernel._launched = True
     kernel.is_backward = False
+    kernel._forward_use = True
     kernel.benchmark_failure_reasons = {}
     kernel._plugins = []
     kernel._reload_kernel = None
@@ -7308,6 +7309,7 @@ def _never_run(kernel, backward=True):
     kernel._cached_launcher = None
     kernel._launched = False
     kernel.is_backward = backward
+    kernel._forward_use = not backward
     return kernel
 
 
@@ -7456,7 +7458,10 @@ import os
 import sys
 
 phase, directory, module = sys.argv[1:4]
-os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
+# "warm" captures again over the cache "capture" filled, so its graphs load from
+# Inductor's caches instead of compiling.
+cache_phase = "capture" if phase == "warm" else phase
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, cache_phase, "inductor")
 os.environ.pop("TRITON_CACHE_DIR", None)
 os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
 if phase == "replay":
@@ -7465,8 +7470,10 @@ if phase == "replay":
 import torch
 
 pc = torch.compiler.precompile
-artifact = os.path.join(directory, "artifact.py")
-cache = os.path.join(directory, "artifact.cache")
+# The warm capture only checks detection on cache hits; replay serves the cold one.
+name = "warm_artifact" if phase == "warm" else "artifact"
+artifact = os.path.join(directory, name + ".py")
+cache = os.path.join(directory, name + ".cache")
 torch._inductor.config.use_static_cuda_launcher = True
 torch._inductor.config.coordinate_descent_tuning = True
 sys.path.insert(0, directory)
@@ -7489,7 +7496,7 @@ if phase == "strict":
         assert "no fully resolved static launcher" in str(e), e
     else:
         raise AssertionError("a strict capture froze a never-run backward kernel")
-elif phase == "capture":
+elif phase in ("capture", "warm"):
     untuned = []
 
     class Untuned(logging.Handler):
@@ -7758,10 +7765,21 @@ class TestPrecompileRuntimeCache(TestCase):
             _freeze_triton_kernel("source", [ambiguous()], require_tuned_backward=True)
         self.assertTrue(failure.exception.sources[0]["untuned_backward_eligible"])
         # Only compile results, which never loaded: replay could fail to load them.
+        # Not eligible for the opt-in either, so no hint.
         unloaded = _never_run(_static_runtime_kernel(32))
         unloaded.launchers = []
+        for require_tuned_backward in (True, False):
+            with self.assertRaises(_UnresolvedTritonExport) as failure:
+                _freeze_triton_kernel(
+                    "source", [unloaded], require_tuned_backward=require_tuned_backward
+                )
+            self.assertFalse(failure.exception.sources[0]["untuned_backward_eligible"])
+            self.assertNotIn("require_tuned_backward", str(failure.exception))
+        # A launcher Triton built itself, not statically, has no _compile_result.
+        dynamic = _never_run(_static_runtime_kernel(32))
+        dynamic.launchers = [types.SimpleNamespace(config=None)]
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [unloaded], require_tuned_backward=False)
+            _freeze_triton_kernel("source", [dynamic], require_tuned_backward=False)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_kernel_with_one_config(self):
@@ -7792,6 +7810,7 @@ class TestPrecompileRuntimeCache(TestCase):
 
         ran = _static_runtime_kernel(64)
         ran.is_backward = True
+        ran._forward_use = False
         ran.launchers[0]._compile_result = object()
         unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
@@ -7836,6 +7855,9 @@ class TestPrecompileRuntimeCache(TestCase):
             [(r["reason"], r["error"]) for r in source["instances"]],
             [("cubin_unavailable", "missing binary")],
         )
+        # The opt-in was already on, so the error does not suggest it.
+        self.assertFalse(source["untuned_backward_eligible"])
+        self.assertNotIn("require_tuned_backward", str(failure.exception))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_untuned_triton_kernels_are_traced(self):
@@ -9418,7 +9440,7 @@ class TestPrecompileRuntimeCache(TestCase):
             module = f"precompile_never_run_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:
                 f.write(_NEVER_RUN_BACKWARD_MODULE)
-            for phase in ("strict", "capture", "replay"):
+            for phase in ("strict", "capture", "replay", "warm"):
                 out = subprocess.run(
                     [
                         sys.executable,
