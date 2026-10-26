@@ -760,6 +760,12 @@ def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
         # rounding is elided for every op, saved or not.
         return x
 
+    node = getattr(V.graph, "current_node", None) if V.graph is not None else None
+    if _has_lowp_pointwise_barrier(node) or _has_saved_lowp_output_use(node):
+        # make_pointwise already rounds this value for the current node; a
+        # second identical pair would be dead IR.
+        return x
+
     return make_pointwise(lambda out: out, force_output_cast=True)(x)
 
 

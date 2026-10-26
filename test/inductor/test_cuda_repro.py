@@ -1971,7 +1971,9 @@ class CudaReproTests(TestCase):
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @parametrize("emulate_precision_casts", [False, True])
     @parametrize("conv_offset", [-100, -1000])
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA: the boundary cast targets cudnn/MIOpen eager")
+    @unittest.skipIf(
+        not TEST_CUDA, "requires CUDA: the boundary cast targets cudnn/MIOpen eager"
+    )
     @config.patch(emulate_precision_casts_on_saved_tensors=True)
     def test_conv_bias_rounds_before_log_softmax(
         self, lowp_dtype, emulate_precision_casts, conv_offset
@@ -2061,48 +2063,45 @@ class CudaReproTests(TestCase):
             # so only the forced cast is countable there.
             self.assertEqual(filtered.count(f".to(tl.{lowp_name})"), 1)
 
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @config.patch(
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=False,
     )
-    def test_conv_bias_cast_gated_off(self):
+    def test_conv_bias_cast_gated_off(self, lowp_dtype):
         # With the gate off, this rounding is elided for saved and unsaved
         # outputs alike, so no low-precision round-trip may appear anywhere in
         # the compiled graph.  The saved/unsaved numeric consistency that the
         # gate-on tests pin down is intentionally not restored here: storing a
-        # saved bf16 output rounds it regardless of this config.
+        # saved low-precision output rounds it regardless of this config.
         torch.manual_seed(0)
         conv = nn.Conv2d(48, 48, 3, padding=1).to(device_type)
         x = torch.randn(8, 48, 16, 16, device=device_type)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
 
         def f1(t):
-            with torch.autocast(device_type, dtype=torch.bfloat16):
+            with torch.autocast(device_type, dtype=lowp_dtype):
                 return F.log_softmax(conv(t), dim=1)
 
         with torch.no_grad():
             conv.weight.normal_(0, 0.6)
             conv.bias.fill_(-1000)
 
-        torch._dynamo.reset()
-        fn = torch.compile(f1, backend="inductor", fullgraph=True)
-        t = x.clone().requires_grad_()
-        out = fn(t)
-        out.sum().backward()
-
         _, codes = run_and_get_code(
             torch.compile(f1, backend="inductor", fullgraph=True),
             x.clone().requires_grad_(),
         )
         code = "\n".join(codes)
-        self.assertNotIn(".to(tl.bfloat16)", code)
+        self.assertNotIn(f".to(tl.{lowp_name})", code)
 
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @config.patch(
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
     )
-    def test_conv_bias_rounds_in_inference(self):
+    def test_conv_bias_rounds_in_inference(self, lowp_dtype):
         # Inference has no saved tensors: without the forced cast, fused
         # consumers would see unrounded logits that eager never produces.  The
         # compiled result must therefore match cudnn eager here too.
@@ -2111,7 +2110,7 @@ class CudaReproTests(TestCase):
         x = torch.randn(8, 48, 16, 16, device=device_type)
 
         def f(t):
-            with torch.autocast(device_type, dtype=torch.bfloat16):
+            with torch.autocast(device_type, dtype=lowp_dtype):
                 return F.log_softmax(conv(t), dim=1)
 
         with torch.no_grad():
@@ -2133,7 +2132,65 @@ class CudaReproTests(TestCase):
             for kernel in code.split("def triton_")
             if kernel.split("(", 1)[0].startswith(("per_fused", "red_fused"))
         )
-        self.assertEqual(filtered.count(".to(tl.bfloat16)"), 1)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        self.assertEqual(filtered.count(f".to(tl.{lowp_name})"), 1)
+
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @config.patch(
+        emulate_precision_casts=False,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_conv_bias_single_roundtrip_when_saved(self, lowp_dtype):
+        # When the conv output is saved for backward, truncate_saved_output
+        # already rounds the peeled add; the saved-use early-return in
+        # emulate_lowp_output_cast must not stack a second round-trip on it.
+        torch.manual_seed(0)
+        conv = nn.Conv2d(48, 48, 3, padding=1).to(device_type)
+        x = torch.randn(8, 48, 16, 16, device=device_type)
+        # small random coefficients keep (y * g) and its sum inside the fp16
+        # range while mul's backward still saves y, the conv output
+        g = 0.1 * torch.randn(8, 48, 16, 16, device=device_type)
+
+        def f(t):
+            with torch.autocast(device_type, dtype=lowp_dtype):
+                y = conv(t)
+                return (y * g).sum()
+
+        def run(fn, compiled):
+            torch._dynamo.reset()
+            conv.zero_grad()
+            t = x.clone().requires_grad_()
+            if compiled:
+                fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out = fn(t)
+            out.backward()
+            return out.detach(), conv.weight.grad.clone()
+
+        with torch.no_grad():
+            conv.weight.normal_(0, 0.6)
+            conv.bias.fill_(-3)
+
+        out, _ = run(f, True)
+        eager_out, _ = run(f, False)
+        self.assertEqual(out, eager_out, atol=1e-3, rtol=1e-3)
+
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        _, codes = run_and_get_code(
+            torch.compile(f, backend="inductor", fullgraph=True),
+            x.clone().requires_grad_(),
+        )
+        code = "\n".join(codes)
+        # the saved output is materialized in a pointwise kernel, not a
+        # reduction, so match kernels that fuse conv-origin ops; the pure
+        # autocast to_copy kernels do not carry "convolution" in their names
+        filtered = "\n".join(
+            kernel
+            for kernel in code.split("def triton_")
+            if "convolution" in kernel.split("(", 1)[0]
+        )
+        # exactly one round-trip: the saved-output truncation of the peeled add
+        self.assertEqual(filtered.count(f".to(tl.{lowp_name})"), 1)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @config.patch(
