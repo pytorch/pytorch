@@ -958,7 +958,10 @@ def compile_to_python(
         shapes_mode = (
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
+        # The options cover this step too, which alone runs the pre-grad, joint-graph
+        # and freezing passes; _standalone_context's pins, inside them, still win.
         with (
+            torch._inductor.config.patch(options or {}),
             torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),
