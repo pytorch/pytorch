@@ -1601,7 +1601,7 @@ class _InProcessFxCompile(FxCompile):
 
             # lift the maximum depth of the Python interpreter stack
             # to adapt large/deep models
-            sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), 3000))
 
             _step_logger()(
                 logging.INFO,
