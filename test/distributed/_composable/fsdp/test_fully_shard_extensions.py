@@ -791,9 +791,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         def fsdp_pre_all_gather(
             local_tensor, mesh, outer_size, outer_stride, module, mp_policy
         ):
-            # One scale per row and per block of 4 columns: (9, 4) in full,
-            # sharded along dim 0 and padded to 2 rows like the data
-            scale = local_tensor.new_ones(2, 4)
+            # One scale per row and per block of 4 columns: (9, 4) in full.
+            # Like a real block-scale hook, build it from this rank's
+            # unpadded rows and pad it to 2 rows like the data; fill the
+            # real rows with the rank and the padding rows with -1 so that
+            # the post hook can verify the gathered layout exactly
+            scale = local_tensor.new_full((2, 4), -1.0)
+            scale[: local_tensor.size(0)] = float(dist.get_rank())
             return (pad(local_tensor), scale), None
 
         @torch.no_grad()
@@ -801,7 +805,12 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
         ):
             data, scale = all_gather_outputs
-            self.assertEqual(scale, torch.ones_like(scale))
+            # The gathered scale is the ranks' (2, 4) blocks in rank order:
+            # rank r contributes its min(2, 9 - 2r) real rows, then padding
+            expected = scale.new_full((16, 4), -1.0)
+            for r in range(8):
+                expected[2 * r : 2 * r + max(0, min(2, 9 - 2 * r))] = float(r)
+            self.assertEqual(scale, expected)
             # A copy, since the unpadded rows alone cannot own the output's storage
             return _finish_post_all_gather(data[:9].clone(), out)
 
@@ -1294,17 +1303,27 @@ class TestAllGatherInputValidation(TestCase):
         )
 
     def test_uneven_multi_tensor_inputs_padded_along_shard_dim(self):
-        # A multi-tensor payload only needs the padded size along the shard
-        # dim per tensor; the other dims are the payload's own (e.g. a block
-        # scale's block-reduced dims)
+        # For Shard(0) an input only needs the padded size along the shard
+        # dim; the other dims are the payload's own (e.g. a block scale's
+        # block-reduced dims). This holds for single and multi-tensor
+        # payloads alike
         self._get_layouts(
             [torch.ones(4, 4), torch.ones(4, 2, 3)], require_padded_size=True
         )
-        # A component missing the padded size along the shard dim still raises
-        msg = "lin.weight is unevenly sharded, so its Tensor all-gather inputs must have the padded sharded size (4, 4), but input 1 has size (3, 2, 3)"
+        self._get_layouts([torch.ones(4, 7)], require_padded_size=True)
+        # A component missing the padded size along dim 0 still raises, with
+        # a message naming the dim-0 requirement it has to meet
+        msg = "lin.weight is unevenly sharded along dim 0, so each of its Tensor all-gather inputs must have the padded size 4 along dim 0, but input 1 has size (3, 2, 3)"
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             self._get_layouts(
                 [torch.ones(4, 4), torch.ones(3, 2, 3)], require_padded_size=True
+            )
+        # A 0-d component has no dim 0 to pad and still gets the original
+        # error rather than an IndexError from the dim-0 check
+        msg = "lin.weight is unevenly sharded, so its Tensor all-gather inputs must have the padded sharded size (4, 4), but input 1 has size ()"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            self._get_layouts(
+                [torch.ones(4, 4), torch.ones(())], require_padded_size=True
             )
         # For other shard dims a plain tensor is read as parameter rows, so
         # the full padded size is still required; records declare their dim

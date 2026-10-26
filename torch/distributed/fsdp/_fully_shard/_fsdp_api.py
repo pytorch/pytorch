@@ -275,8 +275,11 @@ class AllGatherInput:
     prefix. Extensions own any padding: the local shard is unpadded on ranks with
     a smaller shard, so per-row payloads such as scales need padding too. When
     ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
-    of an unevenly sharded parameter to have the padded sharded size, so return
-    payloads of other shapes, such as scales, as records.
+    of an unevenly sharded parameter to have the padded sharded size, except for
+    a parameter sharded on dim 0, where every plain tensor only needs the padded
+    size along dim 0 and its other dims are the payload's own. Return payloads
+    that meet neither requirement, such as scales of a parameter sharded on
+    another dim, as records.
 
     Attributes:
         tensor (Tensor): Local payload, flattened with ``view(-1)``. Scalars count
