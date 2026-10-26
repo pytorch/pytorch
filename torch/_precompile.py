@@ -200,9 +200,9 @@ it.
 #
 # self-contained: ``python_code`` runs on its own, importing beyond torch only the
 # CUSTOM_OP_MODULES of custom ops it calls that are not registered where it is
-# served -- it inlines the composed graph module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
-# prelude/epilogue) or the captured graph (eager), plus all calling-convention
-# metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
+# served -- it inlines the composed graph module (inductor: kernels JIT-compiled on
+# first call, plus AOTAutograd's codegen'd prelude/epilogue) or the captured graph
+# (eager), plus all calling-convention metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
 # calling convention. The ``cache`` holds ONLY the compiled INDUCTOR artifact and is
 # purely an ACCELERATION consumed only by load(): load AST-scrapes the module-level
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
@@ -423,6 +423,12 @@ class DynamoTracer:
     configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be serialized,
     are listed in the artifact rather than refused.
+
+    ``allow_untuned_backward`` covers a backward Triton kernel the capture compiled
+    but no call ran, e.g. a training step's backward whose outputs went unused: by
+    default it is frozen with its first config, tuning off, and reported with a
+    warning and a ``precompile_triton_untuned_kernels`` artifact. Pass False to
+    refuse it like any other kernel that cannot be frozen.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -430,6 +436,7 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
+    allow_untuned_backward: bool = True
 
 
 class PrecompiledRunnable:
@@ -711,9 +718,11 @@ class _DynamoCapture(Capture[_P, _R]):
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
+        allow_untuned_backward: bool = True,
     ) -> None:
         super().__init__()
         self._session = session
+        self._allow_untuned_backward = allow_untuned_backward
         self._artifact_path = artifact_path
         self._cache_path = cache_path
         self._gates = {
@@ -810,7 +819,9 @@ class _DynamoCapture(Capture[_P, _R]):
                 ) from e
 
         try:
-            freeze_runtime_cache(snapshot, write)
+            freeze_runtime_cache(
+                snapshot, write, allow_untuned_backward=self._allow_untuned_backward
+            )
         except PrecompileError:
             raise
         except Exception as e:
@@ -1952,36 +1963,73 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
     return {name for name in names if _is_custom_op(name)}
 
 
-_OP_REFERENCE = re.compile(r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)")
+# Python wrapper code calls an op it does not lower as torch.ops.<ns>.<op>; the C++
+# wrapper (cpp_wrapper) names it as a "<ns>::<op>" string to the dispatcher.
+_OP_REFERENCE = re.compile(
+    r"\btorch\.ops\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)"
+    r"|\b(?:aoti_torch_call_dispatcher|findSchemaOrThrow)\(\s*\"(\w+)::(\w+)"
+)
 
 
 def _custom_op_names_in_source(source: str) -> set[str]:
     """The ``ns::op`` names of the non-ATen operators generated code calls.
 
-    Inductor and AOTAutograd emit an operator they do not lower as
-    ``torch.ops.<ns>.<op>``, so this sees exactly the operators the served code
-    runs: one a decomposition or a tensor subclass introduced is here, and one
-    Inductor lowered away is not.
+    Inductor and AOTAutograd emit a call for each operator they do not lower, so
+    this sees exactly the operators the served code runs: one a decomposition or a
+    tensor subclass introduced is here, and one Inductor lowered away is not.
+    Comments are skipped: a Triton kernel's origin comments name the nodes it
+    fused, lowered ones included.
     """
-    names = {f"{ns}::{op}" for ns, op in _OP_REFERENCE.findall(source)}
+    names = set()
+    for line in source.splitlines():
+        code = line.split("#", 1)[0].split("//", 1)[0]
+        for match in _OP_REFERENCE.finditer(code):
+            ns, op = match.group(1, 2) if match.group(1) else match.group(3, 4)
+            names.add(f"{ns}::{op}")
     return {name for name in names if _is_custom_op(name)}
 
 
 def _backend_custom_op_names(backends: Mapping[str, Any]) -> set[str]:
-    """The custom ops the backend artifacts of a multi-graph capture call."""
+    """The custom ops the backend artifacts of a multi-graph capture call.
+
+    A backend whose served code cannot be read is logged: the artifact records
+    none of its custom ops, so serving needs them registered by the first call.
+    """
+    from torch._dynamo.output_graph import noop_graph_call
+
     names: set[str] = set()
-    for artifact in backends.values():
+    for backend_id, artifact in sorted(backends.items()):
         content = artifact.content
-        # The eager backend serves the captured graph, as its bound forward.
-        gm = getattr(content, "__self__", content)
+        if content is noop_graph_call:
+            continue
+        # The eager backend serves the captured graph: as its bound forward, or
+        # wrapped to be serializable under force_autograd_cache.
+        gm = getattr(content, "graph_module", None) or getattr(
+            content, "__self__", content
+        )
         if isinstance(gm, torch.fx.GraphModule):
             names |= _custom_op_names(gm)
             continue
-        for compiled in (
-            getattr(content, "compiled_fw", None),
-            getattr(content, "compiled_bw", None),
-        ):
-            source = getattr(getattr(compiled, "result", None), "source_code", None)
+        compiled = [
+            c
+            for c in (
+                getattr(content, "compiled_fw", None),
+                getattr(content, "compiled_bw", None),
+            )
+            if c is not None
+        ]
+        sources = [
+            getattr(getattr(c, "result", None), "source_code", None) for c in compiled
+        ]
+        if not sources or not all(isinstance(source, str) for source in sources):
+            log.warning(
+                "precompile: cannot read the code backend %s serves (%s), so the "
+                "artifact records none of its custom ops; serving needs them "
+                "registered by the first call",
+                backend_id,
+                type(content).__name__,
+            )
+        for source in sources:
             if isinstance(source, str):
                 names |= _custom_op_names_in_source(source)
     return names
@@ -1992,9 +2040,12 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
     each with the ops it defines.
 
     The module is the one defining the function ``torch.library.custom_op`` wrapped,
-    which is where the op registers unless it was built elsewhere (by a factory, say).
-    An op defined in ``__main__`` or in a module that cannot be re-imported is
-    reported instead; serving then needs it registered some other way.
+    or, when torch wrapped it for the user (``torch.library.triton_op``), the one
+    defining the user's function, registered as the op's fake. That is where the op
+    registers unless it was built elsewhere (by a factory, say), which the import at
+    load checks. An op defined in ``__main__``, in a module that cannot be
+    re-imported, or inside torch, is reported instead; serving then needs it
+    registered some other way.
     """
     from torch._library.custom_ops import OPDEFS
 
@@ -2003,12 +2054,26 @@ def _custom_op_modules(op_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
         opdef = OPDEFS.get(op_name)
         if opdef is None:
             continue
-        name = getattr(opdef._init_fn, "__module__", None)
+        defined_in = [
+            getattr(fn, "__module__", None)
+            for fn in (opdef._init_fn, getattr(opdef, "_abstract_fn", None))
+            if fn is not None
+        ]
+        name = next(
+            (
+                n
+                for n in defined_in
+                if isinstance(n, str) and n != "torch" and not n.startswith("torch.")
+            ),
+            defined_in[0] if defined_in else None,
+        )
         module = sys.modules.get(name) if isinstance(name, str) else None
         if (
             name == "__main__"
             or module is None
             or getattr(module, "__spec__", None) is None
+            or name == "torch"
+            or name.startswith("torch.")
         ):
             log.warning(
                 "precompile: custom op %s is defined in %r, which a serving process "
@@ -2035,8 +2100,9 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
     serving path imports the module whose ``torch.library.custom_op`` registers it,
     and under lazy imports the model's own import of that module may never resolve.
     A module is imported only if one of its ops is not registered yet, so a process
-    that registers them some other way does not need the module by that name. An
-    op with no module here (``__main__``, ``torch.library.Library``,
+    that registers them some other way does not need the module by that name, and
+    an op its module did not register after all is refused here rather than on the
+    first call. An op with no module here (``__main__``, ``torch.library.Library``,
     ``torch.ops.load_library``) is not checked: it only has to be registered by
     the first call, as under ``torch.compile``.
     """
@@ -2045,13 +2111,21 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
             continue
         try:
             importlib.import_module(module)
-        except ImportError as e:
+        except Exception as e:
             raise PrecompileError(
                 f"this artifact's compiled graphs call custom op(s) "
                 f"{', '.join(module_ops)}, registered by module {module!r}, which "
-                f"cannot be imported here ({e}). Make it importable wherever the "
-                "artifact is served, or register the ops before loading it."
+                f"failed to import here ({type(e).__name__}: {e}). Make it "
+                "importable wherever the artifact is served, or register the ops "
+                "before loading it."
             ) from e
+        missing = [op for op in module_ops if not _custom_op_registered(op)]
+        if missing:
+            raise PrecompileError(
+                f"this artifact's compiled graphs call custom op(s) "
+                f"{', '.join(missing)}, which importing module {module!r} did not "
+                "register. Register them before loading the artifact."
+            )
 
 
 def _write_custom_op_imports(buf: Any, op_names: set[str]) -> None:
@@ -3502,7 +3576,9 @@ def capture(
     needs there, since one compiled or launched only before the block is not in
     the cache. Each write also freezes the compiled kernels the serving process
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
-    freeze. That includes kernels launched directly through ``@triton.jit`` and
+    freeze, except a backward Triton kernel no call ran, which a
+    :class:`DynamoTracer` capture freezes untuned unless
+    ``allow_untuned_backward=False``. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
     directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
     you set is not used inside the block, and a JIT kernel or autotuner already
@@ -3629,6 +3705,7 @@ def capture(
         cache_path,
         require_complete=tracer.require_complete,
         require_no_risky_drops=tracer.require_no_risky_drops,
+        allow_untuned_backward=tracer.allow_untuned_backward,
     )
 
 

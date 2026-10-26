@@ -6229,7 +6229,7 @@ def _rewrite_envelope(cache_path, **fields):
 
 
 def _no_compilation_single_graph(x):
-    return x.neg() + 1
+    return x.sin() + 1
 
 
 def _no_compilation_inductor_graph(x):
@@ -7296,9 +7296,18 @@ def _static_runtime_kernel(block):
     kernel.compile_results = [result]
     kernel.launchers = [types.SimpleNamespace(config=config, _compile_result=result)]
     kernel._cached_launcher = kernel.launchers[0]
+    kernel._launched = True
+    kernel.is_backward = False
     kernel.benchmark_failure_reasons = {}
     kernel._plugins = []
     kernel._reload_kernel = None
+    return kernel
+
+
+def _never_run(kernel, backward=True):
+    kernel._cached_launcher = None
+    kernel._launched = False
+    kernel.is_backward = backward
     return kernel
 
 
@@ -7605,6 +7614,7 @@ class TestPrecompileRuntimeCache(TestCase):
         unexecuted = _static_runtime_kernel(128)
         unexecuted.launchers = []
         unexecuted._cached_launcher = None
+        unexecuted._launched = False
         original_results = kernel.compile_results
         original_launchers = kernel.launchers
         original_fn = kernel.fn.fn
@@ -7658,29 +7668,27 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertIs(kernel._cached_launcher, original_launchers[0])
         self.assertIs(kernel.fn.fn, original_fn)
         kernel.launchers = []
-        kernel.compile_results = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    def test_static_export_freezes_a_never_run_kernel(self):
+    def test_static_export_freezes_a_never_run_backward_kernel(self):
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
         # No instance ran, so none autotuned to one launcher. The first instance has
-        # no static result to fall back to; the second never built its launchers.
-        dynamic = _static_runtime_kernel(16)
-        dynamic.launchers = []
-        dynamic._cached_launcher = None
-        dynamic.compile_results = [object()]
-        unlaunched = _static_runtime_kernel(32)
-        unlaunched.launchers = []
-        unlaunched._cached_launcher = None
+        # no static launcher to fall back to; the second never finished tuning.
+        dynamic = _never_run(_static_runtime_kernel(16))
+        dynamic.launchers[0]._compile_result = object()
+        unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.inductor_meta["coordinate_descent_tuning"] = True
+        unlaunched._should_coordesc_tune = True
         unlaunched.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
         live_meta = dict(unlaunched.inductor_meta)
-        saved = pickle.loads(_freeze_triton_kernel("source", [dynamic, unlaunched]))
+        saved = pickle.loads(
+            _freeze_triton_kernel("source", [dynamic, unlaunched], untuned=[])
+        )
         self.assertEqual(saved.cache_key, "source")
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 32})
         self.assertFalse(saved.kernel.inductor_meta["coordinate_descent_tuning"])
@@ -7688,9 +7696,8 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(unlaunched.inductor_meta, live_meta)
 
         # A kernel that built several launchers but never ran freezes the first.
-        ambiguous = _static_runtime_kernel(64)
+        ambiguous = _never_run(_static_runtime_kernel(64))
         ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
-        ambiguous._cached_launcher = None
         untuned = []
         with self.assertLogs("torch.compiler._runtime_cache", "WARNING") as logs:
             saved = pickle.loads(_freeze_triton_kernel("source", [ambiguous], untuned))
@@ -7702,20 +7709,43 @@ class TestPrecompileRuntimeCache(TestCase):
         )
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_refuses_other_never_run_kernels(self):
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
+
+        def ambiguous(backward=True):
+            kernel = _never_run(_static_runtime_kernel(64), backward)
+            kernel.launchers.append(_static_runtime_kernel(128).launchers[0])
+            return kernel
+
+        # A forward kernel no call ran: the capture missed a path serving may need.
+        with self.assertRaises(_UnresolvedTritonExport):
+            _freeze_triton_kernel("source", [ambiguous(backward=False)], untuned=[])
+        # The caller asked for every kernel tuned (allow_untuned_backward=False).
+        with self.assertRaises(_UnresolvedTritonExport):
+            _freeze_triton_kernel("source", [ambiguous()], untuned=None)
+        # Only compile results, which never loaded: replay could fail to load them.
+        unloaded = _never_run(_static_runtime_kernel(32))
+        unloaded.launchers = []
+        with self.assertRaises(_UnresolvedTritonExport):
+            _freeze_triton_kernel("source", [unloaded], untuned=[])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_freezes_a_never_run_kernel_with_one_config(self):
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
         # Its one launcher was built at compile time, but tuning never ran, so the
         # tuning check alone would reject it.
         for tuning in ("coordesc", "combo"):
-            kernel = _static_runtime_kernel(32)
-            kernel._cached_launcher = None
+            kernel = _never_run(_static_runtime_kernel(32))
             if tuning == "coordesc":
                 kernel.inductor_meta["coordinate_descent_tuning"] = True
                 kernel._should_coordesc_tune = True
             else:
                 kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
-            saved = pickle.loads(_freeze_triton_kernel("source", [kernel]))
+            saved = pickle.loads(_freeze_triton_kernel("source", [kernel], untuned=[]))
             self.assertFalse(saved.kernel.inductor_meta["coordinate_descent_tuning"])
             self.assertIsNone(saved.kernel.inductor_meta["combo_tuning_groups"])
 
@@ -7727,12 +7757,12 @@ class TestPrecompileRuntimeCache(TestCase):
         )
 
         ran = _static_runtime_kernel(64)
+        ran.is_backward = True
         ran.launchers[0]._compile_result = object()
-        unlaunched = _static_runtime_kernel(32)
-        unlaunched.launchers = []
-        unlaunched._cached_launcher = None
+        unlaunched = _never_run(_static_runtime_kernel(32))
+        unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
         with self.assertRaises(_UnresolvedTritonExport) as failure:
-            _freeze_triton_kernel("source", [unlaunched, ran])
+            _freeze_triton_kernel("source", [unlaunched, ran], untuned=[])
         self.assertEqual(
             [r["reason"] for r in failure.exception.sources[0]["instances"]],
             ["non_static_compile_result", "launcher_count_not_one"],
@@ -7740,9 +7770,8 @@ class TestPrecompileRuntimeCache(TestCase):
         # A launch that left no fast-path launcher (under the profiler, say) still
         # counts as one.
         ran._cached_launcher = None
-        ran._launched = True
         with self.assertRaises(_UnresolvedTritonExport):
-            _freeze_triton_kernel("source", [unlaunched, ran])
+            _freeze_triton_kernel("source", [unlaunched, ran], untuned=[])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_reports_a_never_run_kernel_once(self):
@@ -7752,9 +7781,7 @@ class TestPrecompileRuntimeCache(TestCase):
             _UnresolvedTritonExport,
         )
 
-        unlaunched = _static_runtime_kernel(32)
-        unlaunched.launchers = []
-        unlaunched._cached_launcher = None
+        unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.compile_results[0].kernel.cubin_raw = None
         with (
             mock.patch.object(
@@ -7764,7 +7791,7 @@ class TestPrecompileRuntimeCache(TestCase):
             ),
             self.assertRaises(_UnresolvedTritonExport) as failure,
         ):
-            _freeze_triton_kernel("source", [unlaunched])
+            _freeze_triton_kernel("source", [unlaunched], untuned=[])
         [source] = failure.exception.sources
         self.assertEqual(source["instance_count"], 1)
         self.assertEqual(
@@ -7776,9 +7803,8 @@ class TestPrecompileRuntimeCache(TestCase):
     def test_untuned_triton_kernels_are_traced(self):
         from torch.compiler._runtime_cache import _freeze_triton_kernels
 
-        unlaunched = _static_runtime_kernel(32)
-        unlaunched.launchers = []
-        unlaunched._cached_launcher = None
+        unlaunched = _never_run(_static_runtime_kernel(32))
+        unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
         with mock.patch("torch._logging.trace_structured") as trace:
             frozen = pickle.loads(
                 _freeze_triton_kernels(
@@ -7828,12 +7854,7 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
         )
-        # Built under a capture, the kernel is keyed for any host, as a replay
-        # holding frozen kernels looks it up.
-        with (
-            fresh_cache(),
-            mock.patch.object(_runtime_cache, "relocatable_cpp_keys", return_value=True),
-        ):
+        with fresh_cache():
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
                 payload = pickle.dumps({lib.key: binary.read()})
@@ -8349,18 +8370,15 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched = _static_runtime_kernel(32)
         unlaunched.launchers = []
         unlaunched._cached_launcher = None
+        unlaunched._launched = False
         unlaunched.filename = "/tmp/runtime_kernel.py"
         unlaunched.compile_id = CompileId(frame_id=24, frame_compile_id=5)
         unlaunched.is_backward = True
         unlaunched.heuristic_type = HeuristicType.REDUCTION
         unlaunched.configs = [unlaunched.compile_results[0].config]
         unlaunched.inductor_meta["private_config"] = "do not include config values"
-        # Neither has a static result to freeze in place of a launch.
-        unlaunched.compile_results = [object()]
         ambiguous = _static_runtime_kernel(64)
         ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
-        for launcher in ambiguous.launchers:
-            launcher._compile_result = object()
         dynamic = _static_runtime_kernel(64)
         dynamic.launchers[0]._compile_result = object()
         combo = _static_runtime_kernel(64)
@@ -8430,7 +8448,9 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(info["config_count"], 1)
             self.assertEqual(info["launcher_count"], 0)
             self.assertEqual(info["compile_result_count"], 1)
-            self.assertEqual(info["compile_result_types"], ["object"])
+            self.assertEqual(
+                info["compile_result_types"], ["StaticTritonCompileResult"]
+            )
             self.assertEqual(sources["ambiguous"]["instances"][0]["launcher_count"], 2)
             self.assertEqual(
                 sources["dynamic"]["instances"][0]["launcher_result_types"],
@@ -8723,9 +8743,8 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched = _static_runtime_kernel(32)
         unlaunched.launchers = []
         unlaunched._cached_launcher = None
+        unlaunched._launched = False
         unlaunched.inductor_meta = {"kernel_name": "triton_poi_unlaunched_0"}
-        # No static result to freeze in place of a launch.
-        unlaunched.compile_results = [object()]
 
         def record():
             _runtime_cache.record_triton_kernel("unlaunched", unlaunched)
@@ -9382,6 +9401,20 @@ def _(x):
     return torch.empty_like(x)
 
 
+# Called only from triple's backward, so only a backward graph calls it.
+@torch.library.custom_op("{ns}::grad_triple", mutates_args=())
+def grad_triple(g: torch.Tensor) -> torch.Tensor:
+    return g * 3
+
+
+@grad_triple.register_fake
+def _(g):
+    return torch.empty_like(g)
+
+
+triple.register_autograd(lambda ctx, g: torch.ops.{ns}.grad_triple.default(g))
+
+
 @torch.library.custom_op("{ns}::lowered", mutates_args=())
 def lowered(x: torch.Tensor) -> torch.Tensor:
     return x * 2
@@ -9399,10 +9432,22 @@ from torch._inductor.lowering import lowerings, register_lowering
 @register_lowering(torch.ops.{ns}.lowered.default)
 def _(x):
     return lowerings[torch.ops.aten.mul.Tensor](x, 2)
+"""
+
+
+# The entry points, in their own module: it reaches the ops only through torch.ops,
+# so serving one never imports the ops' module on its own.
+_CUSTOM_OP_ENTRY_MODULE = """
+import torch
+import torch.utils._pytree as pytree
 
 
 def fn(x):
     return torch.ops.{ns}.triple.default(torch.ops.{ns}.lowered.default(x.neg())) + 1
+
+
+def grad_fn(x):
+    return torch.ops.{ns}.triple.default(x.neg()) + 1
 
 
 class Child(torch.nn.Module):
@@ -9417,16 +9462,10 @@ child = Child()
 
 def step(x):
     return child(x * 2) + 1
-"""
 
 
-# Calls the op only from __torch_dispatch__, so the op is in the graphs AOTAutograd
-# traces but not in the graph Dynamo captures; it registers nothing itself.
-_SUBCLASS_MODULE = """
-import torch
-import torch.utils._pytree as pytree
-
-
+# Calls the op only from __torch_dispatch__, so the op is in the graphs
+# AOTAutograd traces but not in the graph Dynamo captures.
 class Tripled(torch.Tensor):
     @staticmethod
     def __new__(cls, inner):
@@ -9483,47 +9522,60 @@ import sys
 
 import torch
 
-phase, directory, module, unused, tracer, backend, entry = sys.argv[1:8]
+phase, directory, module, entry_module, unused, tracer, backend, entry = sys.argv[1:9]
+# The entry module is always importable; the ops' module is not where the phase
+# tests serving without it.
+sys.path.insert(0, os.path.join(directory, "entry"))
 if phase not in ("missing", "registered"):
-    sys.path.insert(0, directory)
+    sys.path.insert(0, os.path.join(directory, "ops"))
 pc = torch.compiler.precompile
 artifact = os.path.join(directory, "artifact.py")
 cache = os.path.join(directory, "artifact.cache")
 expected_path = os.path.join(directory, "expected.pt")
+entries = __import__(entry_module)
 x = torch.arange(6, dtype=torch.float32)
 if entry == "subclass_fn":
-    subclass_module = __import__(module + "_subclass")
-    x = subclass_module.Tripled(x)
+    x = entries.Tripled(x)
+grad = entry == "grad_fn"
+x.requires_grad_(grad)
+
+
+def run(f):
+    y = f(x)
+    if grad:
+        y.sum().backward()
+        return y.detach(), x.grad
+    return y
+
+
 if phase == "capture":
-    fn_module = module + "_subclass" if entry == "subclass_fn" else module
-    fn = getattr(__import__(fn_module), entry)
     __import__(module)
     __import__(unused)
     torch._dynamo.config.nested_graph_breaks = False
     with pc.capture(
-        fn,
+        getattr(entries, entry),
         artifact_path=artifact,
         cache_path=cache,
         tracer=pc.DynamoTracer() if tracer == "dynamo" else pc.MakeFxTracer(),
         backend=backend,
     ) as cap:
-        torch.save(cap(x), expected_path)
+        torch.save(run(cap), expected_path)
 elif phase == "replay":
     assert module not in sys.modules, module
     loaded = pc.load(artifact, cache)
-    torch.testing.assert_close(loaded(x), torch.load(expected_path))
     assert module in sys.modules, "the artifact did not import its custom op module"
     assert unused not in sys.modules, "the artifact imported an unused custom op module"
+    torch.testing.assert_close(run(loaded), torch.load(expected_path))
 elif phase == "registered":
     # The ops are already registered, by the same source vendored under another
     # name, so the artifact must not need its module by the original name.
     import types
 
     vendored = types.ModuleType("vendored_custom_ops")
-    with open(os.path.join(directory, module + ".py")) as f:
+    with open(os.path.join(directory, "ops", module + ".py")) as f:
         exec(f.read(), vendored.__dict__)
     loaded = pc.load(artifact, cache)
-    torch.testing.assert_close(loaded(x), torch.load(expected_path))
+    torch.testing.assert_close(run(loaded), torch.load(expected_path))
     assert module not in sys.modules, "the artifact imported an op it did not need"
 else:
     try:
@@ -9549,6 +9601,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "inductor", "fn", "standalone"),
             ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "subclass_fn", "standalone"),
+            ("dynamo", "inductor", "grad_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9557,27 +9610,20 @@ class TestPrecompileCustomOpModules(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tag = uuid.uuid4().hex
             module, unused = f"precompile_op_module_{tag}", f"precompile_unused_{tag}"
+            entry_module = f"precompile_op_entry_{tag}"
             ns = f"precompile_op_test_{tag}"
-            for name, source in (
-                (module, _CUSTOM_OP_MODULE),
-                (module + "_subclass", _SUBCLASS_MODULE),
-                (unused, _UNUSED_OP_MODULE),
+            for subdir, name, source in (
+                ("ops", module, _CUSTOM_OP_MODULE),
+                ("ops", unused, _UNUSED_OP_MODULE),
+                ("entry", entry_module, _CUSTOM_OP_ENTRY_MODULE),
             ):
-                with open(os.path.join(directory, name + ".py"), "w") as f:
+                os.makedirs(os.path.join(directory, subdir), exist_ok=True)
+                with open(os.path.join(directory, subdir, name + ".py"), "w") as f:
                     f.write(source.replace("{ns}", ns))
-            # A Dynamo artifact references the entry function's own module, so only
-            # a make_fx artifact can be served where that module is vendored under
-            # another name.
-            phases = ("capture", "replay", "registered", "missing")
-            if tracer == "dynamo":
-                phases = ("capture", "replay", "missing")
-            if entry == "subclass_fn":
-                # Building the input needs the subclass's module on the path.
-                phases = ("capture", "replay")
-            for phase in phases:
+            for phase in ("capture", "replay", "registered", "missing"):
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
-                    + [module, unused, tracer, backend, entry],
+                    + [module, entry_module, unused, tracer, backend, entry],
                     capture_output=True,
                     text=True,
                     timeout=900,
@@ -9586,22 +9632,27 @@ class TestPrecompileCustomOpModules(TestCase):
                 self.assertIn(f"custom op phase ok: {phase}", out.stdout)
             with open(os.path.join(directory, "artifact.py")) as f:
                 python_code = f.read()
-            ops = (f"{ns}::triple",)
-            if entry == "fn" and backend == "eager":
-                ops = (f"{ns}::lowered", *ops)
-            modules = {module: ops}
+            ops = {
+                "fn": ("lowered", "triple") if backend == "eager" else ("triple",),
+                "grad_fn": ("grad_triple", "triple"),
+            }.get(entry, ("triple",))
+            modules = {module: tuple(f"{ns}::{op}" for op in ops)}
             self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", python_code.splitlines())
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
-    def _define_op(self, ns, name, module=None):
+    def _define_op(self, ns, name, module=None, fake=True):
         def body(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
+        def fake_body(x):
+            return torch.empty_like(x)
+
         if module is not None:
-            body.__module__ = module
+            body.__module__ = fake_body.__module__ = module
         op = torch.library.custom_op(f"{ns}::{name}", mutates_args=())(body)
-        op.register_fake(lambda x: torch.empty_like(x))
+        if fake:
+            op.register_fake(fake_body)
         return op
 
     def test_custom_op_names_cover_higher_order_args_subgraphs_and_packets(self):
@@ -9632,9 +9683,28 @@ class TestPrecompileCustomOpModules(TestCase):
 
         ns = f"precompile_main_{uuid.uuid4().hex}"
         self._define_op(ns, "scripted", module="__main__")
-        with self.assertLogs("torch._precompile", "WARNING") as logs:
-            self.assertEqual(_custom_op_modules({f"{ns}::scripted"}), {})
-        self.assertIn(f"{ns}::scripted", logs.output[0])
+        self._define_op(ns, "internal", module="torch._library.custom_ops")
+        for op in ("scripted", "internal"):
+            with self.assertLogs("torch._precompile", "WARNING") as logs:
+                self.assertEqual(_custom_op_modules({f"{ns}::{op}"}), {})
+            self.assertIn(f"{ns}::{op}", logs.output[0])
+
+    def test_custom_op_modules_follow_a_triton_op_to_its_user_function(self):
+        from torch._precompile import _custom_op_modules
+
+        # triton_op wraps the user's function in its own, which it passes to
+        # custom_op, and registers the user's function as the op's fake.
+        ns = f"precompile_triton_op_{uuid.uuid4().hex}"
+        op = self._define_op(ns, "kernel", module="torch._library.triton", fake=False)
+
+        def user_fn(x):
+            return torch.empty_like(x)
+
+        user_fn.__module__ = "unittest"
+        op.register_fake(user_fn)
+        self.assertEqual(
+            _custom_op_modules({f"{ns}::kernel"}), {"unittest": (f"{ns}::kernel",)}
+        )
 
     def test_import_custom_op_modules(self):
         from torch._precompile import _import_custom_op_modules
@@ -9646,16 +9716,31 @@ class TestPrecompileCustomOpModules(TestCase):
         # Already registered: the module is not needed.
         _import_custom_op_modules({missing_module: (registered,)})
         self.assertNotIn(missing_module, sys.modules)
-        # Not registered: the module is imported, and registers it.
         with tempfile.TemporaryDirectory() as directory:
-            module = f"precompile_late_{uuid.uuid4().hex}"
-            with open(os.path.join(directory, module + ".py"), "w") as f:
-                f.write(_UNUSED_OP_MODULE.replace("{ns}", ns))
             sys.path.insert(0, directory)
             self.addCleanup(sys.path.remove, directory)
-            self.addCleanup(sys.modules.pop, module, None)
+
+            def write(source):
+                module = f"precompile_late_{uuid.uuid4().hex}"
+                with open(os.path.join(directory, module + ".py"), "w") as f:
+                    f.write(source)
+                self.addCleanup(sys.modules.pop, module, None)
+                return module
+
+            # Not registered: the module is imported, and registers it.
+            module = write(_UNUSED_OP_MODULE.replace("{ns}", ns))
             _import_custom_op_modules({module: (f"{ns}::unused",)})
             self.assertIn(module, sys.modules)
+            # The module imports but does not register the op.
+            module = write("")
+            with self.assertRaisesRegex(
+                PrecompileError, f"{ns}::absent, which importing module {module!r}"
+            ):
+                _import_custom_op_modules({module: (f"{ns}::absent",)})
+            # The module raises something other than ImportError.
+            module = write("raise RuntimeError('duplicate registration')")
+            with self.assertRaisesRegex(PrecompileError, "duplicate registration"):
+                _import_custom_op_modules({module: (f"{ns}::absent",)})
         with self.assertRaisesRegex(PrecompileError, repr(missing_module)):
             _import_custom_op_modules({missing_module: (f"{ns}::absent",)})
 
@@ -9667,10 +9752,62 @@ class TestPrecompileCustomOpModules(TestCase):
             "buf0 = torch.ops.mylib.triple.default(arg0_1)\n"
             "buf1 = torch.ops.prims.convert_element_type.default(buf0)\n"
             "buf2 = torch.ops.mylib.packet(buf1)\n"
+            # A Triton kernel's origin comment names an op Inductor lowered away.
+            "    # %lowered : target=torch.ops.mylib.lowered.default\n"
+            # cpp_wrapper names a fallback to the dispatcher.
+            'aoti_torch_call_dispatcher("mylib::cpp_fallback", "", args);\n'
+            'c10::Dispatcher::singleton().findSchemaOrThrow("mylib::cpp_schema", "");\n'
+            '// aoti_torch_call_dispatcher("mylib::commented", "", args);\n'
         )
         self.assertEqual(
-            _custom_op_names_in_source(source), {"mylib::triple", "mylib::packet"}
+            _custom_op_names_in_source(source),
+            {
+                "mylib::triple",
+                "mylib::packet",
+                "mylib::cpp_fallback",
+                "mylib::cpp_schema",
+            },
         )
+
+    def test_backend_custom_op_names(self):
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._precompile import _backend_custom_op_names
+
+        ns = f"precompile_backends_{uuid.uuid4().hex}"
+        op = self._define_op(ns, "eager")
+        graph = torch.fx.Graph()
+        graph.output(graph.call_function(op._opoverload, (graph.placeholder("x"),)))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def compiled(source):
+            return types.SimpleNamespace(
+                result=types.SimpleNamespace(source_code=source)
+            )
+
+        def artifact(content):
+            return types.SimpleNamespace(content=content)
+
+        backends = {
+            "bound_forward": artifact(gm.forward),
+            # The eager backend under functorch.config.force_autograd_cache.
+            "serializable": artifact(types.SimpleNamespace(graph_module=gm)),
+            "inductor": artifact(
+                types.SimpleNamespace(
+                    compiled_fw=compiled("torch.ops.mylib.fw.default(x)"),
+                    compiled_bw=compiled("torch.ops.mylib.bw.default(x)"),
+                )
+            ),
+            "noop": artifact(noop_graph_call),
+        }
+        self.assertEqual(
+            _backend_custom_op_names(backends),
+            {f"{ns}::eager", "mylib::fw", "mylib::bw"},
+        )
+        # Served code it cannot read (RegionalOutputCode, say) is reported.
+        unreadable = {"regional": artifact(types.SimpleNamespace(compiled_fw=object()))}
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self.assertEqual(_backend_custom_op_names(unreadable), set())
+        self.assertIn("regional", logs.output[0])
 
 
 if __name__ == "__main__":
