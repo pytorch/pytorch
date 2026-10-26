@@ -296,6 +296,23 @@ class TestReplicateUnshardedParamViews(FSDPTestMultiThread):
             self.assertEqual(fsdp_param.unsharded_param.dtype, torch.bfloat16)
 
     @skip_if_lt_x_gpu(1)
+    def test_optimizer_step_before_backward_raises(self):
+        # As with DDP, autograd catches an in-place update between forward and
+        # backward, also after a reload replaces the local tensors in place
+        for reload in (False, True):
+            model, _, _ = self._init_model()
+            inp = torch.randn((2, 8), device=device_type.type)
+            model(inp).sum().backward()
+            if reload:
+                model.load_state_dict(model.state_dict(), assign=True)
+                model(inp).sum().backward()
+            optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+            loss = model(inp).sum()
+            optim.step()
+            with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
+                loss.backward()
+
+    @skip_if_lt_x_gpu(1)
     def test_load_state_dict_assign_repoints_views(self):
         model, ref_model, fsdp_params = self._init_model()
         inp = torch.randn((2, 8), device=device_type.type)

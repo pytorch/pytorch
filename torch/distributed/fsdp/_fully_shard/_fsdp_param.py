@@ -3,6 +3,7 @@ import inspect
 import itertools
 import math
 import operator
+import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import auto, Enum
@@ -209,9 +210,10 @@ class FSDPParam:
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
-    # Whether _unsharded_param views _sharded_param_data, which then holds the
-    # whole parameter, instead of all_gather_outputs
-    _unsharded_param_views_shard: bool
+    # The local tensor of sharded_param that _unsharded_param views when the shard
+    # holds the whole parameter, else None. Weak, so that it never keeps a
+    # replaced local tensor alive
+    _unsharded_param_view_source: weakref.ReferenceType[torch.Tensor] | None
     _sharding_spec: DTensorSpec
     # Sharding specs for sharded grads, whose dtype can differ from the param's.
     # Cached per dtype so each backward doesn't build a DTensorSpec per param,
@@ -266,7 +268,7 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
-        self._unsharded_param_views_shard = False
+        self._unsharded_param_view_source = None
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -919,9 +921,13 @@ class FSDPParam:
     def init_unsharded_param(self, view_shard: bool = False):
         """``view_shard`` makes the unsharded parameter view the shard, which must
         hold the whole parameter, instead of ``all_gather_outputs``."""
+        if view_shard:
+            if self._viewed_local_tensor() is not self._sharded_local_tensor:
+                self._view_shard()
+            return
         if (
             hasattr(self, "_unsharded_param")  # after the 1st all-gather
-            and view_shard == self._unsharded_param_views_shard
+            and self._unsharded_param_view_source is None
         ):
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
@@ -950,12 +956,6 @@ class FSDPParam:
                 self.param_dtype or self.orig_dtype,
             )
             self._all_gather_metadata = None
-        elif view_shard:
-            # The view keeps the shard's storage offset, and a whole-parameter
-            # shard has no padding
-            view = self._sharded_param_data.view(self._orig_size)
-            self._set_unsharded_param(view, views_shard=True)
-            return
         else:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
@@ -970,11 +970,23 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        self._set_unsharded_param(unsharded_param, views_shard=False)
+        self._set_unsharded_param(unsharded_param, view_source=None)
         self._release_all_gather_outputs_if_needed()
 
+    def _viewed_local_tensor(self) -> torch.Tensor | None:
+        source = self._unsharded_param_view_source
+        return None if source is None else source()
+
+    def _view_shard(self) -> None:
+        # View the local tensor, which the optimizer updates, rather than
+        # _sharded_param_data: sharing its version counter lets autograd catch an
+        # in-place update between forward and backward, as with DDP
+        local_tensor = self._sharded_local_tensor
+        view = local_tensor.view(self._orig_size)
+        self._set_unsharded_param(view, view_source=local_tensor)
+
     def _set_unsharded_param(
-        self, unsharded_param: torch.Tensor, *, views_shard: bool
+        self, unsharded_param: torch.Tensor, *, view_source: torch.Tensor | None
     ) -> None:
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored before module compute
@@ -996,7 +1008,9 @@ class FSDPParam:
         else:
             param.grad_dtype = self.unsharded_grad_dtype
         self._unsharded_param = param
-        self._unsharded_param_views_shard = views_shard
+        self._unsharded_param_view_source = (
+            None if view_source is None else weakref.ref(view_source)
+        )
 
     def _release_all_gather_outputs_if_needed(self) -> None:
         if self._release_all_gather_outputs_after_post_all_gather:
@@ -1189,6 +1203,10 @@ class FSDPParam:
             and self.param_dtype is None
             and not self.offload_to_cpu
             and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
+            # TODO(#201858): DTensor (e.g. TP) unsharded parameters keep the copy,
+            # since a view's wrapper has its own version counter, and autograd
+            # would miss an in-place update between forward and backward
+            and self._unsharded_dtensor_spec is None
         )
 
     @property
@@ -1538,15 +1556,6 @@ class FSDPParam:
             updated_local_tensor = True
         if not same_local_tensor:
             self._sharded_param_data = local_tensor.view(-1)
-            if self._unsharded_param_views_shard:
-                # Repoint now, and empty the old view, which autograd graphs may
-                # still hold, so that it does not keep the old shard alive
-                stale_param = self._unsharded_param
-                view = self._sharded_param_data.view(self._orig_size)
-                self._set_unsharded_param(view, views_shard=True)
-                if not isinstance(stale_param, DTensor):
-                    stale_param.grad = None
-                    stale_param.data = stale_param.new_empty(0)
         if not isinstance(self.sharded_param, DTensor):
             raise AssertionError(f"Expected DTensor, got {type(self.sharded_param)}")
         if updated_local_tensor:
@@ -1560,6 +1569,16 @@ class FSDPParam:
                 )
         self._sharding_spec = self.sharded_param._spec
         self._sharding_spec_by_dtype.clear()
+        if (
+            self._unsharded_param_view_source is not None
+            and self._viewed_local_tensor() is not self._sharded_local_tensor
+        ):
+            # Repoint now, and empty the old view, which autograd graphs may still
+            # hold, so that it does not keep the old shard alive
+            stale_param = self._unsharded_param
+            self._view_shard()
+            stale_param.grad = None
+            stale_param.data = stale_param.new_empty(0)
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
