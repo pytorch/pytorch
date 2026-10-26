@@ -50,6 +50,7 @@ namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
+C10_METAL_CONSTEXPR unsigned max_threadgroup_size = 1024;
 // Number of elements each thread processes in dense elementwise kernels.
 // Reading/writing a small array of values per thread improves memory-level
 // parallelism vs. a one-element-per-thread kernel.
