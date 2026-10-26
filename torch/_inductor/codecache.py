@@ -4020,6 +4020,50 @@ def _resolve_needs_vec_isa(
     return any(marker in source for marker in _VEC_ISA_CPP_SOURCE_MARKERS)
 
 
+@functools.cache
+def _install_roots() -> tuple[str, ...]:
+    import sysconfig
+
+    roots = dict.fromkeys(
+        (
+            os.path.dirname(os.path.dirname(torch.__file__)),
+            sys.prefix,
+            sys.base_prefix,
+            *sysconfig.get_paths().values(),
+        )
+    )
+    # Longest first, so a root nested in another is replaced before its parent.
+    return tuple(sorted((r for r in roots if r and len(r) > 1), key=len, reverse=True))
+
+
+@functools.cache
+def _build_identity(compiler: str) -> str:
+    import sysconfig
+
+    # The install roots carry the Python version (e.g. include/python3.12), so
+    # what they stood for goes back in explicitly.
+    return " ".join(
+        (
+            f"torch_key={torch_key().hex()}",
+            f"abi={sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",
+            f"compiler={get_compiler_version_info(compiler)}",
+        )
+    )
+
+
+def _install_independent_command_line(command_line: str, compiler: str) -> str:
+    """Key a C++ build by what it compiles, not by where this process is installed.
+
+    A packaged job extracts to a fresh directory every launch, so its include and
+    library paths differ between two launches of the same build. Keying on them
+    keeps a precompiled artifact's frozen C++ kernels from ever matching in a
+    later launch.
+    """
+    for root in _install_roots():
+        command_line = command_line.replace(root, "<install>")
+    return f"{command_line} {_build_identity(compiler)}"
+
+
 @clear_on_fresh_cache
 class CppCodeCache:
     """Compiles and caches C++ libraries.  Users of this class supply the source code to
@@ -4139,9 +4183,12 @@ class CppCodeCache:
             """Writing the code to file will calculate a hash, which we need to vary if
             the command line flags change.  This implements a mostly-generic way of
             validating that."""
-            return CppBuilder(
-                name="o", sources="i", BuildOption=build_option
-            ).get_command_line()
+            return _install_independent_command_line(
+                CppBuilder(
+                    name="o", sources="i", BuildOption=build_option
+                ).get_command_line(),
+                build_option.get_compiler(),
+            )
 
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)

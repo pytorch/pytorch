@@ -11,6 +11,7 @@ import pickle
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -580,6 +581,68 @@ def _custom_empty(*args: object, **kwargs: object) -> None:
 
 # Verify factory detection does not match arbitrary functions named like torch.empty.
 _custom_empty.__name__ = "empty"
+
+
+class TestCppCodeCacheKey(TestCase):
+    def _key(self, command, roots=("/opt/t",), ext_suffix=".so", version="cc 1"):
+        from torch._inductor import codecache
+
+        real_config_var = sysconfig.get_config_var
+        codecache._build_identity.cache_clear()
+        self.addCleanup(codecache._build_identity.cache_clear)
+        with (
+            mock.patch.object(codecache, "_install_roots", return_value=roots),
+            mock.patch.object(
+                sysconfig,
+                "get_config_var",
+                side_effect=lambda name: ext_suffix
+                if name == "EXT_SUFFIX"
+                else real_config_var(name),
+            ),
+            mock.patch.object(
+                codecache, "get_compiler_version_info", return_value=version
+            ),
+        ):
+            return codecache._install_independent_command_line(command, "g++")
+
+    def test_key_ignores_install_location(self):
+        from torch._inductor import codecache
+
+        def key_for(root):
+            command = f"g++ -I{root}/torch/include -L{root}/torch/lib -o o i"
+            return self._key(command, roots=(root,))
+
+        first = key_for("/dev/shm/seed-a")
+        self.assertEqual(first, key_for("/dev/shm/seed-b"))
+        self.assertNotIn("seed-a", first)
+        self.assertIn(codecache.torch_key().hex(), first)
+
+    def test_key_tracks_paths_outside_install(self):
+        self.assertNotEqual(self._key("g++ -I/usr/a"), self._key("g++ -I/usr/b"))
+
+    def test_key_tracks_python_abi(self):
+        self.assertNotEqual(
+            self._key("g++", ext_suffix=".cpython-310-x86_64-linux-gnu.so"),
+            self._key("g++", ext_suffix=".cpython-312-x86_64-linux-gnu.so"),
+        )
+
+    def test_key_tracks_compiler(self):
+        self.assertNotEqual(
+            self._key("g++", version="gcc 11"), self._key("g++", version="gcc 13")
+        )
+
+    def test_install_roots_cover_this_install(self):
+        from torch._inductor import codecache
+
+        roots = codecache._install_roots()
+        self.assertIn(os.path.dirname(os.path.dirname(torch.__file__)), roots)
+        self.assertIn(sys.prefix, roots)
+        self.assertEqual(list(roots), sorted(roots, key=len, reverse=True))
+        command = f"g++ -I{sysconfig.get_paths()['include']} -o o i"
+        self.assertNotIn(
+            sysconfig.get_paths()["include"],
+            codecache._install_independent_command_line(command, "g++"),
+        )
 
 
 class TestPyCodeCache(TestCase):
