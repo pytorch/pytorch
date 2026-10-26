@@ -1599,7 +1599,7 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
-        self._custom_op_names: dict[str, set[str]] = {}
+        self._custom_op_names: dict[str, set[tuple[str, str]]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1616,7 +1616,7 @@ class _CapturePackage(CompilePackage):
 
         self._custom_op_names[backend_id] = _custom_op_names(gm)
 
-    def custom_op_names(self, backend_ids: Iterable[str]) -> set[str]:
+    def custom_op_names(self, backend_ids: Iterable[str]) -> set[tuple[str, str]]:
         """The custom ops the graphs registered under ``backend_ids`` call."""
         return set().union(
             *(self._custom_op_names.get(backend_id, ()) for backend_id in backend_ids)

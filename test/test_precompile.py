@@ -9122,6 +9122,8 @@ class TestPrecompileRuntimeCache(TestCase):
 _CUSTOM_OP_MODULE = """
 import torch
 
+import {bwmod}
+
 
 @torch.library.custom_op("{ns}::triple", mutates_args=())
 def triple(x: torch.Tensor) -> torch.Tensor:
@@ -9131,6 +9133,17 @@ def triple(x: torch.Tensor) -> torch.Tensor:
 @triple.register_fake
 def _(x):
     return torch.empty_like(x)
+
+
+def _setup_context(ctx, inputs, output):
+    pass
+
+
+def _backward(ctx, grad):
+    return torch.ops.{bwns}.scale.default(grad)
+
+
+triple.register_autograd(_backward, setup_context=_setup_context)
 
 
 def fn(x):
@@ -9151,6 +9164,12 @@ def step(x):
     return child(x * 2) + 1
 
 
+def train_fn(x):
+    x = x.detach().requires_grad_()
+    torch.ops.{ns}.triple.default(x.sin()).sum().backward()
+    return x.grad
+
+
 def cond_fn(x):
     return torch.cond(
         x.sum() > 0,
@@ -9158,6 +9177,21 @@ def cond_fn(x):
         lambda y: y.cos(),
         (x,),
     )
+"""
+
+
+_BACKWARD_OP_MODULE = """
+import torch
+
+
+@torch.library.custom_op("{bwns}::scale", mutates_args=())
+def scale(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+@scale.register_fake
+def _(x):
+    return torch.empty_like(x)
 """
 
 
@@ -9182,7 +9216,7 @@ import sys
 
 import torch
 
-phase, directory, module, unused, tracer, backend, entry = sys.argv[1:8]
+phase, directory, module, unused, tracer, backend, entry, bwmod = sys.argv[1:9]
 if phase != "missing":
     sys.path.insert(0, directory)
 pc = torch.compiler.precompile
@@ -9212,7 +9246,7 @@ else:
     try:
         pc.load(artifact, cache)
     except torch.compiler.PrecompileError as e:
-        assert repr(module) in str(e), e
+        assert repr(module) in str(e) or repr(bwmod) in str(e), e
     else:
         raise AssertionError("load ran an artifact whose custom op module is missing")
 print("custom op phase ok:", phase)
@@ -9232,6 +9266,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "inductor", "fn", "standalone"),
             ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "cond_fn", "standalone"),
+            ("dynamo", "inductor", "train_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9240,14 +9275,23 @@ class TestPrecompileCustomOpModules(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tag = uuid.uuid4().hex
             module, unused = f"precompile_op_module_{tag}", f"precompile_unused_{tag}"
-            ns = f"precompile_op_test_{tag}"
-            for name, source in ((module, _CUSTOM_OP_MODULE), (unused, _UNUSED_OP_MODULE)):
+            bwmod = f"precompile_bw_op_{tag}"
+            ns, bwns = f"precompile_op_test_{tag}", f"precompile_bw_test_{tag}"
+            for name, source in (
+                (module, _CUSTOM_OP_MODULE),
+                (bwmod, _BACKWARD_OP_MODULE),
+                (unused, _UNUSED_OP_MODULE),
+            ):
                 with open(os.path.join(directory, name + ".py"), "w") as f:
-                    f.write(source.replace("{ns}", ns))
+                    f.write(
+                        source.replace("{ns}", ns)
+                        .replace("{bwns}", bwns)
+                        .replace("{bwmod}", bwmod)
+                    )
             for phase in ("capture", "replay", "missing"):
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
-                    + [module, unused, tracer, backend, entry],
+                    + [module, unused, tracer, backend, entry, bwmod],
                     capture_output=True,
                     text=True,
                     timeout=900,
@@ -9261,7 +9305,9 @@ class TestPrecompileCustomOpModules(TestCase):
                 for line in python_code.splitlines()
                 if line.startswith("CUSTOM_OP_MODULES = ")
             ]
-            self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module,)!r}")
+            # Only a training step compiles a backward, whose op lives in bwmod.
+            expected = tuple(sorted((module, bwmod))) if entry == "train_fn" else (module,)
+            self.assertEqual(line, f"CUSTOM_OP_MODULES = {expected!r}")
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
@@ -9281,9 +9327,17 @@ class TestPrecompileCustomOpRecording(TestCase):
 
         op, qualname = self._op("in_main")
         op._init_fn.__module__ = "__main__"
+        ns = f"precompile_library_{uuid.uuid4().hex}"
+        lib = torch.library.Library(ns, "DEF")  # noqa: TOR901
+        lib.define("f(Tensor x) -> Tensor")
+        lib.impl("f", lambda x: x.clone(), "CompositeExplicitAutograd")
+        self.addCleanup(lib._destroy)
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            self.assertEqual(_custom_op_modules([qualname]), ())
+            self.assertEqual(
+                _custom_op_modules([(qualname, "default"), (f"{ns}::f", "")]), ()
+            )
         self.assertIn(qualname, "\n".join(logs.output))
+        self.assertIn(f"{ns}::f", "\n".join(logs.output))
 
     def test_a_capture_names_only_the_ops_of_the_graphs_it_serves(self):
         from torch._dynamo.precompile_package import _CapturePackage
@@ -9297,7 +9351,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         package = _CapturePackage(lambda x: x)
         package.add_backend_graph("__compiled_fn_1", graph(served))
         package.add_backend_graph("__compiled_fn_2", graph(dropped))
-        self.assertEqual(package.custom_op_names(["__compiled_fn_1"]), {served_name})
+        self.assertEqual(
+            package.custom_op_names(["__compiled_fn_1"]), {(served_name, "default")}
+        )
 
 
 if __name__ == "__main__":

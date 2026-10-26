@@ -1921,9 +1921,36 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
-def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
-    """The ``ns::op`` names of the operators ``gm`` and its subgraphs call."""
-    names: set[str] = set()
+# Operator namespaces torch registers itself; serving never needs a module for them.
+_TORCH_OP_NAMESPACES = frozenset(
+    {
+        "aten",
+        "prims",
+        "prim",
+        "higher_order",
+        "rngprims",
+        "debugprims",
+        "inductor",
+        "profiler",
+        "quantized",
+        "_quantized",
+        "quantized_decomposed",
+        "c10d_functional",
+        "_c10d_functional",
+        "_c10d_functional_autograd",
+        "_dtensor",
+        "symm_mem",
+        "mkldnn",
+        "onednn",
+        "mkl",
+    }
+)
+
+
+def _custom_op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
+    call, outside torch's own namespaces."""
+    names: set[tuple[str, str]] = set()
     for module in gm.modules():
         graph = getattr(module, "graph", None)
         if not isinstance(graph, torch.fx.Graph):
@@ -1931,39 +1958,74 @@ def _custom_op_names(gm: torch.fx.GraphModule) -> set[str]:
         for node in graph.nodes:
             if node.op != "call_function":
                 continue
-            if isinstance(node.target, torch._ops.OpOverload):
-                names.add(node.target._schema.name)
-            elif isinstance(node.target, torch._ops.OpOverloadPacket):
-                names.add(node.target._qualified_op_name)
+            target = node.target
+            if isinstance(target, torch._ops.OpOverloadPacket):
+                target = target.default
+            if (
+                isinstance(target, torch._ops.OpOverload)
+                and target.namespace not in _TORCH_OP_NAMESPACES
+            ):
+                names.add((target._schema.name, target._overloadname))
     return names
 
 
-def _custom_op_modules(op_names: Iterable[str]) -> tuple[str, ...]:
-    """The importable modules defining the Python custom ops among ``op_names``.
+def _backward_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
+    """The ops the compiled backward graphs among ``artifacts`` call.
 
-    The module is the one defining the function ``torch.library.custom_op`` wrapped,
-    which is where the op registers unless it was built elsewhere (by a factory, say);
-    an op defined in ``__main__`` or a module without a spec cannot be re-imported.
+    A Dynamo capture sees only the forward graph; AOTAutograd entries carry the
+    backward they compiled, which can call ops the forward never does (a custom op's
+    registered backward, say).
+    """
+    names: set[tuple[str, str]] = set()
+    for artifact in artifacts:
+        content = getattr(artifact, "content", None)
+        serialized = getattr(content, "serialized_bw_module", None)
+        if serialized is not None:
+            names |= _custom_op_names(serialized.deserialize())
+    return names
+
+
+def _custom_op_module(op_name: str, overload: str) -> str | None:
+    """The importable module that registers ``op_name``, if one is known.
+
+    A Python custom op registers in the module defining the function
+    ``torch.library.custom_op`` wrapped (unless a factory built it elsewhere); a C++
+    op names its module through ``m.set_python_module``.
     """
     from torch._library.custom_ops import OPDEFS
 
-    modules = set()
-    for op_name in op_names:
-        opdef = OPDEFS.get(op_name)
-        if opdef is None:
-            continue
+    opdef = OPDEFS.get(op_name)
+    if opdef is not None:
         name = getattr(opdef._init_fn, "__module__", None)
-        module = sys.modules.get(name) if name and name != "__main__" else None
-        if module is not None and getattr(module, "__spec__", None) is not None:
-            modules.add(name)
+    else:
+        pystub = torch._C._dispatch_pystub(op_name, overload)
+        name = pystub[0] if pystub is not None else None
+    module = sys.modules.get(name) if name and name != "__main__" else None
+    if name and module is not None and getattr(module, "__spec__", None) is not None:
+        return name
+    return None
+
+
+def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
+    """The importable modules registering the ops among ``op_names``, warning once
+    about the ops the artifact cannot import."""
+    modules: set[str] = set()
+    unrecorded: set[str] = set()
+    for op_name, overload in op_names:
+        module = _custom_op_module(op_name, overload)
+        if module is None:
+            unrecorded.add(op_name)
         else:
-            log.warning(
-                "torch.compiler.precompile: the captured graphs call custom op %s, "
-                "defined in %r, which the artifact cannot import; it serves only "
-                "where something else registers the op first",
-                op_name,
-                name,
-            )
+            modules.add(module)
+    if unrecorded:
+        log.warning(
+            "torch.compiler.precompile: the captured graphs call %s, which no "
+            "importable module is known to register (defined in __main__ or a module "
+            "without a spec, built by a factory, or a C++ op without "
+            "set_python_module); the artifact serves only where something else "
+            "registers them first",
+            ", ".join(sorted(unrecorded)),
+        )
     return tuple(sorted(modules))
 
 
@@ -1983,8 +2045,10 @@ def _check_custom_op_modules(modules: tuple[str, ...]) -> None:
     import importlib.util
 
     for module in modules:
+        # Only the top-level package: finding a submodule imports its parents, and
+        # load must not run code the artifact names before it warns about exec.
         try:
-            found = importlib.util.find_spec(module) is not None
+            found = importlib.util.find_spec(module.partition(".")[0]) is not None
         except (ImportError, ValueError):
             found = False
         if not found:
@@ -2521,7 +2585,7 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_names: Iterable[str] = (),
+    custom_op_names: Iterable[tuple[str, str]] = (),
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2549,7 +2613,9 @@ def _build_multigraph_artifact(
         binding,
         mode,
         unreachable,
-        _custom_op_modules(custom_op_names),
+        _custom_op_modules(
+            {*custom_op_names, *_backward_custom_op_names(backends.values())}
+        ),
     )
     inductor_bundle = None
     if backend != "eager":
