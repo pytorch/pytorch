@@ -32,7 +32,7 @@ class ModelPool {
 
   // Owns a checked-out model. Dropping the lease returns the model to the
   // available pool, which is right for a run that never reached the device. A
-  // run that did reach the device ends with mark_pending() instead: its work
+  // run that did reach the device ends with mark_in_flight() instead: its work
   // may still be in flight, so the model is reused only once it has finished.
   class Lease {
    public:
@@ -59,10 +59,10 @@ class ModelPool {
       return *operator->();
     }
 
-    void mark_pending() {
+    void mark_in_flight() {
       AOTI_RUNTIME_CHECK(
           model_ != nullptr, "The lease no longer holds a model");
-      pool_->return_model_to_pending(model_);
+      pool_->return_model_in_flight(model_);
       model_ = nullptr;
     }
 
@@ -192,7 +192,7 @@ class ModelPool {
     // Free to check out.
     kAvailable,
     // Its last run reached the device and may still be executing there.
-    kPending,
+    kInFlight,
     // Owned by one thread, which is running it or waiting for its device work.
     kCheckedOut,
   };
@@ -206,7 +206,7 @@ class ModelPool {
     // model.
     Stream stream;
     // When the slot entered its current state: the newest available model is
-    // checked out first, and the oldest pending one is waited on first.
+    // checked out first, and the oldest in-flight one is waited on first.
     uint64_t seq;
   };
 
@@ -239,10 +239,10 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  void return_model_to_pending(Model* model) {
+  void return_model_in_flight(Model* model) {
     {
       std::lock_guard lk(models_mutex_);
-      transition(slot_of(model), State::kCheckedOut, State::kPending);
+      transition(slot_of(model), State::kCheckedOut, State::kInFlight);
     }
     model_state_changed_.notify_all();
   }
@@ -330,8 +330,8 @@ class ModelPool {
         return slot->model.get();
       }
 
-      if (slot->state == State::kPending) {
-        transition(*slot, State::kPending, State::kCheckedOut);
+      if (slot->state == State::kInFlight) {
+        transition(*slot, State::kInFlight, State::kCheckedOut);
         lk.unlock();
         try {
           slot->model->wait_for_completion();
@@ -371,20 +371,21 @@ class ModelPool {
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
     // Move every finished run back to available, oldest first, so the most
-    // recently pending one is reused first.
-    std::vector<Slot*> pending;
+    // recently launched one is reused first.
+    std::vector<Slot*> in_flight;
     for (auto& slot : slots_) {
-      if (slot.state == State::kPending) {
-        pending.push_back(&slot);
+      if (slot.state == State::kInFlight) {
+        in_flight.push_back(&slot);
       }
     }
-    std::sort(pending.begin(), pending.end(), [](const Slot* a, const Slot* b) {
-      return a->seq < b->seq;
-    });
+    std::sort(
+        in_flight.begin(), in_flight.end(), [](const Slot* a, const Slot* b) {
+          return a->seq < b->seq;
+        });
     bool reclaimed = false;
-    for (Slot* slot : pending) {
+    for (Slot* slot : in_flight) {
       if (slot->model->is_finished()) {
-        transition(*slot, State::kPending, State::kAvailable);
+        transition(*slot, State::kInFlight, State::kAvailable);
         reclaimed = true;
       }
     }
@@ -395,15 +396,15 @@ class ModelPool {
 
     model_state_changed_.wait(lk, [this]() {
       return oldest(State::kAvailable) != nullptr ||
-          oldest(State::kPending) != nullptr;
+          oldest(State::kInFlight) != nullptr;
     });
     if (oldest(State::kAvailable) != nullptr) {
       return;
     }
     // Let's make the schedule simple first. We always wait on the oldest
-    // pending model to be complete.
-    Slot* slot = oldest(State::kPending);
-    transition(*slot, State::kPending, State::kCheckedOut);
+    // in-flight model to be complete.
+    Slot* slot = oldest(State::kInFlight);
+    transition(*slot, State::kInFlight, State::kCheckedOut);
     lk.unlock();
     try {
       slot->model->wait_for_completion();
