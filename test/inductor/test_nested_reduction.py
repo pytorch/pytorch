@@ -2699,6 +2699,23 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,), tol=0)
         self.check_fusion(expected_kernels=None)
 
+    @parametrize("reduction", ["amin", "sum"])
+    @inductor_config.patch("triton.codegen_upcast_to_fp32", False)
+    def test_half_grouped_reduction_without_fp32_upcast(self, reduction):
+        # Loaded fp16 values stay fp16, but the grouped reduction still
+        # accumulates in fp32 and hands back fp16, so it matches eager exactly.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            value = torch.ops._inductor_test.realize((x - total).to(torch.float16))
+            groups = value.view(x.shape[0], -1, group)
+            return getattr(groups, reduction)(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).half() / 8
+        self.assertEqual(torch.compile(f)(x), f(x), atol=0, rtol=0)
+        self.check_fusion(expected_kernels=None)
+
 
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
