@@ -2380,23 +2380,37 @@ class ByteArrayVariable(VariableTracker):
                 args=list(e.args),
             )
 
+    def _bytearray_search(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # Shared by bytearray.count/find/rfind. These are C method descriptors
+        # without a code object; inlining them raises an internal AttributeError
+        # instead of a graph break. Decline so dispatch falls through to
+        # unimplemented(), the same fallback bytearray_hex/bytearray_decode use
+        # below.
+        check_positional(tx, name, len(args), 1, 3)
+        no_keywords(tx, name, kwargs)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = getattr(self.data, name)(*const_args)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return VariableTracker.build(tx, result)
+
     def bytearray_count(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        check_positional(tx, "count", len(args), 1, 3)
-        no_keywords(tx, "count", kwargs)
-        try:
-            const_args = [arg.as_python_constant() for arg in args]
-            return VariableTracker.build(tx, self.data.count(*const_args))
-        except AsPythonConstantNotImplementedError:
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, bytearray.count),
-                [self] + list(args),
-                kwargs,
-            )
+    ) -> VariableTracker | None:
+        return self._bytearray_search(tx, "count", args, kwargs)
 
     def _bytearray_split(
         self,
@@ -2439,21 +2453,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        check_positional(tx, "find", len(args), 1, 3)
-        no_keywords(tx, "find", kwargs)
-        try:
-            const_args = [arg.as_python_constant() for arg in args]
-        except AsPythonConstantNotImplementedError:
-            # bytearray.find is a C method descriptor without a code object;
-            # inlining it raises an internal AttributeError instead of a graph
-            # break. Decline so dispatch falls through to unimplemented()
-            # (same as bytearray_hex/decode above).
-            return None
-        try:
-            result = self.data.find(*const_args)
-        except (TypeError, ValueError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, result)
+        return self._bytearray_search(tx, "find", args, kwargs)
 
     def bytearray_rfind(
         self,
@@ -2461,18 +2461,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        check_positional(tx, "rfind", len(args), 1, 3)
-        no_keywords(tx, "rfind", kwargs)
-        try:
-            const_args = [arg.as_python_constant() for arg in args]
-        except AsPythonConstantNotImplementedError:
-            # See bytearray_find: decline instead of inlining the C descriptor.
-            return None
-        try:
-            result = self.data.rfind(*const_args)
-        except (TypeError, ValueError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, result)
+        return self._bytearray_search(tx, "rfind", args, kwargs)
 
     def bytearray_hex(
         self,

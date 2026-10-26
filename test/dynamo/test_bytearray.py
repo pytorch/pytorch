@@ -563,6 +563,16 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(bytearray(b"mississippi"), 5), (7, 10))
         self.assertEqual(fn(bytearray(b"mississippi"), -3), (10, 10))
 
+        # The values above would also hold if n were specialized to a constant,
+        # so pin the fallback down: under fullgraph the non-constant start must
+        # raise Unsupported instead of tracing.
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def fn_fullgraph(ba, n):
+            return ba.find(b"i", n), ba.count(b"i", n), ba.rfind(b"i", n)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn_fullgraph(bytearray(b"mississippi"), 5)
+
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
         # operator.iadd on the live bytearray, then skip-to-eager ran += again.
