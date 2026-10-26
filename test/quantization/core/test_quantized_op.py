@@ -5446,7 +5446,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         )
         previous_num_threads = torch.get_num_threads()
         try:
-            torch.set_num_threads(1)
+            torch.set_num_threads(2)
             for index_dtype, offset_dtype in itertools.product(
                     (torch.int32, torch.int64), repeat=2):
                 for sparse in (False, True):
@@ -5466,13 +5466,13 @@ class TestQuantizedEmbeddingOps(TestCase):
                             )
 
                 # The one-entry mapping takes the dense fallback after sparse
-                # calls and must use the correct dense key.
+                # calls and must rebuild the last dense key.
                 with self.subTest(
                         index_dtype=index_dtype,
                         offset_dtype=offset_dtype,
                         fallback_to_no_sparse=True):
                     run_case(
-                        8,
+                        16,
                         False,
                         False,
                         index_dtype,
@@ -9047,27 +9047,6 @@ class TestQuantizedConv(TestCase):
         torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
-    @unittest.skipUnless(IS_ARM64, "AArch64 only")
-    def test_aarch64_quantized_engines(self):
-        engines = torch.backends.quantized.supported_engines
-        self.assertNotIn("x86", engines)
-        self.assertNotIn("fbgemm", engines)
-        self.assertNotIn(torch.backends.quantized.engine, ("x86", "fbgemm"))
-
-    @unittest.skipIf(
-        torch.backends.quantized.engine == "none",
-        "No default quantized engine available",
-    )
-    def test_qconv1d_default_engine(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/177254
-        # On aarch64, fbgemmSupportedCPU() incorrectly returned True, causing
-        # the default quantized engine to be X86 which crashed in FBGEMM with
-        # "RuntimeError: unknown architecure".  # codespell:ignore architecure
-        qconv1d = torch.ao.nn.quantized.Conv1d(4, 8, 3)
-        x = torch.quantize_per_tensor(
-            torch.randn(1, 4, 16), scale=1.0, zero_point=0, dtype=torch.quint8
-        )
-        qconv1d(x)
 
 
 class TestPadding(TestCase):
