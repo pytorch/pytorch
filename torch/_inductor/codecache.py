@@ -21,6 +21,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -4020,6 +4021,97 @@ def _resolve_needs_vec_isa(
     return any(marker in source for marker in _VEC_ISA_CPP_SOURCE_MARKERS)
 
 
+@functools.cache
+def _relocatable_roots() -> tuple[str, ...]:
+    """The torch and Python install roots, which move when a packaged job does.
+
+    These are the torch root, the Python prefixes and the sysconfig paths that
+    belong to the Python installation. ``scripts`` is left out, since with a
+    system Python it is a shared directory such as ``/usr/local/bin``; in a venv
+    or conda environment it lies under ``sys.prefix`` anyway. System prefixes
+    such as ``/usr`` are not roots: they hold headers and toolchains of their
+    own that do not move with the package. Anything under a root, a compiler in
+    an environment's ``bin`` included, is compared by relative path only.
+    """
+    paths = sysconfig.get_paths()
+    roots = dict.fromkeys(
+        normalize_path_separator(root)
+        for root in (
+            os.path.dirname(os.path.dirname(torch.__file__)),
+            sys.prefix,
+            sys.base_prefix,
+            *(
+                paths.get(name)
+                for name in (
+                    "purelib",
+                    "platlib",
+                    "include",
+                    "platinclude",
+                    "data",
+                    "stdlib",
+                    "platstdlib",
+                )
+            ),
+        )
+        # A relative root would match inside unrelated absolute paths.
+        if root and os.path.isabs(root)
+    )
+    for system in ("/", "/usr", "/usr/local"):
+        roots.pop(system, None)
+    # Longest first, so a root nested in another is replaced before its parent.
+    return tuple(sorted(roots, key=len, reverse=True))
+
+
+@functools.cache
+def _root_pattern(roots: tuple[str, ...]) -> re.Pattern[str] | None:
+    if not roots:
+        return None
+    alternatives = "|".join(re.escape(root) for root in roots)
+    # Whole roots only: a root starts after the start, whitespace, a quote, ``=``,
+    # a list separator, ``-I``, ``-L``, ``-isystem`` or ``-B``, and ends at a path or list separator,
+    # quote, space or the end.
+    start = r"(?:^|(?<=[\s\"'=,:;])|(?<=-I)|(?<=-L)|(?<=-isystem)|(?<=-B))"
+    return re.compile(start + f"(?:{alternatives})" + r"(?=[/\\\s\"',:;]|$)")
+
+
+def _strip_relocatable_roots(text: str) -> str:
+    """Replace whole install-root path prefixes in ``text`` with a placeholder."""
+    pattern = _root_pattern(_relocatable_roots())
+    return text if pattern is None else pattern.sub("<install>", text)
+
+
+def _portable_cpp_key(sources: Sequence[str], command_lines: Sequence[str]) -> str:
+    """Name a C++ build by what it compiles, not by where torch is installed.
+
+    The cache key hashes command lines full of install paths, and a packaged job
+    extracts to a fresh directory on every launch. Precompile artifacts freeze
+    their C++ kernels under this key instead, so a later launch of the same build
+    finds them. It is not used for the shared on-disk cache, where the install
+    path still separates builds that torch_key() cannot tell apart.
+
+    Only the command lines lose their install roots: their paths matter only at
+    build time. A path in a source is compiled into the binary, so the sources
+    are hashed as they are.
+
+    The compiler is named by its path in the command line, with the roots
+    stripped like any other path, and not by the serving host's compiler
+    version: a different compiler at the same place under a root is not
+    detected. The command line still carries
+    the vector ISA flags the host resolves, so a host with a different ISA gets a
+    different key and rebuilds.
+    """
+    identity = (
+        torch_key().hex(),
+        f"{sys.implementation.cache_tag}{sysconfig.get_config_var('EXT_SUFFIX')}",
+    )
+    hasher = hashlib.sha256()
+    stripped = (_strip_relocatable_roots(line) for line in command_lines)
+    for part in (*identity, *sources, *stripped):
+        hasher.update(part.encode())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
 @clear_on_fresh_cache
 class CppCodeCache:
     """Compiles and caches C++ libraries.  Users of this class supply the source code to
@@ -4029,6 +4121,9 @@ class CppCodeCache:
     # Shared by subclasses and never cleared: a key hashes the source and build
     # command, and every miss rewrites its entry for the current cache directory.
     _binary_paths: dict[str, str] = {}
+    # Shared by subclasses: the relocation-independent key precompile freezes a
+    # binary under, for each cache key.
+    _portable_keys: dict[str, str] = {}
 
     @staticmethod
     def cache_clear() -> None:
@@ -4149,7 +4244,6 @@ class CppCodeCache:
         key, main_path = write(
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
         )
-
         # Don't bother writing if the argument is empty.
         if optimized_code:
             _, optimized_path = write(
@@ -4159,24 +4253,34 @@ class CppCodeCache:
             # Unused, but makes type checkers happy.
             optimized_path = os.devnull
 
+        def portable_key() -> str:
+            # Only precompile reads it, so it is computed on demand.
+            if key not in cls._portable_keys:
+                cls._portable_keys[key] = _portable_cpp_key(
+                    (main_code, optimized_code or ""),
+                    (main_cmd_line, optimized_cmd_line),
+                )
+            return cls._portable_keys[key]
+
+        from torch.compiler._runtime_cache import (
+            has_frozen_cpp_kernel,
+            has_frozen_cpp_kernels,
+            is_capturing,
+            record_cpp_kernel,
+            restore_cpp_kernel,
+        )
+
         if key not in cls.cache:
-            from torch.compiler._runtime_cache import (
-                has_frozen_cpp_kernel,
-                restore_cpp_kernel,
-            )
             from torch.utils._filelock import FileLock
 
+            frozen = has_frozen_cpp_kernels() and has_frozen_cpp_kernel(portable_key())
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
 
             # if requested, pre-compile any headers. A frozen binary is restored
             # below and never built, so it needs no header.
-            if (
-                config.cpp_cache_precompile_headers
-                and not _IS_WINDOWS
-                and not has_frozen_cpp_kernel(key)
-            ):
+            if config.cpp_cache_precompile_headers and not _IS_WINDOWS and not frozen:
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -4226,7 +4330,7 @@ class CppCodeCache:
                     output_dir=output_dir,
                 )
 
-                worker_fn = functools.partial(
+                worker_fn: Callable[[], None] = functools.partial(
                     _worker_compile_cpp,
                     lock_path,
                     (main_builder, optimized_builder, linker),
@@ -4240,8 +4344,22 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
+            # Served from a directory of its own, so the frozen binary never
+            # stands in for this build in the shared cache. A binary uninstalled
+            # since the check above is built as usual.
+            restored = (
+                restore_cpp_kernel(
+                    portable_key(),
+                    os.path.join(cache_dir(), "precompile_cpp"),
+                    os.path.splitext(binary_path)[1],
+                )
+                if frozen
+                else None
+            )
+            if restored is not None:
+                binary_path = normalize_path_separator(restored)
+                worker_fn = _frozen_cpp_binary_ready
             cls._binary_paths[key] = binary_path
-            restore_cpp_kernel(key, binary_path)
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -4267,14 +4385,17 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
-        from torch.compiler._runtime_cache import record_cpp_kernel
-
-        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
+        if is_capturing():
+            record_cpp_kernel(portable_key(), cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
     def load(cls, *args: Any, **kwargs: Any) -> Any:
         return cls.load_async(*args, **kwargs)()
+
+
+def _frozen_cpp_binary_ready() -> None:
+    """A restored frozen binary needs no build."""
 
 
 def _worker_compile_cpp(

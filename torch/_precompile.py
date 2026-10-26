@@ -318,7 +318,8 @@ __all__: list[str] = []
 # code_hash) to reject a foreign / mismatched cache; see Note [precompile programming
 # model], invariant 7.
 _CACHE_FORMAT = "torch.compiler.precompile"
-_CACHE_VERSION = 1
+# 2: frozen C++ kernels are keyed by CppCodeCache's portable key.
+_CACHE_VERSION = 2
 
 
 # Index into the caller's positional nn.Module arguments (0-based over the modules,
@@ -3554,11 +3555,19 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by their full build command, which includes
-    the producer's absolute PyTorch include and library paths, so they serve
-    only a host whose PyTorch install and toolchain paths match the producer's.
-    Any other host rebuilds them, which needs a C++ compiler there:
-    :func:`no_compilation` does not gate C++ builds.
+    Frozen C++ kernels are keyed by the torch version and a hash of the installed
+    torch sources, the Python ABI tag, the kernel source, and the build command
+    with the PyTorch and Python install roots removed, so they still serve
+    without being rebuilt after the same build is installed or extracted
+    somewhere else. Files under those roots are compared by relative path only:
+    a different compiler, OpenMP or CUDA under the same layout of a Python
+    environment is not detected. Loading one still resolves the C++ compiler and
+    the CPU's vector ISA to form that build command, which outside fbcode needs
+    a compiler on this host. A kernel whose key differs is rebuilt: for example,
+    when this host resolves a different vector ISA, or the build command names a
+    toolchain or CUDA path outside those roots that differs here. A rebuild needs
+    a C++ compiler on this host: :func:`no_compilation` does not gate C++
+    builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
