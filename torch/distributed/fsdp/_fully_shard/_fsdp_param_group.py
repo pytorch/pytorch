@@ -516,6 +516,14 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
+                if fsdp_param.can_view_shard:
+                    # The shard is the whole parameter, so the unsharded parameter
+                    # views it without allocating or copying (#201858)
+                    fsdp_param.init_unsharded_param(view_shard=True)
+                    continue
+                # TODO(#201858): With param_dtype or CPU offload, copy the shard
+                # straight into the output and let copy_ cast or move it, instead
+                # of copying a temporary that all_gather_inputs casts or moves.
                 all_gather_inputs = fsdp_param.all_gather_inputs
                 # Avoids building the lists once the outputs exist
                 if not fsdp_param.all_gather_outputs:
@@ -544,6 +552,7 @@ class FSDPParamGroup:
                         elif all_gather_input.dtype == torch.uint8:
                             tensor = tensor.view(torch.uint8)
                         tensor.copy_(all_gather_input)
+                fsdp_param.init_unsharded_param()
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
@@ -553,9 +562,8 @@ class FSDPParamGroup:
                     self._all_gather_process_group,
                     all_gather_output_fn=self._all_gather_output_fn,
                 )
-
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.init_unsharded_param()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.init_unsharded_param()
 
         self._to_unsharded()
         all_gather_copy_out_event = self.device_handle.Event()

@@ -439,6 +439,8 @@ def _get_param_all_gather_inputs(
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
+    # TODO(#201858): Cast straight into the all-gather input buffer instead of
+    # this temporary, which all_gather_copy_in then copies again.
     if foreach_copy_inputs:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
         param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
@@ -657,6 +659,8 @@ def foreach_reduce(
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
+            # TODO(#201858): Use reduce_scatter_input as reduce_output, dividing
+            # in place, instead of allocating a second buffer and copying.
             if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
