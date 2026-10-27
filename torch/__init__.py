@@ -841,11 +841,21 @@ class SymInt(
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
-    def __round__(self, ndigits: builtins.int | None = None) -> "SymInt":
+    def __round__(self, ndigits: "IntLikeType | None" = None) -> "SymInt":
         # Match int.__round__: ndigits None or non-negative is the identity,
         # a negative ndigits rounds to a multiple of 10 ** -ndigits, half to
         # even (round(25, -1) == 20, round(35, -1) == 40).
-        if ndigits is None or ndigits >= 0:
+        if ndigits is None:
+            return self
+        if not isinstance(ndigits, (builtins.int, SymInt)):
+            raise TypeError(
+                f"'{type(ndigits).__name__}' object cannot be interpreted as an integer"
+            )
+        # The sign of ndigits selects the code path, so a symbolic ndigits is
+        # specialized here (a guard, or a data-dependent error if unbacked)
+        # rather than traced symbolically.
+        ndigits = builtins.int(ndigits)
+        if ndigits >= 0:
             return self
         m = 10 ** (-ndigits)
         q, r = self // m, self % m

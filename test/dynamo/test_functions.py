@@ -5445,7 +5445,7 @@ class GraphModule(torch.nn.Module):
             n = x.shape[0]
             return x.new_full((round(n, -1),), round(n * 5, -1)), round(n, -2)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = CompileCounterWithBackend("inductor")
         opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
         for n in (14, 15, 16, 25, 35, 105):
             x = torch.ones(n)

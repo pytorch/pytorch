@@ -711,6 +711,13 @@ class TestPySymInt(TestCase):
         self.assertEqual(len(shape_env.guards), 0)
         self.assertEqual(r, 20)
 
+        # A symbolic ndigits is specialized, and non-integers are rejected.
+        r = round(a0, create_symint(shape_env, -1, duck=False, positive=None))
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(r, 20)
+        with self.assertRaises(TypeError):
+            round(a0, 1.5)
+
         hints = (0, 4, 5, 6, 14, 15, 16, 25, 35, 99, 105, 1250, 1350)
         hints += (-5, -15, -25, -1250)
         for hint in hints:
