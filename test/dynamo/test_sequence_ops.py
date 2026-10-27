@@ -1660,6 +1660,46 @@ class TestRangeCount(torch._dynamo.test_case.TestCase):
         x = torch.tensor(0)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    def test_int_subclass_uses_inherited_equality(self):
+        class IntSubclass(int):
+            pass
+
+        def fn(x):
+            return x + range(3).count(IntSubclass(1))
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + range(10).count(x.shape[0])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (3, 12):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_comparison_exception_propagates(self):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                if other == 2:
+                    raise RuntimeError("comparison failed")
+                return False
+
+        def fn():
+            try:
+                range(5).count(Match())
+            except RuntimeError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), [0, 1, 2]
+        )
+
     def test_changed_bounds_and_search_value(self):
         class EqualTo:
             def __init__(self, target):
@@ -1671,13 +1711,17 @@ class TestRangeCount(torch._dynamo.test_case.TestCase):
         def fn(x, values, needle):
             return x + values.count(needle)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         x = torch.zeros(3)
         needle = EqualTo(3)
         self.assertEqual(compiled(x, range(5), needle), x + 1)
+        self.assertEqual(counter.frame_count, 1)
         needle.target = 9
         self.assertEqual(compiled(x, range(5), needle), x)
+        self.assertEqual(counter.frame_count, 2)
         self.assertEqual(compiled(x, range(10, 0, -1), needle), x + 1)
+        self.assertEqual(counter.frame_count, 3)
 
 
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):

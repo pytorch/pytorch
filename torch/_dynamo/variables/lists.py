@@ -995,11 +995,10 @@ class RangeVariable(BaseListVariable):
         return r0.step() == r1.step()
 
     def range_count(self, x: VariableTracker) -> int:
-        # Based on CPython
-        # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
-        x = x.as_python_constant()
-        if type(x) not in (bool, int, float):
-            return 0
+        # `count` and `sq_contains_impl` only send exact ints and bools here;
+        # other needles use equality-based iteration.
+        # range_contains_long: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c#L436-L480
+        x = specialize_symnode(x).as_python_constant()
 
         start, stop, step = self.start(), self.stop(), self.step()
 
