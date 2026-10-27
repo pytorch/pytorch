@@ -589,6 +589,16 @@ class RuntimeFloat:
         value = sympy.sympify(self.value)
         return float(value) if value.is_number else self
 
+    @staticmethod
+    def symbolic_values(kwargs: dict[str, Any]) -> list[sympy.Expr]:
+        """Symbolic RuntimeFloat values in template kwargs, for symbol tracking."""
+        return [
+            value
+            for v in kwargs.values()
+            if isinstance(v, RuntimeFloat)
+            and not (value := sympy.sympify(v.value)).is_number
+        ]
+
 
 class TritonTemplateKernel(TritonKernel):
     """
@@ -3567,11 +3577,7 @@ class TritonTemplate(KernelTemplate):
                 result.store_output_fusion_allowed_inputs
             ),
             hint_override=hint_override,
-            runtime_float_values=[
-                sympy.sympify(v.value)
-                for v in kwargs.values()
-                if isinstance(v, RuntimeFloat)
-            ],
+            runtime_float_values=RuntimeFloat.symbolic_values(kwargs),
         )
 
 

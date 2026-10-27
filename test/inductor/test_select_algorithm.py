@@ -31,6 +31,7 @@ from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternalTritonTemplateKernel,
@@ -1835,6 +1836,30 @@ class TestTemplateRender(TestCase):
                     r"double pf\d+ = " if patches.get("cpp_wrapper") else r"pf\d+ = "
                 )
                 FileCheck().check_regex(host_decl).run(code)
+
+        # The FX wrapper derives the scale from the size symbol, and compile-time
+        # tuning launches the kernel with its float hint, not an integer one.
+        float_args = []
+        orig_run = CachingAutotuner.run
+
+        def run(self, *args, **kwargs):
+            float_args.extend(arg for arg in args if isinstance(arg, float))
+            return orig_run(self, *args, **kwargs)
+
+        torch._dynamo.reset()
+        counter = CompileCounterWithBackend("inductor")
+        fx_tuning = {"fx_wrapper": True, "triton.autotune_at_compile_time": True}
+        with (
+            config.patch(fx_tuning),
+            patch_lowering(make_lowering(symbolic=True)),
+            unittest.mock.patch.object(CachingAutotuner, "run", run),
+        ):
+            compiled = torch.compile(fn, backend=counter, dynamic=True)
+            for n in (100, 300):
+                a = torch.randn(n, device=GPU_TYPE)
+                self.assertEqual(compiled(a), a / math.sqrt(n) + 1)
+            self.assertEqual(counter.frame_count, 1)
+            self.assertIn(1 / math.sqrt(100), float_args)
 
         # Graph partitions receive the symbols of a scale that no template input
         # carries, here the length of the CPU tensor y.
