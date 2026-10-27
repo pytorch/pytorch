@@ -8,9 +8,9 @@ template <typename T>
 inline void cross_product(
     device T* out,
     long os,
-    constant T* x,
+    device const T* x,
     long xs,
-    constant T* y,
+    device const T* y,
     long ys) {
   out[0] = mul(x[xs], y[2 * ys]) - mul(x[2 * xs], y[ys]);
   out[os] = mul(x[2 * xs], y[0]) - mul(x[0], y[2 * ys]);
@@ -24,8 +24,8 @@ inline void cross_product(
 template <typename T>
 kernel void cross_dense(
     device T* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* other [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* other [[buffer(2)]],
     constant uint& dim_stride [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   uint base = tid + 2 * (tid / dim_stride) * dim_stride;
@@ -41,8 +41,8 @@ kernel void cross_dense(
 template <typename T>
 kernel void cross_strided(
     device T* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* other [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* other [[buffer(2)]],
     constant long* squashed_sizes [[buffer(3)]],
     constant long* out_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
@@ -75,15 +75,15 @@ kernel void cross_strided(
   template [[host_name("cross_dense_" #DTYPE)]] kernel void   \
   cross_dense<DTYPE>(                                         \
       device DTYPE * out [[buffer(0)]],                       \
-      constant DTYPE * input [[buffer(1)]],                   \
-      constant DTYPE * other [[buffer(2)]],                   \
-      constant uint & dim_stride [[buffer(3)]],               \
+      device const DTYPE* input [[buffer(1)]],                \
+      device const DTYPE* other [[buffer(2)]],                \
+      constant uint& dim_stride [[buffer(3)]],                \
       uint tid [[thread_position_in_grid]]);                  \
   template [[host_name("cross_strided_" #DTYPE)]] kernel void \
   cross_strided<DTYPE>(                                       \
       device DTYPE * out [[buffer(0)]],                       \
-      constant DTYPE * input [[buffer(1)]],                   \
-      constant DTYPE * other [[buffer(2)]],                   \
+      device const DTYPE* input [[buffer(1)]],                \
+      device const DTYPE* other [[buffer(2)]],                \
       constant long* squashed_sizes [[buffer(3)]],            \
       constant long* out_strides [[buffer(4)]],               \
       constant long* input_strides [[buffer(5)]],             \
