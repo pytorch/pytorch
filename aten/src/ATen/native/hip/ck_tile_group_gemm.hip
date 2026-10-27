@@ -7,6 +7,7 @@
 #include <ck_tile/host.hpp>
 #include <ck_tile/ops/epilogue.hpp>
 #include <ck_tile/ops/gemm.hpp>
+#include <ATen/native/hip/ck_tile_group_gemm_utils.h>
 
 #include <array>
 #include <cstdint>
@@ -89,11 +90,8 @@ namespace at::hip::detail {
                 ALayout, BLayout, CLayout
             >;
 
-            using PipelineProblem = ck_tile::UniversalGemmPipelineProblem<
-                DataType, DataType, AccDataType, GemmShape, GemmTraits,
-                ck_tile::GemmPipelineScheduler::Intrawave,
-                PassThrough, PassThrough, DataType, DataType,
-                Config::FixedVectorSizeAB, Config::VectorSizeAB, Config::VectorSizeAB
+            using PipelineProblem = ck_tile_group_gemm::PipelineProblem<
+                DataType, AccDataType, GemmShape, GemmTraits, Config::FixedVectorSizeAB, Config::VectorSizeAB
             >;
 
             using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;

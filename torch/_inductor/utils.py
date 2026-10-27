@@ -57,6 +57,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -402,6 +403,39 @@ def _constexpr_type_repr_prefix(value: object) -> str | None:
     return None
 
 
+def sanitize_constexpr_for_repr(
+    value: object, *, canonicalize_namedtuples: bool = True
+) -> object:
+    """Prepare constexpr reprs with Enum values and collision-safe NamedTuples."""
+    if isinstance(value, enum.Enum):
+        return sanitize_constexpr_for_repr(
+            value.value, canonicalize_namedtuples=canonicalize_namedtuples
+        )
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        children = tuple(
+            sanitize_constexpr_for_repr(
+                child, canonicalize_namedtuples=canonicalize_namedtuples
+            )
+            for child in repr_children.values
+        )
+        unchanged = all(
+            child is original for child, original in zip(children, repr_children.values)
+        )
+        if canonicalize_namedtuples and pytree.is_namedtuple_instance(value):
+            cls = cast(type[NamedTuple], type(value))
+            helper_type = namedtuple_type(cls.__name__, tuple(cls._fields))
+            if cls is helper_type and unchanged:
+                return value
+            return helper_type(*children)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if unchanged:
+            return value
+        return repr_children.rebuild(children)
+    return value
+
+
 def _collect_importable_constexpr_types(
     value: object,
     result: dict[str, ImportableConstexprType],
@@ -410,6 +444,16 @@ def _collect_importable_constexpr_types(
     if id(value) in seen:
         return
     seen.add(id(value))
+
+    # NamedTuple tl.constexpr values are reconstructed by
+    # namedtuple_helpers.namedtuple_type (pickle-safe, works for __main__).
+    # Do not emit a user-module import for them.
+    if pytree.is_namedtuple_instance(value):
+        repr_children = get_constexpr_repr_children(value)
+        if repr_children is not None:
+            for child in repr_children.values:
+                _collect_importable_constexpr_types(child, result, seen)
+        return
 
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
@@ -447,7 +491,11 @@ def _collect_importable_constexpr_types(
                         "evaluated as a constructor call. Set repr=False or init=True."
                     )
         root_name = type_qualname.split(".", 1)[0]
-        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+        # Structural NamedTuple aliases are emitted before user-type imports.
+        # Reserve their namespace so an import cannot replace an emitted type.
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES or root_name.startswith(
+            "_NamedTuple_"
+        ):
             raise ImportError(
                 "Triton constexpr value type "
                 f"{type_module}.{type_qualname} requires import name {root_name}, "
@@ -2112,13 +2160,19 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.cache
 def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
         device = torch.device(get_gpu_type(), index_or_device)
 
+    # Resolve the threshold outside of the cache so that changing
+    # config.max_autotune_gemm_min_sms after the first call takes effect.
+    return _is_big_gpu(device, config.max_autotune_gemm_min_sms)
+
+
+@functools.cache
+def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
     prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
@@ -2131,7 +2185,9 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = min_sms_override
+    if min_sms is None:
+        min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -3612,19 +3668,34 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    from .codecache import PyCodeCache
+
     remove_quote = kwargs.pop("remove_quote", False)
-    # pyrefly: ignore [bad-argument-type]
-    result, source_codes = run_and_get_code(fn, *args, **kwargs)
-    kernels = []
+    # A module-level kernel's def is renamed and its benchmark harness cut, so take the
+    # source it is compiled from, which every load of a wrapper passes, cache hits too.
+    # Keyed by wrapper: one wrapper can be loaded more than once.
+    module_level: dict[str, list[str]] = {}
+    orig_load = PyCodeCache.load_by_key_path
+
+    def load(key: str, *load_args: Any, **load_kwargs: Any) -> Any:
+        if kernel_sources := load_kwargs.get("kernel_sources"):
+            module_level[key] = [src.strip() for _, src in kernel_sources.values()]
+        return orig_load(key, *load_args, **load_kwargs)
+
+    with mock.patch.object(PyCodeCache, "load_by_key_path", load):
+        # pyrefly: ignore [bad-argument-type]
+        result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels: list[str] = []
     for code in source_codes:
         if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
         else:
-            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
-        if remove_quote:
-            kernels = [kernel[3:-3] for kernel in kernels]
+            scraped = re.findall(r"'''.*?'''", code, re.DOTALL)
+            kernels.extend(k[3:-3] if remove_quote else k for k in scraped)
+    for sources in module_level.values():
+        kernels.extend(sources)
     return result, kernels
 
 
@@ -5845,6 +5916,12 @@ def forwarded_cuda_compile_options() -> list[str]:
 
 def tlx_only_hip_options() -> list[str]:
     return _tlx_registry_options("tlx_only_hip_options")
+
+
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP compiler options forwarded to Triton."""
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
 
 
 def _round_up(x: int, y: int) -> int:

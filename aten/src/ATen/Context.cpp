@@ -666,6 +666,9 @@ bool Context::ckSDPASupported() {
 bool Context::ckGemmSupported() {
 #ifdef USE_ROCM
   // CK GEMM support is broader than CK SDPA.
+  // Keep in sync with torch_filter_ck_gemm_arches (cmake/public/utils.cmake),
+  // which restricts the ck_gemm build to these archs, and the runtime dispatch
+  // in aten/src/ATen/native/hip/ck_gemm_{half,bfloat16}.hip.
   static const std::vector<std::string> supported_archs = {
       "gfx90a",
       "gfx942",

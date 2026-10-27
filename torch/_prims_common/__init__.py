@@ -1061,6 +1061,45 @@ _low_precision_dtypes = (
 _complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
 
 
+# Shell dtypes with no defined value conversion. Mirrors c10::isShellType and
+# the eager check in aten/src/ATen/native/Copy.cpp so tracing rejects the same
+# casts.
+_uncastable_shell_dtypes = frozenset(
+    (
+        torch.float4_e2m1fn_x2,
+        torch.bits1x8,
+        torch.bits2x4,
+        torch.bits4x2,
+        torch.bits8,
+        torch.bits16,
+        *(getattr(torch, f"uint{i}") for i in range(1, 8)),
+        *(getattr(torch, f"int{i}") for i in range(1, 8)),
+    )
+)
+
+
+def check_shell_dtype_cast(src: torch.dtype, dst: torch.dtype) -> None:
+    if src == dst or not (
+        src in _uncastable_shell_dtypes or dst in _uncastable_shell_dtypes
+    ):
+        return
+    if torch.float4_e2m1fn_x2 in (src, dst):
+        raise NotImplementedError(
+            f"Casting from {src} to {dst} is not supported. "
+            "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+            "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+            "the nibbles (low 4 bits are the first element, high 4 bits the "
+            "second); to encode, pack fp4 codes into torch.uint8 and "
+            ".view(torch.float4_e2m1fn_x2)."
+        )
+    shell = src if src in _uncastable_shell_dtypes else dst
+    raise NotImplementedError(
+        f"Casting from {src} to {dst} is not supported: {shell} is a shell dtype "
+        "with no defined conversions. Use .view() to reinterpret the bytes as a "
+        "same-size integer dtype instead."
+    )
+
+
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")

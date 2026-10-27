@@ -1,4 +1,5 @@
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/functional.h>
 #include <c10/core/SafePyObject.h>
@@ -668,6 +669,9 @@ struct AutocastState {
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
+  // Excluded autocast dispatch keys, equivalent to `enabled` but checkable in
+  // one mask compare.
+  c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -675,22 +679,26 @@ struct AutocastState {
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
     cache_enabled = at::autocast::is_autocast_cache_enabled();
+    disabled_keys = c10::impl::tls_local_dispatch_key_set().excluded_ &
+        c10::autocast_dispatch_keyset;
   }
 
-  bool operator==(const AutocastState& o) const {
-    for (size_t i = 0; i < DEVICES.size(); i++) {
-      // If disabled audocast, autocast_dtype comparison not occur
-      if (enabled[i] == false && o.enabled[i] == false) {
-        continue;
-      }
-      if (enabled[i] != o.enabled[i] || dtype[i] != o.dtype[i]) {
+  // Compares all enabled flags at once via the TLS excluded set, and only
+  // fetches dtypes for enabled devices.
+  bool matches_current() const {
+    const auto& excluded{c10::impl::tls_local_dispatch_key_set().excluded_};
+    if ((excluded & c10::autocast_dispatch_keyset) != disabled_keys) {
+      return false;
+    }
+
+    for (size_t i{0}; i < DEVICES.size(); ++i) {
+      if (enabled[i] &&
+          dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
       }
     }
-    if (cache_enabled != o.cache_enabled) {
-      return false;
-    }
-    return true;
+
+    return cache_enabled == at::autocast::is_autocast_cache_enabled();
   }
 
   std::string reason(const AutocastState& o) const {
@@ -724,6 +732,16 @@ struct AutocastState {
     json_t.enabled = json_j.at("enabled");
     json_t.dtype = json_j.at("dtype");
     json_t.cache_enabled = json_j.at("cached_enabled");
+
+    // Rebuild disabled_keys from enabled
+    json_t.disabled_keys = c10::DispatchKeySet();
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (!json_t.enabled[i]) {
+        json_t.disabled_keys = json_t.disabled_keys.add(
+            at::autocast::get_autocast_dispatch_key_from_device_type(
+                DEVICES[i]));
+      }
+    }
   }
 };
 
@@ -767,7 +785,7 @@ struct GlobalStateGuard {
   bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
-            _autocast_state == AutocastState() &&
+            _autocast_state.matches_current() &&
             _torch_function == torch::torch_function_enabled() &&
             _torch_function_all_disabled ==
                 at::impl::torch_function_all_disabled() &&
@@ -786,9 +804,8 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    AutocastState current_autocast;
-    if (!(_autocast_state == current_autocast))
-      os << _autocast_state.reason(current_autocast);
+    if (!_autocast_state.matches_current())
+      os << _autocast_state.reason(AutocastState{});
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())
@@ -2698,6 +2715,54 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
  private:
   int64_t _level;
   py::object forward_ad_module;
+};
+
+// Checks if the autograd saved tensor hooks have changed.
+class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
+ public:
+  AUTOGRAD_SAVED_TENSORS_HOOKS(
+      RootGuardManager* root_guard_manager,
+      py::object graph_module_type_obj,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard{root_guard_manager, std::move(verbose_code_parts), std::move(user_stack)},
+        graph_module_type{py::cast<py::type>(std::move(graph_module_type_obj))},
+        guard_hooks_ids{get_guard_hooks_ids()} {}
+
+  bool check_nopybind(PyObject* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return guard_hooks_ids == get_guard_hooks_ids();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return guard_hooks_ids == get_guard_hooks_ids();
+  }
+
+ private:
+  py::type graph_module_type;
+  std::array<PyObject*, 2> guard_hooks_ids;
+
+  std::array<PyObject*, 2> get_guard_hooks_ids() {
+    auto hooks{at::SavedTensorDefaultHooks::get_hooks(true)};
+    if (!hooks) {
+      return {};
+    }
+
+    auto is_graph_module{[&](PyObject* o) {
+      return PyType_IsSubtype(
+          Py_TYPE(o), reinterpret_cast<PyTypeObject*>(graph_module_type.ptr()));
+    }};
+    auto* pack{hooks->first.ptr(&hooks->first.pyinterpreter())};
+    auto* unpack{hooks->second.ptr(&hooks->second.pyinterpreter())};
+    if (!is_graph_module(pack) || !is_graph_module(unpack)) {
+      return {};
+    }
+
+    // This is safe since we're not accessing the contents of these pointers,
+    // only the contained address.
+    return std::array<PyObject*, 2>{pack, unpack};
+  }
 };
 
 /**
@@ -7972,6 +8037,13 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DUAL_LEVEL_MATCH")
       .def(py::init<RootGuardManager*, int64_t, py::list, py::object>())
       .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<
+      AUTOGRAD_SAVED_TENSORS_HOOKS,
+      LeafGuard,
+      std::shared_ptr<AUTOGRAD_SAVED_TENSORS_HOOKS>>(
+      py_m, "AUTOGRAD_SAVED_TENSORS_HOOKS")
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
+      .def("__call__", &AUTOGRAD_SAVED_TENSORS_HOOKS::check);
   py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
       py_m, "FLOAT_IS_NAN")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -8479,6 +8551,18 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
                 self.get_root(),
                 level,
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_autograd_saved_tensors_hooks_guard",
+          [](GuardManager& self,
+             py::object graph_module_type,
+             py::object verbose_code_parts,
+             py::object user_stack) {
+            self.add_leaf_guard(std::make_shared<AUTOGRAD_SAVED_TENSORS_HOOKS>(
+                self.get_root(),
+                std::move(graph_module_type),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
