@@ -62,7 +62,8 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         t = data.detach().requires_grad_(requires_grad)
         # detach() on a C++ fake Parameter returns a plain Tensor, which gets the
         # marker below.
-        if type(t) is not type(data) and not torch._C._is_fake_tensor(data):
+        cpp_fake_param = type(data) is Parameter and torch._C._is_fake_tensor(data)
+        if type(t) is not type(data) and not cpp_fake_param:
             raise RuntimeError(
                 f"Creating a Parameter from an instance of type {type(data).__name__} "
                 "requires that detach() returns an instance of the same type, but return "

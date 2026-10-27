@@ -638,6 +638,19 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(is_fake_tensor(tied))
         self.assertIsInstance(tied, torch.nn.Parameter)
 
+    def test_compile_module_with_fake_parameters(self):
+        # The parameter guards must accept the same fake parameters on later calls
+        mode = FakeTensorMode()
+        with mode:
+            m = torch.nn.Linear(4, 4)
+            x = torch.randn(2, 4)
+        cnt = torch._dynamo.testing.CompileCounter()
+        f = torch.compile(m, backend=cnt)
+        with mode:
+            for _ in range(3):
+                f(x)
+        self.assertEqual(cnt.frame_count, 1)
+
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
