@@ -2120,7 +2120,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the rebuilt guard compares against the sentinel forever: it
         # is refused by name, and pickle_guards_state re-raises that
         # PackageError unchanged as the bypass reason.
-        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+        from torch._C._distributed_c10d import Backend, ProcessGroup
+        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, Backend)

@@ -1041,6 +1041,14 @@ class SplittableBackend(dist.BackendBase):
         return SplittableBackend(ranks.index(self.rank()), len(ranks))
 
 
+class NoneOptionsBackend(SplittableBackend):
+    options = None
+
+    def split(self, store, ranks, opts):
+        self.split_opts = opts
+        return super().split(store, ranks, opts)
+
+
 class FieldOptions(dist.BackendBase.Options):
     def __init__(self, value):
         super().__init__("field-options")
@@ -1273,6 +1281,17 @@ class TestPyBackendSplitGroup(TestCase):
             self.assertEqual(t, torch.ones(2))
         finally:
             dist.destroy_process_group()
+
+    def test_split_group_none_options(self) -> None:
+        # options returning None makes ProcessGroup::splitGroup clone default
+        # Options instead of failing.
+        backend = NoneOptionsBackend(0, 1)
+        split = create_process_group(backend).split_group([0])
+        self.assertIsInstance(
+            split._get_backend(torch.device("cpu")), SplittableBackend
+        )
+        self.assertIs(type(backend.split_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.split_opts.backend, "splittable-python-backend")
 
 
 class TestPyBackendProcessGroup(MultiProcessTestCase):
