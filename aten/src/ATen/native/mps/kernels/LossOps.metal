@@ -446,6 +446,29 @@ struct smooth_l1_backward_functor {
   }
 };
 
+struct huber_backward_functor {
+  template <typename T, typename A>
+  inline T operator()(
+      const T input,
+      const T target,
+      const T grad,
+      const A delta) {
+    // Same branch order as the CPU kernel; the reduction's norm is already
+    // folded into grad by the host.
+    using op_t = c10::metal::opmath_t<T>;
+    const auto x = op_t(input) - op_t(target);
+    const auto g = op_t(grad);
+    const auto d = op_t(delta);
+    if (x <= -d) {
+      return static_cast<T>(-g * d);
+    }
+    if (x >= d) {
+      return static_cast<T>(g * d);
+    }
+    return static_cast<T>(x * g);
+  }
+};
+
 #define INSTANTIATE_CTC_LOSS(T, T_target, T_index)                  \
   template [[host_name("ctc_loss_" #T "_" #T_target "_" #T_index)]] \
   kernel void ctc_loss<T, T_target, T_index>(                       \
@@ -560,3 +583,7 @@ REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, int, int, int);
 REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, short, short, short);
 REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, char, char, char);
 REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, uchar, uchar, uchar);
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, bfloat, float, bfloat);
