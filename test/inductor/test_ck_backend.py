@@ -86,10 +86,10 @@ def _addmm_mismatch_report(fn, x, a, b, Y_compiled, Y_eager):
     return "\n".join(
         [
             "=== addmm mismatch triage ===",
-            f"device {p.name} {p.gcnArchName} CUs={p.multi_processor_count} mem={p.total_memory / 2**30:.1f}GiB pci={p.pci_domain_id:04x}:{p.pci_bus_id:02x}:{p.pci_device_id:02x} sysfs={sysfs}",  # noqa: B950
+            f"device {p.name} {p.gcnArchName} CUs={p.multi_processor_count} mem={p.total_memory / 2**30:.1f}GiB pci={p.pci_domain_id:04x}:{p.pci_bus_id:02x}:{p.pci_device_id:02x} sysfs={sysfs}",
             f"host boot epoch {time.time() - time.monotonic():.0f}",
             f"vs fp32 reference: compiled bad={nbad(Y_compiled, ref)} eager bad={nbad(Y_eager, ref)}",
-            f"repeat: compiled identical={torch.equal(Y_compiled, Y_compiled2)} eager identical={torch.equal(Y_eager, Y_eager2)}",  # noqa: B950
+            f"repeat: compiled identical={torch.equal(Y_compiled, Y_compiled2)} eager identical={torch.equal(Y_eager, Y_eager2)}",
             f"compiled-vs-eager mismatches={len(bad)} first={bad[:8].tolist()} 128x128 tiles={tiles[:16]}",
             f"cross-XCC coherence probe: {stale}/100 iterations stale",
         ]
