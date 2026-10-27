@@ -2582,8 +2582,6 @@ def _export_for_training(
         leak_sources: list[str] = []
         if len(legit_leak) > 0:
             for fake_val in legit_leak:
-                if not isinstance(fake_val, torch.Tensor):
-                    continue
                 if id(fake_val) in _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT:
                     node = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(fake_val)]
                     stack_trace = node.meta.get("stack_trace")
