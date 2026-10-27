@@ -223,11 +223,11 @@ class BenchmarkJob:
         # propagated -- documented in snapshot_settings.
         for name, value in self.settings.items():
             getattr(tunable, name)(value)
-        # TunableOp cannot tune under graph capture. Both flags: the bmreq was
-        # built in the parent where config_cudagraph_benchmarking may be
-        # snapshotted True (ROCm max-autotune), and benchmark_run_fn captures
-        # if either is set -- the warm call would then tune nothing and record
-        # nothing, silently.
+        # TunableOp cannot tune under graph capture, and benchmark_run_fn
+        # captures if either flag is set. config_cudagraph_benchmarking is
+        # snapshotted in the parent from max_autotune, so clearing only the
+        # other one still leaves the tuning in an eager warmup whose time is
+        # thrown away, and returns graph-replay time instead.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
 
@@ -403,16 +403,27 @@ _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
     ("wildcard_fallback_is_enabled", "wildcard_fallback_enable"),
 )
 
-# Getters whose units differ from the matching setter's.
-# get_rotating_buffer_size reports bytes (the L2 size when unset) while the
-# setter takes MB, so stamping the raw value squares the scale: a 4 MiB L2
-# becomes 2**42, truncates to 0, and silently tunes with no rotating buffer.
+
+def _rotating_buffer_mb(value: int, device: int) -> int:
+    """Convert get_rotating_buffer_size()'s bytes to the MB the setter wants.
+
+    The getter reports the device's L2 size when the knob is unset, so a plain
+    conversion would replace the "use L2" policy with a rounded-down constant --
+    and with 0, which TunableOp reads as no rotation at all, when L2 is under
+    1 MiB. Any negative value restores "use L2".
+    """
+    if value == torch.cuda.get_device_properties(device).L2_cache_size:
+        return -1
+    return value // (1024 * 1024)
+
+
+# Getters whose units differ from the matching setter's: (value, device) -> value.
 _SETTING_CONVERSIONS: dict[str, Any] = {
-    "set_rotating_buffer_size": lambda v: v // (1024 * 1024),
+    "set_rotating_buffer_size": _rotating_buffer_mb,
 }
 
 
-def snapshot_settings() -> dict[str, Any]:
+def snapshot_settings(device: int) -> dict[str, Any]:
     """Read the parent's tuning knobs for stamping onto the job.
 
     The worker is long-lived and keyed only on (device, filename), so it never
@@ -426,7 +437,7 @@ def snapshot_settings() -> dict[str, Any]:
         try:
             value = getattr(tunable, getter)()
             convert = _SETTING_CONVERSIONS.get(setter)
-            settings[setter] = convert(value) if convert else value
+            settings[setter] = convert(value, device) if convert else value
         except Exception:
             log.debug("TunableOp setting snapshot failed for %s", getter)
     return settings
@@ -480,7 +491,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         job.filename = resolve_filename(device)
         # Stamp the parent's tuning knobs for the same reason: process-global
         # C++ state does not cross the pipe.
-        job.settings = snapshot_settings()
+        job.settings = snapshot_settings(device)
     except Exception as e:  # resolve before the worker: no restart
         # Failed before the worker was involved (no device, no filename): report
         # without touching it. Shutting down here would kill a healthy worker
