@@ -882,7 +882,9 @@ class CachingAutotuner(KernelInterface):
         )
 
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
-        self._forward_use = self._forward_use or not is_backward
+        # Only ever set, so a concurrent backward compile cannot clear it.
+        if not is_backward:
+            self._forward_use = True
         self.compile_id = compile_id
         self.is_backward = is_backward
 
