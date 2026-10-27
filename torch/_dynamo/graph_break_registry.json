@@ -291,6 +291,16 @@
       "Hints": []
     }
   ],
+  "GB0580": [
+    {
+      "Gb_type": "Dictionary mutated during iteration",
+      "Context": "str(error)",
+      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0018": [
     {
       "Gb_type": "Attempted to wrap unbacked SymInt",
@@ -3673,6 +3683,16 @@
       ]
     }
   ],
+  "GB8395": [
+    {
+      "Gb_type": "mapping proxy of class with pending attribute mutation",
+      "Context": "class: {vt.value}",
+      "Explanation": "The class __dict__ does not reflect class attributes set earlier in the traced code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0206": [
     {
       "Gb_type": "setattr() on Tensor.requires_grad",
@@ -6107,16 +6127,6 @@
       "Explanation": "Dynamo cannot safely export COW-state-dependent control flow because COW state is not represented in the exported graph.",
       "Hints": [
         "Avoid checking COW state inside torch.export regions."
-      ]
-    }
-  ],
-  "GB4592": [
-    {
-      "Gb_type": "Dictionary mutated during comparison",
-      "Context": "str(error)",
-      "Explanation": "Dynamo cannot trace dictionary comparison that changes its keys.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
