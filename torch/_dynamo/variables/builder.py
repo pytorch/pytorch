@@ -3890,7 +3890,6 @@ class VariableBuilder:
             )
 
         fake_tensor_value = example_value
-        # type: ignore[attr-defined]
         fake_mode = maybe_get_fake_mode(fake_tensor_value)
         if fake_mode is not self.tx.fake_mode:
             raise AssertionError(
@@ -3996,7 +3995,6 @@ class VariableBuilder:
                 )
 
             fake_tensor_value = example_value
-            # type: ignore[attr-defined]
             fake_mode = maybe_get_fake_mode(fake_tensor_value)
             if fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
