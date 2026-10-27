@@ -200,7 +200,6 @@ bool isCopyApi(uint32_t id) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbolAsync:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyWithStream:
       return true;
-      break;
     default:;
   }
   return false;
@@ -222,7 +221,6 @@ bool isKernelApi(uint32_t id) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipLaunchCooperativeKernel_spt:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipLaunchKernel_spt:
       return true;
-      break;
     default:;
   }
   return false;
@@ -234,7 +232,6 @@ bool isMallocApi(uint32_t id) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMalloc:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipFree:
       return true;
-      break;
     default:;
   }
   return false;
