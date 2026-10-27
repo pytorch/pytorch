@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import copy
-import functools
 import glob
 import importlib
 import importlib.abc
@@ -592,11 +591,9 @@ def _pick_cudnn_version(
     return max(same_major)[1]
 
 
-@functools.cache
 def _resolve_cudnn_dirs() -> _CudnnDirs:
     # Windows cuDNN 9 for CUDA 13+ nests include and lib under one
-    # <major.minor>. Linux call sites keep their old flat paths. Tests that
-    # change CUDNN_HOME or the tree call cache_clear().
+    # <major.minor>. Linux call sites keep their old flat paths.
     home = CUDNN_HOME
     if not IS_WINDOWS or home is None:
         return _CudnnDirs(None, None)

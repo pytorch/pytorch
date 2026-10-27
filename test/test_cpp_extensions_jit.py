@@ -31,6 +31,7 @@ from torch.utils.cpp_extension import (
     check_compiler_is_gcc,
     CUDA_HOME,
     get_cxx_compiler,
+    IS_HIP_EXTENSION,
     remove_extension_h_precompiler_headers,
     ROCM_HOME,
 )
@@ -200,9 +201,12 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
         with open(os.path.join(lib, "cudnn.lib"), "w"):
             pass
 
-    def _cudnn_dirs(self, cpp):
-        cpp._resolve_cudnn_dirs.cache_clear()
-        return cpp._resolve_cudnn_dirs()
+    def _selected_cudnn(self, cpp, root, cuda):
+        with (
+            mock.patch.object(cpp, "CUDNN_HOME", root),
+            mock.patch("torch.version.cuda", cuda),
+        ):
+            return cpp._resolve_cudnn_dirs()
 
     @unittest.skipIf(not IS_WINDOWS, "versioned cuDNN layout is Windows-only")
     def test_cudnn_version_preference(self):
@@ -212,59 +216,30 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
         with tempfile.TemporaryDirectory() as root:
             for version in ("11.8", "12.9", "13.0", "13.2", "13.10"):
                 self._write_cudnn_version(root, version)
-            with (
-                mock.patch.object(cpp, "CUDNN_HOME", root),
-                mock.patch.object(cpp, "CUDA_HOME", root),
-                mock.patch("torch.version.cuda", "12.6"),
-            ):
-                dirs = self._cudnn_dirs(cpp)
-                arch = cpp._windows_arch()
-                self.assertEqual(
-                    dirs.include, os.path.join(root, "include", "12.9")
-                )
-                self.assertEqual(
-                    dirs.library, os.path.join(root, "lib", "12.9", arch)
-                )
+            dirs = self._selected_cudnn(cpp, root, "12.6")
+            arch = cpp._windows_arch()
+            self.assertEqual(dirs.include, os.path.join(root, "include", "12.9"))
+            self.assertEqual(dirs.library, os.path.join(root, "lib", "12.9", arch))
             self._write_cudnn_version(root, "12.6")
-            with (
-                mock.patch.object(cpp, "CUDNN_HOME", root),
-                mock.patch.object(cpp, "CUDA_HOME", root),
-                mock.patch("torch.version.cuda", "12.6"),
-            ):
-                dirs = self._cudnn_dirs(cpp)
-                self.assertEqual(
-                    dirs.include, os.path.join(root, "include", "12.6")
-                )
-                self.assertEqual(
-                    dirs.library,
-                    os.path.join(root, "lib", "12.6", cpp._windows_arch()),
-                )
-            with (
-                mock.patch.object(cpp, "CUDNN_HOME", root),
-                mock.patch.object(cpp, "CUDA_HOME", root),
-                mock.patch("torch.version.cuda", "13.4"),
-            ):
-                dirs = self._cudnn_dirs(cpp)
-                arch = cpp._windows_arch()
-                self.assertEqual(
-                    dirs.include, os.path.join(root, "include", "13.10")
-                )
-                self.assertEqual(
-                    dirs.library, os.path.join(root, "lib", "13.10", arch)
-                )
+            dirs = self._selected_cudnn(cpp, root, "12.6")
+            self.assertEqual(dirs.include, os.path.join(root, "include", "12.6"))
+            self.assertEqual(
+                dirs.library, os.path.join(root, "lib", "12.6", arch)
+            )
+            dirs = self._selected_cudnn(cpp, root, "13.4")
+            self.assertEqual(dirs.include, os.path.join(root, "include", "13.10"))
+            self.assertEqual(
+                dirs.library, os.path.join(root, "lib", "13.10", arch)
+            )
             with open(os.path.join(root, "include", "cudnn.h"), "w"):
                 pass
-            flat_lib = os.path.join(root, "lib", cpp._windows_arch())
+            flat_lib = os.path.join(root, "lib", arch)
             os.makedirs(flat_lib, exist_ok=True)
             with open(os.path.join(flat_lib, "cudnn.lib"), "w"):
                 pass
-            with (
-                mock.patch.object(cpp, "CUDNN_HOME", root),
-                mock.patch("torch.version.cuda", "13.4"),
-            ):
-                dirs = self._cudnn_dirs(cpp)
-                self.assertEqual(dirs.include, os.path.join(root, "include"))
-                self.assertEqual(dirs.library, flat_lib)
+            dirs = self._selected_cudnn(cpp, root, "13.4")
+            self.assertEqual(dirs.include, os.path.join(root, "include"))
+            self.assertEqual(dirs.library, flat_lib)
 
     @unittest.skipIf(not IS_WINDOWS, "versioned cuDNN layout is Windows-only")
     def test_cudnn_include_and_library_use_one_version(self):
@@ -282,7 +257,7 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 mock.patch("torch.version.cuda", "12.6"),
             ):
                 with self.assertNoLogs(cpp.__name__, level="WARNING"):
-                    dirs = self._cudnn_dirs(cpp)
+                    dirs = cpp._resolve_cudnn_dirs()
                 library = os.path.join(
                     root, "lib", "12.8", cpp._windows_arch()
                 )
@@ -291,6 +266,11 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 )
                 self.assertEqual(dirs.library, library)
                 if not cpp.IS_HIP_EXTENSION:
+                    includes = cpp.include_paths(device_type="cuda")
+                    libs = cpp.library_paths(device_type="cuda")
+                    self.assertIn(dirs.include, includes)
+                    self.assertNotIn(os.path.join(root, "include"), includes)
+                    self.assertIn(library, libs)
                     flags = cpp._prepare_ldflags([], True, False, False, False)
                     self.assertIn(f"/LIBPATH:{library}", flags)
         with tempfile.TemporaryDirectory() as root:
@@ -305,7 +285,7 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 mock.patch("torch.version.cuda", "12.6"),
             ):
                 with self.assertLogs(cpp.__name__, level="WARNING") as caught:
-                    dirs = self._cudnn_dirs(cpp)
+                    dirs = cpp._resolve_cudnn_dirs()
                 message = "\n".join(caught.output)
                 self.assertIn("13.0", message)
                 self.assertIn("12.6", message)
@@ -316,12 +296,12 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                     flags = cpp._prepare_ldflags([], True, False, False, False)
                     self.assertFalse(any("13.0" in flag for flag in flags))
 
+    @unittest.skipIf(IS_WINDOWS, "historical Linux cuDNN paths")
+    @unittest.skipIf(IS_HIP_EXTENSION, "historical Linux cuDNN paths")
     def test_cudnn_linux_link_path_is_unchanged(self):
         # Linux keeps the historical flat paths. The Windows versioned
         # layout is not applied here.
         cpp = torch.utils.cpp_extension
-        if IS_WINDOWS or cpp.IS_HIP_EXTENSION:
-            return
         with tempfile.TemporaryDirectory() as root:
             cuda_home = os.path.join(root, "cuda-home")
             cudnn = os.path.join(root, "cudnn")
