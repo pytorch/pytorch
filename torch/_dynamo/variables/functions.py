@@ -4859,6 +4859,8 @@ def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
     descriptor: DescriptorTypes,
     obj: "VariableTracker",
+    *,
+    is_wrapper_call: bool = False,
 ) -> None:
     """Check that obj's type is compatible with descriptor.__objclass__.
 
@@ -4870,11 +4872,19 @@ def _check_descriptor_obj_type(
     """
     obj_type = obj.python_type()
     if not issubclass(obj_type, descriptor.__objclass__):
+        if is_wrapper_call:
+            # wrapperdescr_call checks the receiver before wrapperdescr_raw_call.
+            raise_type_error(
+                tx,
+                f"descriptor '{descriptor.__name__}' requires a "
+                f"'{get_type_tp_name(descriptor.__objclass__)}' object "
+                f"but received a '{get_type_tp_name(obj_type)}'",
+            )
         raise_type_error(
             tx,
             f"descriptor '{descriptor.__name__}' for "
-            f"'{descriptor.__objclass__.__name__}' objects "
-            f"doesn't apply to a '{obj_type.__name__}' object",
+            f"'{get_type_tp_name(descriptor.__objclass__)}' objects "
+            f"doesn't apply to a '{get_type_tp_name(obj_type)}' object",
         )
 
 
@@ -4973,6 +4983,14 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
         return self.descriptor
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # PyWrapperDescr_Type inherits object_richcompare, like PyMethodDescr_Type.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -4989,7 +5007,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        _check_descriptor_obj_type(tx, self.descriptor, obj, is_wrapper_call=True)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
@@ -5192,15 +5210,25 @@ class MethodDescriptorVariable(DescriptorVariable):
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
+        method = obj.lookup_method_descriptor(self.descriptor)
+        if method is not None:
+            result = method(
+                obj,
+                tx,
+                name,
+                rest,
+                kwargs,
+                descriptor=self.descriptor,
+                qualname=self.descriptor.__qualname__,
+            )
+            if result is not None:
+                return result
+        # Some builtin descriptors are modeled through slots rather than `tp_methods`, e.g.
+        # `list.__getitem__` on a subclass must still bypass its override.
         if isinstance(obj, UserDefinedObjectVariable):
             base_methods = obj._base_methods
             if base_methods is not None and self.descriptor in base_methods:
                 return obj.call_base_method(tx, name, rest, kwargs)
-        method = obj.lookup_tp_method(name)
-        if method is not None:
-            result = method(obj, tx, name, rest, kwargs)
-            if result is not None:
-                return result
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
@@ -5431,6 +5459,11 @@ class BoundBuiltinMethodVariable(VariableTracker):
             # graph, so a tensor subclass override never runs.
             fn = VariableTracker.build(tx, descriptor)
             return fn.call_function(tx, [obj, *args], kwargs)
+        method = obj.lookup_method_descriptor(descriptor)
+        if method is not None:
+            result = method(obj, tx, name, args, kwargs, descriptor=descriptor)
+            if result is not None:
+                return result
         if mro_lookup(obj.python_type(), name) is descriptor:
             # Nothing overrides it, so name lookup reaches the same C method.
             return obj.call_method(tx, name, args, kwargs)
