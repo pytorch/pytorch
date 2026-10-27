@@ -359,7 +359,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype):
         return cute.runtime.make_fake_tensor(
             dtype,
             (cute.sym_int(), cute.sym_int(divisibility=div)),
-            stride=(cute.sym_int64(divisibility=div), 1),
+            stride=(cute.sym_int64(divisibility=align // elem_bytes), 1),
             assumed_align=align,
         )
 
