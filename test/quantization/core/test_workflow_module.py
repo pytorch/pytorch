@@ -41,6 +41,8 @@ from torch.ao.quantization import (
     RecordingObserver,
 )
 from torch.ao.quantization.quantize import _get_observer_dict
+from torch.testing._internal.common_device_type import onlyAccelerator, instantiate_device_type_tests, \
+    deviceCountAtLeast
 
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
@@ -61,7 +63,7 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     to_tensor,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase, HardwareClassification
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
@@ -80,6 +82,8 @@ _INT_DTYPES = (
 )
 
 class TestObserver(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @given(qdtype=st.sampled_from(_INT_DTYPES),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
@@ -299,46 +303,6 @@ class TestObserver(QuantizationTestCase):
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @override_qengines
-    def test_state_dict_respects_device_affinity(self):
-        """
-        Tests that loading from a state dict loads buffers to the correct
-        device.
-        """
-        device_cpu = torch.device('cpu')
-        device_cuda = torch.device('cuda:0')
-        test_cases = itertools.product(
-            [device_cpu, device_cuda],
-            [device_cpu, device_cuda],
-            [MinMaxObserver, MovingAverageMinMaxObserver,
-             PerChannelMinMaxObserver,
-             MovingAveragePerChannelMinMaxObserver,
-             # TODO: enable this (separate PR)
-             # HistogramObserver,
-             PlaceholderObserver, RecordingObserver, NoopObserver,
-             FakeQuantize])
-
-        for device_source, device_target, obs_cls in test_cases:
-            # calibrated source model
-            model = obs_cls()
-            model.to(device_source)
-            model(torch.randn(4, 1, 4, 4, device=device_source))
-            # target model
-            model2 = obs_cls()
-            model2.to(device_target)
-            model2.load_state_dict(model.state_dict())
-            # verify that buffers stayed on model2's device
-            model_devices = {p.device for p in model2.parameters()} | \
-                {p.device for p in model2.buffers()}
-            # some observers do not have any buffers, so lessEqual instead of
-            # Equal
-            self.assertLessEqual(len(model_devices), 1)
-            if len(model_devices) == 1:
-                model_device = next(iter(model_devices))
-                self.assertEqual(model_device, device_target)
-
     def test_histogram_observer_consistent_buffer_shape(self):
         """
         Ensures that the buffer shapes do not change from uninitialized to
@@ -431,28 +395,6 @@ class TestObserver(QuantizationTestCase):
             # Verify that state_dict matches exactly with original one.
             self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_observer_qparams_respects_device_affinity(self):
-        """
-        Ensure that the scale and zero_point returned by the observer
-        are on the same device as the input tensor.
-        """
-        observerList = [MinMaxObserver(),
-                        MovingAverageMinMaxObserver(),
-                        PerChannelMinMaxObserver(),
-                        MovingAveragePerChannelMinMaxObserver()]
-        for obs in observerList:
-            device = torch.device('cuda:1')
-            x = torch.randn(1, 2, device=device)
-            obs.to(device)
-            result = obs(x)
-            scale, zero_point = obs.calculate_qparams()
-
-            self.assertEqual(x.device, scale.device)
-            self.assertEqual(x.device, zero_point.device)
-
     def test_zero_numel(self):
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
                     PerChannelMinMaxObserver,
@@ -498,6 +440,72 @@ class TestObserver(QuantizationTestCase):
             new_obs.load_state_dict(obs.state_dict())
             self.assertTrue(torch.equal(obs.min_val, new_obs.min_val))
             self.assertTrue(torch.equal(obs.max_val, new_obs.max_val))
+
+class TestObserverAccelerator(QuantizationTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_state_dict_respects_device_affinity(self, devices):
+        """
+        Tests that loading from a state dict loads buffers to the correct
+        device.
+        """
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                device_cpu = torch.device('cpu')
+                device_acc = torch.device(devices[0])
+                test_cases = itertools.product(
+                    [device_cpu, device_acc],
+                    [device_cpu, device_acc],
+                    [MinMaxObserver, MovingAverageMinMaxObserver,
+                     PerChannelMinMaxObserver,
+                     MovingAveragePerChannelMinMaxObserver,
+                     # TODO: enable this (separate PR)
+                     # HistogramObserver,
+                     PlaceholderObserver, RecordingObserver, NoopObserver,
+                     FakeQuantize])
+
+                for device_source, device_target, obs_cls in test_cases:
+                    # calibrated source model
+                    model = obs_cls()
+                    model.to(device_source)
+                    model(torch.randn(4, 1, 4, 4, device=device_source))
+                    # target model
+                    model2 = obs_cls()
+                    model2.to(device_target)
+                    model2.load_state_dict(model.state_dict())
+                    # verify that buffers stayed on model2's device
+                    model_devices = {p.device for p in model2.parameters()} | \
+                        {p.device for p in model2.buffers()}
+                    # some observers do not have any buffers, so lessEqual instead of
+                    # Equal
+                    self.assertLessEqual(len(model_devices), 1)
+                    if len(model_devices) == 1:
+                        model_device = next(iter(model_devices))
+                        self.assertEqual(model_device, device_target)
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_observer_qparams_respects_device_affinity(self, devices):
+        """
+        Ensure that the scale and zero_point returned by the observer
+        are on the same device as the input tensor.
+        """
+        # Prefer a non-primary device to exercise device-index handling. the original test used cuda:1
+        device = devices[1]
+        observerList = [MinMaxObserver(),
+                        MovingAverageMinMaxObserver(),
+                        PerChannelMinMaxObserver(),
+                        MovingAveragePerChannelMinMaxObserver()]
+        for obs in observerList:
+            x = torch.randn(1, 2, device=device)
+            obs.to(device)
+            result = obs(x)
+            scale, zero_point = obs.calculate_qparams()
+
+            self.assertEqual(x.device, scale.device)
+            self.assertEqual(x.device, zero_point.device)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -640,6 +648,8 @@ class _ReferenceHistogramObserver(HistogramObserver):
         return new_min, new_max
 
 class TestRecordHistogramObserver(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # TODO: move this to quantize.py
     def test_record_observer(self):
         for qengine in supported_qengines:
@@ -676,6 +686,8 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
 class TestHistogramObserver(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from(
                (torch.per_tensor_affine, torch.per_tensor_symmetric))
@@ -857,33 +869,7 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, [1., 0., 1., 2., 1., 0., 0., 1., 1., 1.])
 
 class TestFakeQuantize(TestCase):
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
-           qparams=hu.qparams(dtypes=torch.qint8)))
-    def test_fq_module_per_channel(self, device, X):
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, axis, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        X.requires_grad_()
-        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
-        Y_prime = fq_module(X)
-        if fq_module.scale is None:
-            raise AssertionError("fq_module.scale should not be None")
-        if fq_module.zero_point is None:
-            raise AssertionError("fq_module.zero_point should not be None")
-        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
-                                                        fq_module.zero_point, axis, quant_min, quant_max)
-        np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-
-        # Test backward
-        dout = torch.rand_like(X, dtype=torch.float, device=device)
-        Y_prime.backward(dout)
-        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
-                                                              fq_module.zero_point, axis, quant_min, quant_max)
-        np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+    hw_classification = HardwareClassification.GENERIC
 
     def test_fq_serializable_per_channel(self):
         observer = default_per_channel_weight_observer
@@ -913,8 +899,37 @@ class TestFakeQuantize(TestCase):
         self.assertEqual(fq_module.activation_post_process.quant_min, 0)
         self.assertEqual(fq_module.activation_post_process.quant_max, 127)
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']))
+class TestFakeQuantizeAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
+           qparams=hu.qparams(dtypes=torch.qint8)))
+    def test_fq_module_per_channel(self, device, X):
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, axis, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        X.requires_grad_()
+        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
+        Y_prime = fq_module(X)
+        if fq_module.scale is None:
+            raise AssertionError("fq_module.scale should not be None")
+        if fq_module.zero_point is None:
+            raise AssertionError("fq_module.zero_point should not be None")
+        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
+                                                        fq_module.zero_point, axis, quant_min, quant_max)
+        np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+        # Test backward
+        dout = torch.rand_like(X, dtype=torch.float, device=device)
+        Y_prime.backward(dout)
+        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
+                                                              fq_module.zero_point, axis, quant_min, quant_max)
+        np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+    @given(sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']))
     def test_fused_moving_avg_obs_fake_quant(self, device, sampled_dtype):
         try:
             if device == 'cpu':
@@ -935,6 +950,8 @@ def _get_buffer_ids(module):
     return [id(v) for k, v in module._buffers.items()]
 
 class TestFusedModuleScriptable(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fx_qat_convbn_fused_jit_scriptable(self):
         """
         Tests jit scriptability works for fused ConvBN.
@@ -1526,6 +1543,9 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(ref_model.quant.activation_post_process.activation_post_process.quant_max, upper_bnd)
             self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
                              obs2match)
+
+instantiate_device_type_tests(TestObserverAccelerator, globals())
+instantiate_device_type_tests(TestFakeQuantizeAccelerator, globals())
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
