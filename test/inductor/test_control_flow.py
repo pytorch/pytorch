@@ -1850,7 +1850,7 @@ class WhileLoopTests(TestCase):
         compiled = torch.compile(fn, fullgraph=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
-            "effects in while_loop cond_fn are unsupported",
+            "effects in torch.while_loop cond_fn are not supported",
         ):
             compiled(torch.eye(2) * 2, torch.tensor(2))
 
@@ -1893,7 +1893,7 @@ class WhileLoopTests(TestCase):
         matrix = (torch.eye(2) * 2).requires_grad_()
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
-            "effects in while_loop_stack_output are unsupported",
+            "effects in torch.while_loop are not supported with autograd",
         ):
             compiled(matrix, torch.tensor(2))
 

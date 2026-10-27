@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import operator
 from collections.abc import Callable
 from typing import Any
 
@@ -59,6 +60,44 @@ def _graph_has_effects(gm):
             if nested_tokens or node.target is with_effects or has_effects(node.target):
                 return True
     return False
+
+
+def _can_thread_ordered_token(ctx, mode):
+    # Inside another HOP's subgraph (torch.cond, map, scan), mode._tokens still
+    # holds the enclosing graph's token, and an effect there bakes it into the
+    # subgraph as a constant. Thread the token only if it entered the graph
+    # being traced as a placeholder; otherwise keep the untokenized path.
+    from torch._higher_order_ops.effects import with_effects
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode, get_proxy_slot
+
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is None:
+        return True
+    token = mode._tokens.get(EffectType.ORDERED)
+    if token is None:
+        return False
+    node = get_proxy_slot(
+        ctx.unwrap_tensors((token,))[0],
+        proxy_mode.tracer,
+        None,
+        lambda t: t.proxy.node,
+    )
+    # Each op that threads a token takes it as an input and returns the new
+    # one as output 0.
+    while isinstance(node, torch.fx.Node) and node.target is operator.getitem:
+        src, idx = node.args[0], node.args[1]
+        if idx != 0 or not isinstance(src, torch.fx.Node):
+            break
+        if src.target is with_effects:
+            node = src.args[0]
+        elif src.target is while_loop_op and src.kwargs.get("num_effect_tokens"):
+            carried = src.args[2]
+            node = carried[0] if isinstance(carried, (tuple, list)) else None
+        elif src.target is torch.ops.higher_order.invoke_subgraph:
+            node = src.args[2]
+        else:
+            break
+    return isinstance(node, torch.fx.Node) and node.op == "placeholder"
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -736,12 +775,12 @@ def while_loop_func(
         if not num_effect_tokens and mode is not None:
             if _graph_has_effects(checked_graphs["cond_fn"]):
                 raise NotImplementedError(
-                    "effects in while_loop cond_fn are unsupported"
+                    "effects in torch.while_loop cond_fn are not supported"
                 )
             body_has_effect = _graph_has_effects(checked_graphs["body_fn"])
             if stack_output and body_has_effect:
                 raise NotImplementedError(
-                    "effects in while_loop_stack_output are unsupported"
+                    "effects in torch.while_loop are not supported with autograd"
                 )
             if body_has_effect and mutated_arg_indices:
                 raise NotImplementedError(
@@ -751,6 +790,8 @@ def while_loop_func(
                 raise NotImplementedError(
                     "effects in while_loop are unsupported during export"
                 )
+            if body_has_effect and not _can_thread_ordered_token(ctx, mode):
+                body_has_effect = False
             # If no earlier effect created the ORDERED token, create it the way
             # handle_effects does.
             if body_has_effect and EffectType.ORDERED not in mode._tokens:

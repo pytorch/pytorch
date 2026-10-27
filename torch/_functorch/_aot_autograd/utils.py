@@ -276,6 +276,14 @@ def is_with_effects(node: torch.fx.Node) -> bool:
         return True
     elif (
         node.op == "call_function"
+        and node.target is torch.ops.higher_order.while_loop
+        and node.kwargs.get("num_effect_tokens", 0)
+    ):
+        # An effectful while_loop keeps its token as a carry until unlift_tokens
+        # rewrites it into with_effects, which runs after partitioning.
+        return True
+    elif (
+        node.op == "call_function"
         and node.target is torch.ops.higher_order.invoke_subgraph
     ):
         # Check if subgraph has effects by looking in the cache
