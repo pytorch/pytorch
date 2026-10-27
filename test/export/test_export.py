@@ -6387,24 +6387,20 @@ def forward(self, x):
     def test_detect_leak_nonstrict_module_input_param(self):
         global_list = []
 
-        class Inner(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.randn(4))
-
         class Foo(torch.nn.Module):
-            def forward(self, x, inner):
-                global_list.append(inner.w)
-                return x * inner.w
+            def forward(self, x, y, m):
+                global_list.append(m.linear.weight)
+                return m(x, y)
 
         # The parameters of an nn.Module input are fakified before leak tracking
         # starts, so FakeTensor.__init__ does not record them; set_proxy_slot
         # does when tracing registers them.
+        inputs = (torch.randn(3), torch.randn(3), InputModule())
         with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             with self.assertWarnsRegex(
                 UserWarning, "Detected 1 fake tensors that are still alive"
             ):
-                export(Foo(), (torch.randn(4), Inner()), strict=False)
+                export(Foo(), inputs, strict=False)
 
     def test_export_cyclic_reference_leak(self):
         class Node:
