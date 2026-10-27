@@ -357,10 +357,22 @@ class _UnresolvedTritonExport(RuntimeError):
         self.sources = sources
         self.report = {"sources": sources}
         hint = ""
+        instances = [
+            instance
+            for source in sources
+            for instance in cast(list[dict[str, object]], source.get("instances", []))
+        ]
+        if any(instance.get("reason") == "frozen_untuned" for instance in instances):
+            hint += (
+                " A kernel refused as frozen_untuned was loaded from an artifact "
+                "frozen untuned earlier in this process, so running it here cannot "
+                "tune it: capture in a fresh process, or without loading that "
+                "artifact."
+            )
         if any(source.get("untuned_backward_eligible") for source in sources):
-            hint = (
-                " A backward kernel no captured step ran (untuned_backward_eligible) "
-                "can instead be frozen untuned, with "
+            hint += (
+                " A backward kernel no captured step ran, or loaded frozen untuned "
+                "(untuned_backward_eligible), can instead be frozen untuned, with "
                 "DynamoTracer(require_tuned_backward=False)."
             )
         super().__init__(
@@ -854,7 +866,9 @@ def freeze_runtime_cache(
     it without compiling. The exception, unless ``require_tuned_backward``, is a
     backward kernel no instance ever launched: it is frozen untuned, with its
     first loaded static config that does not spill past the autotuning threshold,
-    and reported. The caller must stop compiling
+    and reported. So is, launched or not, a backward kernel loaded from an
+    artifact frozen untuned earlier in this process, which cannot be tuned in it.
+    The caller must stop compiling
     before calling this: a kernel compiled on another thread meanwhile is neither
     waited on nor frozen.
     """
