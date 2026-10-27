@@ -17,6 +17,10 @@
 #include <thrust/swap.h>
 #include <cooperative_groups.h>
 
+// This file contains the following custom Linear Algebra kernels:
+// - LU (partial pivoting/no pivoting);
+// - LDL (Bunch-Kaufman pivoting);
+
 /*
   Batched LU-factorization with partial pivoting.
   The approach is a recursive panel factorization with trailing matrix updates delegated to GEMMs/TRSMs.
