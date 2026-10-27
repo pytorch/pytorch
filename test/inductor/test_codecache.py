@@ -5996,6 +5996,7 @@ class TestCppCodeCacheKey(TestCase):
                 # The capture and the replay hosts install the same torch at
                 # different roots, and the capture host's is gone by the replay.
                 capture_root, replay_root = tempfile.mkdtemp(), tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, capture_root, ignore_errors=True)
                 self.addCleanup(shutil.rmtree, replay_root)
                 for root in (capture_root, replay_root):
                     os.symlink(cpp_extension._TORCH_PATH, os.path.join(root, "torch"))
