@@ -5,15 +5,19 @@ import struct
 import unittest
 
 import torch
+from torch._prims_common import _uncastable_shell_dtypes
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
     instantiate_device_type_tests,
+    onlyCPU,
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -247,6 +251,8 @@ ROUND_TRIP_TEST_CASES = (
 
 
 class TestFloat8Dtype(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
@@ -422,6 +428,8 @@ class TestFloat8Dtype(TestCase):
 
 
 class TestFloat4Dtype(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO(#146647): make the testing generic for shell dtypes
     def test_float4_e2m1fn_x2(self, device):
         # can create a tensor of dtype float4
@@ -442,6 +450,75 @@ class TestFloat4Dtype(TestCase):
 
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
+
+    def test_cast_raises_on_host(self, device):
+        # Casting to or from fp4x2 used to device-assert on CUDA, poisoning the
+        # context; it must raise on the host instead.
+        x_f4 = torch.zeros(4, 8, dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        msg = r"view\(torch.uint8\) and unpack"
+        for dtype in (torch.float32, torch.bfloat16, torch.uint8, torch.float8_e4m3fn):
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x_f4.to(dtype)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.empty(4, 8, device=device).copy_(x_f4)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.zeros(4, 8, device=device).to(torch.float4_e2m1fn_x2)
+        # zero-element casts are rejected too, rather than silently succeeding
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.empty(0, dtype=torch.float4_e2m1fn_x2, device=device).float()
+        # the device is still usable afterwards
+        self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
+
+    def test_cast_raises_when_tracing(self, device):
+        # Meta, FakeTensor, the prims decomposition, and Dynamo tracing must
+        # reject the same casts as eager instead of tracing them.
+        msg = r"view\(torch.uint8\) and unpack"
+        x_meta = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device="meta")
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            x_meta.to(torch.float32)
+        with FakeTensorMode():
+            x_fake = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device=device)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x_fake.to(torch.float32)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.empty(4, 8, device=device).copy_(x_fake)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.ops.prims.convert_element_type(x_fake, torch.float32)
+        x = torch.zeros(4, 8, dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        torch._dynamo.reset()
+        # fullgraph, so a graph break cannot fall back to the eager check
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(
+                lambda t: t.to(torch.float32), backend="eager", fullgraph=True
+            )(x)
+
+    @onlyCPU
+    def test_shell_dtype_lists_match(self, device):
+        # The prims check mirrors the C++ copy_ check; keep their dtype sets equal.
+        quantized = {
+            torch.qint8,
+            torch.qint32,
+            torch.quint8,
+            torch.quint4x2,
+            torch.quint2x4,
+        }
+        dtypes = {d for d in vars(torch).values() if isinstance(d, torch.dtype)}
+        for dtype in dtypes - quantized - {torch.float32}:
+            meta = torch.empty(2, dtype=dtype, device="meta")
+            meta_f32 = torch.empty(2, device="meta")
+            for cast in (lambda: meta.to(torch.float32), lambda: meta_f32.to(dtype)):
+                try:
+                    cast()
+                    rejected = False
+                except NotImplementedError:
+                    rejected = True
+                self.assertEqual(
+                    rejected, dtype in _uncastable_shell_dtypes, msg=str(dtype)
+                )
 
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(
@@ -471,6 +548,8 @@ class TestFloat8DtypeCPUOnly(TestCase):
     another C++ dtype macro, and there is no use case yet for unscaled float8
     multiplication - doesn't seem worth it.
     """
+
+    hw_classification = HardwareClassification.CPU
 
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
@@ -507,6 +586,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
 
 
 instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")
+
 
 if __name__ == "__main__":
     run_tests()
