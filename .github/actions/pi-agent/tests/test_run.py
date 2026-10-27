@@ -248,14 +248,15 @@ class TestRun(unittest.TestCase):
         self.assertTrue((self.root / "refreshed").exists())
 
 
-class TestToolGuard(unittest.TestCase):
-    def test_guard_behavior(self) -> None:
+class TestExtensions(unittest.TestCase):
+    def test_extension_behavior(self) -> None:
         run = subprocess.run(
             [
                 "node",
                 "--experimental-strip-types",
                 "--test",
                 str(ACTION / "tests/tool-guard.mjs"),
+                str(ACTION / "tests/submit-result.mjs"),
             ],
             text=True,
             capture_output=True,
