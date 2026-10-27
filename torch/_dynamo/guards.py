@@ -5244,28 +5244,24 @@ class GuardsStatePickler(FunctionPicklerBase):
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
             is_fake = torch._subclasses.fake_tensor.is_fake_tensor(obj)
-            # A fake answers empty_like with another fake, and that fake would
-            # drag the mode and its converters into the pickle, so build the
-            # template as a plain meta tensor. no_dispatch stops a Python
-            # fake's __torch_dispatch__ (which runs whether or not its
-            # FakeTensorMode is active) but not the Fake dispatch key that a
-            # C++ fake carries, so exclude that key instead.
-            template_ctx: contextlib.AbstractContextManager[Any] = (
-                contextlib.nullcontext()
-            )
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                template_ctx = no_dispatch()
-            elif is_fake:
+            elif (
+                is_fake
+                and pytype is torch.Tensor
+                and isinstance(obj, torch.nn.Parameter)
+            ):
                 # As in TENSOR_MATCH, a C++ fake Parameter can be a plain Tensor
                 # carrying the Parameter marker.
-                if pytype is torch.Tensor and isinstance(obj, torch.nn.Parameter):
-                    pytype = torch.nn.Parameter
-                fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
-                template_ctx = torch._C._ExcludeDispatchKeyGuard(fake_key)
-            with template_ctx:
+                pytype = torch.nn.Parameter
+            # A fake answers empty_like with another fake (a Python fake through
+            # its own __torch_dispatch__, whether or not its FakeTensorMode is
+            # active), and that fake would drag the mode and its converters into
+            # the pickle; no_dispatch, which also excludes the Fake dispatch key,
+            # makes the template a plain meta tensor.
+            with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
