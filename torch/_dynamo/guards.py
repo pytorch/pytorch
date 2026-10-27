@@ -1455,6 +1455,11 @@ def check_closure(value: object, metadata: Any) -> bool:
     return id(value) == metadata
 
 
+def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, ...]:
+    positions = {id(key): index for index, key in enumerate(dict.keys(value))}
+    return tuple(positions[id(key)] for key in collections.OrderedDict.keys(value))
+
+
 def _ordered_dict_key_signature(
     value: collections.OrderedDict[Any, Any],
 ) -> list[tuple[type[Any] | None, Any]]:
@@ -3776,6 +3781,24 @@ class GuardBuilder(GuardBuilderBase):
 
         def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
             return _ordered_dict_keys_match(value, key_signature)
+
+        code = [f"___check_order({self.arg_ref(guard)})"]
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars() | {"___check_order": guard_fn},
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
+        eval_fn=lambda value, order: _ordered_dict_order(value) == order,
+    )
+    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        order = _ordered_dict_order(self.get(guard))
+
+        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
+            return _ordered_dict_order(value) == order
 
         code = [f"___check_order({self.arg_ref(guard)})"]
         self.add_python_lambda_leaf_guard_to_root(
