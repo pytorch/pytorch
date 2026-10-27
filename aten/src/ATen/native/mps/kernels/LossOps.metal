@@ -417,6 +417,13 @@ struct mse_functor {
   }
 };
 
+struct mse_backward_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T c, const T alpha) {
+    return alpha * (a - b) * c;
+  }
+};
+
 #define INSTANTIATE_CTC_LOSS(T, T_target, T_index)                  \
   template [[host_name("ctc_loss_" #T "_" #T_target "_" #T_index)]] \
   kernel void ctc_loss<T, T_target, T_index>(                       \
@@ -518,3 +525,7 @@ REGISTER_BINARY_OP(mse, bfloat, bfloat);
 REGISTER_BINARY_CASTOUT_OP(mse, float, float);
 REGISTER_BINARY_CASTOUT_OP(mse, half, half);
 REGISTER_BINARY_CASTOUT_OP(mse, bfloat, bfloat);
+
+REGISTER_TERNARY_ALPHA_OP(mse_backward, float, float, float);
+REGISTER_TERNARY_ALPHA_OP(mse_backward, half, half, half);
+REGISTER_TERNARY_ALPHA_OP(mse_backward, bfloat, bfloat, bfloat);
