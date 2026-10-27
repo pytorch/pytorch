@@ -123,6 +123,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     is_fake_tensor,
     maybe_get_fake_dispatch_keys,
+    maybe_get_fake_pytype,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
@@ -5233,14 +5234,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
             is_fake = is_fake_tensor(obj)
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
-            pytype = type(obj)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                obj, torch._subclasses.FakeTensor
-            ):
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+            # For fakes, record the real tensor's type. This is important for
+            # cross-compilation where we compile with fake tensors but run with
+            # real tensors.
+            pytype = maybe_get_fake_pytype(obj)
+            if pytype is None:
+                pytype = type(obj)
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
