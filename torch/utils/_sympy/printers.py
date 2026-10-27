@@ -332,17 +332,19 @@ class PythonPrinter(ExprPrinter):
         # pyrefly: ignore [missing-attribute]
         return f"math.log2({self._print(expr.args[0])})"
 
+    # NB: torch._sym_isnan rather than math.isnan, for the same reason as
+    # _helper_sqrt: guards may be re-evaluated with SymFloat inputs.
     def _print_IsNaN(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError("IsNaN expects exactly one argument")
         # pyrefly: ignore [missing-attribute]
-        return f"math.isnan({self._print(expr.args[0])})"
+        return f"torch._sym_isnan({self._print(expr.args[0])})"
 
     def _print_IsNotNaN(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError("IsNotNaN expects exactly one argument")
         # pyrefly: ignore [missing-attribute]
-        return f"(not math.isnan({self._print(expr.args[0])}))"
+        return f"torch.sym_not(torch._sym_isnan({self._print(expr.args[0])}))"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:

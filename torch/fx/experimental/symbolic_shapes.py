@@ -774,6 +774,28 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
     return False
 
 
+def _to_cnf_with_opaque_bools(expr: SympyBoolean) -> SympyBoolean:
+    """
+    sympy's to_cnf only treats IsNaN(x) / IsNotNaN(x) as literals when x is an
+    atom; negating one with a compound argument (e.g. IsNaN(FloatMul(zuf0, 2.0)))
+    raises "Illegal operator". Swap them for symbols while converting.
+    """
+    from torch.utils._sympy.functions import IsNaN, IsNotNaN
+
+    opaque = expr.atoms(IsNaN, IsNotNaN)
+    if not opaque:
+        return sympy.logic.boolalg.to_cnf(expr)
+    to_sym = {
+        a: sympy.Dummy(f"opaque_bool{i}") for i, a in enumerate(sorted(opaque, key=str))
+    }
+    expr = sympy.logic.boolalg.to_cnf(expr.xreplace(to_sym))
+    back: dict[sympy.Basic, sympy.Basic] = {}
+    for a, d in to_sym.items():
+        back[sympy.Not(d)] = ~a
+        back[d] = a
+    return expr.xreplace(back)
+
+
 def canonicalize_bool_expr(expr: _T) -> _T:
     """
     Canonicalize supported boolean expressions recursively. Ge/Gt relations are
@@ -792,7 +814,7 @@ def canonicalize_bool_expr(expr: _T) -> _T:
         return expr
 
     if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
-        expr = sympy.logic.boolalg.to_cnf(expr)
+        expr = _to_cnf_with_opaque_bools(expr)  # type: ignore[arg-type, assignment]
     return _canonicalize_bool_expr_impl(expr)  # type: ignore[arg-type, return-value]
 
 
@@ -859,11 +881,13 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
-    # A Not around something that is not a comparison, e.g. Not(IsNaN(x)),
-    # is already in its simplest form, so return it as is. (Not around a
-    # comparison never gets here: to_cnf already turned e.g. Not(a < b) into
-    # a >= b.)
-    if isinstance(expr, sympy.Not) and not isinstance(expr.args[0], Relational):
+    # Opaque boolean atoms such as IsNaN(x) / IsNotNaN(x), or a Not around
+    # something that is not a comparison, are already in their simplest form.
+    # (Not around a comparison never gets here: to_cnf already turned e.g.
+    # Not(a < b) into a >= b.)
+    if not isinstance(expr, (Relational, sympy.Not)) or (
+        isinstance(expr, sympy.Not) and not isinstance(expr.args[0], Relational)
+    ):
         return expr
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}

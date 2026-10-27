@@ -1178,12 +1178,24 @@ _FLOAT_SYMBOL_SENSITIVE_METHODS = frozenset(
 )
 
 
-def _has_float_symbol(e: sympy.Basic) -> bool:
-    from torch.utils._sympy.symbol import symbol_is_type, SymT
+def _has_unbacked_float_symbol(e: sympy.Basic) -> bool:
+    try:
+        return _has_unbacked_float_symbol_cached(e)
+    except RecursionError:
+        from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 
-    return any(
-        symbol_is_type(s, (SymT.FLOAT, SymT.UNBACKED_FLOAT)) for s in e.free_symbols
-    )
+        return free_symbol_is_type(e, SymT.UNBACKED_FLOAT)
+
+
+@functools.lru_cache(4096)
+def _has_unbacked_float_symbol_cached(e: sympy.Basic) -> bool:
+    # Recursive and cached, so a long chain of float ops costs O(1) per op
+    # instead of re-walking the free symbols of the whole expression.
+    if e.is_Symbol:
+        from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+        return symbol_is_type(e, SymT.UNBACKED_FLOAT)
+    return any(_has_unbacked_float_symbol_cached(a) for a in e.args)
 
 
 def _maybe_ieee_float_op(
@@ -1191,12 +1203,16 @@ def _maybe_ieee_float_op(
 ) -> sympy.Basic | None:
     """
     Build float +, -, * and comparisons with IEEE semantics when an operand
-    involves a float symbol (which may be NaN or inf). Sympy's Add / Mul and
-    relationals assume real numbers and would fold x - x to 0 or x != x to
-    False. Returns None when the regular sympy construction is fine.
+    involves an unbacked float symbol (e.g. from .item(), which may be NaN or
+    inf). Sympy's Add / Mul and relationals assume real numbers and would fold
+    x - x to 0 or x != x to False. Returns None when the regular sympy
+    construction is fine.
+
+    Backed float symbols are not handled here: Dynamo specializes NaN / inf
+    float inputs and guards against NaN, so they keep sympy's simplifications.
     See https://github.com/pytorch/pytorch/issues/198070
     """
-    if not (_has_float_symbol(a) or _has_float_symbol(b)):
+    if not (_has_unbacked_float_symbol(a) or _has_unbacked_float_symbol(b)):
         return None
 
     import sympy
@@ -1625,7 +1641,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
 
         optimized_summation = False
         try:
-            # See _maybe_ieee_float_op: float symbols may be NaN / inf.
+            # See _maybe_ieee_float_op: unbacked floats may be NaN / inf.
             out = None
             if (
                 self.pytype is float or other.pytype is float

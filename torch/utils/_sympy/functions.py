@@ -1407,7 +1407,6 @@ class IsNaN(sympy.Function, sympy.logic.boolalg.Boolean):
     """
 
     nargs = (1,)
-    _torch_handler_name = "isnan"
 
     @classmethod
     def eval(cls, x: sympy.Expr) -> sympy.Basic | None:
@@ -1430,7 +1429,6 @@ class IsNotNaN(sympy.Function, sympy.logic.boolalg.Boolean):
     """
 
     nargs = (1,)
-    _torch_handler_name = "isnotnan"
 
     @classmethod
     def eval(cls, x: sympy.Expr) -> sympy.Basic | None:
@@ -1488,7 +1486,6 @@ class _OpaqueFloatBinOp(sympy.Function):
 
 class FloatAdd(_OpaqueFloatBinOp):
     # No identity: x + 0.0 is not x for x = -0.0.
-    _torch_handler_name = "add"
     _op_str = "+"
 
     @staticmethod
@@ -1497,7 +1494,6 @@ class FloatAdd(_OpaqueFloatBinOp):
 
 
 class FloatMul(_OpaqueFloatBinOp):
-    _torch_handler_name = "mul"
     _op_str = "*"
 
     @staticmethod
