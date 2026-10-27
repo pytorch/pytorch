@@ -558,6 +558,59 @@ instantiate_device_type_tests(
 )
 
 
+class TestFullyShardPythonCustomOpRegistrations(TestCase):
+    # op -> the composite alias key its device-generic impl registers to
+    OPS = {
+        "fsdp::all_gather_copy_in": "CompositeExplicitAutogradNonFunctional",
+        "fsdp::split_with_sizes_copy": "CompositeExplicitAutograd",
+        "fsdp::chunk_cat": "CompositeExplicitAutograd",
+        "fsdp::copy_": "CompositeExplicitAutograd",
+    }
+
+    def test_every_backend_has_a_kernel(self):
+        backends = ["CPU", "CUDA", "XPU", "HPU", "MTIA", "PrivateUse1", "MPS", "Meta"]
+        for op, alias_key in self.OPS.items():
+            self.assertTrue(
+                torch._C._dispatch_has_kernel_for_dispatch_key(op, alias_key), op
+            )
+            # The NonFunctional key leaves out the functional backends
+            functional = [] if alias_key.endswith("NonFunctional") else ["XLA", "Lazy"]
+            for key in backends + functional:
+                self.assertTrue(
+                    torch._C._dispatch_has_computed_kernel_for_dispatch_key(op, key),
+                    f"{op} has no kernel for {key}",
+                )
+
+    def test_not_decomposed(self):
+        # A CompositeImplicitAutograd kernel would decompose the ops before
+        # functionalization and Inductor, which match on them
+        for op in self.OPS:
+            self.assertFalse(
+                torch._C._dispatch_has_kernel_for_dispatch_key(
+                    op, "CompositeImplicitAutograd"
+                ),
+                op,
+            )
+        self.assertTrue(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                "fsdp::copy_", "Functionalize"
+            )
+        )
+
+    def test_all_gather_copy_in_meta_skips_copy(self):
+        # Inputs that don't match inp_split_sizes: only the copy would notice
+        def call(device):
+            inputs = [torch.empty(3, device=device)]
+            output = torch.empty(8, device=device)
+            return torch.ops.fsdp.all_gather_copy_in(inputs, output, [4], 4, 1)
+
+        all_gather_input, all_gather_output = call("meta")
+        self.assertEqual(all_gather_input.shape, (4,))
+        self.assertEqual(all_gather_output.shape, (8,))
+        with self.assertRaises(RuntimeError):
+            call("cpu")
+
+
 class TestFullyShardDefaultAllGatherOutputFn(TestCase):
     # Only uint8 buffers hold bytes, not those of other 1-byte dtypes such as int8
     @dtypes(torch.float32, torch.int8)
