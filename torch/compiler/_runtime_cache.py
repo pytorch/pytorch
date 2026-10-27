@@ -510,7 +510,8 @@ def _freeze_triton_kernel(
     # Such a kernel never autotuned down to one config. Every config computes the
     # same values up to floating-point reduction order, so freeze one rather than
     # leave the artifact unable to serve that kernel without compiling. A forward
-    # no call ran means the capture missed a path, so it is still refused.
+    # no call ran means the capture missed a path, so it is still refused, as is a
+    # kernel whose direction was never recorded (is_backward defaults to False).
     if rejected and all(e["reason"] == "launcher_count_not_one" for e in rejected):
         for kernel in ordered:
             if kernel._cached_launcher is not None or not kernel.is_backward:
@@ -724,7 +725,7 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
         raise error
     if untuned:
         log.warning(
-            "precompile: froze %d Triton kernels that no captured call ran with a "
+            "precompile: froze %d backward Triton kernels that no captured call ran with a "
             "config autotuning did not pick, so they may run slower: %s%s",
             len(untuned),
             ", ".join(untuned[:5]),
