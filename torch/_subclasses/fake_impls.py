@@ -711,6 +711,9 @@ def _to_dense(
     if maybe_mkldnn_out is not NotImplemented:
         return typing_cast(FakeTensor, maybe_mkldnn_out)
 
+    self_device = maybe_get_fake_device(self)
+    if self_device is None:
+        raise AssertionError("expected a fake tensor device")
     if self.layout in _TO_DENSE_SPARSE_LAYOUTS:
         if dtype is not None:
             raise RuntimeError("dtype argument is not supported by sparse_to_dense")
@@ -720,16 +723,10 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        self_device = maybe_get_fake_device(self)
-        if self_device is None:
-            raise AssertionError("expected a fake tensor device")
         return FakeTensor(fake_mode, out, self_device)
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)
-    self_device = maybe_get_fake_device(self)
-    if self_device is None:
-        raise AssertionError("expected a fake tensor device")
     return fake_mode.fake_tensor_converter.from_meta_and_device(
         fake_mode, out, self_device
     )
@@ -809,9 +806,8 @@ def _unique(
         # pyrefly: ignore[no-matching-overload]
         ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    return_if_dim_and_cpu = dim is not None and maybe_get_fake_device(
-        arg
-    ) == torch.device("cpu")
+    arg_device = maybe_get_fake_device(arg)
+    return_if_dim_and_cpu = dim is not None and arg_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
         inverse = arg.new_empty(
             arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
@@ -2140,9 +2136,9 @@ def index_put_impl(
     )
     values = new_kwargs["values"]
     self_device = maybe_get_fake_device(new_kwargs["input"])
+    values_device = maybe_get_fake_device(values)
     torch._check(
-        self_device == maybe_get_fake_device(values)
-        or (values.ndim == 0 and values.numel() == 1),
+        self_device == values_device or (values.ndim == 0 and values.numel() == 1),
         lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
     )
 
