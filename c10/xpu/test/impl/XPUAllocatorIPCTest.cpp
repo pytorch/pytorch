@@ -16,14 +16,13 @@ class XPUAllocatorIPCTest : public ::testing::TestWithParam<bool> {
           << "Expandable segment IPC sharing requires SYCL compiler 2026.2 or later.";
 #endif
     }
-    c10::xpu::XPUCachingAllocator::emptyCache();
   }
 
   void TearDown() override {
     if (GetParam()) {
-      c10::xpu::XPUCachingAllocator::emptyCache();
       c10::CachingAllocator::setAllocatorSettings("expandable_segments:False");
     }
+    c10::xpu::XPUCachingAllocator::emptyCache();
   }
 };
 
