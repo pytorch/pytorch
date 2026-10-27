@@ -49,11 +49,11 @@ ownership:
     section: python_nn_api
     paths:
       - /torch/nn/: [bob]
-  - name: unowned_compiler_dynamo
+  - name: compiler_dynamo
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/unlabeled.py
-  - name: unowned_protected_codeownership
+  - name: protected_codeownership
     section: protected_codeownership
     paths:
       - /CODEOWNERS: [albanD]

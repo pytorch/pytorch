@@ -5,7 +5,8 @@
 # Each entry under `ownership` is a label group: a `name`, its labels, its owners,
 # and every path it owns, listed once. The name is a stable identifier that
 # doesn't change when a label is renamed; it is the group's most specific label
-# followed by its other labels, or unowned_<section> for paths without labels.
+# followed by its other labels, or the CODEOWNERS section name for paths without
+# labels. Ownership status is `owners` alone; `[]` means no owner recorded yet.
 # Handles are written without the leading @. A path with handles is an active
 # CODEOWNERS rule (those handles get review requests); a bare path is a
 # commented rule. `section` is the CODEOWNERS section the group's paths are
@@ -951,11 +952,13 @@ ownership:
       - /docs/source/notes/get_start_xpu.md: [EikanWang, gujinghui]
 
   # Paths without a label group yet, by CODEOWNERS section.
-  - name: unowned_core_aten_native_ops
+  - name: core_aten_native_ops
+    owners: []
     section: core_aten_native_ops
     paths:
       - /aten/
-  - name: unowned_core_aten_runtime
+  - name: core_aten_runtime
+    owners: []
     section: core_aten_runtime
     paths:
       - /aten/CMakeLists.txt
@@ -1120,11 +1123,13 @@ ownership:
       - /aten/src/README.md
       - /aten/src/THC/
       - /aten/tools/
-  - name: unowned_core_c10_dispatch
+  - name: core_c10_dispatch
+    owners: []
     section: core_c10_dispatch
     paths:
       - /c10/
-  - name: unowned_core_csrc_misc
+  - name: core_csrc_misc
+    owners: []
     section: core_csrc_misc
     paths:
       - /torch/csrc/CudaIPCTypes.cpp
@@ -1205,7 +1210,8 @@ ownership:
       - /torch/csrc/utils.cpp
       - /torch/csrc/utils.h
       - /torch/csrc/utils/
-  - name: unowned_core_tests
+  - name: core_tests
+    owners: []
     section: core_tests
     paths:
       - /test/HowToWriteTestsUsingFileCheck.md
@@ -1391,12 +1397,14 @@ ownership:
       - /test/test_view_ops.py
       - /test/test_weak.py
       - /test/forward_backward_compatibility/check_forward_backward_compatibility.py: [larryliu0820]
-  - name: unowned_backend_device_runtime
+  - name: backend_device_runtime
+    owners: []
     section: backend_device_runtime
     paths:
       - /test/custom_backend/
       - /torch/backends/
-  - name: unowned_python_core_api
+  - name: python_core_api
+    owners: []
     section: python_core_api
     paths:
       - /torch/CMakeLists.txt
@@ -1472,7 +1480,8 @@ ownership:
       - /torch/types.py
       - /torch/utils/
       - /torch/_vendor/quack/: [slayton58, drisspg]
-  - name: unowned_python_api_tests
+  - name: python_api_tests
+    owners: []
     section: python_api_tests
     paths:
       - /test/cpython/
@@ -1488,13 +1497,15 @@ ownership:
       - /test/torch_np/
       - /test/typing/
       - /test/xpu/test_transformers.py
-  - name: unowned_cpp_runtime_tests
+  - name: cpp_runtime_tests
+    owners: []
     section: cpp_runtime_tests
     paths:
       - /test/cpp/
       - /test/cpp_api_parity/
       - /test/test_cpp_api_parity.py
-  - name: unowned_cpp_api_custom_ops
+  - name: cpp_api_custom_ops
+    owners: []
     section: cpp_api_custom_ops
     paths:
       - /aten/src/ATen/native/native_functions.yaml
@@ -1529,7 +1540,8 @@ ownership:
       - /torch/library.h
       - /torch/library.py
       - /torch/utils/_cpp_extension_versioner.py
-  - name: unowned_infra_developer_tools
+  - name: infra_developer_tools
+    owners: []
     section: infra_developer_tools
     paths:
       - /.devcontainer/
@@ -1540,7 +1552,8 @@ ownership:
       - /binaries/
       - /scripts/
       - /tools/
-  - name: unowned_infra_test
+  - name: infra_test
+    owners: []
     section: infra_test
     paths:
       - /test/benchmark_utils/
@@ -1560,17 +1573,20 @@ ownership:
       - /torch/_logging/
       - /torch/testing/
       - /torch/utils/benchmark/
-  - name: unowned_caffe2
+  - name: caffe2
+    owners: []
     section: caffe2
     paths:
       - /caffe2/
-  - name: unowned_compiler_export_fx
+  - name: compiler_export_fx
+    owners: []
     section: compiler_export_fx
     paths:
       - /test/onnx/exporter/test_exportable_module.py
       - /test/onnx/test_fx_type_promotion.py
       - /test/package/package_bc/test_fx_module.pt
-  - name: unowned_ai_agent_tooling
+  - name: ai_agent_tooling
+    owners: []
     section: ai_agent_tooling
     paths:
       - /.agents/
@@ -1586,7 +1602,8 @@ ownership:
       - /AI_POLICY.md
       - /CLAUDE.md
       - /torch/_dynamo/CLAUDE.md
-  - name: unowned_docs_general
+  - name: docs_general
+    owners: []
     section: docs_general
     paths:
       - /CITATION.cff
@@ -1598,7 +1615,8 @@ ownership:
       - /README.md
       - /RELEASE.md
       - /SECURITY.md
-  - name: unowned_protected_codeownership
+  - name: protected_codeownership
+    owners: []
     section: protected_codeownership
     paths:
       - /CODEOWNERS: [albanD, malfet]
