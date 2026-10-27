@@ -100,6 +100,7 @@ __all__ = [
     "RoundToInt",
     "RoundDecimal",
     "ToFloat",
+    "IsNaN",
     "FloatPow",
     "PowByNatural",
     "Identity",
@@ -1392,6 +1393,27 @@ class ToFloat(sympy.Function):
     def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         number = printer._print(self.args[0])
         return f"(double)({number})"
+
+
+class IsNaN(sympy.Function, sympy.logic.boolalg.Boolean):
+    """
+    Boolean ``math.isnan(x)``. Opaque to sympy so that it is never simplified
+    using real-number identities (e.g. ``Eq(x, x)``, which is False for NaN).
+    Used to assert that unbacked floats are not NaN, see
+    ShapeEnv.create_unbacked_symfloat.
+    """
+
+    nargs = (1,)
+    _torch_handler_name = "isnan"
+
+    @classmethod
+    def eval(cls, x: sympy.Expr) -> sympy.Basic | None:
+        if x is sympy.nan:
+            return sympy.true
+        # Integers (and infinities) are never NaN.
+        if x.is_integer or x.is_number:
+            return sympy.false
+        return None
 
 
 class Identity(sympy.Function):

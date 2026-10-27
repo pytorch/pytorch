@@ -505,6 +505,16 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.decreasing_map(a, sympy.Not)
 
     @staticmethod
+    def isnan(x):
+        x = ValueRanges.wrap(x)
+        if x.is_int:
+            return ValueRanges.wrap(sympy.false)
+        if x.is_singleton() and x.lower.is_number:
+            return ValueRanges.wrap(sympy.true if x.lower is sympy.nan else sympy.false)
+        # Float value ranges do not model NaN, so a finite range proves nothing.
+        return ValueRanges.unknown_bool()
+
+    @staticmethod
     def or_(a, b):
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.Or)
 

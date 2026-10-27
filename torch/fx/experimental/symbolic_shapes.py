@@ -859,6 +859,13 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
+    # A Not around something that is not a comparison, e.g. the
+    # Not(IsNaN(zuf0)) assert added for every unbacked float, is already in
+    # its simplest form, so return it as is. (Not around a comparison never
+    # gets here: to_cnf already turned e.g. Not(a < b) into a >= b.)
+    if isinstance(expr, sympy.Not) and not isinstance(expr.args[0], Relational):
+        return expr
+
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
@@ -5651,6 +5658,16 @@ class ShapeEnv:
         sym_node = SymNode(symbol, self, float, None, fx_node=fx_node)
         self._log_create_unbacked_symbol(
             "create_unbacked_symfloat", symbol, vr, sym_node=sym_node
+        )
+
+        # Sympy reasons about float symbols as if they were real numbers, so it
+        # folds Eq(zuf0, zuf0) to True, zuf0 - zuf0 to 0, etc. These are only
+        # valid if zuf0 is not NaN; make that assumption sound by asserting it
+        # at runtime. See https://github.com/pytorch/pytorch/issues/198070
+        from torch.utils._sympy.functions import IsNaN
+
+        self.guard_or_defer_runtime_assert(
+            sympy.Not(IsNaN(symbol)), f"unbacked float {symbol} is not NaN"
         )
 
         return SymFloat(sym_node)
