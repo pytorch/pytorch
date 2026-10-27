@@ -231,7 +231,7 @@ class ExceptionVariable(VariableTracker):
         self.python_stack: traceback.StackSummary | None = None
 
     @staticmethod
-    def create(  # noqa: RAW_VT_CONSTRUCTION
+    def create(  # noqa: RVT001
         exc_type: type[BaseException],
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],

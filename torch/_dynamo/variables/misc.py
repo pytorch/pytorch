@@ -334,7 +334,7 @@ class SuperVariable(VariableTracker):
                         "source must not be None for user-defined class"
                     )
                 user_cls_source = source.member
-                user_cls_vt = variables.UserDefinedClassVariable(  # noqa: RAW_VT_CONSTRUCTION
+                user_cls_vt = variables.UserDefinedClassVariable(  # noqa: RVT001
                     user_cls, source=user_cls_source
                 )
             return user_cls_vt.call_method(tx, "__new__", args, kwargs)
@@ -514,13 +514,13 @@ class SuperVariable(VariableTracker):
         return python_constant_repr_impl(self, tx)
 
 
-class UnknownVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class UnknownVariable(VariableTracker):  # noqa: RVT001
     """
     It could be anything!
     """
 
 
-class DelayGraphBreakVariable(UnknownVariable):  # noqa: RAW_VT_CONSTRUCTION
+class DelayGraphBreakVariable(UnknownVariable):  # noqa: RVT001
     """
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
@@ -631,7 +631,7 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class CellVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class CellVariable(VariableTracker):  # noqa: RVT001
     # PyCell_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L151
     _cpython_type = types.CellType
 
@@ -954,7 +954,7 @@ class AutogradFunctionVariable(VariableTracker):
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
             apply_source = source and AttrSource(source, member="apply")
-            val = AutogradFunctionApplyVariable(  # noqa: RAW_VT_CONSTRUCTION
+            val = AutogradFunctionApplyVariable(  # noqa: RVT001
                 forward_fn,
                 self.fn_cls.backward,
                 source,
@@ -1449,7 +1449,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     tp_methods = {"queue_callback": Method(queue_callback)}
 
 
-class LambdaVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class LambdaVariable(VariableTracker):  # noqa: RVT001
     # TODO: change to Ts = TypeVarTuple("Ts") for py 3.11+
     def __init__(self, fn: Callable[..., VariableTracker], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -1467,7 +1467,7 @@ class LambdaVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
         return self.fn(*args, **kwargs)
 
 
-class GetAttrVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class GetAttrVariable(VariableTracker):  # noqa: RVT001
     _nonvar_fields = {
         "name",
         "py_type",
@@ -1589,7 +1589,7 @@ class GetAttrVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
         return python_constant_repr_impl(self, tx)
 
 
-class CallMethodVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class CallMethodVariable(VariableTracker):  # noqa: RVT001
     """A method bound to a VT instance.
 
     Returned by object_generic_getattr when the MRO walk finds a method
@@ -2065,7 +2065,7 @@ class NumpyVariable(VariableTracker):
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
-class NullVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class NullVariable(VariableTracker):  # noqa: RVT001
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -2089,7 +2089,7 @@ class NullVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
         return "None"
 
 
-class DeletedVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class DeletedVariable(VariableTracker):  # noqa: RVT001
     """Marker used to implement delattr()"""
 
 

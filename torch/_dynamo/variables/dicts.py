@@ -109,7 +109,7 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
-class ConstDictVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class ConstDictVariable(VariableTracker):  # noqa: RVT001
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
 
@@ -889,7 +889,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
         return super().tp_getattro_impl(tx, name)
 
 
-class OrderedDictVariable(ConstDictVariable):  # noqa: RAW_VT_CONSTRUCTION
+class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     _cpython_type = collections.OrderedDict
     # self.items is actually a collections.OrderedDict at runtime for this
     # class (see ConstDictVariable.__init__'s storage_cls), which is what
@@ -1047,7 +1047,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RAW_VT_CONSTRUCTION
         raise NotImplementedError
 
 
-class MappingProxyVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class MappingProxyVariable(VariableTracker):  # noqa: RVT001
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 

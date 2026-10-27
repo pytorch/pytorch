@@ -1677,7 +1677,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            # noqa: RAW_VT_CONSTRUCTION
+            # noqa: RVT001
             return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
         return super().tp_getattro_impl(tx, name)
 

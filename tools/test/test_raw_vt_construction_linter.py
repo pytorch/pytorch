@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -24,11 +26,11 @@ class TestRawVTConstructionLinter(unittest.TestCase):
             "    pass\n"
             "class ValueVariable(VariableTracker):\n"
             "    pass\n"
-            "class ContainerVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION\n"
+            "class ContainerVariable(VariableTracker):  # noqa: RVT001\n"
             "    pass\n"
             "class ChildVariable(ContainerVariable):\n"
             "    pass\n"
-            "# noqa: RAW_VT_CONSTRUCTION\n"
+            "# noqa: RVT001\n"
             "class PlainState(VariableTracker):\n"
             "    pass\n",
             "torch/_dynamo/variables/base.py",
@@ -63,6 +65,22 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def check(self, source: str, relative_path: str = "torch/_dynamo/callsite.py"):
         return check_file(str(self.write(source, relative_path)), self.inventory)
+
+    def run_cli(self, filenames: list[str]):
+        relative_path = "tools/linter/adapters/raw_vt_construction_linter.py"
+        adapter = Path(__file__).resolve().parents[2] / relative_path
+        self.write(
+            adapter.read_text(encoding="utf-8"),
+            relative_path,
+        )
+        result = subprocess.run(
+            [sys.executable, relative_path, *filenames],
+            cwd=self.temp_dir.name,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return [json.loads(line) for line in result.stdout.splitlines()]
 
     def test_inventory_follows_inheritance_without_name_categories(self) -> None:
         self.assertEqual(
@@ -114,12 +132,12 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_decorated_class_noqa_does_not_exempt_other_calls(self) -> None:
         decorator = "@decorate(ValueVariable(0))\n"
-        directive = "# noqa: RAW_VT_CONSTRUCTION\n"
+        directive = "# noqa: RVT001\n"
         for prefix, suffix, decorator_line in (
-            (decorator, "  # noqa: RAW_VT_CONSTRUCTION", 2),
+            (decorator, "  # noqa: RVT001", 2),
             (directive + decorator, "", 3),
             (decorator + directive, "", 2),
-            (directive + decorator + directive, "  # noqa: RAW_VT_CONSTRUCTION", 3),
+            (directive + decorator + directive, "  # noqa: RVT001", 3),
         ):
             with self.subTest(prefix=prefix, suffix=suffix):
                 path = self.write(
@@ -254,16 +272,16 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_callsite_noqa(self) -> None:
         for call in (
-            "ValueVariable(1)  # noqa: RAW_VT_CONSTRUCTION\n",
-            "wrapper(ValueVariable(1))  # noqa: RAW_VT_CONSTRUCTION\n",
-            "ValueVariable(ValueVariable(1))  # noqa: RAW_VT_CONSTRUCTION\n",
-            "# noqa: RAW_VT_CONSTRUCTION\nValueVariable(1)\n",
-            "ValueVariable(  # noqa: RAW_VT_CONSTRUCTION\n    1,\n)\n",
-            "ValueVariable(  # noqa: RAW_VT_CONSTRUCTION\n    1,\n).call_function()\n",
-            "ValueVariable(\n    1,\n)  # noqa: RAW_VT_CONSTRUCTION\n",
-            "ValueVariable(1)  # noqa: E123, RAW_VT_CONSTRUCTION\n",
-            "ValueVariable(1)  # type: ignore[arg-type]  # noqa: RAW_VT_CONSTRUCTION\n",
-            "# type: ignore[arg-type]  # noqa: RAW_VT_CONSTRUCTION\nValueVariable(1)\n",
+            "ValueVariable(1)  # noqa: RVT001\n",
+            "wrapper(ValueVariable(1))  # noqa: RVT001\n",
+            "ValueVariable(ValueVariable(1))  # noqa: RVT001\n",
+            "# noqa: RVT001\nValueVariable(1)\n",
+            "ValueVariable(  # noqa: RVT001\n    1,\n)\n",
+            "ValueVariable(  # noqa: RVT001\n    1,\n).call_function()\n",
+            "ValueVariable(\n    1,\n)  # noqa: RVT001\n",
+            "ValueVariable(1)  # noqa: E123, RVT001\n",
+            "ValueVariable(1)  # type: ignore[arg-type]  # noqa: RVT001\n",
+            "# type: ignore[arg-type]  # noqa: RVT001\nValueVariable(1)\n",
         ):
             with self.subTest(call=call):
                 self.assertEqual(
@@ -275,9 +293,9 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_noqa_does_not_cover_other_lines(self) -> None:
         for call in (
-            "ValueVariable(  # noqa: RAW_VT_CONSTRUCTION\n    ValueVariable(1),\n)\n",
-            "ValueVariable(\n    ValueVariable(1),\n)  # noqa: RAW_VT_CONSTRUCTION\n",
-            "wrapper(\n    ValueVariable(1),\n)  # noqa: RAW_VT_CONSTRUCTION\n",
+            "ValueVariable(  # noqa: RVT001\n    ValueVariable(1),\n)\n",
+            "ValueVariable(\n    ValueVariable(1),\n)  # noqa: RVT001\n",
+            "wrapper(\n    ValueVariable(1),\n)  # noqa: RVT001\n",
         ):
             with self.subTest(call=call):
                 messages = self.check(
@@ -287,10 +305,12 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_only_explicit_comment_directives_suppress(self) -> None:
         for call in (
-            'ValueVariable("# noqa: RAW_VT_CONSTRUCTION")\n',
-            'text = "# noqa: RAW_VT_CONSTRUCTION"\nValueVariable(1)\n',
-            "ValueVariable(1)  # not-noqa: RAW_VT_CONSTRUCTION\n",
-            "ValueVariable(1)  # noqa: RAW_VT_CONSTRUCTION_EXTRA\n",
+            'ValueVariable("# noqa: RVT001")\n',
+            'text = "# noqa: RVT001"\nValueVariable(1)\n',
+            "ValueVariable(1)  # not-noqa: RVT001\n",
+            "ValueVariable(1)  # noqa: RVT001_EXTRA\n",
+            "ValueVariable(1)  # noqa: RVT0010\n",
+            "ValueVariable(1)  # noqa: RAW_VT_CONSTRUCTION\n",
             "ValueVariable(1)  # type: ignore[arg-type]\n",
         ):
             with self.subTest(call=call):
@@ -305,13 +325,12 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_function_noqa_exempts_only_its_body(self) -> None:
         for definition, indent in (
-            ("def factory(value):  # noqa: RAW_VT_CONSTRUCTION\n", "    "),
-            ("# noqa: RAW_VT_CONSTRUCTION\ndef factory(value):\n", "    "),
-            ("async def factory(value):  # noqa: RAW_VT_CONSTRUCTION\n", "    "),
-            ("def factory(  # noqa: RAW_VT_CONSTRUCTION\n    value,\n):\n", "    "),
+            ("def factory(value):  # noqa: RVT001\n", "    "),
+            ("# noqa: RVT001\ndef factory(value):\n", "    "),
+            ("async def factory(value):  # noqa: RVT001\n", "    "),
+            ("def factory(  # noqa: RVT001\n    value,\n):\n", "    "),
             (
-                "class Factory:\n"
-                "    def wrap(self, value):  # noqa: RAW_VT_CONSTRUCTION\n",
+                "class Factory:\n    def wrap(self, value):  # noqa: RVT001\n",
                 "        ",
             ),
         ):
@@ -332,10 +351,10 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_function_noqa_excludes_signature_and_nested_scopes(self) -> None:
         decorator = "@decorate(ValueVariable(0))\n"
-        directive = "# noqa: RAW_VT_CONSTRUCTION\n"
+        directive = "# noqa: RVT001\n"
         for keyword in ("def", "async def"):
             for prefix, suffix, decorator_line in (
-                (decorator, "  # noqa: RAW_VT_CONSTRUCTION", 2),
+                (decorator, "  # noqa: RVT001", 2),
                 (directive + decorator, "", 3),
                 (decorator + directive, "", 2),
             ):
@@ -350,7 +369,7 @@ class TestRawVTConstructionLinter(unittest.TestCase):
                         "    callback = lambda: ValueVariable(value)\n"
                         "    class Nested:\n"
                         "        own = ValueVariable(value)\n"
-                        "    def inner_factory(value):  # noqa: RAW_VT_CONSTRUCTION\n"
+                        "    def inner_factory(value):  # noqa: RVT001\n"
                         "        return ValueVariable(value)\n"
                         "    items = [ValueVariable(item) for item in ValueVariable(value)]\n"
                         "    items = {ValueVariable(item) for item in ValueVariable(value)}\n"
@@ -474,6 +493,48 @@ class TestRawVTConstructionLinter(unittest.TestCase):
 
     def test_unrelated_files_are_not_parsed(self) -> None:
         self.assertEqual(self.check("if:\n", "torch/unrelated.py"), [])
+
+    def test_cli_rechecks_unchanged_callers_after_class_exemption_removed(self) -> None:
+        imports = "from torch._dynamo.variables import ContainerVariable"
+        source = f"{imports}\nContainerVariable([])\n"
+        caller = self.write(source, "torch/caller.py")
+        self.assertEqual(self.run_cli([]), [])
+        base = self.variables_dir / "base.py"
+        self.write(
+            base.read_text(encoding="utf-8").replace(
+                "class ContainerVariable(VariableTracker):  # noqa: RVT001",
+                "class ContainerVariable(VariableTracker):",
+            ),
+            "torch/_dynamo/variables/base.py",
+        )
+        self.assertEqual(self.run_cli([str(base)]), [])
+        locations = [(message["path"], message["line"]) for message in self.run_cli([])]
+        self.assertEqual(locations, [(str(caller), 2)])
+        self.assertEqual(caller.read_text(encoding="utf-8"), source)
+
+    def test_cli_rechecks_unchanged_callers_after_builder_class_added(self) -> None:
+        source = "from torch._dynamo.variables import BuiltState\nBuiltState(1)\n"
+        caller = self.write(source)
+        builder = self.write(
+            "from .base import ValueVariable\nclass BuiltState:\n    pass\nValueVariable(0)\n",
+            "torch/_dynamo/variables/builder.py",
+        )
+        exports = self.variables_dir / "__init__.py"
+        self.write(
+            exports.read_text(encoding="utf-8") + "from .builder import BuiltState\n",
+            "torch/_dynamo/variables/__init__.py",
+        )
+        self.assertEqual(self.run_cli([]), [])
+        self.write(
+            builder.read_text(encoding="utf-8").replace(
+                "class BuiltState:", "class BuiltState(ValueVariable):"
+            ),
+            "torch/_dynamo/variables/builder.py",
+        )
+        self.assertEqual(self.run_cli([str(builder)]), [])
+        locations = [(message["path"], message["line"]) for message in self.run_cli([])]
+        self.assertEqual(locations, [(str(caller), 2)])
+        self.assertEqual(caller.read_text(encoding="utf-8"), source)
 
     def test_cli_reads_only_supplied_paths(self) -> None:
         checked = self.write(

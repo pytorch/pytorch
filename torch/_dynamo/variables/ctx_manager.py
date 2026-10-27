@@ -162,7 +162,7 @@ class ContextWrappingVariable(VariableTracker):
 
         return self._wrap_function(args[0])
 
-    # noqa: RAW_VT_CONSTRUCTION
+    # noqa: RVT001
     def _wrap_function(self, fn: VariableTracker) -> VariableTracker:
         if isinstance(fn, NestedUserFunctionVariable):
             return WrappedNestedUserFunctionVariable(fn, self)

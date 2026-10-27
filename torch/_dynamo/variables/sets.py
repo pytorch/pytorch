@@ -573,7 +573,7 @@ class BaseSetVariable(VariableTracker):
     }
 
 
-class SetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
+class SetVariable(BaseSetVariable):  # noqa: RVT001
     """Represents a Python set during symbolic execution."""
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
@@ -882,7 +882,7 @@ class OrderedSetClassVariable(VariableTracker):
         return var
 
 
-class OrderedSetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
+class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     """``torch.utils._ordered_set.OrderedSet``, an insertion-ordered set.
 
     OrderedSet is a pure-Python ``collections.abc.MutableSet``, not a subclass
@@ -1146,7 +1146,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
     }
 
 
-class FrozensetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
+class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
 

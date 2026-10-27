@@ -2350,17 +2350,17 @@ def _resolve_descriptor_get(
             if obj.source
             else None
         )
-        prop_vt = VariableBuilder.create_internal_descriptor(type_attr, prop_source)
+        prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
-        md_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+        md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.GetSetDescriptorType):
-        gs_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+        gs_vt = variables.GetSetDescriptorVariable.create(type_attr, source)
         return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
     _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
     if isinstance(type_attr, _tuplegetter):
-        tg_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+        tg_vt = variables.TupleGetterVariable.create(type_attr, source)
         return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, staticmethod):
         sm_vt = variables.StaticMethodVariable.from_descriptor(
@@ -2373,7 +2373,7 @@ def _resolve_descriptor_get(
         )
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
-        cmd_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+        cmd_vt = variables.ClassMethodDescriptorVariable.create(type_attr, source)
         return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.WrapperDescriptorType):
         wd_vt = VariableBuilder.create_internal_wrapper_descriptor(

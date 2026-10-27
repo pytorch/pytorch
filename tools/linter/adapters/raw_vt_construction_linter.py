@@ -8,7 +8,10 @@ modeled, and repeated imports in one scope are not flow-tracked. Calls to factor
 methods and dynamic callees are outside this rule's scope. An exact VT may also
 construct itself in its own static or class method named ``create``.
 
-An exact class-definition ``# noqa: RAW_VT_CONSTRUCTION`` permits that class,
+With no filenames, check all Python files under torch so inventory changes also
+check unchanged callers.
+
+An exact class-definition ``# noqa: RVT001`` permits that class,
 without permitting subclasses. Individual calls may use the same directive on
 the callee line, closing line, or immediately preceding standalone comment.
 Definition directives may appear inline or in a standalone comment immediately
@@ -32,6 +35,8 @@ from typing import NamedTuple
 
 
 LINTER_CODE = "RAW_VT_CONSTRUCTION"
+# Flake8 treats nonnumeric codes as blanket noqa directives.
+NOQA_CODE = "RVT001"
 _VARIABLES_MODULE = "torch._dynamo.variables"
 _VARIABLES_DIR = Path(__file__).resolve().parents[3] / "torch/_dynamo/variables"
 _FUNCTION_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
@@ -175,7 +180,7 @@ def _noqa_comments(source: str) -> dict[int, tokenize.TokenInfo]:
         if token.type != tokenize.COMMENT:
             continue
         match = re.search(r"#\s*noqa:\s*([A-Za-z0-9_, \t]+)", token.string)
-        if match and LINTER_CODE in re.split(r"[, \t]+", match[1]):
+        if match and NOQA_CODE in re.split(r"[, \t]+", match[1]):
             comments[token.start[0]] = token
     return comments
 
@@ -366,7 +371,7 @@ def check_file(
                 None,
                 None,
                 "Use VariableTracker.build or a VT factory, or exempt this call, "
-                "function, or exact VT class with '# noqa: RAW_VT_CONSTRUCTION'.",
+                f"function, or exact VT class with '# noqa: {NOQA_CODE}'.",
             )
         )
     return sorted(messages, key=lambda message: (message.line or 0, message.char or 0))
@@ -374,15 +379,20 @@ def check_file(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
-    parser.add_argument("filenames", nargs="+", help="Python files to check")
+    parser.add_argument(
+        "filenames", nargs="*", help="Python files to check (default: all under torch)"
+    )
     args = parser.parse_args(argv)
     try:
         inventory = _discover_variable_tracker_classes()
     except SyntaxError as error:
         print(json.dumps(_syntax_error(error)._asdict()), flush=True)
         return
-    for filename in args.filenames:
-        for message in check_file(filename, inventory):
+    filenames = args.filenames or sorted(
+        inventory.variables_dir.parents[1].rglob("*.py")
+    )
+    for filename in filenames:
+        for message in check_file(str(filename), inventory):
             print(json.dumps(message._asdict()), flush=True)
 
 

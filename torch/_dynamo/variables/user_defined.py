@@ -829,7 +829,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return cm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
-            cmd_vt = VariableBuilder.create_internal_descriptor(cls_attr, source)
+            cmd_vt = variables.ClassMethodDescriptorVariable.create(cls_attr, source)
             return cmd_vt.tp_descr_get_impl(tx, self, self)
 
         # property_descr_get with obj=NULL returns self.
@@ -840,9 +840,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return VariableBuilder.create_internal_descriptor(
-                cls_attr, descriptor_source
-            )
+            return variables.PropertyVariable.create(cls_attr, descriptor_source)
 
         # member_get with obj=NULL returns self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
@@ -852,7 +850,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return VariableBuilder.create_internal_descriptor(
+            return variables.MemberDescriptorVariable.create(
                 cls_attr, descriptor_source
             )
 
@@ -862,10 +860,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            tg_vt = cast(
-                variables.TupleGetterVariable,
-                VariableBuilder.create_internal_descriptor(cls_attr, descriptor_source),
-            )
+            tg_vt = variables.TupleGetterVariable.create(cls_attr, descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
 
         # TODO(tp_descr_get) - Comparison dunders must be checked before
@@ -1437,7 +1432,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # import here to avoid circular dependency
             from .ctx_manager import NullContextVariable
 
-            return NullContextVariable(*args, **kwargs)  # noqa: RAW_VT_CONSTRUCTION
+            return NullContextVariable(*args, **kwargs)  # noqa: RVT001
         elif self.value is collections.defaultdict:
             # defaultdict construction — use track_new_user_defined_object
             # which creates DefaultDictVariable. __init__ handler extracts
@@ -1569,7 +1564,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             rest_args = args[1:]
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
-            return variables.functions.FunctoolsPartialVariable(  # noqa: RAW_VT_CONSTRUCTION
+            return variables.functions.FunctoolsPartialVariable(  # noqa: RVT001
                 fn, args=rest_args, keywords=kwargs
             )
         elif self.value is warnings.catch_warnings and not args:
@@ -3955,7 +3950,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
-        from .builder import VariableBuilder
 
         # TODO - Check what is this _is_c_defined_property and if this handling should be moved inside the PropertyVariable.
         if isinstance(type_attr, property) and not self._is_c_defined_property(
@@ -3966,7 +3960,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the property wrapper.
             if self.source:
                 source = self.get_source_by_walking_mro(tx, name)
-            prop_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+            prop_vt = variables.PropertyVariable.create(type_attr, source)
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3984,7 +3978,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
                 return result
-            md_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+            md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
             return md_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -4003,13 +3997,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
                 return result
-            gs_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+            gs_vt = variables.GetSetDescriptorVariable.create(type_attr, source)
             return gs_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
 
         if isinstance(type_attr, _collections._tuplegetter):
-            tg_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+            tg_vt = variables.TupleGetterVariable.create(type_attr, source)
             return tg_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -4091,7 +4085,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
-            cmd_vt = VariableBuilder.create_internal_descriptor(type_attr, source)
+            cmd_vt = variables.ClassMethodDescriptorVariable.create(type_attr, source)
             return cmd_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )

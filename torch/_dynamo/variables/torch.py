@@ -919,7 +919,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return ProfilerContextVariable()  # noqa: RAW_VT_CONSTRUCTION
+            return ProfilerContextVariable()  # noqa: RVT001
         elif (
             self.value is torch._C.DisableTorchFunctionSubclass
             or self.value is torch._C.DisableTorchFunction
@@ -3866,7 +3866,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if source is not None:
                 if type(mro_lookup(type(self.value), name)) is property:
                     # Guarding the result would call the property getter again.
-                    return TorchInGraphFunctionVariable(  # noqa: RAW_VT_CONSTRUCTION
+                    return TorchInGraphFunctionVariable(  # noqa: RVT001
                         member, source=source
                     )
                 return TorchInGraphFunctionVariable.create_with_source(member, source)

@@ -3858,7 +3858,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
-        # noqa: RAW_VT_CONSTRUCTION
+        # noqa: RVT001
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])  # type: ignore[arg-type]
 
 

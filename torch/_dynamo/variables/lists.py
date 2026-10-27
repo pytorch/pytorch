@@ -763,7 +763,7 @@ class BaseListVariable(VariableTracker):
     }
 
 
-class RangeVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
+class RangeVariable(BaseListVariable):  # noqa: RVT001
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
     _index_not_found_msg = "sequence.index(x): x not in sequence"
@@ -1160,7 +1160,7 @@ class RangeVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
         return hash(self.as_python_constant()), False
 
 
-class ListVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
+class ListVariable(BaseListVariable):  # noqa: RVT001
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
     # CPython 3.14 stopped including the repr of the searched value (gh-121288)
@@ -1406,7 +1406,7 @@ class ListVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # list __reversed__: reverse iterator over items.
-        return ListReverseIteratorVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return ListReverseIteratorVariable(  # noqa: RVT001
             source_seq=self,
             mutation_type=ValueMutationNew(),
         )
@@ -1426,7 +1426,7 @@ class ListVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
     }
 
 
-class DequeVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
+class DequeVariable(BaseListVariable):  # noqa: RVT001
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
@@ -1916,7 +1916,7 @@ class DequeVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
     ) -> VariableTracker:
         # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
         # the current state and detects mutation during iteration.
-        return DequeReverseIteratorVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return DequeReverseIteratorVariable(  # noqa: RVT001
             list(reversed(self.items)),
             self,
             self.state,
@@ -1987,7 +1987,7 @@ class DequeVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1886-L1904
-        return DequeIteratorVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return DequeIteratorVariable(  # noqa: RVT001
             list(self.items),
             self,
             self.state,
@@ -2015,7 +2015,7 @@ class DequeVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
     }
 
 
-class TupleVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
+class TupleVariable(BaseListVariable):  # noqa: RVT001
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
 
@@ -2050,7 +2050,7 @@ class TupleVariable(BaseListVariable):  # noqa: RAW_VT_CONSTRUCTION
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
-        # noqa: RAW_VT_CONSTRUCTION
+        # noqa: RVT001
         return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2269,7 +2269,7 @@ class ByteArrayVariable(VariableTracker):
         return self
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # noqa: RAW_VT_CONSTRUCTION
+        # noqa: RVT001
         return ByteArrayIteratorVariable(self, 0, mutation_type=ValueMutationNew())
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -2546,7 +2546,7 @@ class ByteArrayVariable(VariableTracker):
         raise_type_error(tx, "unhashable type: 'bytearray'")
 
 
-class SizeVariable(TupleVariable):  # noqa: RAW_VT_CONSTRUCTION
+class SizeVariable(TupleVariable):  # noqa: RVT001
     """torch.Size(...)"""
 
     _cpython_type = torch.Size
@@ -2795,7 +2795,7 @@ class SizeVariable(TupleVariable):  # noqa: RAW_VT_CONSTRUCTION
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
-class SliceVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class SliceVariable(VariableTracker):  # noqa: RVT001
     # PySlice_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c#L689
     _cpython_type = slice
 
@@ -3053,7 +3053,7 @@ class BaseListIteratorVariable(IteratorVariable):
     tp_methods = {"__length_hint__": Method(length_hint)}
 
 
-class ListIteratorVariable(BaseListIteratorVariable):  # noqa: RAW_VT_CONSTRUCTION
+class ListIteratorVariable(BaseListIteratorVariable):  # noqa: RVT001
     # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
     _cpython_type = type(iter([]))
 
@@ -3327,7 +3327,7 @@ class ListReverseIteratorVariable(IteratorVariable):
             codegen.extend_output(create_call_function(1, False))
 
 
-class RangeIteratorVariable(IteratorVariable):  # noqa: RAW_VT_CONSTRUCTION
+class RangeIteratorVariable(IteratorVariable):  # noqa: RVT001
     # PyRangeIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L896
     _cpython_type = type(iter(range(0)))
 

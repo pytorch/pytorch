@@ -954,7 +954,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 changes = torch._dynamo.patch_dynamo_config(
                     *args_const, **kwargs_const
                 ).changes
-                return variables.DynamoConfigPatchVariable(changes)  # noqa: RAW_VT_CONSTRUCTION
+                return variables.DynamoConfigPatchVariable(changes)  # noqa: RVT001
             except AsPythonConstantNotImplementedError as e:
                 raise RuntimeError(
                     "Cannot convert patch_dynamo_config args/kwargs to constants. "
@@ -971,7 +971,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     raise AssertionError(
                         f"error_on_graph_break must be a bool, got {type(error_on_graph_break)}"
                     )
-                # noqa: RAW_VT_CONSTRUCTION
+                # noqa: RVT001
                 return variables.ErrorOnGraphBreakVariable(error_on_graph_break)
             except Exception as e:
                 raise RuntimeError(
@@ -988,7 +988,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     fwd = fwd.as_python_constant()
                 if isinstance(bwd, VariableTracker):
                     bwd = bwd.as_python_constant()
-                return variables.CudagraphOverrideVariable(fwd, bwd)  # noqa: RAW_VT_CONSTRUCTION
+                return variables.CudagraphOverrideVariable(fwd, bwd)  # noqa: RVT001
             except Exception as e:
                 raise RuntimeError(
                     "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
@@ -1199,7 +1199,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if tree_map_callable is None:
             return None
 
-        wrapped_map_fn = TreeMapOnlyFunctionVariable(  # noqa: RAW_VT_CONSTRUCTION
+        wrapped_map_fn = TreeMapOnlyFunctionVariable(  # noqa: RVT001
             allowed_types,
             map_fn,
             source=getattr(map_fn, "source", None),
@@ -1857,7 +1857,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RAW_VT_CONSTRUCTION
+class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
     """Some unsupported user-defined method"""
 
     # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
@@ -4516,7 +4516,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         if not isinstance(ptr, variables.DataPtrVariable):
             raise AssertionError(f"ptr must be a DataPtrVariable, got {type(ptr)}")
 
-        return TMADescriptorExperimentalVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return TMADescriptorExperimentalVariable(  # noqa: RVT001
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
@@ -4642,7 +4642,7 @@ class CreateTMADescriptorStableVariable(VariableTracker):
             else:
                 default_source = DefaultsSource(factory_source, default_index)
             install_guard(default_source.make_guard(GuardBuilder.CONSTANT_MATCH))
-        return TMADescriptorStableVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return TMADescriptorStableVariable(  # noqa: RVT001
             tensor=cast("TensorVariable", tensor),
             block_shape=cast("ListVariable", block_shape),
             descriptor_module=descriptor_module,
@@ -5037,7 +5037,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
@@ -5290,7 +5290,7 @@ def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
     return descriptor.__get__(obj, type(obj))
 
 
-class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
+class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     """Bound builtin_function_or_method (PyCFunction_Type).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
@@ -5513,6 +5513,13 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: types.ClassMethodDescriptorType,
+        source: Source | None = None,
+    ) -> "ClassMethodDescriptorVariable":
+        return ClassMethodDescriptorVariable(descriptor, source=source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
@@ -5738,7 +5745,7 @@ class ClassMethodVariable(VariableTracker):
         # as `owner.<name>`, so build the VT that can source it.
         # A classmethod may wrap any callable, so let the builder pick the VT;
         # tp_descr_get_impl rejects the ones it cannot bind.
-        return ClassAttrClassMethodVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return ClassAttrClassMethodVariable(  # noqa: RVT001
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
             source=source,
@@ -5863,6 +5870,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: types.MemberDescriptorType,
+        source: Source | None = None,
+    ) -> "MemberDescriptorVariable":
+        return MemberDescriptorVariable(descriptor, source=source)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # member_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L57-L62
         return descr_repr(tx, self.descriptor, "member")
@@ -5962,6 +5976,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: types.GetSetDescriptorType,
+        source: Source | None = None,
+    ) -> "GetSetDescriptorVariable":
+        return GetSetDescriptorVariable(descriptor, source=source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
@@ -6172,6 +6193,12 @@ class PropertyVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: property, source: Source | None = None
+    ) -> "PropertyVariable":
+        return PropertyVariable(descriptor, source=source)
+
     def __repr__(self) -> str:
         fget_name = getattr(self.descriptor.fget, "__name__", "?")
         return f"PropertyVariable({fget_name})"
@@ -6261,6 +6288,13 @@ class TupleGetterVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: "_collections._tuplegetter",
+        source: Source | None = None,
+    ) -> "TupleGetterVariable":
+        return TupleGetterVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         _, (idx, doc) = self.descriptor.__reduce__()

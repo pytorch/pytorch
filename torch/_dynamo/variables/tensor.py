@@ -2619,7 +2619,7 @@ class TensorVariable(VariableTracker):
     def method_untyped_storage(
         self, tx: "InstructionTranslatorBase"
     ) -> "UntypedStorageVariable":
-        return UntypedStorageVariable(  # noqa: RAW_VT_CONSTRUCTION
+        return UntypedStorageVariable(  # noqa: RVT001
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
