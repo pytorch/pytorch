@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import json
 import os
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -28,12 +31,10 @@ class _FakeProcess:
         self.wait_calls = 0
         self.kill_calls = 0
         self.close_calls = 0
-        # Mirrors TuningProcess.alive(): False short-circuits the bounded wait,
-        # which is what a fake with no real child should report.
+        # Tests override these to drive _shutdown_locked's bounded-wait branches.
         self._alive = False
         self.process = None
-        # TuningProcess.running: cleared by close()/kill(), i.e. only when
-        # the pipe itself failed. Left True for a child-reported error.
+        # TuningProcess.running: cleared only when the pipe itself failed.
         self.running = False
 
     def put(self, job):
@@ -47,9 +48,6 @@ class _FakeProcess:
     def shutdown(self, wait=True):
         self.shutdown_calls += 1
 
-    # The teardown surface _shutdown_locked drives. Without these the fake
-    # raised AttributeError, which the except Exception there swallowed, so the
-    # restart tests passed whether or not the old worker was ever shut down.
     def alive(self):
         return self._alive
 
@@ -132,6 +130,31 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(first.shutdown_calls, 1)
         self.assertEqual(first.close_calls, 1)
         self.assertEqual(first.kill_calls, 0)
+
+    def test_a_wedged_child_is_killed_and_reaped(self):
+        # A child stuck in device teardown never acts on the sentinel. Without
+        # the kill it would hold the GPU and stall every later submit.
+        self._submit(device=0)
+        first = self.created[0]
+        first._alive = True
+        first.process = mock.Mock()
+        first.process.wait.side_effect = subprocess.TimeoutExpired("worker", 10.0)
+        self._submit(device=1)
+        self.assertEqual(first.kill_calls, 1)
+        # close() belongs to the clean path; kill() closes the pipes itself.
+        self.assertEqual(first.close_calls, 0)
+        # Once for the bounded wait, once reaping the killed child.
+        self.assertEqual(first.process.wait.call_count, 2)
+
+    def test_a_child_that_exits_within_the_bound_is_not_killed(self):
+        self._submit(device=0)
+        first = self.created[0]
+        first._alive = True
+        first.process = mock.Mock()
+        self._submit(device=1)
+        self.assertEqual(first.kill_calls, 0)
+        self.assertEqual(first.close_calls, 1)
+        self.assertEqual(first.process.wait.call_count, 1)
 
     def test_worker_is_reused_when_device_and_file_are_unchanged(self):
         self._submit(device=2, filename="a.csv")
@@ -638,28 +661,44 @@ class TunableOpRealWorkerTest(TestCase):
         nothing off ROCm checks that the stamped dict and the mask tuple
         actually reach the child and that the job runs there.
         """
-        wrapped = _TestTunableOpJob(
-            tunableop.BenchmarkJob(
-                _TestBenchmarkRequest(1.0),
-                tuning=True,
-                nearest_match=True,
-                dyn_dims_mask=(True, False, True, False),
+        with tempfile.TemporaryDirectory(prefix="tunableop_pipe_") as d:
+            record = os.path.join(d, "calls.json")
+            wrapped = _TestTunableOpJob(
+                tunableop.BenchmarkJob(
+                    _TestBenchmarkRequest(1.0),
+                    tuning=True,
+                    nearest_match=True,
+                    dyn_dims_mask=(True, False, True, False),
+                ),
+                record_path=record,
             )
+            with mock.patch.multiple(
+                "torch.cuda.tunable",
+                get_max_tuning_duration=mock.Mock(return_value=11),
+                get_max_tuning_iterations=mock.Mock(return_value=12),
+                get_rotating_buffer_size=mock.Mock(return_value=13 * 1024 * 1024),
+                get_cublaslt_requested_algo_count=mock.Mock(return_value=14),
+            ):
+                outcome = self._submit(wrapped, timeout=120.0)
+            self.assertEqual(outcome.status, "ok")
+            self.assertEqual(outcome.time, 1.0)
+            with open(record) as f:
+                calls = json.load(f)
+        # Recorded in the child, so these assert what crossed the pipe.
+        self.assertIn(
+            ["set_filename", ["t.csv"], {"insert_device_ordinal": False}], calls
         )
-        with mock.patch.multiple(
-            "torch.cuda.tunable",
-            get_max_tuning_duration=mock.Mock(return_value=11),
-            get_max_tuning_iterations=mock.Mock(return_value=12),
-            get_rotating_buffer_size=mock.Mock(return_value=13 * 1024 * 1024),
-            get_cublaslt_requested_algo_count=mock.Mock(return_value=14),
-        ):
-            outcome = self._submit(wrapped, timeout=120.0)
-        self.assertEqual(outcome.status, "ok")
-        self.assertEqual(outcome.time, 1.0)
-        # What submit() stamped, and therefore what the child received.
-        self.assertEqual(wrapped.settings["set_max_tuning_duration"], 11)
-        self.assertEqual(wrapped.settings["set_rotating_buffer_size"], 13)
-        self.assertEqual(wrapped.filename, "t.csv")
+        self.assertIn(["set_max_tuning_duration", [11], {}], calls)
+        self.assertIn(["set_rotating_buffer_size", [13], {}], calls)
+        self.assertIn(
+            [
+                "dynamic_dims_mask",
+                [],
+                {"M": True, "N": False, "K": True, "BATCH": False},
+            ],
+            calls,
+        )
+        self.assertIn("dynamic_dims_mask().__enter__", [c[0] for c in calls])
 
 
 class TunableOpRocmWorkerTest(TestCase):
@@ -684,7 +723,15 @@ class TunableOpRocmWorkerTest(TestCase):
         # would re-scale by 2**20 and overflow the setter's signed int.
         tunable = torch.cuda.tunable
         previous = tunable.get_rotating_buffer_size()
-        self.addCleanup(tunable.set_rotating_buffer_size, previous // (1024 * 1024))
+        # The getter reports the L2 size when the knob is unset, so restoring
+        # previous // MB would replace "unset" with a rounded concrete value.
+        # Any negative size means "use L2" (TuningContext::SetRotatingBufferSize),
+        # which is what -1 restores.
+        l2 = torch.cuda.get_device_properties(torch.cuda.current_device()).L2_cache_size
+        self.addCleanup(
+            tunable.set_rotating_buffer_size,
+            -1 if previous == l2 else previous // (1024 * 1024),
+        )
 
         tunable.set_rotating_buffer_size(4)  # MB
         parent_bytes = tunable.get_rotating_buffer_size()
@@ -697,8 +744,6 @@ class TunableOpRocmWorkerTest(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_real_job_tunes_and_appends_to_shared_file(self):
-        import tempfile
-
         from torch._inductor.autotune_process import _TestTunableMatmulRequest
 
         tunableop._worker = None
@@ -707,6 +752,8 @@ class TunableOpRocmWorkerTest(TestCase):
         self.addCleanup(setattr, tunableop, "_worker", None)
         self.addCleanup(setattr, tunableop, "_worker_key", None)
 
+        was_enabled = torch.cuda.tunable.is_enabled()
+        previous_filename = torch.cuda.tunable.get_filename()
         with tempfile.TemporaryDirectory(prefix="tunableop_worker_roc_") as d:
             results_file = os.path.join(d, "results.csv")
             torch.cuda.tunable.set_filename(results_file, False)
@@ -719,8 +766,8 @@ class TunableOpRocmWorkerTest(TestCase):
                 ):
                     outcome = tunableop.submit(job, timeout=600.0)
             finally:
-                torch.cuda.tunable.enable(False)
-                torch.cuda.tunable.set_filename("", False)
+                torch.cuda.tunable.enable(was_enabled)
+                torch.cuda.tunable.set_filename(previous_filename, False)
             self.assertEqual(outcome.status, "ok")
             self.assertGreater(outcome.time, 0)
             with open(results_file) as f:
