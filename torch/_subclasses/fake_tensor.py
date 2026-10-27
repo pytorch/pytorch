@@ -216,6 +216,7 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
+    # Keys are the fake tensors to check for leaks; values are unused.
     non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
 
     def __init__(self) -> None:
@@ -226,8 +227,10 @@ class FakeTensorTLS(threading.local):
 fake_tensor_tls = FakeTensorTLS()
 
 
-# Called from FakeTensor.__init__ and, since C++ fake tensors have no Python
-# __init__, from set_proxy_slot for every tensor registered with a tracer.
+# Called from FakeTensor.__init__, and from set_proxy_slot for every tensor
+# registered with a tracer. The latter also records C++ fakes, which have no
+# Python __init__, and fakes created before is_exporting() is set, such as the
+# nn.Module input parameters fakified by _fakify_module_inputs.
 def track_fake_tensor_for_export(t: object) -> None:
     if (
         torch.compiler.is_exporting()
