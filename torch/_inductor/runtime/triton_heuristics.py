@@ -80,6 +80,7 @@ from .runtime_utils import (
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
+    extra_options_to_hashable,
     get_first_attr,
     get_max_y_grid,
     get_num_bytes,
@@ -776,8 +777,9 @@ class CachingAutotuner(KernelInterface):
         # Compile-time info included in runtime logginging
         self.compile_id: CompileId | None = None
         self.is_backward = False
-        # Whether any compile used this kernel in a forward: is_backward holds only
-        # the latest compile's direction, and a kernel object can serve both.
+        # Whether any compile in this process used this kernel in a forward:
+        # is_backward holds only the latest compile's direction, and a kernel
+        # object can serve both.
         self._forward_use = False
 
         # Mode for launch grid calculation
@@ -1250,6 +1252,7 @@ class CachingAutotuner(KernelInterface):
             getattr(self.fn, "_hash_lock", None),
             self.benchmark_failure_reasons,
             self._launched,
+            self._forward_use,
         )
         self.fn.fn = None
         self.fn.__globals__ = None
@@ -1258,6 +1261,7 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []
         self._cached_launcher = None
         self._launched = False
+        self._forward_use = False
         self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
@@ -1274,12 +1278,14 @@ class CachingAutotuner(KernelInterface):
                 self.fn._hash_lock,
                 self.benchmark_failure_reasons,
                 self._launched,
+                self._forward_use,
             ) = old_values
         else:
             # even if we don't need/have specific values, we do need the
             # _hash_lock to be a valid RLock
             self.fn._hash_lock = threading.RLock()
             self._launched = False
+            self._forward_use = False
 
     def prepare_for_caching(self) -> None:
         """
@@ -3754,6 +3760,11 @@ def hash_configs(configs: list[Config]):
         hasher.update(
             f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
+        if extra_options := getattr(cfg, "extra_options", None):
+            # Preserve existing hashes when no backend-specific options exist.
+            hasher.update(
+                f"extra_options={extra_options_to_hashable(extra_options)}\n".encode()
+            )
     return hasher.hexdigest()
 
 
