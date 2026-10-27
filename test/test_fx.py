@@ -2210,6 +2210,61 @@ class TestFX(JitTestCase):
             leaf, [n.target for n in graph.nodes if n.op == "call_function"]
         )
 
+    def test_registry_growth_in_a_revert_window_patches_a_builtin_once(self):
+        from torch.fx import _symbolic_trace
+
+        unresolved = object()
+
+        def target(x):
+            return x
+
+        def other(x):
+            return x
+
+        # A module that torch.fx.wrap("len")s the builtin.
+        len_scope = {}
+        other_scope = {"other": other}
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # Its module body registers another wrap target.
+                    key = (id(other_scope), "other")
+                    _symbolic_trace._wrapped_fns_to_patch[key] = other_scope
+                    value = target
+                    dict.__setitem__(self, name, value)
+                return value
+
+        target_scope = Globals(t=unresolved)
+
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                with _symbolic_trace._maybe_revert_all_patches():
+                    # Code run here imports a module that wrap("t")s a lazy t.
+                    key = (id(target_scope), "t")
+                    _symbolic_trace._wrapped_fns_to_patch[key] = target_scope
+                    torch.fx.Tracer().trace(Inner())
+                return x
+
+        with (
+            unittest.mock.patch.dict(_symbolic_trace._wrapped_fns_to_patch),
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is unresolved,
+                create=True,
+            ),
+        ):
+            _symbolic_trace._wrapped_fns_to_patch[(id(len_scope), "len")] = len_scope
+            # Exits without deleting the "len" patch twice.
+            torch.fx.Tracer().trace(Outer())
+        self.assertNotIn("len", len_scope)
+
     def test_an_earlier_lazily_bound_wrap_target_resolves_outside_every_trace(self):
         from torch.fx import _symbolic_trace
 

@@ -2083,9 +2083,9 @@ def _custom_op_modules(
     """The importable modules defining the Python custom ops among ``op_names``,
     each with the ops it defines.
 
-    The module is the one defining the function ``torch.library.custom_op``
-    wrapped, or, for ``torch.library.triton_op``, whose function is torch's own
-    wrapper, the one defining the op's fake, the user's function. That is where
+    The module is the one defining the user's function: the one
+    ``torch.library.custom_op`` wrapped, or, through ``__wrapped__``, the one
+    behind ``torch.library.triton_op``'s own wrapper. That is where
     the op registers unless it was built elsewhere (by a factory, say), which the
     import at load checks. A serving process must be able to import it by name; a
     torch submodule counts (some register their ops only once imported), but
