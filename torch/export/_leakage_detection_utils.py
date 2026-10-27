@@ -4,6 +4,7 @@ import typing
 from collections.abc import Iterable
 from typing_extensions import TypeIs
 
+import torch
 from torch.fx.experimental.symbolic_shapes import TrackedFake
 
 
@@ -62,12 +63,14 @@ def _dict_is_attr_of_tracked_fake(d: dict) -> bool:
     return False
 
 
-def find_legit_leaks_from_referrers(active_fakes: Iterable[object]) -> list[object]:
+def find_legit_leaks_from_referrers(
+    active_fakes: Iterable[torch.Tensor],
+) -> list[torch.Tensor]:
     # Tensor == returns an elementwise tensor, not a bool, so set equality is
     # ambiguous. List duplication is not a concern because the input tracker is
     # a WeakIdKeyDictionary, which deduplicates by object identity, and the
     # caller never uses set operations.
-    legit_leak: list[object] = []
+    legit_leak: list[torch.Tensor] = []
 
     # This is so that we don't falsely flag generator to be holding fake tensor
     fake_list = list(active_fakes)
