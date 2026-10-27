@@ -4983,6 +4983,14 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
         return self.descriptor
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # PyWrapperDescr_Type inherits object_richcompare, like PyMethodDescr_Type.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",

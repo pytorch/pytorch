@@ -1963,9 +1963,9 @@ class DictViewVariable(VariableTracker):
     ) -> ConstantVariable:
         if self.kv is None:
             raise AssertionError("kv must not be None for call_obj_hasattr")
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+        return ConstantVariable.create(
+            mro_lookup(self.python_type(), name) is not NO_SUCH_SUBOBJ
+        )
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
