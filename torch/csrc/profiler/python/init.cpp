@@ -500,7 +500,7 @@ void initPythonBindings(PyObject* module) {
             std::vector<std::string> performance_events;
             performance_events.reserve(py_perf_events.size());
             for (const auto& py_perf_event : py_perf_events) {
-              performance_events.push_back(py::str(py_perf_event));
+              performance_events.push_back(py_perf_event.cast<std::string>());
             }
 
             return ExperimentalConfig(
