@@ -166,8 +166,8 @@ class CudaGraphManager {
     replay(*it->second, inputs, outputs, num_outputs, stream);
   }
 
-  // Drops all graphs, e.g. when the model's constants move. Their memory
-  // stays in the pool for later captures until the manager is destroyed.
+  // Drops all graphs, e.g. when the model's constants move. The next capture
+  // starts a new pool.
   void reset() {
     std::lock_guard<std::mutex> lock(mutex_);
     graphs_.clear();
@@ -381,7 +381,13 @@ class CudaGraphManager {
       size_t num_inputs,
       size_t num_outputs,
       cudaStream_t stream) {
-    if (!pool_) {
+    // A pool can't take a capture once every graph captured into it is gone.
+    if (graphs_.empty()) {
+      if (pool_) {
+        // Deleting the pool returns its memory to the device.
+        AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
+        pool_.reset();
+      }
       CUDAMemPoolHandle pool = nullptr;
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_create_cuda_mem_pool(device_index_, &pool));
