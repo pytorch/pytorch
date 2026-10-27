@@ -9,12 +9,11 @@ the async compile pool) at real execution time.
 
 This removes the need for hand-written ``_*_fake`` twins on each op.
 
-Note: we deliberately do NOT gate on ``torch.compiler.is_compiling()`` --
-post-184614 it is True in the compiling thread for the whole torch.compile
-session, so a gate would make Dynamo's ``_get_fake_value_impl`` run the body
-during any torch.compile session, surfacing any ``_compile_*`` ``ValueError``
-as a ``TorchRuntimeError`` graph break. If a guard is ever needed, gate on
-``torch.compiler.is_exporting()``.
+Note: we deliberately do NOT gate on ``torch.compiler.is_compiling()`` —
+that flag's underlying ``_is_compiling_flag`` is only set during
+``torch.export``, never during ``torch.compile``. Dynamo's
+``_get_fake_value_impl`` would otherwise run the body and surface
+any ``_compile_*`` ``ValueError`` as a ``TorchRuntimeError`` graph break.
 """
 
 from __future__ import annotations
