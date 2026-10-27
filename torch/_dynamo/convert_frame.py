@@ -1741,13 +1741,6 @@ def _compile(
 
     check_compilation_allowed("Dynamo graph compilation")
 
-    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
-        # Overlap the one-time source hashing for Inductor's cache keys with
-        # Dynamo and AOTAutograd tracing.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
-
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
