@@ -1993,6 +1993,8 @@ _TORCH_OP_NAMESPACES = frozenset(
         "vulkan_prepack",
         "metal",
         "metal_prepack",
+        "vulkan_quantized",
+        "_nnapi",
     }
 )
 
@@ -2003,9 +2005,10 @@ def _registered_by_torch(op_name: str, overload: str) -> bool:
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
     torch_dir = os.path.dirname(torch.__file__)
-    helpers = (
-        os.path.join(torch_dir, "library.py"),
-        os.path.join(torch_dir, "_library"),
+    # torch's helpers that build a Library for the caller's namespace record themselves.
+    helpers = tuple(
+        os.path.join(torch_dir, name)
+        for name in ("library.py", "_library", "_custom_op")
     )
     return path.startswith(torch_dir + os.sep) and not path.startswith(helpers)
 

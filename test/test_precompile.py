@@ -9557,6 +9557,9 @@ class TestPrecompileCustomOpModules(TestCase):
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
 
+def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
+
+
 class TestPrecompileCustomOpRecording(TestCase):
     def _op(self, name):
         ns = f"precompile_recording_{uuid.uuid4().hex}"
@@ -9596,7 +9599,11 @@ class TestPrecompileCustomOpRecording(TestCase):
         ns = f"precompile_library_{uuid.uuid4().hex}"
         lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
         lib.define("f(Tensor x) -> Tensor")
-        names = [(qualname, ""), (f"{ns}::f", ""), (recorded._qualname, "")]
+        torch._custom_ops.custom_op(f"{ns}::legacy_op")(legacy_op)
+        registry = torch._custom_op.impl.global_registry
+        self.addCleanup(registry[f"{ns}::legacy_op"]._destroy)
+        names = [(qualname, ""), (f"{ns}::f", ""), (f"{ns}::legacy_op", "")]
+        names.append((recorded._qualname, ""))
         importlib.import_module("torch.export.custom_ops")
 
         # Torch's own ops, registered from C++ and from Python inside torch.
@@ -9606,6 +9613,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         (message,) = logs.output
         self.assertIn(qualname, message)
         self.assertIn(f"{ns}::f", message)
+        self.assertIn(f"{ns}::legacy_op", message)
         self.assertNotIn(recorded._qualname, message)
         self.assertNotIn("aten::add", message)
         self.assertNotIn("export::", message)
@@ -9629,7 +9637,8 @@ class TestPrecompileCustomOpRecording(TestCase):
             """
         )
         # Only a source build records C++ schemas under torch/, so they are checked
-        # against the list itself.
+        # against the list itself. Namespaces this build does not register (vulkan,
+        # metal, nnapi, ...) are not checked.
         out = subprocess.check_output([sys.executable, "-c", script], text=True)
         # "_test" holds TorchScript's own test ops.
         self.assertEqual(set(out.split()) - {"_test"}, set())
