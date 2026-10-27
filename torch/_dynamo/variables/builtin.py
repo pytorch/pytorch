@@ -296,15 +296,28 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
+# Raising ops need a reject check in ComputedLazyConstantVariable.create, like division
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
-    # invert/str excluded: SymNodeVariable lacks nb_invert_impl/tp_repr_impl
-    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_, len, bool]),
+    1: frozenset(
+        [
+            operator.neg,
+            operator.pos,
+            operator.abs,
+            operator.not_,
+            operator.invert,
+            len,
+            str,
+            bool,
+        ]
+    ),
     2: frozenset(
         [
             operator.add,
             operator.sub,
             operator.mul,
+            operator.truediv,
+            operator.floordiv,
+            operator.mod,
             operator.and_,
             operator.or_,
             operator.xor,
@@ -4106,7 +4119,12 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(
                         obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
                     )
-                elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                elif not isinstance(obj, variables.UnspecializedNNModuleVariable) and (
+                    obj.tp_as_sequence.sq_length is not None
+                    or obj.tp_as_mapping.mp_length is not None
+                ):
+                    # Iterables need not be Sized. Unsized user-defined objects
+                    # are guarded through the state read while tracing iteration.
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         lst = ListVariable([], mutation_type=ValueMutationNew())
