@@ -301,22 +301,6 @@ memory_pool: Literal["none", "intermediates", "outputs", "combined"] = os.enviro
     "TORCHINDUCTOR_MEMORY_POOL", "intermediates"
 )  # type: ignore[assignment]
 
-# Compile-time TunableOp integration for ROCm hipBLASLt GEMMs. "tune" tunes GEMMs
-# during autotuning and records the solutions, including a range of sizes of the
-# dynamic dim; "reuse" instead borrows the nearest recorded shape, benchmarks it
-# against the default kernel, and records the winner. Run as separate passes:
-# "tune" builds the results file, "reuse" consumes it.
-# pyrefly: ignore [bad-assignment]
-aten_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
-    "TORCHINDUCTOR_ATEN_TUNABLEOP_MODE", "off"
-)  # type: ignore[assignment]
-
-# Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning can
-# hang, which subprocess isolation alone does not fix, so the wait is bounded.
-aten_tunableop_timeout: float = float(
-    os.environ.get("TORCHINDUCTOR_ATEN_TUNABLEOP_TIMEOUT", "900")
-)
-
 # codegen benchmark harness
 benchmark_harness = True
 
@@ -3024,6 +3008,25 @@ class cuda(cutlass):
     # runtime concrete-miss lookups can reuse. False stops producing new
     # wildcard entries; existing rows in a loaded file still satisfy lookups.
     autotune_tunableop_dynamic_dims_wildcard: bool = False
+
+    # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
+    # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
+    # autotuning and records the solutions, including a range of sizes of the
+    # dynamic dim; "reuse" instead borrows the nearest recorded shape, benchmarks
+    # it against the default kernel, and records the winner. Run as separate
+    # passes: "tune" builds the results file, "reuse" consumes it.
+    # Env var name is deliberately flat, like the other knobs in this class.
+    # pyrefly: ignore [bad-assignment]
+    aten_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
+        "TORCHINDUCTOR_ATEN_TUNABLEOP_MODE", "off"
+    )  # type: ignore[assignment]
+
+    # Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning
+    # can hang, which subprocess isolation alone does not fix, so the wait is
+    # bounded.
+    aten_tunableop_timeout: float = float(
+        os.environ.get("TORCHINDUCTOR_ATEN_TUNABLEOP_TIMEOUT", "900")
+    )
 
 
 @inherit_fields_from(cutlass)
