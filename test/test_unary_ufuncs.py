@@ -15,6 +15,9 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfMPS,
+    expectedFailureMPS,
+    expectedFailureMPSComplex,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -37,6 +40,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_unary_tensors,
     unary_ufuncs,
 )
+from torch.testing._internal.common_mps import mps_ops_modifier
 from torch.testing._internal.common_utils import (
     gradcheck,
     HardwareClassification,
@@ -58,6 +62,10 @@ from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 
 if TEST_SCIPY:
     import scipy
+
+# silu and round(decimals=0) xfails for integer dtypes only exist because CPU lacks
+# them, which matters for MPS-vs-CPU comparisons, but not for the tests below
+unary_ufuncs = mps_ops_modifier(unary_ufuncs, xfail_exclusion=["nn.functional.silu", "rounddecimals_0"])
 
 # Refer [scipy reference filter]
 # Filter operators for which the reference function
@@ -670,6 +678,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(exponent.dtype == torch.int32)
         self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
 
+    @expectedFailureMPS  # iterates over float64/complex128, which MPS does not support
     def test_frexp_assert_raises(self, device):
         invalid_input_dtypes = integral_types_and(torch.bool) + complex_types()
         for dtype in invalid_input_dtypes:
@@ -1278,10 +1287,8 @@ class TestUnaryUfuncs(TestCase):
 
     def _helper_test_igamma(self, loglo, loghi, device, dtype, torch_fcn, scipy_fcn):
         exp1 = 2.71828182846
-        vec1 = torch.logspace(
-            loglo, loghi, steps=500, base=exp1, dtype=torch.float64, device=device
-        ).unsqueeze(-1)
-        vec1 = vec1.to(dtype)
+        vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1, dtype=torch.float64)
+        vec1 = vec1.unsqueeze(-1).to(device=device, dtype=dtype)
         inputs = [
             (vec1, vec1.transpose(0, 1)),
             (vec1, vec1),  # for large number, it should approach 0.5
@@ -1497,6 +1504,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @expectedFailureMPS  # log_ndtr is not implemented on MPS
     def test_special_log_ndtr_vs_scipy(self, device, dtype):
         def check_equal(t):
             # Test by comparing with scipy
@@ -1565,6 +1573,7 @@ class TestUnaryUfuncs(TestCase):
                 torch_op(t, out=out)
 
     @dtypes(*float8_types_and(torch.float8_e8m0fnu))
+    @dtypesIfMPS(torch.float8_e4m3fn)
     def test_isinf_isfinite_float8(self, device, dtype):
         # Float8_e5m2 is the only fp8 dtype that can encode infinity; for the
         # rest isinf is trivially false and isfinite reduces to "not NaN".
@@ -1573,9 +1582,7 @@ class TestUnaryUfuncs(TestCase):
         t = ref.to(dtype)
 
         self.assertEqual(t.isinf(), ref.isinf())
-        if dtype is not torch.float8_e8m0fnu:
-            # isfinite reports every Float8_e8m0fnu value as finite, NaN included
-            self.assertEqual(t.isfinite(), ref.isfinite())
+        self.assertEqual(t.isfinite(), ref.isfinite())
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
@@ -1770,6 +1777,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @expectedFailureMPSComplex  # exp(inf+infj) is nan+nanj instead of inf+nanj
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = (
@@ -1872,6 +1880,18 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
+
+    @skipIfNoSciPy
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("stride", (1, 2))
+    def test_erfinv_near_endpoints(self, device, dtype, stride):
+        bits = 24 if dtype == torch.float32 else 53
+        values = [1 - 2.0**-k for k in range(2, bits + 1)]
+        values += [-x for x in values]
+        x = torch.empty(len(values) * stride, device=device, dtype=dtype)[::stride]
+        x.copy_(torch.tensor(values, device=device, dtype=dtype))
+        expected = torch.from_numpy(scipy.special.erfinv(x.cpu().numpy()))
+        self.assertEqual(torch.special.erfinv(x), expected, atol=0, rtol=4 * torch.finfo(dtype).eps)
 
 
 class TestUnaryUfuncsCpuOnly(TestCase):
@@ -1990,7 +2010,7 @@ class TestUnaryUfuncsCUDADevice(TestCase):
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals())
+instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True)
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
 instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
 

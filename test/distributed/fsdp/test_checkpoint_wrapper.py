@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 _SAVED_PREFIX = "_saved_"
 GRAD_FN_NEXT_FUNCTIONS = "next_functions"
 
-device_type = torch.device(get_devtype())
+device = torch.device(get_devtype())
 
 
 class CheckpointWrapperTest(TestCase):
@@ -189,12 +189,12 @@ class CheckpointWrapperTest(TestCase):
                 use_checkpointing,
                 use_wrapper=use_wrapper,
                 use_reentrant=use_reentrant,
-            ).to(device_type.type)
-            x = torch.randn(10000, 256, requires_grad=True).to(device_type.type)
-            torch.get_device_module(device_type.type).reset_peak_memory_stats()
+            ).to(device.type)
+            x = torch.randn(10000, 256, requires_grad=True).to(device.type)
+            torch.get_device_module(device.type).reset_peak_memory_stats()
             loss = a(x).sum()
             loss.backward()
-            return torch.get_device_module(device_type.type).max_memory_allocated()
+            return torch.get_device_module(device.type).max_memory_allocated()
 
         functional_no_reentrant = test(
             use_checkpointing=True, use_wrapper=False, use_reentrant=False
@@ -345,7 +345,7 @@ class CheckpointWrapperTest(TestCase):
             nn.Linear(10, 10),
             nn.Linear(10, 10),
             nn.Linear(10, 10),
-        ).to(device_type.type)
+        ).to(device.type)
 
         # Patch saved_tensor_hooks to make the unpack keep the tensor on CPU for
         # testing, otherwise the tensor access during the DFS will cause orig
@@ -364,7 +364,7 @@ class CheckpointWrapperTest(TestCase):
 
         model = offload_wrapper(model)
 
-        inp = torch.randn(3, 10, device=device_type.type)
+        inp = torch.randn(3, 10, device=device.type)
         loss = model(inp).sum()
 
         # All autograd saved tensors should be offloaded to CPU.
@@ -391,7 +391,7 @@ class CheckpointWrapperTest(TestCase):
 
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_checkpoint_wrapper_with_block_mask(self):
         """Test that BlockMask can be passed through checkpoint_wrapper."""
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
@@ -414,8 +414,8 @@ class CheckpointWrapperTest(TestCase):
             def forward(self, x, mask):
                 return x * 2
 
-        model = checkpoint_wrapper(Block()).cuda()
-        x = torch.randn(4, 128, device="cuda")
+        model = checkpoint_wrapper(Block()).to(device.type)
+        x = torch.randn(4, 128, device=device.type)
         result = model(x, block_mask)
         self.assertEqual(result, x * 2)
 
