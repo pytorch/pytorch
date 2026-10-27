@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import json
 import re
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from unittest import main, mock, TestCase
@@ -152,23 +151,134 @@ def workflow_jobs(workflow: str) -> Any:
     return jobs
 
 
-class TestMergeWorkflowSteps(TestCase):
-    """Any change to what the merge and revert workflows run fails this test, so
-    whoever makes it checks that the workflows still reply to merge and revert
-    commands only through code that tags those replies (trymerge.py and
-    comment_on_pr.py; tryrebase.py reports rebases, which carry no status). Once
-    that holds, update the hash. Action version bumps don't change it."""
+def workflow_steps(workflow: str) -> list[dict[str, Any]]:
+    """A workflow's steps without their names, inputs (`with:`) and environment
+    other than COMMENT_ID, and with the commands they run stripped of comments
+    and blank lines. Runners, permissions and secrets are left out too: none of
+    these decide what replies to a command."""
+    steps = []
+    for job in workflow_jobs(workflow).values():
+        for step in job["steps"]:
+            pinned = {k: v for k, v in step.items() if k not in ("name", "with", "env")}
+            if "run" in step:
+                lines = [line.strip() for line in step["run"].split("\n")]
+                pinned["run"] = [x for x in lines if x and not x.startswith("#")]
+            env = job.get("env", {}) | step.get("env", {})
+            if "COMMENT_ID" in env:
+                pinned["COMMENT_ID"] = env["COMMENT_ID"]
+            steps.append(pinned)
+    return steps
 
-    PINNED = {
-        "trymerge.yml": "c2c010959270dfb408a5dcde0183e57fb2d633d215ec5e3bc8f75f668647fb8f",
-        "revert.yml": "c62cca424cdf4081d6723ec3d7362a6698f5e0e9edac2e87a90f506fdbdd8068",
+
+COMMENT_ID = "${{ github.event.client_payload.comment_id }}"
+CANCELED = "${{ cancelled() && steps.checkout.outcome == 'success' }}"
+SETUP_STEPS = [
+    {"id": "checkout", "uses": "actions/checkout"},
+    {"uses": "actions/setup-python"},
+    {"run": ["pip install pyyaml==6.0.2"]},
+    {
+        "run": [
+            'git config --global user.email "pytorchmergebot@users.noreply.github.com"',
+            'git config --global user.name "PyTorch MergeBot"',
+        ]
+    },
+]
+
+
+class TestMergeWorkflowSteps(TestCase):
+    """The merge and revert workflows reply to commands only through code that
+    tags those replies: trymerge.py, and comment_on_pr.py with the command it
+    reports (tryrebase.py reports rebases, which carry no status). Any change to
+    what they run fails this test, so whoever makes it checks that this still
+    holds, then updates the steps below."""
+
+    STEPS = {
+        "trymerge.yml": [
+            *SETUP_STEPS,
+            {
+                "shell": "bash",
+                "COMMENT_ID": COMMENT_ID,
+                "run": [
+                    "set -x",
+                    'if [ -n "${REBASE}" ]; then',
+                    'if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then',
+                    'python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"',
+                    "exit 0",
+                    "fi",
+                    "git checkout main",
+                    "git fetch -p",
+                    "sleep 60",
+                    "fi",
+                    'if [ -z "${COMMENT_ID}" ]; then',
+                    'echo "Error: merge requires COMMENT_ID to be specified"',
+                    "exit 1",
+                    "fi",
+                    'if [ -n "${FORCE}" ]; then',
+                    'python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    'elif [ -n "${IGNORE_CURRENT}" ]; then',
+                    'python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    "else",
+                    'python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    "fi",
+                ],
+            },
+            {
+                "if": CANCELED,
+                "continue-on-error": True,
+                "COMMENT_ID": COMMENT_ID,
+                "run": [
+                    "set -x",
+                    'python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"',
+                ],
+            },
+            {
+                "uses": "aws-actions/configure-aws-credentials",
+                "continue-on-error": True,
+            },
+            {
+                "uses": "seemethere/upload-artifact-s3",
+                "if": "always()",
+                "continue-on-error": True,
+            },
+        ],
+        "revert.yml": [
+            *SETUP_STEPS,
+            {
+                "COMMENT_ID": COMMENT_ID,
+                "run": [
+                    "set -ex",
+                    'if [ -n "${COMMENT_ID}" ]; then',
+                    'if [ -n "${REASON}" ]; then',
+                    'python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" --reason "${REASON}" "${PR_NUM}"',
+                    "else",
+                    'python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    "fi",
+                    "else",
+                    'if [ -n "${REASON}" ]; then',
+                    'python3 .github/scripts/trymerge.py --revert --reason "${REASON}" "${PR_NUM}"',
+                    "else",
+                    'python3 .github/scripts/trymerge.py --revert "${PR_NUM}"',
+                    "fi",
+                    "fi",
+                ],
+            },
+            {
+                "if": CANCELED,
+                "continue-on-error": True,
+                "COMMENT_ID": COMMENT_ID,
+                "run": [
+                    "set -ex",
+                    'python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "revert"',
+                ],
+            },
+        ],
     }
 
-    def test_jobs_are_reviewed(self) -> None:
-        for workflow, pinned in self.PINNED.items():
+    def test_steps_are_reviewed(self) -> None:
+        self.maxDiff = None
+        for workflow, steps in self.STEPS.items():
             with self.subTest(workflow=workflow):
-                jobs = json.dumps(workflow_jobs(workflow), sort_keys=True)
-                self.assertEqual(sha256(jobs.encode()).hexdigest(), pinned)
+                self.assertEqual(workflow_steps(workflow), steps)
 
 
 def module_path(name: str) -> Path | None:
@@ -318,27 +428,20 @@ class TestWorkflowScriptsPostThroughTheTaggingPath(TestCase):
     REVIEWED = [
         ("comment_on_pr", "main", "msg"),
         ("trymerge", "post_pr_comment", "with_status(comment, status, comment_id)"),
-        ("tryrebase", "<module>", "import gh_post_pr_comment as gh_post_comment"),
-        ("tryrebase", "main", 'f"PR #{args.pr_num} is closed, won\'t rebase"'),
-        ("tryrebase", "main", "msg"),
-        ("tryrebase", "main", "msg"),
-        ("tryrebase", "post_already_uptodate", "msg"),
-        (
-            "tryrebase",
-            "rebase_ghstack_onto",
-            "f'Rebased `{orig_ref}` onto `{onto_branch}` because #{pr.pr_num} was rebased, please pull locally before adding more changes (for example, via `ghstack ' + f'checkout https://github.com/{org}/{project}/pull/{pr_num}`)'",
-        ),
-        (
-            "tryrebase",
-            "rebase_ghstack_onto",
-            "f'Successfully rebased `{orig_ref}` onto `{onto_branch}`, please pull locally ' + 'before adding more changes (for example, via `ghstack ' + f'checkout https://github.com/{org}/{project}/pull/{pr.pr_num}`)'",
-        ),
-        ("tryrebase", "rebase_native_stack_onto", "msg"),
-        (
-            "tryrebase",
-            "rebase_onto",
-            "f'Successfully rebased `{pr.head_ref()}` onto `{onto_branch}`, please pull locally ' + f'before adding more changes (for example, via `git checkout {pr.head_ref()} && ' + 'git pull --rebase`)'",
-        ),
+    ]
+    # Modules whose replies report no merge or revert outcome, with the functions
+    # that post them; their text doesn't matter here
+    UNTAGGED = {"tryrebase"}
+    REVIEWED_UNTAGGED = [
+        ("tryrebase", "<module>"),
+        ("tryrebase", "main"),
+        ("tryrebase", "main"),
+        ("tryrebase", "main"),
+        ("tryrebase", "post_already_uptodate"),
+        ("tryrebase", "rebase_ghstack_onto"),
+        ("tryrebase", "rebase_ghstack_onto"),
+        ("tryrebase", "rebase_native_stack_onto"),
+        ("tryrebase", "rebase_onto"),
     ]
 
     def test_posting_paths_are_reviewed(self) -> None:
@@ -347,7 +450,13 @@ class TestWorkflowScriptsPostThroughTheTaggingPath(TestCase):
             for name, tree in self.modules.items()
             for post in raw_posts(name, tree)
         )
-        self.assertEqual(found, self.REVIEWED)
+        self.assertEqual(
+            [post for post in found if post[0] not in self.UNTAGGED], self.REVIEWED
+        )
+        self.assertEqual(
+            [post[:2] for post in found if post[0] in self.UNTAGGED],
+            self.REVIEWED_UNTAGGED,
+        )
 
 
 class TestEveryCommentDeclaresItsStatus(TestCase):
@@ -443,6 +552,12 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
             "f'The branches of the reverted PRs could not be updated, so they may not "
             "show only their own changes. To update them, comment `@pytorchbot rebase "
             "-b {default_branch}` on the topmost reverted PR. Error: {e}'",
+        ),
+        # A failure after the merge or revert landed (LandedError)
+        (
+            "trymerge",
+            "handle_exception",
+            "format_failure_comment(e.__cause__, title, run_url)",
         ),
     ]
 

@@ -91,6 +91,7 @@ from trymerge import (
     is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
+    LandedError,
     main as trymerge_main,
     MandatoryChecksMissingError,
     manually_close_merged_pr,
@@ -3294,6 +3295,23 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         with self.assertRaisesRegex(RuntimeError, "stop after gates"):
             self.merge_into(**kwargs)
 
+    def test_a_failure_after_landing_is_a_landed_error(self) -> None:
+        for failing in (self.repo.rev_parse, self.close):
+            with self.subTest(failing=failing):
+                failing.side_effect = RuntimeError("failed after landing")
+                with self.assertRaises(LandedError) as raised:
+                    self.merge_into()
+                failing.side_effect = None
+                self.assertEqual(
+                    str(raised.exception.__cause__), "failed after landing"
+                )
+
+    def test_a_dry_run_lands_nothing(self) -> None:
+        self.close.side_effect = RuntimeError("close failed")
+        with self.assertRaisesRegex(RuntimeError, "close failed") as raised:
+            self.merge_into(dry_run=True)
+        self.assertNotIsInstance(raised.exception, LandedError)
+
     def test_gates_lower_prs_before_landing(self) -> None:
         waivers = {(1001, "red")}
         self.assertStopsBeforeLanding(ignore_current_checks=waivers)
@@ -3725,6 +3743,45 @@ class TestNativeStackRevert(NoNetworkTestCase):
         for pr in self.prs.values():
             pr.add_numbered_label.assert_called_once_with("reverted", False)
             pr.add_label.assert_called_once_with("ci-no-td", False)
+
+    def test_the_revert_reply_names_its_command(self) -> None:
+        for ghstack in (False, True):
+            with self.subTest(ghstack=ghstack):
+                self.calls.reset_mock()
+                self.bottom.is_ghstack_pr.return_value = ghstack
+                self.ghstack.return_value = [("sha-1000", self.bottom)]
+                try_revert(self.repo, self.bottom, comment_id=42)
+                [reply] = [
+                    call.args[3]
+                    for call in self.calls_to("gh_post_pr_comment")
+                    if call.args[2] == 1000
+                ]
+                self.assertIn("has been successfully reverted", reply)
+                self.assertEqual(parse_tag(reply), Tag(REVERT_SUCCESS, 42))
+
+    def test_a_failure_after_the_push_is_a_landed_error(self) -> None:
+        for ghstack in (False, True):
+            with self.subTest(ghstack=ghstack):
+                self.calls.reset_mock()
+                self.bottom.is_ghstack_pr.return_value = ghstack
+                self.ghstack.return_value = [("sha-1000", self.bottom)]
+                self.calls.reopen.side_effect = RuntimeError("reopen failed")
+                with self.assertRaises(LandedError) as raised:
+                    self.revert()
+                self.assertEqual(len(self.calls_to("repo.push")), 1)
+                self.assertEqual(str(raised.exception.__cause__), "reopen failed")
+                # Nothing lands in a dry run
+                comment = self.calls.gh_post_pr_comment
+                comment.side_effect = RuntimeError("comment failed")
+                with self.assertRaisesRegex(RuntimeError, "comment failed") as raised:
+                    self.revert(dry_run=True)
+                comment.side_effect = None
+                self.assertNotIsInstance(raised.exception, LandedError)
+
+    def test_a_failed_refresh_after_the_push_is_a_landed_error(self) -> None:
+        self.patch("trymerge.refresh_reverted_branches", side_effect=OSError("boom"))
+        with self.assertRaises(LandedError):
+            self.revert()
 
     def test_pr_without_dependents_is_reverted_alone(self) -> None:
         self.validate.return_value = ("reverter", "sha-validated")
@@ -4172,6 +4229,34 @@ class TestMainStatusTags(NoNetworkTestCase):
         trymerge_main()
         self.assertEqual(self.statuses(), [MERGE_FAILURE])
         self.merge.assert_not_called()
+
+    @staticmethod
+    def landed(message: str) -> LandedError:
+        try:
+            raise LandedError(message) from RuntimeError(message)
+        except LandedError as e:
+            return e
+
+    def test_failure_after_a_merge_landed_is_untagged(self) -> None:
+        self.merge.side_effect = self.landed("close failed")
+        trymerge_main()
+        self.assertEqual(self.statuses(), [None])
+        body = self.post.call_args.args[3]
+        self.assertTrue(
+            body.startswith("## The merge landed, but a step after it failed\n")
+        )
+        self.assertIn("**Reason**: close failed", body)
+
+    def test_failure_after_a_revert_landed_is_untagged(self) -> None:
+        self.args.revert = True
+        self.patch("trymerge.try_revert", side_effect=self.landed("reopen failed"))
+        trymerge_main()
+        self.assertEqual(self.statuses(), [REVERT_SUCCESS, None])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "## The revert landed, but a step after it failed\n"
+            )
+        )
 
     def test_revert_start_and_failure_are_tagged(self) -> None:
         self.args.revert = True

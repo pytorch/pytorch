@@ -1676,12 +1676,12 @@ class GitHubPR:
         if docker_pr is not None:
             check_docker_builds_ready(docker_pr)
 
+        merge_commit_sha: str | None = None
         # GitHub's merge endpoint does not support stacked PRs.
         if stack is not None:
             additional_merged_prs = self.merge_native_stack_into(
                 repo, stack, native_prs, docker_pr, dry_run
             )
-            merge_commit_sha = repo.rev_parse(name=self.default_branch())
         # Dependabot commits are authored/signed by the bot; merge them through
         # GitHub's squash+merge API so that signature is preserved and dependabot
         # can track the merge, instead of re-authoring a squash commit locally.
@@ -1702,51 +1702,59 @@ class GitHubPR:
                 warn_on_docker_merge_skew(repo, docker_pr)
 
             repo.push(self.default_branch(), dry_run)
-            # When the merge process reaches this part, we can assume that the
-            # commit has been successfully pushed to trunk
-            merge_commit_sha = repo.rev_parse(name=self.default_branch())
-        if not dry_run:
-            self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
-            for pr in additional_merged_prs:
-                pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+        # The merge landed: a failure after this point must not report it as failed
+        try:
+            if merge_commit_sha is None:
+                # The commits just pushed to trunk
+                merge_commit_sha = repo.rev_parse(name=self.default_branch())
+            if not dry_run:
+                self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+                for pr in additional_merged_prs:
+                    pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
-        if comment_id and self.pr_num:
-            # Finally, upload the record to s3. The list of pending and failed
-            # checks are at the time of the merge
-            save_merge_record(
-                comment_id=comment_id,
-                pr_num=self.pr_num,
-                owner=self.org,
-                project=self.project,
-                author=self.get_author(),
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                ignore_current_checks=ignorable_checks.get("IGNORE_CURRENT_CHECK", []),
-                broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
-                flaky_checks=ignorable_checks.get("FLAKY", []),
-                unstable_checks=ignorable_checks.get("UNSTABLE", []),
-                ai_not_related_checks=ignorable_checks.get("AI_NOT_RELATED", []),
-                last_commit_sha=self.last_commit_sha(default=""),
-                merge_base_sha=self.get_merge_base(),
+            if comment_id and self.pr_num:
+                # Finally, upload the record to s3. The list of pending and failed
+                # checks are at the time of the merge
+                save_merge_record(
+                    comment_id=comment_id,
+                    pr_num=self.pr_num,
+                    owner=self.org,
+                    project=self.project,
+                    author=self.get_author(),
+                    pending_checks=pending_checks,
+                    failed_checks=failed_checks,
+                    ignore_current_checks=ignorable_checks.get(
+                        "IGNORE_CURRENT_CHECK", []
+                    ),
+                    broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
+                    flaky_checks=ignorable_checks.get("FLAKY", []),
+                    unstable_checks=ignorable_checks.get("UNSTABLE", []),
+                    ai_not_related_checks=ignorable_checks.get("AI_NOT_RELATED", []),
+                    last_commit_sha=self.last_commit_sha(default=""),
+                    merge_base_sha=self.get_merge_base(),
+                    merge_commit_sha=merge_commit_sha,
+                    is_failed=False,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    ignore_current=bool(ignore_current_checks),
+                )
+            else:
+                print("Missing comment ID or PR number, couldn't upload to s3")
+
+            # Usually Github will see that the commit has "resolves <pr_num>" in the
+            # commit message and close the PR, but sometimes it doesn't, leading to
+            # confusion.  When it doesn't, we close it manually.
+            time.sleep(60)  # Give Github some time to close the PR
+            manually_close_merged_pr(
+                pr=self,
+                additional_merged_prs=additional_merged_prs,
                 merge_commit_sha=merge_commit_sha,
-                is_failed=False,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=bool(ignore_current_checks),
+                comment_id=comment_id,
+                dry_run=dry_run,
             )
-        else:
-            print("Missing comment ID or PR number, couldn't upload to s3")
-
-        # Usually Github will see that the commit has "resolves <pr_num>" in the
-        # commit message and close the PR, but sometimes it doesn't, leading to
-        # confusion.  When it doesn't, we close it manually.
-        time.sleep(60)  # Give Github some time to close the PR
-        manually_close_merged_pr(
-            pr=self,
-            additional_merged_prs=additional_merged_prs,
-            merge_commit_sha=merge_commit_sha,
-            comment_id=comment_id,
-            dry_run=dry_run,
-        )
+        except Exception as e:
+            if dry_run:
+                raise
+            raise LandedError(str(e)) from e
 
     def merge_via_github_api(self, dry_run: bool = False) -> str:
         """Squash-and-merge this PR through GitHub's merge API, pinned to the
@@ -1848,6 +1856,11 @@ class MandatoryChecksMissingError(MergeRuleFailedError):
 
 class PostCommentError(Exception):
     pass
+
+
+class LandedError(Exception):
+    """A step after the merge or revert was pushed failed. The command's outcome
+    stands, so its reply carries no failure tag; the cause is `__cause__`."""
 
 
 @dataclass
@@ -3083,7 +3096,7 @@ def do_revert_prs(
     *,
     author_login: str,
     extra_msg: str = "",
-    comment_id: int | None = None,
+    comment_id: int | None,
     skip_internal_checks: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -3091,14 +3104,20 @@ def do_revert_prs(
         repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
     )
     repo.push(shas_and_prs[0][1].default_branch(), dry_run)
-    reopen_reverted_prs(
-        original_pr,
-        shas_and_prs,
-        revert_msg,
-        comment_id=comment_id,
-        skip_internal_checks=skip_internal_checks,
-        dry_run=dry_run,
-    )
+    # The revert landed: a failure after this point must not report it as failed
+    try:
+        reopen_reverted_prs(
+            original_pr,
+            shas_and_prs,
+            revert_msg,
+            comment_id=comment_id,
+            skip_internal_checks=skip_internal_checks,
+            dry_run=dry_run,
+        )
+    except Exception as e:
+        if dry_run:
+            raise
+        raise LandedError(str(e)) from e
 
 
 def revert_with_dependents(
@@ -3108,7 +3127,7 @@ def revert_with_dependents(
     *,
     author_login: str,
     extra_msg: str,
-    comment_id: int | None = None,
+    comment_id: int | None,
     skip_internal_checks: bool,
     dry_run: bool,
 ) -> None:
@@ -3138,15 +3157,23 @@ def revert_with_dependents(
         repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
     )
     repo.push(default_branch, dry_run)
-    reopen_reverted_prs(
-        pr,
-        shas_and_prs[::-1],
-        revert_msg,
-        comment_id=comment_id,
-        skip_internal_checks=skip_internal_checks,
-        dry_run=dry_run,
-    )
-    refresh_reverted_branches(repo, pr, [p.pr_num for _, p in shas_and_prs], dry_run)
+    # The revert landed: a failure after this point must not report it as failed
+    try:
+        reopen_reverted_prs(
+            pr,
+            shas_and_prs[::-1],
+            revert_msg,
+            comment_id=comment_id,
+            skip_internal_checks=skip_internal_checks,
+            dry_run=dry_run,
+        )
+        refresh_reverted_branches(
+            repo, pr, [p.pr_num for _, p in shas_and_prs], dry_run
+        )
+    except Exception as e:
+        if dry_run:
+            raise
+        raise LandedError(str(e)) from e
 
 
 def refresh_reverted_branches(
@@ -3636,16 +3663,29 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
-        msg = format_failure_comment(e, title, os.getenv("GH_RUN_URL"))
-        post_pr_comment(
-            org,
-            project,
-            args.pr_num,
-            msg,
-            status=REVERT_FAILURE if args.revert else MERGE_FAILURE,
-            comment_id=args.comment_id,
-            dry_run=args.dry_run,
-        )
+        run_url = os.getenv("GH_RUN_URL")
+        if isinstance(e, LandedError) and e.__cause__ is not None:
+            command = "revert" if args.revert else "merge"
+            title = f"The {command} landed, but a step after it failed"
+            # Not the command's outcome: the merge or revert landed
+            post_pr_comment(
+                org,
+                project,
+                args.pr_num,
+                format_failure_comment(e.__cause__, title, run_url),
+                status=None,
+                dry_run=args.dry_run,
+            )
+        else:
+            post_pr_comment(
+                org,
+                project,
+                args.pr_num,
+                format_failure_comment(e, title, run_url),
+                status=REVERT_FAILURE if args.revert else MERGE_FAILURE,
+                comment_id=args.comment_id,
+                dry_run=args.dry_run,
+            )
         traceback.print_exc()
 
     try:

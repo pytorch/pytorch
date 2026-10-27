@@ -16,9 +16,12 @@ the second command. A revert dispatched without a comment has no ``comment=``.
 started", "successfully started a revert job", "has been successfully
 reverted"). A merge that lands closes the PR and posts no reply of its own, so
 the PR closing, not a tag, is the sign that it landed. ``failure`` means the
-command was refused or failed. A later reply supersedes an earlier one: a merge
-that started and then failed carries a ``success`` reply followed by a
-``failure`` one.
+command was refused or failed before the merge or revert landed. An error after
+it landed, in a follow-up step such as labeling, is reported in an untagged
+reply, so the newest tag stays ``success``. The exception is a job canceled or
+timed out after the merge or revert landed: its reply can't tell and says
+``failure``. A later reply supersedes an earlier one: a merge that started and
+then failed carries a ``success`` reply followed by a ``failure`` one.
 
 Only replies on the PR the command was issued on are tagged. PRs merged or
 reverted along with it, as part of its stack, get untagged notices; the outcome
