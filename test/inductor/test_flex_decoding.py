@@ -9,7 +9,9 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
+from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -2251,6 +2253,113 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "q_seq_len,num_kv_heads,block_size,pinned_block_m,block_m",
+        [
+            # Default BLOCK_M: next_power_of_2(Q * 8 heads) capped at 128 rows.
+            (17, 4, 128, None, 128),
+            (32, 4, 128, None, 128),
+            (64, 4, 128, None, 128),
+            (127, 4, 128, None, 128),
+            # 16-row sparse Q blocks, as in the vLLM integration: each tile reads one
+            # sparse row (16 positions), and the grid spans 4.
+            (64, 4, 16, None, 128),
+            (64, 8, 16, None, 64),
+            # A 96-row Q block (not a power of two), 2 shared heads: positions per tile are
+            # capped at 32, the largest power of two dividing 96 (a 64-position tile won't fit).
+            (64, 16, (96, 128), None, 64),
+            # Pinned BLOCK_Ms the old check rejected: 256 rows / 8 heads = 32 positions.
+            (32, 4, 128, 256, 256),
+            # Q = 16 is a multiple of the default tile but not of the pinned one: SAFE_M_BOUNDARY
+            # must follow the pinned BLOCK_M, or rows past Q_LEN overwrite the next head's.
+            (16, 4, 128, 256, 256),
+        ],
+    )
+    def test_gqa_block_m_fits_sparse_q_block(
+        self, q_seq_len, num_kv_heads, block_size, pinned_block_m, block_m, device
+    ):
+        # The decode kernel tiles GQA-folded rows: each BLOCK_M tile covers
+        # BLOCK_M // (Hq // Hkv) query positions, which must fit in one sparse Q block.
+        kv_seq_len = 256
+        offset = kv_seq_len - q_seq_len
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            # Causal with an offset, so every query row reads a different KV range.
+            return q_idx + offset >= kv_idx
+
+        num_q_heads, head_dim = 32, 64
+        mask = create_block_mask(
+            mask_mod,
+            1,
+            None,
+            q_seq_len,
+            kv_seq_len,
+            device=device,
+            BLOCK_SIZE=block_size,
+        )
+        q = torch.randn(1, num_q_heads, q_seq_len, head_dim, device=device)
+        k = torch.randn(1, num_kv_heads, kv_seq_len, head_dim, device=device)
+        v = torch.randn(1, num_kv_heads, kv_seq_len, head_dim, device=device)
+        eager = flex_attention(q, k, v, block_mask=mask, enable_gqa=True)
+        kernel_options = (
+            {} if pinned_block_m is None else {"fwd_BLOCK_M": pinned_block_m}
+        )
+        out, code = run_and_get_code(
+            torch.compile(flex_attention),
+            q,
+            k,
+            v,
+            block_mask=mask,
+            enable_gqa=True,
+            kernel_options=kernel_options,
+        )
+        # Ensure the decode kernel ran (only it tiles GQA-folded rows), with the expected tile.
+        FileCheck().check(f"BLOCK_M : tl.constexpr = {block_m}").check(
+            "BLOCK_M_PER_HQ"
+        ).run(code[0])
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_gqa_block_m_not_multiple_of_shared_heads_raises(self, device):
+        q = torch.randn(1, 32, 8, 64, device=device)
+        k = torch.randn(1, 4, 8, 64, device=device)
+        v = torch.randn(1, 4, 8, 64, device=device)
+        with self.assertRaisesRegex(InductorError, "BLOCK_M=4.*GQA_SHARED_HEADS=8"):
+            torch.compile(flex_attention)(
+                q, k, v, enable_gqa=True, kernel_options={"fwd_BLOCK_M": 4}
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_pinned_block_m_larger_than_default(self, device):
+        # 8 query positions x 8 shared heads = 64 rows, so the default BLOCK_M is 64.
+        # A pinned fwd_BLOCK_M=128 leaves rows past Q_LEN in the tile; they must stay
+        # masked, or their logsumexp rows overwrite the next head's.
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_seq_len, num_q_heads, num_kv_heads, head_dim = 8, 32, 4, 64
+        mask = create_block_mask(mask_mod, 1, None, q_seq_len, q_seq_len, device=device)
+        q = torch.randn(1, num_q_heads, q_seq_len, head_dim, device=device)
+        k = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
+        v = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
+        kwargs = dict(block_mask=mask, enable_gqa=True)
+        eager = flex_attention(q, k, v, **kwargs)
+        out, code = run_and_get_code(
+            torch.compile(flex_attention),
+            q,
+            k,
+            v,
+            kernel_options={"fwd_BLOCK_M": 128},
+            **kwargs,
+        )
+        # Ensure the decode kernel ran: only it tiles GQA-folded rows.
+        FileCheck().check("BLOCK_M_PER_HQ").run(code[0])
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
+
+    @supported_platform
     @parametrize_device_dtype("dtypes_fast")
     def test_larger_block_mask_bug(self, device, dtype):
         def mask_mod(b, h, q_idx, kv_idx):
@@ -2423,6 +2532,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             # Checkout output
             self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
+
+
+class TestGetSplitKDeviceRouting(common_utils.TestCase):
+    # Regression guard: get_split_k must query the SM count from the kernel's
+    # own device via DeviceInterface, not from ambient backend state.
+    def test_split_k_queries_kernel_device(self):
+        calls = []
+
+        def fake_mp_count(device=None):
+            calls.append(device)
+            return 80
+
+        with patch.object(CudaInterface, "get_multi_processor_count", fake_mp_count):
+            split_k = get_split_k(2, 4, 128, torch.device("cuda", 1))
+
+        self.assertEqual(calls, [torch.device("cuda", 1)])
+        self.assertEqual(split_k, 80 // (2 * 4) * 2)
 
 
 instantiate_device_type_tests(

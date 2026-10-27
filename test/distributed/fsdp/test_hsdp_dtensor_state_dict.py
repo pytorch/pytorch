@@ -2,12 +2,13 @@
 
 import io
 from copy import deepcopy
+from typing import ClassVar
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
@@ -49,6 +50,17 @@ class DenseModel(torch.nn.Module):
 
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
+    # The workers are reused for every test in this class, and each new mesh adds
+    # NCCL communicators that hold /dev/shm until the workers exit, so build the
+    # 2D mesh once and share it across tests.
+    _mesh_2d: ClassVar[DeviceMesh | None] = None
+
+    def _get_mesh_2d(self) -> DeviceMesh:
+        cls = type(self)
+        if cls._mesh_2d is None:
+            cls._mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        return cls._mesh_2d
+
     def _create_model(self, device, device_mesh=None):
         device_id = device_type
         if device_mesh:
@@ -58,7 +70,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
         else:
-            mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+            mesh_2d = self._get_mesh_2d()
             intra_node_pg = mesh_2d.get_group(mesh_dim=1)
             inter_node_pg = mesh_2d.get_group(mesh_dim=0)
             model = FSDP(
@@ -77,7 +89,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     def test_hsdp_init_with_device_mesh(self, device):
         device_id = device_type
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = self._get_mesh_2d()
         model, optim = self._create_model(device_id, mesh_2d)
 
         FSDP.set_state_dict_type(
@@ -112,7 +124,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, device, offload_to_cpu):
         device_id = device_type
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = self._get_mesh_2d()
 
         model, optim = self._create_model(device_id, mesh_2d)
         FSDP.set_state_dict_type(
@@ -182,7 +194,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, device, offload_to_cpu):
         device_id = device_type
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = self._get_mesh_2d()
         model, optim = self._create_model(device_id, mesh_2d)
 
         FSDP.set_state_dict_type(
@@ -237,7 +249,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, device, offload_to_cpu):
         device_id = device_type
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = self._get_mesh_2d()
         model, optim = self._create_model(device_id, mesh_2d)
 
         FSDP.set_state_dict_type(
@@ -299,7 +311,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                 dist.all_reduce(sparse)
                 return self.dense(sparse)
 
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = self._get_mesh_2d()
         model = FakeMPModel(device_mesh=mesh_2d).to(device_id)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
