@@ -44,10 +44,12 @@ from ..exc import (
     raise_type_error,
     TorchDynamoException,
     unimplemented,
+    Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstDictKeySource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
@@ -561,6 +563,8 @@ class ConstDictVariable(VariableTracker):
     def install_dict_order_guard(
         self, *, ordered: bool = True, guard_keys: bool = False
     ) -> None:
+        # Plain dict iteration has only storage order; subclasses distinguish it
+        # from linked order and may avoid guarding keys used only for hook dispatch.
         if self.source:
             from ..symbolic_convert import InstructionTranslator
 
@@ -664,6 +668,13 @@ class ConstDictVariable(VariableTracker):
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        if not self.items and isinstance(item, variables.LazyConstantVariable):
+            # These primitive types hash without side effects. Empty global hook
+            # flag dictionaries must not specialize a module's current hook ID.
+            item.python_type()
+            if isinstance(self, ConstDictVariable):
+                self.install_dict_keys_match_guard()
+            return ConstantVariable.create(False)
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
@@ -745,9 +756,7 @@ class ConstDictVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if isinstance(self, OrderedDictVariable):
-            self.install_dict_order_guard(guard_keys=True)
+        self.install_dict_order_guard(guard_keys=True)
         result = ConstDictVariable({}, mutation_type=ValueMutationNew())
         if self.items:
             # `PyDict_Copy` falls back to `PyDict_Merge` when `tp_iter` differs.
@@ -796,7 +805,23 @@ class ConstDictVariable(VariableTracker):
         # A __dict__ deletion marker is already absent; do not record another
         # attribute mutation (which may be forbidden inside a HOP).
         is_proxy = isinstance(self.items, SideEffectsProxyDict)
-        value = self.items.get(key) if is_proxy else self.items.pop(key, None)
+        if is_proxy:
+            value = self.items.get(key)
+        else:
+            try:
+                # Authorize before the single lookup removes a tracked entry.
+                if (
+                    self
+                    not in tx.output.side_effects.ignore_mutation_on_these_variables
+                ):
+                    tx.output.side_effects.check_allowed_side_effect(self)
+            except Unsupported:
+                # A missing key is a read, even when mutation is forbidden.
+                value = self.items.get(key)
+                if value is not None:
+                    raise
+            else:
+                value = self.items.pop(key, None)
         if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, key, key_present=False)
@@ -936,8 +961,6 @@ class ConstDictVariable(VariableTracker):
             or self._can_fast_merge(other)
         ):
             if isinstance(other, ConstDictVariable):
-                other.install_dict_keys_match_guard()
-            if isinstance(other, OrderedDictVariable):
                 other.install_dict_order_guard(guard_keys=True)
             self.items.update(other.items)
         else:
@@ -1021,9 +1044,7 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        self.install_dict_order_guard(guard_keys=True)
         return [x.vt for x in self.items]
 
     def nb_or_impl(
@@ -1076,11 +1097,14 @@ class ConstDictVariable(VariableTracker):
             hkey = self._lookup_key(tx, key)
         tx.output.side_effects.mutation(self)
         if value is None:
-            if hkey not in self.items:
+            if isinstance(self.items, SideEffectsProxyDict) and hkey not in self.items:
+                raise_observed_exception(KeyError, tx, args=[key])
+            try:
+                del self.items[hkey]
+            except KeyError:
                 raise_observed_exception(KeyError, tx, args=[key])
             self.should_reconstruct_all = True
             self.has_deleted_keys = True
-            del self.items[hkey]
         else:
             self.items[hkey] = value
         return ConstantVariable.create(None)
@@ -1201,7 +1225,7 @@ class OrderedDictVariable(ConstDictVariable):
     ) -> None:
         super().install_dict_order_guard(ordered=ordered, guard_keys=guard_keys)
         if self.source and ordered:
-            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
     def dict_copy(
         self,
@@ -1949,8 +1973,12 @@ class MappingProxyVariable(VariableTracker):
 
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
-    # Special class to avoid adding any guards on the nn module hook ids.
+    # Defer hook-ID guards so equivalent modules can reuse normal hook dispatch.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
+    def is_python_constant(self) -> bool:
+        # Truth testing a hook dictionary must not specialize its IDs.
+        return False
+
     def install_dict_keys_match_guard(self) -> None:
         pass
 
@@ -1970,14 +1998,36 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
             )
             install_guard(self.make_guard(guard))
 
-    def install_dict_contains_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: HashableTracker,
-        *,
-        key_present: bool | None = None,
-    ) -> None:
-        pass
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        source = item.source
+        if (
+            isinstance(source, ConstDictKeySource)
+            and isinstance(source.base, AttrSource)
+            and isinstance(self.source, AttrSource)
+            and source.base.base == self.source.base
+            and not tx.output.side_effects.is_modified(self)
+        ):
+            key = _get_literal_key(item)
+            keys = [_get_literal_key(k.vt) for k in self.items]
+            if type(key) is int and all(type(k) is int for k in keys):
+                item.python_type()
+                for stored_key in self.items:
+                    stored_key.vt.python_type()
+                # Normal hook dispatch tests an ID against the same module's
+                # kwargs/always-call flags. Guard that relationship, not the ID.
+                install_guard(
+                    self.source.base.make_guard(
+                        functools.partial(
+                            GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                            hooks_name=source.base.member,
+                            flags_name=self.source.member,
+                        )
+                    )
+                )
+                return ConstantVariable.create(key in keys)
+        return super().sq_contains_impl(tx, item)
 
 
 class DictViewVariable(VariableTracker):
@@ -2364,9 +2414,12 @@ class DictItemsVariable(DictViewVariable):
             return ConstantVariable.create(False)
         key, val = item.items
         key_ht = self.dv_dict._lookup_key(tx, key)
-        if key_ht not in self.dv_dict.items:
+        stored = self.dv_dict.items.get(key_ht)
+        present = stored is not None and type(stored) is not variables.DeletedVariable
+        if isinstance(self.dv_dict, ConstDictVariable):
+            self.dv_dict.install_dict_contains_guard(tx, key_ht, key_present=present)
+        if not present:
             return ConstantVariable.create(False)
-        stored = self.dv_dict.items[key_ht]
         return generic_richcompare_bool(tx, stored, val, "__eq__")
 
     def tp_richcompare_impl(

@@ -80,6 +80,12 @@ string(REPLACE ";" "," AT_ROCM_CK_SDPA_ARCHS_STR "${AT_ROCM_CK_SDPA_ARCHS}")
 # Alongside the other generated ATen headers (see cmake/Codegen.cmake).
 configure_file(ROCmCKSDPAConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKSDPAConfig.h" @ONLY)
 
+# CK GEMM allowlist (TORCH_CK_GEMM_ARCH_LIST, top-level CMakeLists.txt) surfaced
+# to Context.cpp and the ck_gemm .hip dispatch, so the runtime check stays in
+# step with the build arch filter (torch_filter_ck_gemm_arches).
+string(REPLACE ";" "," TORCH_CK_GEMM_ARCH_LIST_STR "${TORCH_CK_GEMM_ARCH_LIST}")
+configure_file(ROCmCKGEMMConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKGEMMConfig.h" @ONLY)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
 # At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
