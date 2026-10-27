@@ -144,10 +144,16 @@ endif()
                 line.split("=", 1)
                 for line in (self.root / "build/ep_config.txt").read_text().splitlines()
             )
-            source_dir = (self.source / "third_party/nccl-extensions/nccl_ep").as_posix()
-            self.assertIn(f"-DNCCL_EP_SOURCE_DIR={source_dir}", config["args"].split(";"))
+            source_dir = (
+                self.source / "third_party/nccl-extensions/nccl_ep"
+            ).as_posix()
+            self.assertIn(
+                f"-DNCCL_EP_SOURCE_DIR={source_dir}", config["args"].split(";")
+            )
             library = "libnccl_ep.so" if system_nccl else "libnccl_ep.a"
-            self.assertEqual(Path(config["library"]), self.root / "build/nccl/lib" / library)
+            self.assertEqual(
+                Path(config["library"]), self.root / "build/nccl/lib" / library
+            )
             self.assertEqual("nccl_external" in config["dependencies"], not system_nccl)
 
         checkout_dir = self.source / "third_party/nccl-extensions"

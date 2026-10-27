@@ -471,7 +471,9 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         self._init()
         ts = self.get_token_switch()
         topk_idx = torch.zeros(NUM_TOKENS, TOP_K, dtype=dtype, device=self.device)
-        with self.assertRaisesRegex(TypeError, "topk_idx must have dtype int32 or int64"):
+        with self.assertRaisesRegex(
+            TypeError, "topk_idx must have dtype int32 or int64"
+        ):
             ts.create_routing(topk_idx, layout="flat")
 
     @skip_if_lt_x_gpu(2)
