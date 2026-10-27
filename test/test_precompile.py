@@ -10043,10 +10043,13 @@ class TestPrecompileCustomOpModules(TestCase):
             GuardsStatePickler({}, {}, {}, {}, buf).dump(state)
         variant = {"guards_state": buf.getvalue()}
         frames = [{"code": Local.__new__.__code__, "variants": [variant]}]
-        kept = [("BUILTIN_MATCH", f"G['torch'].ops.{ns}.source")]
+        kept = [
+            ("BUILTIN_MATCH", f"G['torch'].ops.{ns}.source"),
+            ("ID_MATCH", f"G['torch'].ops.{ns}.source.v2"),
+        ]
         self.assertEqual(
             _guard_op_names(frames, kept),
-            {f"{ns}::{n}" for n in ("held", "by_def", "source")},
+            {f"{ns}::{n}" for n in ("held", "by_def", "source", "source.v2")},
         )
         self.assertNotIn(name, sys.modules)
 
@@ -10327,6 +10330,7 @@ class TestPrecompileCustomOpModules(TestCase):
             'aoti_torch_call_dispatcher("mylib::cpp_fallback", "", args);\n'
             'c10::Dispatcher::singleton().findSchemaOrThrow("mylib::cpp_schema", "");\n'
             '// aoti_torch_call_dispatcher("mylib::commented", "", args);\n'
+            "    // buffer buf3 (op: torch.ops.mylib.unaligned.default) is not aligned\n"
             # cpp_wrapper looks up an op with a list[Tensor] return in Python.
             'PyObject* op = PyUnicode_FromString("torch.ops.mylib.halves.default");\n'
             # An op lowered to an extern kernel is named in its size assert.

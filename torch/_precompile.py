@@ -2009,6 +2009,10 @@ def _op_names_in_source(source: str) -> set[str]:
     """
     names = set()
     for line in source.splitlines():
+        # A C++ comment line, e.g. cpp_wrapper's note on an unaligned buffer, which
+        # names the op that made it. Python never starts a line with "//".
+        if line.lstrip().startswith("//"):
+            continue
         # Strings blanked in place, so a "#" or "//" in one ends no line early.
         blanked = _STRING_LITERAL.sub(lambda m: " " * len(m[0]), line)
         # A torch.ops call is Python, where "//" is floor division; a dispatcher
@@ -2080,7 +2084,7 @@ def _backend_op_names(
 
 
 # A guard can name an operator by the source load evaluates, e.g. G['torch'].ops.ns.op.
-_GUARDED_OP = re.compile(r"(?:\.ops|\['ops'\])\.(\w+)\.(\w+)")
+_GUARDED_OP = re.compile(r"(?:\.ops|\['ops'\])\.(\w+)\.(\w+)(?:\.([A-Za-z]\w*))?")
 
 
 class _PlaceholderType(type):
@@ -2122,7 +2126,9 @@ def _guard_op_names(
     from torch._dynamo.package import _GuardsStateUnpickler
 
     names = {
-        f"{ns}::{op}" for _, name in kept_guards for ns, op in _GUARDED_OP.findall(name)
+        _op_name(*match)
+        for _, name in kept_guards
+        for match in _GUARDED_OP.findall(name)
     }
 
     def record(name: str) -> type:
