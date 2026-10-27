@@ -1,10 +1,33 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/test/impl/XPUTest.h>
 
-TEST(XPUAllocatorIPCTest, ShareAndGetRoundTrip) {
-  c10::xpu::XPUCachingAllocator::emptyCache();
+// Param: whether expandable segments are enabled.
+class XPUAllocatorIPCTest : public ::testing::TestWithParam<bool> {
+ protected:
+  void SetUp() override {
+    if (GetParam()) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      c10::CachingAllocator::setAllocatorSettings("expandable_segments:True");
+#else
+      GTEST_SKIP()
+          << "Expandable segment IPC sharing requires SYCL compiler 2026.2 or later.";
+#endif
+    }
+    c10::xpu::XPUCachingAllocator::emptyCache();
+  }
+
+  void TearDown() override {
+    if (GetParam()) {
+      c10::xpu::XPUCachingAllocator::emptyCache();
+      c10::CachingAllocator::setAllocatorSettings("expandable_segments:False");
+    }
+  }
+};
+
+TEST_P(XPUAllocatorIPCTest, ShareAndGetRoundTrip) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   const auto _4mb = 4 * 1024 * 1024;
   auto buf = allocator->allocate(_4mb);
@@ -18,8 +41,7 @@ TEST(XPUAllocatorIPCTest, ShareAndGetRoundTrip) {
   ASSERT_NE(devptr, nullptr);
 }
 
-TEST(XPUAllocatorIPCTest, ShareOffsetSubAllocation) {
-  c10::xpu::XPUCachingAllocator::emptyCache();
+TEST_P(XPUAllocatorIPCTest, ShareOffsetSubAllocation) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   // 20M memory is reserved, can be reused later.
   {
@@ -40,7 +62,7 @@ TEST(XPUAllocatorIPCTest, ShareOffsetSubAllocation) {
   ASSERT_NE(devptr, nullptr);
 }
 
-TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheHit) {
+TEST_P(XPUAllocatorIPCTest, GetIpcDevPtrCacheHit) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   const auto _4mb = 4 * 1024 * 1024;
   auto buf = allocator->allocate(_4mb);
@@ -55,7 +77,7 @@ TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheHit) {
   EXPECT_EQ(sp1.use_count(), 2);
 }
 
-TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheEviction) {
+TEST_P(XPUAllocatorIPCTest, GetIpcDevPtrCacheEviction) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   const auto _4mb = 4 * 1024 * 1024;
   auto buf = allocator->allocate(_4mb);
@@ -73,7 +95,7 @@ TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheEviction) {
   EXPECT_EQ(sp2.use_count(), 1);
 }
 
-TEST(XPUAllocatorIPCTest, SameProcessRoundTrip) {
+TEST_P(XPUAllocatorIPCTest, SameProcessRoundTrip) {
   const auto _4mb = 4 * 1024 * 1024;
   const int numel = _4mb / sizeof(int);
 
@@ -100,6 +122,14 @@ TEST(XPUAllocatorIPCTest, SameProcessRoundTrip) {
 
   validateHostData(hostData.data(), numel);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    AllocatorMode,
+    XPUAllocatorIPCTest,
+    ::testing::Bool(),
+    [](const ::testing::TestParamInfo<bool>& info) {
+      return std::string(info.param ? "ExpandableSegment" : "Regular");
+    });
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);

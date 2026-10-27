@@ -350,11 +350,11 @@ struct ExpandableSegment {
   // Unmaps the physical memory handles in the range [begin, end) from the
   // segment.
   void unmapHandles(size_t begin, size_t end) {
-    // Currently, we don't support IPC shared memory with expandable segments.
-    TORCH_INTERNAL_ASSERT(queue_);
     // As explained in Note [Safe to Free Blocks on BlockPool], additional
     // synchronization is unnecessary here because the memory is already safe to
-    // release.
+    // release. This holds for IPC-imported segments as well (queue_ is
+    // std::nullopt there), since they are only released after the consuming
+    // process is done using them.
     for (const auto i : c10::irange(begin, end)) {
       // Note: physical_mem's destructor does NOT automatically unmap any mapped
       // ranges. Users must explicitly call unmap on all ranges before
