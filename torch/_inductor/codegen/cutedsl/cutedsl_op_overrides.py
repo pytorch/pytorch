@@ -434,6 +434,28 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def truediv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        # FlexGEMM QUACK epilogues pass Python literals; Inductor IR passes rendered
+        # strings and keeps division. Reciprocal multiplication avoids costly division.
+        # The reciprocal must be a normal value in the operand dtype; powers of two
+        # then rewrite exactly. Other constants require fast math because results
+        # can differ in the last bit(s).
+        dtype, _ = CuteDSLOpOverrides._extract_dtype_and_bounds(a)
+        if (
+            isinstance(b, (int, float))
+            and math.isfinite(b)
+            and b != 0
+            and dtype is not None
+            and dtype.is_floating_point
+        ):
+            reciprocal = 1.0 / b
+            limits = torch.finfo(dtype)
+            exact = abs(math.frexp(b)[0]) == 0.5
+            if limits.tiny <= abs(reciprocal) <= limits.max and (
+                exact or _CUTEDSL_FAST_MATH.get()
+            ):
+                return CuteDSLOpOverrides._apply_binary_op(
+                    a, repr(reciprocal), "({a} * {b})"
+                )
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} / {b})")
 
     @staticmethod

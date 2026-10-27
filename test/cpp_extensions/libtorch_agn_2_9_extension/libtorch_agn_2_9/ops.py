@@ -483,3 +483,13 @@ def my_layout(t: Tensor, layout: torch.layout) -> bool:
     Returns: bool - True if the tensor's layout matches
     """
     return torch.ops.libtorch_agn_2_9.my_layout.default(t, layout)
+
+
+def test_stable_torch_warn(value) -> None:
+    """
+    Tests STABLE_TORCH_WARN by emitting a warning that streams value.
+
+    Args:
+        value: int - value streamed into the warning message
+    """
+    torch.ops.libtorch_agn_2_9.test_stable_torch_warn.default(value)

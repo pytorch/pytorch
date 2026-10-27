@@ -233,7 +233,7 @@ Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, s
   const auto result_size_1 = mask_dim_length ? *mask_dim_length : NestedTensor_get_max_size(*nt_impl)[0];
   auto result = at::ones({sizes.sizes()[0], result_size_1}, at::kBool);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
-  auto* result_data = result.data_ptr<bool>();
+  auto* result_data = result.mutable_data_ptr<bool>();
   const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   const auto sizes_size_1 = sizes.sizes()[1];
   for (const auto ii : c10::irange(sizes.sizes()[0])) {
