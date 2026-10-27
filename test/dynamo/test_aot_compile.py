@@ -11063,12 +11063,10 @@ from user code:
     def test_cross_aot_compile_parameter(self):
         # The loaded guards must expect a Parameter where a fake Parameter was
         # compiled, though that fake records no pytype
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         def fn(x, w):
             return x @ w
 
-        with FakeTensorMode(allow_non_fake_inputs=True):
+        with FakeTensorMode():
             fake_inputs = (torch.randn(2, 4), torch.nn.Parameter(torch.randn(4, 4)))
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled_fn.aot_compile((fake_inputs, {})).save_compiled_function(self.path())
