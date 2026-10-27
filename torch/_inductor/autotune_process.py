@@ -760,6 +760,40 @@ class BenchmarkRequest:
             self.cleanup_run_fn()
 
 
+class _TestTunableOpJob:
+    """Supports unit testing. Runs a TunableOp BenchmarkJob with torch.cuda stubbed.
+
+    Defined here, not in the test file, for the same reason as
+    _TestBenchmarkRequest: the TuningProcess child has only torch on its path.
+    Stubbing matters because the job drives real TunableOp entry points --
+    set_device, the enable flags, the snapshotted setters -- and those need a
+    GPU, which the generic worker tests do not have. Without this the real job
+    only ever crosses the pipe on ROCm.
+    """
+
+    def __init__(self, job: Any) -> None:
+        self.job = job
+        # submit() stamps these onto the object it is handed, then reads them
+        # back, so the wrapper has to carry them itself; __call__ copies them
+        # onto the wrapped job, which is what reads them in the child.
+        self.device = 0
+        self.filename = ""
+        self.settings: dict[str, Any] = {}
+
+    def __call__(self) -> float:
+        from unittest import mock
+
+        self.job.device = self.device
+        self.job.filename = self.filename
+        self.job.settings = self.settings
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", mock.MagicMock()),
+            mock.patch("torch.cuda.empty_cache"),
+        ):
+            return self.job()
+
+
 class _TestBenchmarkRequest(BenchmarkRequest):
     """
     Supports unit testing. Defined in this file instead of the test file so the
@@ -779,10 +813,6 @@ class _TestBenchmarkRequest(BenchmarkRequest):
         self.sleep = sleep
         self.exc = exc
         self.crash = crash
-
-    def __call__(self) -> float:
-        # Lets submit()-style callers treat the request itself as the job.
-        return self.benchmark()
 
     def benchmark(
         self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
