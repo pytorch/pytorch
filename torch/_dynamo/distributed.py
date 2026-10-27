@@ -63,21 +63,18 @@ def get_guard_pg() -> dist.ProcessGroup | None:
     return None
 
 
-def _is_fake_world() -> bool:
-    """Whether every backend of the default group is fake, so no rank has a real peer
-    to rendezvous with."""
-    config = dist.BackendConfig(dist.get_backend_config())
-    return all(
-        backend == dist.Backend.FAKE
-        for backend in config.get_device_backend_map().values()
-    )
+def _default_device_backends() -> dict[str, str]:
+    """The default group's backend for each device type."""
+    return dist.BackendConfig(dist.get_backend_config()).get_device_backend_map()
 
 
-def _compile_sync_backend() -> str | None:
-    """The backend get_compile_sync_pg builds its group on, or None when it cannot
-    build one: in a real world without gloo, or an MPI one, whose default group has
-    no store for gloo to rendezvous through."""
-    if _is_fake_world():
+def _compile_sync_backend(device_backends: dict[str, str]) -> str | None:
+    """The backend get_compile_sync_pg builds its group on, given the default group's
+    ``device_backends``, or None when it cannot build one: in a real world without
+    gloo, or an MPI one, whose default group has no store for gloo to rendezvous
+    through."""
+    # Every backend fake: no rank has a real peer to rendezvous with.
+    if all(backend == dist.Backend.FAKE for backend in device_backends.values()):
         return dist.Backend.FAKE
     # Only a plain "mpi" default group is built without a store; "cpu:mpi,..." has one.
     if dist.is_gloo_available() and dist.get_backend() != dist.Backend.MPI:
@@ -88,7 +85,9 @@ def _compile_sync_backend() -> str | None:
 def _compile_sync_pg_available() -> bool:
     """With an initialized default group, whether get_compile_sync_pg returns a
     group rather than raising."""
-    return _COMPILE_SYNC_PG is not None or _compile_sync_backend() is not None
+    if _COMPILE_SYNC_PG is not None:
+        return True
+    return _compile_sync_backend(_default_device_backends()) is not None
 
 
 # NB: Like get_guard_pg, this is only called when the caller explicitly asked for
@@ -114,7 +113,8 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _COMPILE_SYNC_PG
         if _COMPILE_SYNC_PG is None:
-            backend = _compile_sync_backend()
+            backends = _default_device_backends()
+            backend = _compile_sync_backend(backends)
             if backend is None:
                 # No fallback: per above, the accelerator backend would let a
                 # compile time collective match a runtime one.
@@ -134,9 +134,6 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             # A fake backend does not keep the configured timeout, so read it from
             # a real one, the object-collective device's first (cuda's in
             # cpu:fake,cuda:nccl).
-            backends = dist.BackendConfig(
-                dist.get_backend_config()
-            ).get_device_backend_map()
             timeout = None
             for device in sorted(backends, key=lambda d: d != coll_device):
                 if backends[device] == dist.Backend.FAKE:
