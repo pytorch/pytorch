@@ -1384,7 +1384,7 @@ class TestScatterAddOverrideCorrectness(TestCase):
         # Half-precision dst rows padded by 2 elements: 4B-aligned, which the
         # paired atomics need, but not a multiple of vec_elems. TMA declines,
         # and vec-scatter's declared dst stride contract must still accept it.
-        from torch._native.ops.scatter_add import cutedsl_impl
+        from torch._native.ops.scatter_add import cutedsl_impl, vec_scatter_kernel
         torch.manual_seed(0)
         self_t, idx, src, idx_1d = _make_override_triple(
             200, 100, (128,), dtype=torch.float16, outer_pad_self=2
@@ -1392,8 +1392,7 @@ class TestScatterAddOverrideCorrectness(TestCase):
         self.assertFalse(cutedsl_impl._is_tma_supported(self_t, 0, idx, src))
         self.assertTrue(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
         ref = _naive_scatter_add(self_t, idx_1d, src)
-        # In place, so the padded dst layout reaches the kernel.
-        self_t.scatter_add_(0, idx, src)
+        vec_scatter_kernel.vec_scatter_add_into(self_t, idx_1d, src)
         tol = _override_tol(torch.float16)
         self.assertEqual(self_t, ref, atol=tol, rtol=tol)
 
