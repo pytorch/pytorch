@@ -302,11 +302,24 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     BackwardPrefetch.BACKWARD_PRE,
                     BackwardPrefetch.BACKWARD_POST,
                 ],
-                "skip_writeback_check": [False, True],
             },
             self._test_diff_hyperparams,
             cpu_offload=CPUOffload(offload_params=False),
             sharding_strategy=sharding_strategy,
+            skip_writeback_check=False,
+        )
+        # The writeback check does not affect numerics, so skipping it is
+        # covered once instead of across the grid.
+        self._test_diff_hyperparams(
+            device_init_mode=DEVICEInitMode.DEVICE_BEFORE,
+            init_optim_before_wrap=False,
+            optim_class=torch.optim.AdamW,
+            multi_tensor=False,
+            set_to_none=False,
+            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+            cpu_offload=CPUOffload(offload_params=False),
+            sharding_strategy=sharding_strategy,
+            skip_writeback_check=True,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -361,19 +374,21 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             and cpu_offload.offload_params
         ):
             return  # not supported
-        if skip_writeback_check:
-            os.environ[_FSDP_SKIP_WRITEBACK_CHECK] = "1"
         ddp_model = self._get_ddp_transformer(find_unused_params=False)
         ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
-        fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
-            device_init_mode=device_init_mode,
-            init_optim_before_wrap=init_optim_before_wrap,
-            optim_class=optim_class,
-            multi_tensor=multi_tensor,
-            sharding_strategy=sharding_strategy,
-            backward_prefetch=backward_prefetch,
-            cpu_offload=cpu_offload,
-        )
+        # FlatParamHandle reads the env var at construction.
+        with patch.dict(
+            os.environ, {_FSDP_SKIP_WRITEBACK_CHECK: str(int(skip_writeback_check))}
+        ):
+            fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
+                device_init_mode=device_init_mode,
+                init_optim_before_wrap=init_optim_before_wrap,
+                optim_class=optim_class,
+                multi_tensor=multi_tensor,
+                sharding_strategy=sharding_strategy,
+                backward_prefetch=backward_prefetch,
+                cpu_offload=cpu_offload,
+            )
         self._check_train_parity(
             ddp_model, ddp_optim, fsdp_model, fsdp_optim, set_to_none
         )

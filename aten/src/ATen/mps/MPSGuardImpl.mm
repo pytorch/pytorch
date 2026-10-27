@@ -31,7 +31,7 @@ void MPSGuardImpl::record(void** event,
   // MPS event pool and assign it to the event pointer. Then record the event in
   // the MPS event pool.
   auto mps_event_id = (__bridge id_t)(intptr_t)(*event);
-  bool enable_timing = (flag == EventFlag::BACKEND_DEFAULT);
+  bool enable_timing = (flag & EventFlag::TIMING);
   if (!mps_event_id) {
     mps_event_id = at::mps::getMPSEventPool()->acquireEvent(enable_timing);
     *event = (__bridge void*)(intptr_t)(mps_event_id);
