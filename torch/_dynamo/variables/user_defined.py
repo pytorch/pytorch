@@ -3197,6 +3197,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if (
                 isinstance(method, types.MethodDescriptorType)
+                and not is_torch_class(method.__objclass__)
                 and name not in self._slotdefs
                 and not trace_rules.is_polyfilled_callable(method)
             ):
@@ -5295,7 +5296,9 @@ class DefaultDictVariable(ConstDictVariable):
         new = cast(
             ConstDictVariable, cls.call_function(tx, [self_.default_factory, left], {})
         )
-        ConstDictVariable.dict_update(new, tx, [right], {})
+        new.install_dict_keys_match_guard()
+        tx.output.side_effects.mutation(new)
+        new.dict_merge(tx, right)
         return new
 
     def nb_inplace_or_impl(
