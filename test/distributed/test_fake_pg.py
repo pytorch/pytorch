@@ -120,8 +120,9 @@ class TestFakePG(TestCase):
                         dist, "is_gloo_available", return_value=gloo_available
                     ),
                 ):
+                    backends = dynamo_distributed._default_device_backends()
                     self.assertEqual(
-                        dynamo_distributed._compile_sync_backend(), backend
+                        dynamo_distributed._compile_sync_backend(backends), backend
                     )
 
     @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
