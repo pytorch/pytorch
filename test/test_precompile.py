@@ -9587,25 +9587,6 @@ def _(g):
 triple.register_autograd(lambda ctx, g: torch.ops.{ns}.grad_triple.default(g))
 
 
-@torch.library.custom_op("{ns}::lowered", mutates_args=())
-def lowered(x: torch.Tensor) -> torch.Tensor:
-    return x * 2
-
-
-@lowered.register_fake
-def _(x):
-    return torch.empty_like(x)
-
-
-# Inductor lowers this op away, so only an eager artifact calls it.
-from torch._inductor.lowering import lowerings, register_lowering
-
-
-@register_lowering(torch.ops.{ns}.lowered.default)
-def _(x):
-    return lowerings[torch.ops.aten.mul.Tensor](x, 2)
-
-
 @torch.library.custom_op("{ns}::doubled", mutates_args=())
 def doubled(x: torch.Tensor) -> torch.Tensor:
     return x * 2
@@ -9638,6 +9619,29 @@ def halves(x: torch.Tensor) -> list[torch.Tensor]:
 @halves.register_fake
 def _(x):
     return [torch.empty_like(x), torch.empty_like(x)]
+"""
+
+
+# In its own module: Inductor lowers this op away, so a make_fx artifact it compiled
+# does not need it.
+_LOWERED_OP_MODULE = """
+import torch
+from torch._inductor.lowering import lowerings, register_lowering
+
+
+@torch.library.custom_op("{ns}::lowered", mutates_args=())
+def lowered(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@lowered.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+@register_lowering(torch.ops.{ns}.lowered.default)
+def _(x):
+    return lowerings[torch.ops.aten.mul.Tensor](x, 2)
 """
 
 
@@ -9737,7 +9741,9 @@ import sys
 
 import torch
 
-phase, directory, module, entry_module, unused, tracer, backend, entry = sys.argv[1:9]
+phase, directory, module, entry_module, unused, lowered, tracer, backend, entry = (
+    sys.argv[1:10]
+)
 if backend == "inductor-cpp-wrapper":
     torch._inductor.config.cpp_wrapper = True
     backend = "inductor"
@@ -9769,6 +9775,7 @@ def run(f):
 if phase == "capture":
     __import__(module)
     __import__(unused)
+    __import__(lowered)
     torch._dynamo.config.nested_graph_breaks = False
     with pc.capture(
         getattr(entries, entry),
@@ -9784,14 +9791,17 @@ elif phase == "replay":
     assert module in sys.modules, "the artifact did not import its custom op module"
     assert unused not in sys.modules, "the artifact imported an unused custom op module"
     torch.testing.assert_close(run(loaded), torch.load(expected_path))
+    if tracer == "make_fx" and backend != "eager":
+        assert lowered not in sys.modules, "it imported an op's module Inductor lowered"
 elif phase == "registered":
     # The ops are already registered, by the same source vendored under another
     # name, so the artifact must not need its module by the original name.
     import types
 
-    vendored = types.ModuleType("vendored_custom_ops")
-    with open(os.path.join(directory, "ops", module + ".py")) as f:
-        exec(f.read(), vendored.__dict__)
+    for name in (module, lowered):
+        vendored = types.ModuleType(f"vendored_{name}")
+        with open(os.path.join(directory, "ops", name + ".py")) as f:
+            exec(f.read(), vendored.__dict__)
     loaded = pc.load(artifact, cache)
     torch.testing.assert_close(run(loaded), torch.load(expected_path))
     assert module not in sys.modules, "the artifact imported an op it did not need"
@@ -9904,11 +9914,13 @@ class TestPrecompileCustomOpModules(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tag = uuid.uuid4().hex
             module, unused = f"precompile_op_module_{tag}", f"precompile_unused_{tag}"
+            lowered = f"precompile_lowered_{tag}"
             entry_module = f"precompile_op_entry_{tag}"
             ns = f"precompile_op_test_{tag}"
             for subdir, name, source in (
                 ("ops", module, _CUSTOM_OP_MODULE),
                 ("ops", unused, _UNUSED_OP_MODULE),
+                ("ops", lowered, _LOWERED_OP_MODULE),
                 ("entry", entry_module, _CUSTOM_OP_ENTRY_MODULE),
             ):
                 os.makedirs(os.path.join(directory, subdir), exist_ok=True)
@@ -9928,7 +9940,7 @@ class TestPrecompileCustomOpModules(TestCase):
             for phase in phases:
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
-                    + [module, entry_module, unused, tracer, backend, entry],
+                    + [module, entry_module, unused, lowered, tracer, backend, entry],
                     capture_output=True,
                     text=True,
                     timeout=900,
@@ -9938,12 +9950,15 @@ class TestPrecompileCustomOpModules(TestCase):
             with open(os.path.join(directory, "artifact.py")) as f:
                 python_code = f.read()
             ops = {
-                "fn": ("lowered", "triple") if backend == "eager" else ("triple",),
                 "grad_fn": ("grad_triple", "triple"),
-                "out_fn": ("doubled.out",),
+                # Inductor calls the out variant; Dynamo's guards name the op.
+                "out_fn": ("doubled", "doubled.out"),
                 "list_fn": ("halves",),
             }.get(entry, ("triple",))
             modules = {module: tuple(f"{ns}::{op}" for op in ops)}
+            # Inductor lowers that op away, but a Dynamo artifact's guards name it.
+            if entry == "fn" and (backend == "eager" or tracer == "dynamo"):
+                modules = {lowered: (f"{ns}::lowered",), **modules}
             self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", python_code.splitlines())
             # The import code is inlined, not imported from this torch.
             self.assertIn("def _import_custom_op_modules(", python_code)

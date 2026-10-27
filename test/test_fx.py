@@ -2131,6 +2131,51 @@ class TestFX(JitTestCase):
             torch.fx.Tracer().trace(Outer())
         self.assertNotIn("len", len_scope)
 
+    def test_nested_resolution_windows_patch_a_new_wrap_target_once(self):
+        from torch.fx import _symbolic_trace
+
+        def leaf(x):
+            return x + 1
+
+        # Modules that torch.fx.wrap("len") the builtin and wrap("leaf").
+        len_scope, leaf_scope = {}, {"leaf": leaf}
+
+        def resolve_b(scope, name):
+            _register_wrap(len_scope, "len")
+            _register_wrap(leaf_scope, "leaf")
+            return object()
+
+        def inner_forward(self, x):
+            return x * 2
+
+        class Inner(torch.nn.Module):
+            forward = _with_lazy_globals(inner_forward, resolve_b, b=_UNRESOLVED)
+
+        def resolve_a(scope, name):
+            # A's module body runs a trace of its own, whose scan resolves B.
+            torch.fx.Tracer().trace(Inner())
+            return object()
+
+        def mid_forward(self, x):
+            return x - 1
+
+        class Mid(torch.nn.Module):
+            forward = _with_lazy_globals(mid_forward, resolve_a, a=_UNRESOLVED)
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.Tracer().trace(Mid())
+                return leaf_scope["leaf"](x)
+
+        # Every trace exits without deleting the "len" patch twice.
+        with _fake_lazy_imports():
+            graph = torch.fx.Tracer().trace(Outer())
+        self.assertIsNone(_symbolic_trace.CURRENT_PATCHER)
+        self.assertNotIn("len", len_scope)
+        self.assertIs(leaf_scope["leaf"], leaf)
+        # The outer trace keeps the target a leaf after the nested ones return.
+        self.assertIn(leaf, _targets(graph, "call_function"))
+
     def test_an_earlier_lazily_bound_wrap_target_resolves_outside_every_trace(self):
         original_call = torch.nn.Module.__call__
         saw_original = {}

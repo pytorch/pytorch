@@ -2026,7 +2026,7 @@ def _backend_op_names(
     those among them an eager graph calls.
 
     A backend whose served code cannot be read is logged: the artifact records
-    none of its custom ops, so serving needs them registered by the first call.
+    none of its custom ops, so serving needs them registered before ``load``.
     """
     from torch._dynamo.output_graph import noop_graph_call
 
@@ -2056,7 +2056,7 @@ def _backend_op_names(
             log.warning(
                 "precompile: cannot read the code backend %s serves (%s), so the "
                 "artifact records none of its custom ops; serving needs them "
-                "registered by the first call",
+                "registered before load",
                 backend_id,
                 type(content).__name__,
             )
@@ -2068,12 +2068,24 @@ def _backend_op_names(
                 log.warning(
                     "precompile: cannot read the %s code backend %s serves (%s), so "
                     "the artifact records none of the custom ops it calls; serving "
-                    "needs them registered by the first call",
+                    "needs them registered before load",
                     half,
                     backend_id,
                     type(c).__name__,
                 )
     return names | eager_names, eager_names
+
+
+# A guard on an operator names it by its source, e.g. G['torch'].ops.ns.op.
+_GUARDED_OP = re.compile(r"(?:\.ops|\['ops'\])\.(\w+)\.(\w+)")
+
+
+def _guard_op_names(guards: Iterable[tuple[str, str]]) -> set[str]:
+    """The ``ns::op`` names of the operators the kept ``(guard type, source)``
+    ``guards`` name, which ``load`` looks up as it rebuilds them, whether or not a
+    backend still calls them (Inductor lowers away a triton_op or an op with a
+    lowering)."""
+    return {f"{ns}::{op}" for _, name in guards for ns, op in _GUARDED_OP.findall(name)}
 
 
 def _custom_op_modules(
@@ -2156,7 +2168,7 @@ def _custom_op_modules(
             log.warning(
                 "precompile: no module a serving process can import registers custom "
                 "op %s (%r: %s); the artifact serves only where it is already "
-                "registered by its first call",
+                "registered by its first call, or before load for a Dynamo artifact",
                 op_name,
                 name,
                 reason,
@@ -2398,7 +2410,7 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # which has no readable source form here. Everything else is meant to be read and
 # reviewed. Beyond torch it imports the modules of the frames it serves, and those
 # CUSTOM_OP_MODULES, the modules registering the custom ops its compiled subgraphs
-# call, whose ops are not registered yet.
+# call or its guards name, whose ops are not registered yet.
 """
 
 
@@ -2647,6 +2659,7 @@ def _build_multigraph_python_source(
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
     op_names, eager_op_names = _backend_op_names(backends)
+    op_names |= _guard_op_names(summary.kept_guards)
     _write_custom_op_imports(
         buf,
         op_names,

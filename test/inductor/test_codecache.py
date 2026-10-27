@@ -5843,7 +5843,8 @@ class TestCppCodeCacheKey(TestCase):
             with fresh_cache(), self._torch_root(root), capture_scope():
                 keys.append(self._frozen_key())
                 (key,) = CppCodeCache.cache
-                paths.append(CppCodeCache._binary_paths[key])
+                binary = CppCodeCache._binary_paths[key]
+                paths.append(os.path.relpath(binary, cache_dir()))
         self.assertEqual(keys[0], keys[1])
         # Each install still builds and stores its own binary, so another build
         # sharing the cache dir never loads it.
@@ -6004,10 +6005,10 @@ class TestCppCodeCacheKey(TestCase):
             cache = {}
             cpp_compile_command_flags = {"include_pytorch": True}
 
-        # A kernel that includes no torch header, and one that links libc10.
+        # A kernel that includes no torch header, and one that links libtorch_cpu.
         torch_code = """
-            #include <c10/core/CPUAllocator.h>
-            extern "C" int f() { return c10::GetCPUAllocator() == nullptr; }
+            #include <ATen/Parallel.h>
+            extern "C" int f() { return at::get_num_threads() < 1; }
         """
         for cache, code in ((CppCodeCache, self.CODE), (TorchCppCodeCache, torch_code)):
             with self.subTest(cache=cache.__name__):
