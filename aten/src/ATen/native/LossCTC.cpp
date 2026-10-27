@@ -98,6 +98,12 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
       TORCH_CHECK(target_lengths[i] >= 0,
                   "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
                   " (while checking arguments for ", c, ")");
+      // compare against the remaining extent before accumulating, so a huge
+      // length cannot overflow pos and wrap back into range
+      TORCH_CHECK(target_lengths[i] <= targets.size(0) - pos,
+                  "Expected target_lengths to fit in targets of size ", targets.size(0),
+                  " at dimension 0, but target_lengths[", i, "] = ", target_lengths[i], " exceeds the ",
+                  targets.size(0) - pos, " remaining entries (while checking arguments for ", c, ")");
       tg_batch_offsets[i] = pos * static_cast<int64_t>(targets.stride(0));
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -290,6 +296,12 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     int64_t pos = 0;
     max_target_length = 0;
     for (const auto i : c10::irange(batch_size)) {
+      // compare against the remaining extent before accumulating, so a huge
+      // length cannot overflow pos and wrap back into range
+      TORCH_CHECK(target_lengths[i] <= targets.size(0) - pos,
+                  "Expected target_lengths to fit in targets of size ", targets.size(0),
+                  " at dimension 0, but target_lengths[", i, "] = ", target_lengths[i], " exceeds the ",
+                  targets.size(0) - pos, " remaining entries (while checking arguments for ctc_loss_backward_cpu)");
       tg_batch_offsets[i] = pos * static_cast<int64_t>(targets.stride(0));
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
