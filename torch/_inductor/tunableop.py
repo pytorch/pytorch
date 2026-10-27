@@ -86,10 +86,20 @@ class BenchmarkJob:
     _get_worker_locked).
     """
 
-    def __init__(self, bmreq: Any, tuning: bool, nearest_match: bool = False) -> None:
+    def __init__(
+        self,
+        bmreq: Any,
+        tuning: bool,
+        nearest_match: bool = False,
+        dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
+    ) -> None:
         self.bmreq = bmreq
         self.tuning = tuning
         self.nearest_match = nearest_match
+        # (M, N, K, BATCH). Thread-local in the parent, so unlike the knobs in
+        # settings it cannot be snapshotted -- the caller passes it explicitly
+        # and __call__ re-enters it around the benchmark.
+        self.dyn_dims_mask = dyn_dims_mask
         # Stamped by submit() with the parent's tuning knobs (see
         # snapshot_settings): the worker is a long-lived fresh process that
         # would otherwise tune with defaults.
@@ -125,7 +135,18 @@ class BenchmarkJob:
             getattr(tunable, name)(value)
         # TunableOp cannot tune under graph capture.
         self.bmreq.benchmark_with_cudagraphs = False
+        # The mask lives on a thread-local stack in whichever process sets it, so
+        # the caller's context manager does not reach this worker. Re-enter it here
+        # or every GEMM benchmarked through the worker registers only its concrete
+        # signature, losing the wildcard entry that dynamic shapes match against at
+        # runtime -- silently, and precisely in tune mode, which exists to record it.
+        mask = self.dyn_dims_mask
         try:
+            if mask is not None and any(mask):
+                with tunable.dynamic_dims_mask(
+                    M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+                ):
+                    return self.bmreq.benchmark()
             return self.bmreq.benchmark()
         finally:
             # The worker outlives this job -- it is torn down only on a key
@@ -293,16 +314,14 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 #   * numerical-check tolerances -- set_numerical_check_tolerances has no
 #     getter, so there is nothing to snapshot;
 #   * wildcard_fallback_enable, record_untuned_enable and
-#     _record_borrowed_enable -- these do have getters, but they select what
-#     the worker records rather than how it tunes, and the worker's recording
-#     policy is set per job rather than inherited from the parent;
+#     _record_borrowed_enable -- these do have getters, but they govern lookup
+#     and recording rather than how a GEMM is tuned. The worker runs them at
+#     its own defaults, or at whatever the env sets, since all three are
+#     env-settable; nothing stamps them per job. The only recording-relevant
+#     flag the job carries is nearest_match;
 #   * the thread-local dynamic-dims mask. It is per call rather than per
-#     process, so a snapshot is the wrong mechanism for it -- but nothing
-#     carries it to the worker either: BenchmarkJob has no field for it and
-#     __call__ runs bmreq.benchmark() outside any dynamic_dims_mask context.
-#     With cuda.autotune_tunableop_dynamic_dims_wildcard set, a GEMM routed
-#     here therefore records only its concrete key, where the same GEMM
-#     benchmarked inline would also record the wildcard one.
+#     process, so a snapshot is the wrong mechanism for it -- the job carries
+#     it explicitly instead (dyn_dims_mask, re-entered in __call__).
 # Anything read from the environment reaches the worker by inheritance.
 _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
     ("get_max_tuning_duration", "set_max_tuning_duration"),
