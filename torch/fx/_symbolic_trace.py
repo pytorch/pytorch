@@ -1403,23 +1403,40 @@ def _resolve_lazy_imports(
                     _ = d[name]
                 lazy = unresolved()
         # A module body it ran can register torch.fx.wrap targets the traces have
-        # not patched yet. Outermost first, so an inner trace leaves the name to
-        # the patch that outlives it. Only those: a trace in a revert window does
-        # not show its patches, so it would record a builtin's again.
+        # not patched yet. Only those: a trace in a revert window does not show its
+        # patches, so it would record a builtin's again.
         new_fns = [
             (key, target_dict)
             for key, target_dict in _wrapped_fns_to_patch.items()
             if key not in registered
         ]
         if new_fns:
-            for trace_patcher in reversed(_trace_patchers(patcher)):
-                made = len(trace_patcher.patches_made)
-                _patch_wrap_targets(trace_patcher, new_fns, [])
-                # Still inside a revert window, e.g. Dynamo's, whose reapply
-                # installs them.
-                if trace_patcher.revert_depth > 0:
-                    for new_patch in reversed(trace_patcher.patches_made[made:]):
-                        new_patch.revert()
+            _patch_new_wrap_targets(patcher, new_fns)
+
+
+def _patch_new_wrap_targets(
+    patcher: _Patcher, new_fns: list[tuple[tuple[int, str], dict[str, Any]]]
+) -> None:
+    """Patch the torch.fx.wrap targets registered during a resolution window for
+    ``patcher``'s trace and the traces it runs inside, outermost first, so an inner
+    trace leaves a name to the patch that outlives it."""
+    reverted_patched = False
+    for trace_patcher in reversed(_trace_patchers(patcher)):
+        # A window nested in this one may have recorded some of them already.
+        made_keys = {(id(p.frame_dict), p.fn_name) for p in trace_patcher.patches_made}
+        fns = [(key, d) for key, d in new_fns if key not in made_keys]
+        if trace_patcher.revert_depth == 0:
+            _patch_wrap_targets(trace_patcher, fns, [])
+        elif not reverted_patched:
+            # Still inside a revert window, e.g. Dynamo's, whose reapply installs
+            # them. Only the outermost such patcher records them: the windows of
+            # those inside it reapply too, and two live patches of one target would
+            # revert out of order.
+            reverted_patched = True
+            made = len(trace_patcher.patches_made)
+            _patch_wrap_targets(trace_patcher, fns, [])
+            for new_patch in reversed(trace_patcher.patches_made[made:]):
+                new_patch.revert()
 
 
 def _autowrap_check(
