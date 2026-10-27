@@ -99,6 +99,7 @@ bool use_mkldnn_tf32_matmul(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Matmul.h>
 
 namespace at::native {
 
@@ -211,9 +212,7 @@ mkldnn_gemm(
   }
 #endif
 
-  ideep::matmul_forward::compute(
-      src, a, c, alpha, beta,
-      std::vector<float>(), std::vector<float>(), std::vector<float>(), op_attr);
+  mkldnn::matmul_forward(src, a, c, alpha, beta, op_attr);
 
   if (c.get_data_handle() != c_data){
     // ideep will query oneDNN expect format of output
@@ -266,9 +265,7 @@ mkldnn_gemm(
   ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
   ideep::tensor c = make_ideep_tensor<float>({n, m}, dnnl::memory::data_type::f32, c_strides, c_data);
 
-  ideep::matmul_forward::compute(
-      b, a, c, alpha, beta,
-      std::vector<float>(), std::vector<float>(), std::vector<float>(), op_attr);
+  mkldnn::matmul_forward(b, a, c, alpha, beta, op_attr);
 
   if(c.get_data_handle() != c_data){
     // ideep will query onednn expect format of output
@@ -426,8 +423,7 @@ void mkldnn_matmul(
   const ideep::tensor x = itensor_view_from_dense(mat1_, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_view_from_dense(mat2_, /*from_const_data_ptr*/true);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
-  ideep::matmul_forward::compute(x, w, y, alpha, beta,
-      std::vector<float>(), std::vector<float>(), std::vector<float>(), op_attr);
+  mkldnn::matmul_forward(x, w, y, alpha, beta, op_attr);
   if (y.get_data_handle() != result.data_ptr()){
     // ideep will query onednn expect format of output
     // if given output format is not expected, ideep will re-init an output buffer
