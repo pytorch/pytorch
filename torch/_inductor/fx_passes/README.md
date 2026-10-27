@@ -15,12 +15,12 @@ dim = get_arg_value(split_node, 2, "dim")
 
 
 ## Mutations
-After AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except:
+Immediately after AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except:
 
-- a `copy_` epilogue at the end of the graph that writes back mutated inputs, and
+- a `copy_` epilogue that writes back mutated inputs (administrative view ops may follow these mutations), and
 - rare input mutation ops: `aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`, plus `inductor.resize_storage_bytes_.default` and `fsdp.copy_.default` used by FSDP.
 
-Passes can assume the graph is otherwise functional.
+Passes can assume the graph is otherwise functional only until the first mutation-introducing pass runs, such as `bucket_all_gather` / `bucket_fsdp_all_gather` when enabled, or `slice_scatter_chunking_pass`. Passes registered after that point must handle the mutations introduced by preceding passes.
 
 Passes do not have to support the rare input mutation ops; because they are rare, it is usually fine to exit early if any appears:
 
@@ -47,11 +47,13 @@ def f(x: Tensor):
 
 a pass must not eliminate `x.clone()`, by the same rule as in [Altering Aliasing](#altering-aliasing): passes must neither introduce nor remove aliasing between user-visible inputs and outputs.
 
-The final post-grad passes `slice_scatter_chunking_pass` and `reinplace_inplaceable_ops` reintroduce mutation just before lowering.
+Mutation-introducing passes must run after passes that rely on the functional invariant. Any pass running after mutation has been introduced must support the resulting non-functional graph. Preserve these ordering constraints when adding or reordering passes.
 
 
 ## Altering Aliasing
-- Passes may change aliasing relationships among intermediate tensors because internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
+- Passes may change aliasing relationships among intermediate tensors only when doing so preserves the values observed across any mutations in the graph. Internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
+
+Changes to intermediate aliasing must also preserve tensor values in the presence of the mutation exceptions described above.
 
 - Passes must preserve aliasing relationships that escape through user-visible inputs and outputs. They must neither introduce nor remove user-visible input-output or output-output aliases.
 
@@ -63,7 +65,7 @@ c = b.clone()
 a = alias(b)
 c = alias(b)
 ```
-is fine when `a`, `b`, and `c` are all intermediates, but breaks when `a` and `c` are both outputs (adds an output-output alias) or when `b` is an input and `a` or `c` is an output (adds an input-output alias).
+is fine when `a`, `b`, and `c` are all intermediates and no mutation makes their users observe different values. It breaks when `a` and `c` are both outputs (adds an output-output alias) or when `b` is an input and `a` or `c` is an output (adds an input-output alias).
 
 Similarly,
 ```python
