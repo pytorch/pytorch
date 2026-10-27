@@ -46,8 +46,10 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_constant,
     maybe_get_fake_device,
     maybe_get_item_memo,
+    maybe_get_sym_memo,
     maybe_set_fake_device,
     maybe_set_item_memo,
+    maybe_set_sym_memo,
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
@@ -765,19 +767,7 @@ def _unique(
         raise DynamicOutputShapeException(func)
 
     memo_name = "unique_consecutive_memo" if unique_consecutive else "unique_memo"
-    nnz = getattr(arg, memo_name, None)
-    if (
-        nnz is not None
-        and not isinstance(arg, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-        and (
-            (
-                not arg.is_inference()
-                and getattr(arg, f"_{memo_name}_vc", None) != arg._version
-            )
-            or getattr(arg, f"_{memo_name}_epoch", None) != fake_mode.epoch
-        )
-    ):
-        nnz = None
+    nnz = maybe_get_sym_memo(arg, memo_name, fake_mode)
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -809,12 +799,7 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            arg_any = typing_cast(Any, arg)
-            setattr(arg_any, memo_name, nnz)
-            if not isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                if not arg.is_inference():
-                    setattr(arg_any, f"_{memo_name}_vc", arg._version)
-                setattr(arg_any, f"_{memo_name}_epoch", fake_mode.epoch)
+            maybe_set_sym_memo(arg, memo_name, nnz, fake_mode)
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -1460,20 +1445,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    nnz = getattr(arg, "nonzero_memo", None)
-    if (
-        nnz is not None
-        and not isinstance(arg, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-        and (
-            (
-                not arg.is_inference()
-                and getattr(arg, "_nonzero_memo_vc", None) != arg._version
-            )
-            or getattr(arg, "_nonzero_memo_epoch", None) != fake_mode.epoch
-        )
-    ):
-        nnz = None
-    if nnz is None:
+    if (nnz := maybe_get_sym_memo(arg, "nonzero_memo", fake_mode)) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -1511,12 +1483,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
-        if not isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-            arg_any = typing_cast(Any, arg)
-            if not arg.is_inference():
-                arg_any._nonzero_memo_vc = arg._version
-            arg_any._nonzero_memo_epoch = fake_mode.epoch
+        maybe_set_sym_memo(arg, "nonzero_memo", nnz, fake_mode)
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
