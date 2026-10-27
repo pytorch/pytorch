@@ -501,8 +501,9 @@ class TestAOTCompileToPython(TestCase):
 
     def test_options_reach_both_steps_under_the_standalone_pins(self):
         # Step 1 (compile_fx, capturing the dense graph) runs under the options with
-        # step 2's pins over them, so cpp_wrapper=True cannot send it down the C++
-        # wrapper branch that step 2 then compiles without, and freezing, from the
+        # step 2's pins over them, so cpp_wrapper=True or fx_wrapper=True cannot send
+        # it down the wrapper branch that step 2 then compiles without (it loses the
+        # aliasing between inputs), and freezing, from the
         # options or the ambient config, cannot route it through freezing's compiler.
         import torch._inductor.compile_fx as compile_fx_module
 
@@ -510,15 +511,16 @@ class TestAOTCompileToPython(TestCase):
         real_compile_fx = compile_fx_module.compile_fx
 
         def spy(*args, **kwargs):
-            config = torch._inductor.config
-            seen.append((config.cpp_wrapper, config.freezing, config.nan_asserts))
+            c = torch._inductor.config
+            seen.append((c.cpp_wrapper, c.fx_wrapper, c.freezing, c.nan_asserts))
             return real_compile_fx(*args, **kwargs)
 
         m = _Pointwise().eval()
         x = torch.randn(8, 4)
         gm, inputs = _capture(m, x), _flat_inputs(m, x)
+        pinned = {"cpp_wrapper": True, "fx_wrapper": True, "freezing": True}
         for options in (
-            {"cpp_wrapper": True, "freezing": True, "nan_asserts": True},
+            {**pinned, "nan_asserts": True},
             {"nan_asserts": True},
         ):
             seen.clear()
@@ -527,7 +529,7 @@ class TestAOTCompileToPython(TestCase):
                 unittest.mock.patch.object(compile_fx_module, "compile_fx", spy),
             ):
                 src, _ = compile_to_python(gm, inputs, options=options)
-            self.assertEqual(seen, [(False, False, True)])
+            self.assertEqual(seen, [(False, False, False, True)])
         with torch.no_grad():
             self.assertEqual(load_from_python(src)(inputs)[0], m(x))
 
