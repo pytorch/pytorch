@@ -261,6 +261,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   // Child comm should be on the same device as parent comm
   comm->deviceIndex_ = source->deviceIndex_;
   comm->nonBlocking_ = config.blocking == 0;
+  comm->initialized_ = !comm->nonBlocking_;
   comm->setUniqueHash(
       source->getUniqueHash() + ":" +
       std::to_string(source->ncclCommSplitCounter_));
