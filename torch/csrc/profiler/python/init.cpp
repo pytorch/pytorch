@@ -490,7 +490,11 @@ void initPythonBindings(PyObject* module) {
                 p.trace_only);
           },
           [](const py::tuple& t) { // __setstate__
-            TORCH_CHECK(t.size() >= 9, "Expected at least 9 values in state");
+            TORCH_CHECK(
+                t.size() == 11,
+                "Expected 11 values in _ExperimentalConfig state, got ",
+                t.size(),
+                ". Pickles from older PyTorch versions are not supported.");
 
             py::list py_perf_events = t[1].cast<py::list>();
             std::vector<std::string> performance_events;
@@ -509,8 +513,8 @@ void initPythonBindings(PyObject* module) {
                 t[6].cast<bool>(),
                 t[7].cast<bool>(),
                 t[8].cast<std::string>(),
-                t.size() > 9 ? t[9].cast<bool>() : false,
-                t.size() > 10 ? t[10].cast<bool>() : false);
+                t[9].cast<bool>(),
+                t[10].cast<bool>());
           }))
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)

@@ -1027,10 +1027,10 @@ class TestProfiler(TestCase):
                 expose_kineto_event_metadata=True,
                 custom_profiler_config="custom_config",
                 # Only custom_profiler_config and trace_only are readable from
-                # Python, so the round trip is checked through them.
-                # __setstate__ reads trace_only from an optional trailing slot
-                # and falls back to false if that slot is missing, so it must
-                # be true here for a wrong index to fail the test.
+                # Python, so the round trip is checked through them. trace_only
+                # is true while adjust_timestamps, which precedes it in the
+                # pickled state, keeps its false default, so reading one slot
+                # too early fails the test.
                 trace_only=True,
             )
             pickled = pickle.dumps(config)
@@ -1044,6 +1044,14 @@ class TestProfiler(TestCase):
             self.assertIsInstance(copied, _ExperimentalConfig)
             self.assertEqual(copied.custom_profiler_config, "custom_config")
             self.assertTrue(copied.trace_only)
+
+    def test_experimental_config_rejects_old_pickle_state(self):
+        # PyTorch 2.15 pickled one more field, adjust_profiler_step, at index 3.
+        state = _ExperimentalConfig().__getstate__()
+        old_state = state[:3] + (False,) + state[3:]
+        config = _ExperimentalConfig.__new__(_ExperimentalConfig)
+        with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
+            config.__setstate__(old_state)
 
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
