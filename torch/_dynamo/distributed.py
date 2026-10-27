@@ -14,11 +14,15 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
+import logging
+
 import torch
 import torch.distributed as dist
 
 from . import config
 
+
+log = logging.getLogger(__name__)
 
 _COMPILE_PG: dist.ProcessGroup | None = None
 _GUARD_PG: dist.ProcessGroup | None = None
@@ -126,7 +130,7 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
             # A fake backend does not keep the configured timeout, so read it from
             # a real one, the object-collective device's first (cuda's in
-            # cpu:fake,cuda:nccl); a fake world has none.
+            # cpu:fake,cuda:nccl).
             backends = dist.BackendConfig(
                 dist.get_backend_config()
             ).get_device_backend_map()
@@ -134,14 +138,21 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             for device in sorted(backends, key=lambda d: d != coll_device):
                 if backends[device] == dist.Backend.FAKE:
                     continue
+                device_backend = default_pg._get_backend(torch.device(device))
                 try:
-                    options = default_pg._get_backend(torch.device(device)).options
+                    options = device_backend.options
                 except RuntimeError:
                     # A backend that does not implement getBackendOptions (ucc).
                     continue
                 if options is not None:
                     timeout = options._timeout
                     break
+            if timeout is None and backend != dist.Backend.FAKE:
+                log.warning(
+                    "No backend of the default process group reports its timeout, "
+                    "so the compile time sync group uses the default one, %s",
+                    dist.constants.default_pg_timeout,
+                )
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend=backend, timeout=timeout, pg_tag="pt2_compile_sync_pg"
             )
