@@ -15,6 +15,12 @@ from pathlib import Path
 
 import torch
 from torch._C import FileCheck
+from torch._C._profiler import (
+    _ExperimentalConfig,
+    ProfilerActivity,
+    ProfilerConfig,
+    ProfilerState,
+)
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config
 from torch._inductor.debug import (
@@ -30,9 +36,13 @@ from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
+from torch.autograd import _disable_profiler, _enable_profiler, _prepare_profiler
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 try:
@@ -642,6 +652,168 @@ class TestProvenanceTracingStackTraces(TestCase):
                         sorted(expected_lines),
                         lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
+
+    @torch._inductor.config.patch(
+        {
+            "trace.provenance_tracking_level": 2,
+            "trace.provenance_profiler_markers": True,
+        }
+    )
+    def test_provenance_profiler_markers_cpu(self):
+        model = Model4()
+        example_inputs = (
+            torch.randn(8, 10),
+            torch.randn(10, 20),
+            torch.randn(20, 30),
+            torch.randn(10, 30),
+        )
+        torch._dynamo.reset()
+        reset_inductor_kernel_provenance_debug_handle()
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            _, (code,) = run_and_get_code(compiled, *example_inputs)
+            handles = set(json.loads(payload_buffer.getvalue().strip()))
+
+        FileCheck().check("[Provenance debug handles] cpp_fused_mul_0:2").check_next(
+            "with torch._C._profiler._RecordFunctionFast('inductor_provenance:cpp_fused_mul_0:2'): pass"
+        ).run(code)
+
+        with torch.profiler.profile() as prof:
+            compiled(*example_inputs)
+        prefix = "inductor_provenance:"
+        markers = {
+            e.name.removeprefix(prefix)
+            for e in prof.events()
+            if e.name.startswith(prefix)
+        }
+        self.assertEqual(markers, handles)
+
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @torch._inductor.config.patch(
+        {
+            "trace.provenance_tracking_level": 2,
+            "trace.provenance_profiler_markers": True,
+        }
+    )
+    def test_provenance_profiler_markers_without_python_profiler_cpu(self):
+        model = Model4()
+        example_inputs = (
+            torch.randn(8, 10),
+            torch.randn(10, 20),
+            torch.randn(20, 30),
+            torch.randn(10, 30),
+        )
+        torch._dynamo.reset()
+        reset_inductor_kernel_provenance_debug_handle()
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            compiled(*example_inputs)
+            handles = set(json.loads(payload_buffer.getvalue().strip()))
+
+        # Like an on-demand (Kineto daemon) session: enable the native profiler
+        # with global callbacks and no Python profiler context, so the Python
+        # profiler flag stays False.
+        profiler_config = ProfilerConfig(
+            ProfilerState.KINETO,
+            False,
+            False,
+            False,
+            False,
+            False,
+            _ExperimentalConfig(profile_all_threads=True),
+        )
+        activities = {ProfilerActivity.CPU}
+        _prepare_profiler(profiler_config, activities)
+        _enable_profiler(profiler_config, activities)
+        try:
+            self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+            compiled(*example_inputs)
+        finally:
+            names = [e.name() for e in _disable_profiler().events()]
+
+        prefix = "inductor_provenance:"
+        markers = {n.removeprefix(prefix) for n in names if n.startswith(prefix)}
+        self.assertEqual(markers, handles)
+        self.assertTrue(any(n.startswith("## Call CompiledFxGraph ") for n in names))
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch(
+        {
+            "trace.provenance_tracking_level": 2,
+            "trace.provenance_profiler_markers": True,
+            "force_disable_caches": True,
+            "shape_padding": False,
+        }
+    )
+    def test_provenance_profiler_markers_repeated_extern_kernel(self):
+        def f(a, b, c):
+            return (a @ b) @ c
+
+        inputs = [torch.randn(64, 64, device="cuda") for _ in range(3)]
+        torch._dynamo.reset()
+        reset_inductor_kernel_provenance_debug_handle()
+        payload_buffer = io.StringIO()
+        handler = logging.StreamHandler(payload_buffer)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(StructuredTracePayloadFormatter())
+        handler.addFilter(
+            lambda record: record.metadata.get("artifact", {}).get("name")
+            == "inductor_provenance_tracking_node_mappings"
+        )
+        trace_log.addHandler(handler)
+        try:
+            compiled = torch.compile(f)
+            compiled(*inputs)
+        finally:
+            trace_log.removeHandler(handler)
+        kernel_to_post = json.loads(payload_buffer.getvalue())["cppCodeToPost"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = os.path.join(tmp, "trace.json")
+            with torch.profiler.profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                compiled(*inputs)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as trace_file:
+                events = json.load(trace_file)["traceEvents"]
+
+        # Each GPU kernel maps through its correlation id to its CPU launch; the
+        # latest marker before that launch on the same thread names its handle.
+        prefix = "inductor_provenance:"
+        markers = sorted(
+            (e["ts"], e["tid"], e["name"].removeprefix(prefix))
+            for e in events
+            if e.get("name", "").startswith(prefix)
+        )
+        launches = {
+            e["args"]["correlation"]: e
+            for e in events
+            if e.get("cat") in ("cuda_runtime", "cuda_driver")
+            and "correlation" in e.get("args", {})
+        }
+        kernel_launches = sorted(
+            (
+                launches[e["args"]["correlation"]]
+                for e in events
+                if e.get("cat") == "kernel"
+            ),
+            key=lambda launch: launch["ts"],
+        )
+        # Handles in launch order, one entry per extern call even if it
+        # launches several GPU kernels.
+        resolved = []
+        for launch in kernel_launches:
+            handle = [
+                h
+                for ts, tid, h in markers
+                if tid == launch["tid"] and ts <= launch["ts"]
+            ][-1]
+            if not resolved or resolved[-1] != handle:
+                resolved.append(handle)
+
+        self.assertEqual([kernel_to_post[h] for h in resolved], [["mm"], ["mm_1"]])
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_gpu_and_triton

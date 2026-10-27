@@ -573,6 +573,10 @@ class CompiledFxGraph(OutputCode):
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
     _serialized_original_gm: bytes | None = None
+    # Enter the "## Call CompiledFxGraph ##" range without the Python profiler
+    # flag check, so on-demand profiling sessions also scope the provenance
+    # markers of this graph's calls.
+    _always_enter_call_range: bool = False
 
     def __init__(
         self,
@@ -749,6 +753,7 @@ class CompiledFxGraph(OutputCode):
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
         self._set_compile_context_for_autotune_cache()
+        self._always_enter_call_range = config.trace.provenance_profiler_markers
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -823,7 +828,10 @@ class CompiledFxGraph(OutputCode):
             with autotune_cache_context:
                 try:
                     # Checking the profiler directly is faster than nullcontext
-                    if torch.autograd.profiler._is_profiler_enabled:
+                    if (
+                        torch.autograd.profiler._is_profiler_enabled
+                        or self._always_enter_call_range
+                    ):
                         with torch._C._profiler._RecordFunctionFast(
                             f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},

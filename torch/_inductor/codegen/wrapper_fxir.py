@@ -67,6 +67,7 @@ from .wrapper import (
     Line,
     MultiOutputLine,
     NullLine,
+    ProfilerMarkerLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
@@ -852,6 +853,11 @@ class FxConverter:
         if not isinstance(line, CommentLine):
             raise AssertionError(f"expected CommentLine, got {type(line)}")
         # We ignore comments in FX IR.
+
+    def _generate_profiler_marker(self, line: WrapperLine) -> None:
+        if not isinstance(line, ProfilerMarkerLine):
+            raise AssertionError(f"expected ProfilerMarkerLine, got {type(line)}")
+        # Profiler markers are emitted only by the Python wrapper.
 
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
         if not isinstance(line, DynamicScalarLine):
