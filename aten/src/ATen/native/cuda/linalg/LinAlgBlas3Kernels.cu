@@ -1240,9 +1240,7 @@ ldl_diagonal_panel_fused_kernel(
     // same pivots as LAPACK, the solve residual averages about 1.2x LAPACK's on
     // random indefinite matrices, and a pivot that results from heavy cancellation,
     // e.g. in a graded matrix, can lose several digits (normwise backward stability
-    // holds). Avoiding the undo takes a saved copy of the stale candidate and, after
-    // an interchange, swapping the rows of Lprev along with the data (and back after
-    // the trailing GEMM), as ?lasyf does.
+    // holds). It also loses exactly zero rows/cols: see the TODO at the info update.
     if (ilambda_updated && ilambda >= curr_step + pivot_rank) {
       update_rowcol(ilambda, /*first=*/curr_step + pivot_rank, /*skip=*/-1, /*undo=*/true);
       sync();
@@ -1294,11 +1292,21 @@ ldl_diagonal_panel_fused_kernel(
       }
     }
     // Update info if singular and if detected for the first time.
-    // Not guaranteed to fire for a singular input, even one with an exactly zero
-    // row/col: interchanges move data but not Lprev/Uprev, so a moved column is
-    // updated with the factors of its new position, and the exact zero survives
-    // only if the undo above and the trailing GEMM cancel bit for bit, which
-    // they do not. LAPACK keeps the zero exact, as the factors travel with the data.
+    // TODO: unlike LAPACK, an exactly zero row/col is not always detected. Its row of
+    // L is exactly zero, so all its updates are exact zeros, and LAPACK keeps it zero
+    // by moving its factors along with it. Here they stay put: if it is the
+    // curr_step + 1 partner of a 2x2 pivot, it moves to ilambda, and the undo above
+    // adds the update of the former row/col ilambda to it. The in-panel updates and
+    // the trailing GEMM subtract that again with different rounding, leaving noise in
+    // place of a zero pivot, so info stays 0, unless the 2x2 pivot is the first of
+    // its panel (Lprev is empty). Leading and trailing zero rows/cols never move.
+    // Fix, as in ?lasyf/?lahef: drop the undo by updating a saved copy of the stale
+    // candidate, swap the rows of Lprev along with the data, and swap them back after
+    // the trailing GEMM to keep LAPACK's storage of L. This also recovers the accuracy
+    // the undo costs. It is left for a follow-up as it adds work to the panel (a
+    // strided swap of up to nb entries per interchange, the copy, a pass after the
+    // GEMM), so it needs re-benchmarking and possibly re-tuning panel_width, while
+    // the factorization is backward stable either way and info differs only as above.
     if (D_is_singular && gtid == 0 && *dinfo == 0) {
       *dinfo = curr_step + 1;
     }
