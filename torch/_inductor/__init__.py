@@ -148,6 +148,14 @@ def aoti_compile_and_package(
             "of setting the aot_inductor.output_path config."
         )
 
+    # Ops with a torch.library.register_aot_impl builder get their C shims
+    # (generated from the builder's TVMFFIKernel) and companion libs
+    # auto-filled into inductor_configs here, so the normal AOTI lowering
+    # emits a direct shim call instead of the proxy executor.
+    from .aoti_impl import resolve_aot_impls
+
+    resolve_aot_impls(exported_program, inductor_configs)
+
     # a wrapper around aoti_compile_and_package_inner.
     return aot_inductor_minifier_wrapper(
         _aoti_compile_and_package_inner,
