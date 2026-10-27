@@ -336,6 +336,7 @@ def _blockscaled_tma_impl(
             shape ``(B0, 1, B1, N, B2)``.
 
     Examples::
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
         >>> qdata, scales = _blockscaled_tma_impl(x, (1, 0), False, True)
         >>> qdata.stride()
@@ -386,6 +387,7 @@ def _blockscaled_tma_impl_dual(
             each axis, regardless of input layout.
 
     Examples::
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
         >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x, False, True)
     """
