@@ -37,11 +37,12 @@ namespace {
 // Function to check if test data files exist and are valid
 bool testDataFilesExist() {
   std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
-  std::array<std::string, 4> required_files = {
-      "data.pt",
-      "script_data.pt",
-      "script_model_cpu.pt",
-      "script_model_cuda.pt"};
+  std::vector<std::string> required_files = {
+      "data.pt", "script_data.pt", "script_model_cpu.pt"};
+  // compile_model.py only writes CUDA data when a GPU is visible.
+  if (torch::cuda::is_available()) {
+    required_files.emplace_back("script_model_cuda.pt");
+  }
 
   for (const auto& filename : required_files) {
     std::string filepath = bindir + "/" + filename;
@@ -63,6 +64,8 @@ void ensureTestDataGenerated() {
     }
 
     std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+    // The build directory is not shipped to CI test jobs, so create it here.
+    std::filesystem::create_directories(bindir);
 
     // Calculate path to source directory: build/test_aoti_inference -> build ->
     // pytorch
@@ -72,23 +75,29 @@ void ensureTestDataGenerated() {
 
     // Generate test data files (data.pt, etc.) by running test.py directly
     std::string test_script = source_dir + "/test.py";
-    std::string test_data_cmd = "cd " + bindir + " && python " + test_script;
+    std::string test_data_cmd =
+        "cd \"" + bindir + "\" && python \"" + test_script + "\"";
     std::cout << "Generating test data: " << test_data_cmd << std::endl;
     int result1 = std::system(test_data_cmd.c_str());
-    if (result1 != 0) {
-      std::cerr << "Warning: Test data generation failed with code " << result1
-                << std::endl;
-    }
+    TORCH_CHECK(
+        result1 == 0,
+        "Test data generation failed with status ",
+        result1,
+        ": ",
+        test_data_cmd);
 
     // Generate model files (script_*.pt) by running compile_model.py directly
     std::string compile_script = source_dir + "/compile_model.py";
-    std::string models_cmd = "cd " + bindir + " && python " + compile_script;
+    std::string models_cmd = "cd \"" + bindir + "\" && python \"" +
+        compile_script + "\" \"" + AOTI_CUSTOM_CLASS_LIB + "\"";
     std::cout << "Generating model files: " << models_cmd << std::endl;
     int result2 = std::system(models_cmd.c_str());
-    if (result2 != 0) {
-      std::cerr << "Warning: Model generation failed with code " << result2
-                << std::endl;
-    }
+    TORCH_CHECK(
+        result2 == 0,
+        "Model generation failed with status ",
+        result2,
+        ": ",
+        models_cmd);
   });
 }
 
