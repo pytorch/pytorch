@@ -60,8 +60,8 @@ typedef void* syclDevicePtr_t;
 
 /**
  * A loaded kernel and the launch properties that are fixed once it is loaded:
- * the SIMD width it was compiled for (which with num_warps gives the work-group
- * size) and its argument count.
+ * the threads per warp used with num_warps to size the work-group, and its
+ * argument count.
  */
 struct LoadedKernel {
   sycl::kernel kernel;
@@ -351,7 +351,8 @@ inline LoadedKernel _createKernel(
   props.pNext = nullptr;
   ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
   // requiredSubgroupSize is the intel_reqd_sub_group_size attribute triton
-  // always emits; a kernel that declares no required size runs at 32.
+  // always emits. If a kernel declares none, the compiler picks its SIMD width;
+  // only for the work-group size do we assume triton's default warp size of 32.
   const uint32_t requiredSimd = props.requiredSubgroupSize;
   const uint32_t threadsPerWarp = requiredSimd != 0 ? requiredSimd : 32;
   // Level Zero reports spillMemSize in bytes per hardware thread, while
