@@ -679,7 +679,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_begin(
 
 // Ends the capture. With instantiate false, the capture is discarded instead,
 // e.g. because the captured work failed; discarding succeeds even if the
-// capture was invalidated. Either way the stream stops capturing.
+// capture was invalidated, unless the AOTI_RUNTIME_STRICT_CUDA_GRAPH
+// environment variable is set to a value other than 0: then discarding
+// reports errors and warnings from ending the capture. Either way the stream
+// stops capturing.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph, bool instantiate);
 
