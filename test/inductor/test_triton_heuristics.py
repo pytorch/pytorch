@@ -1919,6 +1919,35 @@ class TestCachingAutotunerLaunched(TestCase):
                 self.assertIs(future.result(), autotuner)
             self.assertTrue(autotuner._forward_use)
 
+    def test_forward_use_recorded_by_a_process_pool_compile(self):
+        from concurrent.futures import Future
+
+        from torch._inductor.async_compile import (
+            AsyncCompile,
+            CompiledTritonKernels,
+            loading_graph,
+        )
+
+        autotuner = self._make_autotuner()
+        # A process worker returns the kernel in its pickled state.
+        autotuner.prepare_for_pickle()
+        task = Future()
+        task.set_result((autotuner, 0))
+        pool = MagicMock()
+        pool.submit.return_value = task
+        source = f"# a kernel compiled in a process worker {id(autotuner)}"
+        self.addCleanup(CompiledTritonKernels.remove_future, source)
+        with (
+            loading_graph(False),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+            patch.object(AsyncCompile, "should_use_thread_workers", return_value=False),
+            patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+            patch.object(autotuner, "precompile"),
+        ):
+            self.assertIs(AsyncCompile().triton("triton_", source).result(), autotuner)
+        self.assertEqual((autotuner.is_backward, autotuner._forward_use), (False, True))
+
 
 class TestFastLauncherDeviceSupport(TestCase):
     @staticmethod
