@@ -2987,19 +2987,20 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        # A freed hook's id can be reused by new hooks, so its death must
-        # invalidate this entry.
         hooks = get_hooks()
-        guard_hooks_ids = (
-            tuple(
-                self.id_ref(h, f"saved_tensors_hooks[{i}]") for i, h in enumerate(hooks)
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
             )
-            if are_inline_hooks(hooks)
-            else None
-        )
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                get_hooks()
+                hooks
             )
 
         code = [
