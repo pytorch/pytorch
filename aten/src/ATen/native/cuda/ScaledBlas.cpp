@@ -1506,15 +1506,17 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
   // Store implementations that care about swizzling, and how many swizzle arguments
   // they have to have
   // NOTE(slayton): auto here is unable to deduce the correct type..
-  std::array<std::tuple<ScaledGemmImplementation, unsigned int>, 4> swizzled_impl = {{
+  std::array<std::tuple<ScaledGemmImplementation, unsigned int>, 6> swizzled_impl = {{
     // {implementation, # required arguments}
     {ScaledGemmImplementation::MXFP8_MXFP8, 1},
     {ScaledGemmImplementation::NVFP4_NVFP4, 2},
     {ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE, 1},
-    {ScaledGemmImplementation::MXFP4_MXFP4, 1}
+    {ScaledGemmImplementation::MXFP4_MXFP4, 1},
+    {ScaledGemmImplementation::MNK4_1x32, 1},
+    {ScaledGemmImplementation::MNK4_1x128, 1}
   }};
 
-  // Only check MX/NVFP formats on NVIDIA
+  // Check implementations that consume swizzle metadata.
   for (auto [check_impl, num_args] : swizzled_impl) {
     if (impl != check_impl) {
       continue;
@@ -1728,13 +1730,6 @@ void scaled_mm_cuda_v2_impl(
   );
 
   check_swizzle_lengths(gemm_impl, swizzle_a_enum, swizzle_b_enum);
-  if (gemm_impl == ScaledGemmImplementation::MNK4_1x32 ||
-      gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
-    TORCH_CHECK_VALUE(
-        swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1 &&
-            swizzle_a_enum[0] == SwizzleType::SWIZZLE_MNxK4 && swizzle_b_enum[0] == SwizzleType::SWIZZLE_MNxK4,
-        "For packed MNxK4 scaling swizzle_a and swizzle_b must each be SWIZZLE_MNxK4");
-  }
 
 
   ScaledGemmEpilogue epilogue;
