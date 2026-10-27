@@ -1238,11 +1238,11 @@ class TestScatterAddOverrideCorrectness(TestCase):
     def test_alignment_correctness(self, case):
         # End-to-end regression for the SEV-class crash where a
         # misaligned data_ptr / row stride bypassed the cond and faulted
-        # in the TMA / vec-scatter kernel (cudaErrorMisalignedAddress).
-        # With the alignment cond in place, every case here either runs
-        # via vec-scatter (when the relaxed dst-only 4B contract is met --
-        # expected_vec=True) or falls through to aten; both must produce
-        # correct numerics.
+        # in the TMA / vec-scatter kernel (cudaErrorMisalignedAddress
+        # from cp.reduce.async.bulk or a paired atomic). With the alignment cond
+        # in place, every case here either runs via vec-scatter (when
+        # the relaxed dst-only 4B contract is met -- expected_vec=True)
+        # or falls through to aten; both must produce correct numerics.
         from torch._native.ops.scatter_add import cutedsl_impl
 
         # See test_alignment_cond_matrix.
@@ -1341,26 +1341,43 @@ class TestScatterAddOverrideCorrectness(TestCase):
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
 
+    @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("path", ["tma", "vec"])
-    @parametrize("violation", ["src_ptr", "row_len", "src_row_stride"])
-    def test_kernel_rejects_contract_violation(self, path, violation):
+    @parametrize("violation,msg", [
+        subtest(("src_ptr", "Misaligned Tensor data on argument #0"), name="src_ptr"),
+        subtest(("src_row_stride", r"Invalid mSrc\.strides\[0\]"), name="src_row_stride"),
+        subtest(("row_len", r"Invalid mSrc\.shape\[1\]"), name="row_len"),
+        subtest(("dst_ptr", "Misaligned Tensor data on argument #2"), name="dst_ptr"),
+        subtest(("dst_row_stride", r"Invalid mOut\.strides\[0\]"), name="dst_row_stride"),
+    ])
+    def test_kernel_rejects_contract_violation(self, dtype, path, violation, msg):
         # The kernels declare the cond's alignment contract to tvm-ffi, which
         # checks it on every call. Call them directly to bypass the cond.
         from torch._native.ops.scatter_add import tma_kernel, vec_scatter_kernel
         if path == "tma" and not SM90OrLater:
             self.skipTest("TMA path requires sm_90+")
+        if path == "vec" and violation.startswith("dst") and dtype.itemsize >= 4:
+            self.skipTest("vec-scatter dst only needs 4B alignment")
         M, N = 64, 128
+
+        def zeros(rows, cols):
+            return torch.zeros(rows, cols, device="cuda", dtype=dtype)
+
+        out, src = zeros(M, N), zeros(M, N)
         if violation == "src_ptr":
-            src = _misaligned_view(M, N, torch.float32)
+            src = _misaligned_view(M, N, dtype)
+        elif violation == "src_row_stride":
+            src = zeros(M, N + 1)[:, :N]
         elif violation == "row_len":
-            N = 130
-            src = torch.randn(M, N, device="cuda")
+            # Row strides stay 16B multiples, so only the row length is off.
+            out, src = zeros(M, 136)[:, :130], zeros(M, 136)[:, :130]
+        elif violation == "dst_ptr":
+            out = _misaligned_view(M, N, dtype)
         else:
-            src = torch.randn(M, N + 1, device="cuda")[:, :N]
-        out = torch.zeros(M, N, device="cuda")
+            out = zeros(M, N + 1)[:, :N]
         idx = torch.zeros(M, dtype=torch.int64, device="cuda")
         run = tma_kernel.tma_scatter_add_into if path == "tma" else vec_scatter_kernel.vec_scatter_add_into
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, msg):
             run(out, idx, src)
 
     def test_vec_accepts_dst_row_stride_finer_than_a_vector(self):
