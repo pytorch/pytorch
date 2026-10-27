@@ -21,7 +21,7 @@ import torch._functorch.config
 import torch.fx as fx
 import torch.nn
 import torch.utils.checkpoint
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
@@ -68,6 +68,138 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("same_order", [False, True])
+    def test_ordered_dict_comparison_uses_linked_order(self, same_order):
+        def fn(x, left, right):
+            return x + (left == right)
+
+        left = OrderedDict(a=1, b=2)
+        right = OrderedDict(b=2, a=1) if same_order else left.copy()
+        left.move_to_end("a")
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, left, right),
+            fn(x, left, right),
+        )
+
+    def test_ordered_dict_equal_literal_keys_reuse_graph(self):
+        def fn(x, mapping):
+            return x + sum(mapping.values())
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("operation", ["copy", "unpack", "update", "expand"])
+    def test_ordered_dict_materialization_order(self, operation):
+        def fn(x, mapping):
+            if operation == "copy":
+                result = mapping.copy()
+            elif operation == "unpack":
+                result = [*mapping]
+            elif operation == "update":
+                result = {}
+                result.update(mapping)
+            else:
+                result = {**mapping}
+            return x + 1, list(result)
+
+        mapping = OrderedDict(a=1, b=2)
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        mapping.move_to_end("a")
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+
+    def test_ordered_dict_copy_key_identity_guard(self):
+        def fn(x, mapping):
+            return x + 1, [id(key) for key in mapping.copy()]
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+
+    @parametrize("operation", ["items", "dict_items", "arithmetic", "repr"])
+    def test_hook_dict_items_observe_current_ids(self, operation):
+        def hook(module, args, output):
+            return output + 1
+
+        def fn(x, module):
+            hooks = module._forward_hooks
+            if operation == "repr":
+                result = repr(hooks.items())
+            elif operation == "arithmetic":
+                result = [key + 1 for key, value in hooks.items()]
+            else:
+                result = list(
+                    dict.items(hooks) if operation == "dict_items" else hooks.items()
+                )
+            return x + 1, result
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            module.register_forward_hook(hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+
+    @parametrize("operation", ["copy", "update"])
+    def test_hook_dict_materialization_keys(self, operation):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, module):
+            if operation == "copy":
+                result = module._forward_hooks.copy()
+            else:
+                result = {}
+                result.update(module._forward_hooks)
+            return x + (1 in result)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for key in (0, 1):
+            module = torch.nn.Identity()
+            module._forward_hooks[key] = hook
+            self.assertEqual(compiled(x, module), fn(x, module))
+
+    def test_empty_dict_membership_keeps_key_lazy(self):
+        def fn(x, key, mapping):
+            return x + (key in mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for key in (3, 4):
+            self.assertEqual(compiled(x, key, {}), x)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(compiled(x, 4, {4: None}), x + 1)
+
+    def test_hook_kwargs_membership_reuse(self):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest)
+
+        def fn(x, module):
+            return module(x)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for with_kwargs in ((False, True), (False, True), (True, False)):
+            module = torch.nn.Identity()
+            for flag in with_kwargs:
+                module.register_forward_hook(hook, with_kwargs=flag)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(
+                counter.frame_count, 1 if with_kwargs == (False, True) else 2
+            )
+
     def test_ordered_dict_key_identity_guard(self):
         def fn(x, mapping):
             key, other = mapping
@@ -174,7 +306,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         )
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("operation", ["contains", "get", "pop"])
+    @parametrize("operation", ["contains", "items_contains", "get", "pop", "delitem"])
     @parametrize("present", [False, True])
     def test_input_dict_lookup_comparison_count(self, mapping_type, operation, present):
         class Key:
@@ -192,6 +324,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
             stored.calls = 0
             if operation == "contains":
                 result = probe in mapping
+            elif operation == "items_contains":
+                result = (probe, 7) in mapping.items()
+            elif operation == "delitem":
+                try:
+                    mapping.__delitem__(probe)
+                    result = True
+                except KeyError:
+                    result = False
             else:
                 result = getattr(mapping, operation)(probe, 11)
             return x + stored.calls, result
@@ -207,8 +347,11 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual, expected)
 
     @parametrize("key", ["a", 3, (1, 2)])
-    def test_input_dict_contains_key_guard(self, key):
+    @parametrize("items_view", [False, True])
+    def test_input_dict_contains_key_guard(self, key, items_view):
         def fn(x, mapping, key):
+            if items_view:
+                return x + ((key, 1) in mapping.items())
             return x + (key in mapping)
 
         x = torch.zeros(1)
@@ -256,6 +399,59 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 list(actual_mapping.items()), list(expected_mapping.items())
             )
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("with_default", [False, True])
+    def test_missing_dict_pop_in_hop(self, mapping_type, with_default):
+        def fn(x, mapping):
+            def body(x):
+                try:
+                    value = (
+                        mapping.pop("missing", 2)
+                        if with_default
+                        else mapping.pop("missing")
+                    )
+                except KeyError:
+                    value = 2
+                return x + value
+
+            return torch.cond(x.sum() > 0, body, body, (x,))
+
+        x = torch.ones(2)
+        mapping = mapping_type()
+        mapping["present"] = 1
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), x + 2
+        )
+        self.assertEqual(list(mapping.items()), [("present", 1)])
+
+    def test_rejected_dict_pop_preserves_tracked_items(self):
+        from torch._dynamo.side_effects import SideEffects
+        from torch._dynamo.variables.dicts import ConstDictVariable
+
+        original_check = SideEffects.check_allowed_side_effect
+        rejected_sizes = []
+
+        def check(side_effects, variable):
+            try:
+                return original_check(side_effects, variable)
+            except Unsupported:
+                if isinstance(variable, ConstDictVariable):
+                    rejected_sizes.append(len(variable.items))
+                raise
+
+        def fn(x, mapping):
+            def body(x):
+                return x + mapping.pop("a")
+
+            return torch.cond(x.sum() > 0, body, body, (x,))
+
+        with patch.object(SideEffects, "check_allowed_side_effect", check):
+            with self.assertRaises(UncapturedHigherOrderOpError):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.ones(2), {"a": 1}
+                )
+        self.assertEqual(rejected_sizes, [1])
 
     def test_dunder_dict_pop_deleted_key_in_hop(self):
         class Obj:
@@ -4375,7 +4571,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.cos())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """KeyError on d2[5]""",
+            """list(dict.keys(d2))[1] == 5""",
             munge_exc(record.getMessage()),
         )
 
@@ -4402,7 +4598,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.cos())
         record = self.getRecord(records, "d1")
         self.assertIn(
-            """KeyError on d1[3]""",
+            """list(dict.keys(d1))[1] == 3""",
             munge_exc(record.getMessage()),
         )
 
