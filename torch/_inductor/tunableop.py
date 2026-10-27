@@ -281,6 +281,14 @@ def _shutdown_locked(graceful: bool = True) -> None:
                 else:
                     _worker.close()
             else:
+                # kill() signals only when alive() is true, and alive() is gated
+                # on running, which close() already cleared on the EOF path. A
+                # child that closed its pipes and then wedged in device teardown
+                # would never be signalled, and would hold its context and
+                # allocator memory on the GPU with no handle left to reach it.
+                process = _worker.process
+                if process is not None and process.poll() is None:
+                    process.kill()
                 _worker.kill()
                 _reap(_worker)
         except Exception:
@@ -376,6 +384,27 @@ def resolve_filename(device: int) -> str:
     return filename
 
 
+def _job_device(job: BenchmarkJob) -> int:
+    """The device the job's tensors live on, which is the one to tune on.
+
+    Not current_device(): Inductor scopes V.graph.set_current_device, which is
+    graph bookkeeping, and compile_fx's CUDA guard covers post-grad passes
+    rather than lowering, so a graph targeting cuda:1 can be autotuned while
+    the process current device is 0. The child builds its tensors from these
+    metas, so this is the GPU it really tunes on and the ordinal the results
+    file must be named for. Mirrors BenchmarkRequest._get_benchmark_device,
+    including its fall back to the current device when nothing carries one.
+    """
+    bmreq = job.bmreq
+    metas = [getattr(bmreq, "output_tensor_meta", None)]
+    metas += list(getattr(bmreq, "input_tensor_meta", None) or [])
+    for meta in metas:
+        index = getattr(getattr(meta, "device", None), "index", None)
+        if index is not None:
+            return index
+    return torch.cuda.current_device()
+
+
 def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     """Run one job in the worker, bounding how long we wait for it.
 
@@ -388,9 +417,9 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         timeout = config.cuda.aten_tunableop_timeout
     try:
         # Inside the try with everything else: the contract above is that this
-        # function reports faults rather than raising, and current_device() is
+        # function reports faults rather than raising, and reading the device is
         # as able to fail as the benchmark is.
-        device = torch.cuda.current_device()
+        device = _job_device(job)
         # The worker inherits this process's visibility mask rather than having
         # it rewritten, so the same logical ordinal names the same GPU there.
         job.device = device
