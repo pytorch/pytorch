@@ -3788,7 +3788,13 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_vnni_supported()) {
+#if defined(__aarch64__)
+  // On AArch64, oneDNN selects jit:int8 when SVE + I8MM is available.
+  const bool use_mkldnn = true;
+#else
+  const bool use_mkldnn = at::cpu::is_avx512_vnni_supported();
+#endif
+  if (at::globalContext().userEnabledMkldnn() && use_mkldnn) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;

@@ -105,7 +105,9 @@ struct RuntimeStateGuard {
   std::unique_ptr<RuntimeState> _state;
 };
 
-static PyObject* call_cpp_tensor_pre_hooks(PyObject* dummy, PyObject* args) {
+static PyObject* call_cpp_tensor_pre_hooks(
+    PyObject* /*dummy*/,
+    PyObject* args) {
   HANDLE_TH_ERRORS;
   int idx = -1;
   PyObject* grad = nullptr;
@@ -401,7 +403,7 @@ struct VerboseLogger : public PythonLogger {
 
   std::string log_node_check(
       const Node& fn,
-      size_t size_inputs_num,
+      size_t /*size_inputs_num*/,
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       size_t node_idx) {
@@ -618,14 +620,14 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
-static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
+static PyObject* clear_cache(PyObject* /*dummy*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS;
   CacheNode::root()->clear();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
+static PyObject* is_cache_empty(PyObject* /*dummy*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS;
   if (CacheNode::root()->is_empty()) {
     Py_RETURN_TRUE;
@@ -634,7 +636,7 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
+static PyObject* set_verbose_logger(PyObject* /*dummy*/, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* logger = nullptr;
   if (!PyArg_ParseTuple(args, "O", &logger)) {
@@ -1234,7 +1236,7 @@ static variable_list compiled_autograd(
   return outputs;
 }
 
-static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
+static PyObject* set_autograd_compiler(PyObject* /*dummy*/, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* obj = nullptr;
   int b = 0;

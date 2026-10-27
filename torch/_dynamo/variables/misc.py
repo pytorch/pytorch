@@ -74,9 +74,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
-    GetSet,
     getset_build,
-    load_pending_mutation,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -89,7 +87,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import mro_attr_source
+from .object_protocol import mro_attr_source, python_constant_repr_impl
 from .user_defined import (
     call_random_fn,
     is_standard_setattr,
@@ -501,6 +499,9 @@ class SuperVariable(VariableTracker):
             ],
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class UnknownVariable(VariableTracker):
     """
@@ -517,11 +518,18 @@ class DelayGraphBreakVariable(UnknownVariable):
         self,
         msg: str | None = None,
         hints: list[str] | None = None,
+        callable_var: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.msg = msg
         self.hints = hints or []
+        self.callable_var = callable_var
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.callable_var is None:
+            return super().reconstruct(codegen)
+        codegen(self.callable_var)
 
     def call_function(
         self,
@@ -684,6 +692,9 @@ class CellVariable(VariableTracker):
             op,
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
@@ -700,23 +711,66 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
 
 
 class AutogradFunctionVariable(VariableTracker):
-    """represents a torch.autograd.Function subclass"""
+    """represents a torch.autograd.Function subclass or constructed instance"""
 
     _nonvar_fields = {
         "fn_cls",
         "fn_cls_source",
+        "represents_instance",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
-        self, fn_cls: Any, fn_cls_source: Source | None = None, **kwargs: Any
+        self,
+        fn_cls: Any,
+        fn_cls_source: Source | None = None,
+        represents_instance: bool = False,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
         self.fn_cls_source = fn_cls_source if fn_cls_source is not None else self.source
+        self.represents_instance = represents_instance
 
     def python_type(self) -> type:
         return type
+
+    def get_real_python_backed_value(self) -> Any:
+        if self.represents_instance:
+            return NO_SUCH_SUBOBJ
+        return self.fn_cls
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        if self.represents_instance:
+            if inspect.getattr_static(self.fn_cls, "__hash__") is not object.__hash__:
+                self._unsupported_method("__hash__")
+            try:
+                hash_source = self._get_raw_attribute_source(tx, "__hash__")
+                if hash_source is None:
+                    self._unsupported_method("__hash__")
+                install_guard(hash_source.make_guard(GuardBuilder.BUILTIN_MATCH))
+            except NotImplementedError:
+                self._unsupported_method("__hash__")
+            return super().hash_impl(tx)
+        if self.fn_cls_source is not None:
+            try:
+                install_guard(self.fn_cls_source.make_guard(GuardBuilder.CLASS_MATCH))
+                return hash(self.fn_cls), False
+            except NotImplementedError:
+                pass
+        return hash(self.fn_cls), True
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if self.fn_cls_source is None:
+            return super().call_obj_hasattr(tx, name)
+        install_guard(
+            self.fn_cls_source.make_guard(
+                functools.partial(GuardBuilder.HASATTR, attr=name)
+            )
+        )
+        return variables.ConstantVariable.create(hasattr(self.fn_cls, name))
 
     def _resolve_kwargs(
         self,
@@ -779,21 +833,30 @@ class AutogradFunctionVariable(VariableTracker):
         setup_context = self.fn_cls.setup_context
         is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
 
-        # Tracing forward directly would skip the custom vmap staticmethod that
-        # eager custom_function_call runs while a functorch transform is active.
-        # generate_vmap_rule is fine: its rule is vmap over forward.
-        if (
-            self.fn_cls.vmap is not torch.autograd.Function.vmap
-            and torch._C._functorch.peek_interpreter_stack() is not None
-        ):
-            unimplemented(
-                gb_type="autograd.Function with custom vmap under functorch transform",
-                context=f"call_apply {self} {args} {kwargs}",
-                explanation="Dynamo traces `forward` directly and does not model "
-                "the `vmap` staticmethod of a `torch.autograd.Function` while a "
-                "functorch transform is active.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+        if torch._C._are_functorch_transforms_active():
+            from torch._C._functorch import TransformType
+            from torch._functorch.autograd_function import has_overridden_vmap_rule
+            from torch._functorch.pyfunctorch import (
+                retrieve_current_functorch_interpreter,
             )
+
+            # Under vmap, Function.apply goes through custom_function_call_vmap.
+            # Inlining forward matches it only for generate_vmap_rule=True; a
+            # vmap staticmethod (and its output checks) is not traced.
+            interpreter = retrieve_current_functorch_interpreter()
+            if interpreter.key() == TransformType.Vmap and (
+                not self.fn_cls.generate_vmap_rule
+                or has_overridden_vmap_rule(self.fn_cls)
+            ):
+                unimplemented(
+                    gb_type="autograd.Function without a generated vmap rule under vmap",
+                    context=f"call_apply {self}",
+                    explanation=f"vmap over {self.fn_cls.__name__} runs custom_function_call_vmap, which Dynamo only models for generate_vmap_rule=True without a vmap staticmethod.",
+                    hints=[
+                        "Use generate_vmap_rule=True if the generated rule is enough.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs, is_setup_ctx_defined)
@@ -988,6 +1051,7 @@ class AutogradFunctionVariable(VariableTracker):
         return AutogradFunctionVariable(
             self.fn_cls,
             fn_cls_source=self.fn_cls_source,
+            represents_instance=True,
         )
 
     def _resolve_staticmethod(
@@ -1135,6 +1199,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "proxy",
         "inference",
         "saved_tensors",
+        "output_grad_dtypes",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -1146,6 +1211,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors: Any | None = None,
         non_differentiable: Any | None = None,
         dirty_tensors: list[VariableTracker] | None = None,
+        output_grad_dtypes: tuple[torch.dtype | None, ...] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -1153,25 +1219,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
-
-    # _FunctionBase.needs_input_grad is a writable getset. apply() seeds it as an
-    # instance-dict entry, so user writes go there too and reads see them;
-    # without a pending entry the read falls through to tp_getattro_impl.
-    def _get_needs_input_grad(
-        self, tx: "InstructionTranslatorBase"
-    ) -> VariableTracker | None:
-        return load_pending_mutation(tx, self, "needs_input_grad")
-
-    def _set_needs_input_grad(
-        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
-    ) -> None:
-        stored = variables.DeletedVariable() if value is None else value
-        se = tx.output.side_effects
-        se.store_instance_dict_attr(self, "needs_input_grad", stored)
-
-    tp_getset = {
-        "needs_input_grad": GetSet(_get_needs_input_grad, _set_needs_input_grad)
-    }
+        self.output_grad_dtypes = output_grad_dtypes
 
     @staticmethod
     def create(
@@ -1241,6 +1289,35 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.dirty_tensors = args
         return variables.ConstantVariable.create(None)
 
+    def set_output_grad_dtype(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "set_output_grad_dtype", kwargs)
+        dtypes = (
+            tuple(arg.as_python_constant() for arg in args)
+            if all(arg.is_python_constant() for arg in args)
+            else None
+        )
+        if (
+            getattr(self, "proxy", None) is None
+            or self.output_grad_dtypes is not None
+            or dtypes is None
+            or not all(d is None or isinstance(d, torch.dtype) for d in dtypes)
+        ):
+            unimplemented(
+                gb_type="Unsupported autograd.Function context `set_output_grad_dtype`",
+                context=f"call_method {self} set_output_grad_dtype {args}",
+                explanation="Dynamo only supports tracing a single "
+                "ctx.set_output_grad_dtype call with constant torch.dtype or "
+                "None arguments inside autograd.Function.apply.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self.output_grad_dtypes = dtypes
+        return variables.ConstantVariable.create(None)
+
     def save_for_backward(
         self,
         tx: "InstructionTranslatorBase",
@@ -1282,12 +1359,18 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "mark_non_differentiable": Method(mark_non_differentiable),
         "mark_dirty": Method(mark_dirty),
         "save_for_backward": Method(save_for_backward),
+        "set_output_grad_dtype": Method(set_output_grad_dtype),
     }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
+        if name in [
+            "save_for_backward",
+            "mark_dirty",
+            "mark_non_differentiable",
+            "set_output_grad_dtype",
+        ]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
@@ -1482,6 +1565,9 @@ class GetAttrVariable(VariableTracker):
             return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
         return super().mp_subscript_impl(tx, key)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class CallMethodVariable(VariableTracker):
     """A method bound to a VT instance.
@@ -1558,6 +1644,9 @@ class CallMethodVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.method_name))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class PythonModuleVariable(VariableTracker):
     # PyModule_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/moduleobject.c#L1203
@@ -1610,6 +1699,9 @@ class PythonModuleVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class TypingVariable(VariableTracker):
@@ -1730,6 +1822,9 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 @functools.lru_cache(maxsize=1)
@@ -2267,6 +2362,9 @@ class LoggingLoggerVariable(VariableTracker):
             ],
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ConstantLikeVariable(VariableTracker):
     """self.value is a compile-time constant, but not a literal"""
@@ -2542,6 +2640,9 @@ class RandomClassVariable(VariableTracker):
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
         )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class RandomVariable(VariableTracker):
