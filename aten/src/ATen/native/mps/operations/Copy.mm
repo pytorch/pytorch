@@ -67,7 +67,9 @@ void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
 // Byte-erased compute copy, not a blit: faster at small sizes and avoids the encoder switch.
 // One dispatch per <=2GB chunk keeps chunk_bytes in uint.
 static void copy_bytes_kernel(void* dst,
+                              size_t dst_offset,
                               const void* src,
+                              size_t src_offset,
                               size_t size,
                               at::OptionalTensorRef dst_tensor,
                               at::OptionalTensorRef src_tensor,
@@ -80,8 +82,6 @@ static void copy_bytes_kernel(void* dst,
   kernel->runCommandBlock([&] {
     kernel->startEncoding();
     auto encoder = stream->commandEncoder();
-    auto dst_offset = dst_tensor ? dst_tensor->storage_offset() * dst_tensor->itemsize() : 0;
-    auto src_offset = src_tensor ? src_tensor->storage_offset() * src_tensor->itemsize() : 0;
     [encoder setBuffer:(id<MTLBuffer>)dst offset:dst_offset atIndex:0];
     [encoder setBuffer:(id<MTLBuffer>)src offset:src_offset atIndex:1];
     for (size_t base = 0; base < size;) {
@@ -245,8 +245,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   @autoreleasepool {
     auto [destBuffer, destOffset] = buffer_with_offset_from_tensor(dst, dst_tensor_nbytes, non_blocking);
-    // 4 bytes alignment required on macos for blits.
-    TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
     id<MTLBuffer> blitSourceBuffer = sourceBuffer;
     Tensor blitSource = src;
@@ -281,6 +279,14 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
                                 dst.scalar_type(),
                                 static_cast<uint32_t>(src.numel()),
                                 /*ilp_threshold=*/0u);
+      if (!non_blocking) {
+        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+      }
+    } else if (destOffset % 4 != 0 || storage_byte_offset % 4 != 0) {
+      // Blits need 4-byte aligned offsets on macOS, which sub-4-byte dtypes at odd offsets violate (#119367)
+      needsBlit = false;
+      copy_bytes_kernel(
+          destBuffer, destOffset, sourceBuffer, storage_byte_offset, src.nbytes(), dst, src, non_blocking);
       if (!non_blocking) {
         stream->synchronize(SyncType::COMMIT_AND_WAIT);
       }
@@ -350,7 +356,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
 }
 
 void copy_bytes_mps(void* dst, const void* src, size_t size) {
-  copy_bytes_kernel(dst, src, size, {}, {}, /*non_blocking=*/false);
+  copy_bytes_kernel(dst, 0, src, 0, size, {}, {}, /*non_blocking=*/false);
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
@@ -368,7 +374,14 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     return dst_;
   }
   if (sameDataType) {
-    copy_bytes_kernel(getMTLBufferStorage(dst_), getMTLBufferStorage(src_), src_.nbytes(), dst_, src_, non_blocking);
+    copy_bytes_kernel(getMTLBufferStorage(dst_),
+                      dst_.storage_offset() * dst_.itemsize(),
+                      getMTLBufferStorage(src_),
+                      src_.storage_offset() * src_.itemsize(),
+                      src_.nbytes(),
+                      dst_,
+                      src_,
+                      non_blocking);
   } else {
     copy_cast_kernel_mps(dst_, src_);
   }
