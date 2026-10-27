@@ -5,7 +5,9 @@ for example ``<!-- mergebot-status: merge failure comment=123 -->``. GitHub
 renders it as nothing and leaves it out of GraphQL ``bodyText``, so the visible
 text and the text-matching consumers stay as they were. Tools such as ShipIt's
 DiffTrain merge job read the newest tagged reply to their own command instead of
-guessing from prose.
+guessing from prose. Only comments authored by the mergebot account count: anyone
+can post a comment that ends in a tag, which renders as nothing, and the parsers
+here do no author check, so a reader must check the author itself.
 
 ``comment=`` is the id of the comment that issued the command, so a reader can
 tell the reply to its command from the reply to an earlier one: a second merge
@@ -139,7 +141,8 @@ def open_fence(body: str) -> str | None:
 
 def parse_tag(body: str) -> Tag | None:
     """The tag a reply carries, or None for a reply without one. Only a tag on the
-    reply's last line counts."""
+    reply's last line counts. This does not check who posted the reply; the
+    caller must (see the module docstring)."""
     match = STATUS_TAG_RE.search(body)
     if match is None:
         return None
@@ -152,6 +155,7 @@ def parse_tag(body: str) -> Tag | None:
 
 
 def parse_status(body: str) -> Status | None:
-    """The status a reply reports, or None for a reply without a tag."""
+    """The status a reply reports, or None for a reply without a tag. Like
+    parse_tag, this does not check who posted the reply."""
     tag = parse_tag(body)
     return tag.status if tag is not None else None

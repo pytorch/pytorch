@@ -10,6 +10,7 @@ import time
 import traceback
 import urllib.parse
 from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache, partial
 from pathlib import Path
@@ -81,7 +82,7 @@ from trymerge_explainer import get_revert_message, TryMergeExplainer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Iterator
 
     from native_stack import NativeStack, StackEntry
 
@@ -1703,18 +1704,15 @@ class GitHubPR:
 
             repo.push(self.default_branch(), dry_run)
         # The merge landed: a failure after this point must not report it as failed
-        try:
+        with after_landing(dry_run):
             if merge_commit_sha is None:
                 # The commits just pushed to trunk
                 merge_commit_sha = repo.rev_parse(name=self.default_branch())
-            if not dry_run:
-                self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
-                for pr in additional_merged_prs:
-                    pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
             if comment_id and self.pr_num:
-                # Finally, upload the record to s3. The list of pending and failed
-                # checks are at the time of the merge
+                # Save the record for the s3 upload before any other follow-up
+                # step, so that step failing can't lose it. The list of pending and
+                # failed checks are at the time of the merge
                 save_merge_record(
                     comment_id=comment_id,
                     pr_num=self.pr_num,
@@ -1740,6 +1738,11 @@ class GitHubPR:
             else:
                 print("Missing comment ID or PR number, couldn't upload to s3")
 
+            if not dry_run:
+                self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+                for pr in additional_merged_prs:
+                    pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+
             # Usually Github will see that the commit has "resolves <pr_num>" in the
             # commit message and close the PR, but sometimes it doesn't, leading to
             # confusion.  When it doesn't, we close it manually.
@@ -1751,10 +1754,6 @@ class GitHubPR:
                 comment_id=comment_id,
                 dry_run=dry_run,
             )
-        except Exception as e:
-            if dry_run:
-                raise
-            raise LandedError(str(e)) from e
 
     def merge_via_github_api(self, dry_run: bool = False) -> str:
         """Squash-and-merge this PR through GitHub's merge API, pinned to the
@@ -1861,6 +1860,18 @@ class PostCommentError(Exception):
 class LandedError(Exception):
     """A step after the merge or revert was pushed failed. The command's outcome
     stands, so its reply carries no failure tag; the cause is `__cause__`."""
+
+
+@contextmanager
+def after_landing(dry_run: bool) -> Iterator[None]:
+    """Wrap the steps after a merge or revert was pushed: their failure raises
+    LandedError. A dry run pushed nothing, so it re-raises the original."""
+    try:
+        yield
+    except Exception as e:
+        if dry_run:
+            raise
+        raise LandedError(str(e)) from e
 
 
 @dataclass
@@ -3105,7 +3116,7 @@ def do_revert_prs(
     )
     repo.push(shas_and_prs[0][1].default_branch(), dry_run)
     # The revert landed: a failure after this point must not report it as failed
-    try:
+    with after_landing(dry_run):
         reopen_reverted_prs(
             original_pr,
             shas_and_prs,
@@ -3114,10 +3125,6 @@ def do_revert_prs(
             skip_internal_checks=skip_internal_checks,
             dry_run=dry_run,
         )
-    except Exception as e:
-        if dry_run:
-            raise
-        raise LandedError(str(e)) from e
 
 
 def revert_with_dependents(
@@ -3158,7 +3165,7 @@ def revert_with_dependents(
     )
     repo.push(default_branch, dry_run)
     # The revert landed: a failure after this point must not report it as failed
-    try:
+    with after_landing(dry_run):
         reopen_reverted_prs(
             pr,
             shas_and_prs[::-1],
@@ -3170,10 +3177,6 @@ def revert_with_dependents(
         refresh_reverted_branches(
             repo, pr, [p.pr_num for _, p in shas_and_prs], dry_run
         )
-    except Exception as e:
-        if dry_run:
-            raise
-        raise LandedError(str(e)) from e
 
 
 def refresh_reverted_branches(

@@ -3306,6 +3306,20 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
                     str(raised.exception.__cause__), "failed after landing"
                 )
 
+    def test_a_label_failure_after_landing_keeps_the_merge_record(self) -> None:
+        for pr in (self.top, self.lower):
+            with self.subTest(pr=pr.pr_num):
+                self.record.reset_mock()
+                pr.add_numbered_label.side_effect = RuntimeError("label failed")
+                with self.assertRaises(LandedError):
+                    self.merge_into()
+                pr.add_numbered_label.side_effect = None
+                self.record.assert_called_once()
+                self.assertEqual(
+                    self.record.call_args.kwargs["merge_commit_sha"], "merged-sha"
+                )
+                self.assertFalse(self.record.call_args.kwargs["is_failed"])
+
     def test_a_dry_run_lands_nothing(self) -> None:
         self.close.side_effect = RuntimeError("close failed")
         with self.assertRaisesRegex(RuntimeError, "close failed") as raised:
