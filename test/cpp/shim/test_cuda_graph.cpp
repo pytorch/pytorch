@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <optional>
@@ -138,6 +139,22 @@ TEST_F(AOTICudaGraphTest, DiscardingInvalidatedCaptureSucceeds) {
   EXPECT_EQ(
       aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/false),
       AOTI_TORCH_SUCCESS);
+  EXPECT_FALSE(stream_is_capturing());
+  expect_new_capture_works();
+}
+
+TEST_F(AOTICudaGraphTest, StrictDiscardReportsInvalidatedCapture) {
+  c10::utils::set_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH", "1");
+  ASSERT_EQ(
+      aoti_torch_cuda_graph_capture_begin(
+          graph_, pool_, capture_stream_->stream()),
+      AOTI_TORCH_SUCCESS);
+  EXPECT_NE(cudaStreamSynchronize(capture_stream_->stream()), cudaSuccess);
+  (void)cudaGetLastError();
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/false),
+      AOTI_TORCH_FAILURE);
+  c10::utils::unset_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH");
   EXPECT_FALSE(stream_is_capturing());
   expect_new_capture_works();
 }
