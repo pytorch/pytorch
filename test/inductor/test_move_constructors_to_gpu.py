@@ -54,6 +54,50 @@ class TestMoveConstructorsToGpu(TestCase):
 
         self._check_fn(foo, True, inp)
 
+    @torch._inductor.config.patch({"triton.cudagraphs": True, "graph_partition": True})
+    def test_output_failure_cudagraphs(self):
+        # cudagraphs lets the search walk through the output node so that cpu
+        # scalar inputs stay movable, but a returned constructor keeps its device
+        def returned_and_indexed(x):
+            tmp1 = torch.arange(x.shape[0], device="cpu")
+            return tmp1, x[tmp1]
+
+        def cpu_chain(x):
+            return x * 2, torch.ones(6, device="cpu").mul(3).sum()
+
+        def only_output(x):
+            return (x.new_zeros((2, 3), device="cpu"),)
+
+        def scalar_and_constructor(x, scalar):
+            # the returned add depends on both a movable cpu scalar input and a
+            # constructor that cannot move; x * 2 keeps a gpu op in the graph
+            return x * 2, scalar + torch.arange(x.shape[0], device="cpu")
+
+        inp = torch.rand(32, 77, device=GPU_TYPE)
+        cases = (
+            (returned_and_indexed, (inp,)),
+            (cpu_chain, (inp,)),
+            (only_output, (inp,)),
+            (scalar_and_constructor, (inp, torch.tensor(2.0))),
+        )
+        for fn, args in cases:
+            torch._dynamo.reset()
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+            for e, a in zip(expected, actual):
+                self.assertEqual(e, a, exact_device=True)
+
+    @torch._inductor.config.patch({"triton.cudagraphs": True, "graph_partition": True})
+    def test_non_output_constructor_moves_cudagraphs(self):
+        def index_with_arange(x):
+            return x[torch.arange(x.shape[0])]
+
+        inp = torch.rand(32, 77, device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(index_with_arange), inp)
+        self.assertEqual(out, index_with_arange(inp))
+        # the arange reaches no output, so it must still move to the device
+        FileCheck().check_not("cpp_fused").run(code[0])
+
     def test_non_convertable_op_failure(self):
         def foo(x):
             y = torch.arange(x.shape[0])

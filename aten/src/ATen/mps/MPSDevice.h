@@ -28,6 +28,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_26_2,
   MACOS_26_4,
   MACOS_27_0,
+  MACOS_27_0_1,
 };
 
 // Metal language version to compile shaders with
