@@ -646,7 +646,7 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
             elif col == "eager_latency":
                 print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
-            elif col == "input_tokens_per_second":
+            elif col in ("input_tokens_per_second", "output_tokens_per_second"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
@@ -1201,10 +1201,15 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    if getattr(args, "hf_inference_mode", "generate") == "prefill":
+    hf_inference_mode = getattr(args, "hf_inference_mode", "generate")
+    if hf_inference_mode == "prefill":
         input_tokens = times * example_inputs["input_ids"].numel()
         headers += ["eager_latency", "input_tokens_per_second"]
         row += [median[0] * 1000, input_tokens / median[1]]
+    elif hf_inference_mode == "decode":
+        output_tokens = times * example_inputs["decode_ids"].numel()
+        headers += ["eager_latency", "output_tokens_per_second"]
+        row += [median[0] * 1000, output_tokens / median[1]]
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -2043,10 +2048,14 @@ class BenchmarkRunner:
         return 1
 
     def validate_args(self, args):
-        if args.hf_inference_mode == "prefill" or args.prompt_length is not None:
+        if (
+            args.hf_inference_mode != "generate"
+            or args.prompt_length is not None
+            or args.decode_length is not None
+        ):
             raise ValueError(
-                "--hf-inference-mode=prefill and --prompt-length require the "
-                "huggingface suite"
+                "--hf-inference-mode=prefill/decode, --prompt-length, and "
+                "--decode-length require the huggingface suite"
             )
 
     def get_performance_workload(self):
@@ -3461,14 +3470,19 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--hf-inference-mode",
-        choices=("generate", "prefill"),
+        choices=("generate", "prefill", "decode"),
         default="generate",
         help="Inference workload for registered Hugging Face generation models.",
     )
     parser.add_argument(
         "--prompt-length",
         type=int,
-        help="Uniform prompt length for Hugging Face prefill benchmarks (default: 1000).",
+        help="Uniform prompt length for Hugging Face prefill and decode benchmarks (default: 1000).",
+    )
+    parser.add_argument(
+        "--decode-length",
+        type=int,
+        help="Timed decode steps per request for Hugging Face decode benchmarks (default: 128).",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -4751,9 +4765,9 @@ def run(runner, args, original_dir=None):
 
     if args.output:
         output_filename = args.output
-    elif args.hf_inference_mode == "prefill" and output_filename:
+    elif args.hf_inference_mode != "generate" and output_filename:
         stem, ext = os.path.splitext(output_filename)
-        output_filename = f"{stem}_prefill{ext}"
+        output_filename = f"{stem}_{args.hf_inference_mode}{ext}"
 
     if output_filename:
         if args.output_directory:
@@ -4796,8 +4810,8 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
-            if args.hf_inference_mode == "prefill":
-                args.profiler_trace_name += "_prefill"
+            if args.hf_inference_mode != "generate":
+                args.profiler_trace_name += f"_{args.hf_inference_mode}"
         else:
             args.profiler_trace_name = args.profiler_trace_name
 

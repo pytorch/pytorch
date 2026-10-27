@@ -68,6 +68,7 @@ class WhisperBenchmark(Benchmark):
 class TextGenerationBenchmark(Benchmark):
     INPUT_LENGTH = 1000
     OUTPUT_LENGTH = 2000
+    DECODE_LENGTH = 128
 
     @staticmethod
     def get_model_and_inputs(
@@ -76,6 +77,7 @@ class TextGenerationBenchmark(Benchmark):
         batch_size=1,
         prompt_length=INPUT_LENGTH,
         inference_mode="generate",
+        decode_length=DECODE_LENGTH,
     ):
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device)
@@ -88,7 +90,7 @@ class TextGenerationBenchmark(Benchmark):
         model.generation_config.pad_token_id = tokenizer.eos_token_id
         model.generation_config.temperature = 0.0
 
-        if inference_mode == "prefill":
+        if inference_mode in ("prefill", "decode"):
             total_length = prompt_length + TextGenerationBenchmark.OUTPUT_LENGTH
             text_config = model.config.get_text_config(decoder=True)
             context_length = getattr(text_config, "max_position_embeddings", None)
@@ -99,7 +101,7 @@ class TextGenerationBenchmark(Benchmark):
                     f"{model_name}'s context length {context_length}"
                 )
             # Match the static cache generate() allocates for this request, so prefill
-            # attends over the same KV length as generate's first forward.
+            # and decode attend over the same KV length as generate.
             cache_capacity = total_length - 1
             model = TextGenerationPrefillModel(
                 model,
@@ -116,6 +118,15 @@ class TextGenerationBenchmark(Benchmark):
             dtype=torch.long,
         )
         example_inputs = {"input_ids": input_ids}
+        if inference_mode == "decode":
+            # Fixed tokens instead of argmax, so eager, compiled, and fp64 runs match.
+            example_inputs["decode_ids"] = torch.randint(
+                low=0,
+                high=tokenizer.vocab_size,
+                size=(batch_size, decode_length),
+                device=device,
+                dtype=torch.long,
+            )
         return model, example_inputs
 
 
@@ -189,6 +200,18 @@ class TextGenerationPrefillModel(torch.nn.Module):
         else:
             self.cache.reset()
 
+    def prepare_for_decode(self, input_ids):
+        self.prepare_for_prefill(input_ids)
+        # Prefill outside the compiled forward: a second input shape would make
+        # Dynamo recompile the decode graph with a dynamic sequence dim.
+        with torch.no_grad():
+            self.model(
+                input_ids=input_ids,
+                past_key_values=self.cache,
+                use_cache=True,
+                logits_to_keep=1,
+            )
+
     def forward(self, input_ids):
         if self.cache is None:
             raise RuntimeError("prepare_for_prefill() must be called before forward()")
@@ -217,6 +240,15 @@ HF_LLM_MODELS: dict[str, Benchmark] = {
 PREFILL_MODELS = {
     "meta-llama/Llama-3.2-1B",
     "google/gemma-2-2b",
+    "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3.5-0.8B",
+}
+
+
+# gemma-2-2b is excluded: its sliding-window cache layers track their length in a
+# Python int, so compiled decode recompiles every step.
+DECODE_MODELS = {
+    "meta-llama/Llama-3.2-1B",
     "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3.5-0.8B",
 }
