@@ -5945,8 +5945,9 @@ def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> b
 
 def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     """
-    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
-    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    gfx950 takes SWIZZLE_32_8 for MX FP4 from ROCm 7.13 and MX FP8 from 7.14.
+    gfx1250 also requests SWIZZLE_32_8. The caller has to pass the swizzle;
+    the scale element count does not name the layout.
     """
     # is_available() is not stable across a process lifetime, so it must stay
     # outside the cache -- a False from before device init would otherwise be

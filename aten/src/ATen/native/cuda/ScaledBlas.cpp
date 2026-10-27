@@ -146,14 +146,20 @@ bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
 }
 
 #ifdef USE_ROCM
-// Number of 1x32 e8m0 block scales in the SWIZZLE_32_8 layout.
+// Element count of the gfx950 32x8 tile.
 int64_t blockwise_1x32_numel_32_8(int64_t rows, int64_t k_unpacked) {
   return round_up<int64_t>(rows, 32) *
       round_up<int64_t>(ceil_div<int64_t>(k_unpacked, 32), 8);
 }
 
-// gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
-// from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+// gfx1250 MX scale count. K-blocks are padded up to a multiple of 4.
+int64_t blockwise_1x32_numel_gfx1250(int64_t rows, int64_t k_unpacked) {
+  constexpr int64_t k_group = 4;
+  return rows * round_up<int64_t>(ceil_div<int64_t>(k_unpacked, 32), k_group);
+}
+
+// gfx950 takes SWIZZLE_32_8 as the 32x8 tile: MX FP4 from ROCm 7.13, MX FP8
+// from 7.14. gfx1250 also requests SWIZZLE_32_8.
 bool prefers_swizzle_32_8([[maybe_unused]] const at::Tensor& t) {
 #if ROCM_VERSION >= 71300
   const bool version_supported =
@@ -164,18 +170,38 @@ bool prefers_swizzle_32_8([[maybe_unused]] const at::Tensor& t) {
 #endif
 }
 
-// Both layouts are legal on gfx950: NO_SWIZZLE selects hipBLASLt's
-// VEC32_UE8M0, SWIZZLE_32_8 selects BLK32_UE8M0_32_8_EXT, and neither is
-// arch-gated in cublasLtMatmulScaleMode (cuda/detail/CublasLtUtils.h), so gfx950
-// keeps taking the pre-7.14 unswizzled scales. SWIZZLE_32_4_4 has no ROCm
-// equivalent and would silently map to VEC32_UE8M0, so it is rejected. The
-// pair check comes first so a mismatch is not reported as a size error.
+bool is_gfx1250_mx_swizzle() {
+#if ROCM_VERSION >= 71400
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1250"});
+#else
+  return false;
+#endif
+}
+
+int64_t mx_swizzle_32_8_numel(int64_t rows, int64_t k_unpacked) {
+  if (is_gfx1250_mx_swizzle()) {
+    return blockwise_1x32_numel_gfx1250(rows, k_unpacked);
+  }
+  return blockwise_1x32_numel_32_8(rows, k_unpacked);
+}
+
+// gfx950 accepts NO_SWIZZLE or SWIZZLE_32_8. gfx1250 only accepts
+// SWIZZLE_32_8, so NO_SWIZZLE is rejected there. SWIZZLE_32_4_4 has no ROCm
+// equivalent and is rejected. The pair check comes first so a mismatch is
+// not reported as a size error.
 static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, SwizzleType swizzle_b) {
   TORCH_CHECK_VALUE(swizzle_a == swizzle_b,
       "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8, got swizzle_a=",
       static_cast<int>(swizzle_a), " and swizzle_b=", static_cast<int>(swizzle_b));
   TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE || swizzle_a == SwizzleType::SWIZZLE_32_8,
       "For ROCM MX gemm, block scales must use NO_SWIZZLE or SWIZZLE_32_8, got ", static_cast<int>(swizzle_a));
+  if (is_gfx1250_mx_swizzle()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        swizzle_a == SwizzleType::SWIZZLE_32_8,
+        "gfx1250 MX block scaling requires SWIZZLE_32_8 scales. "
+        "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
+    return;
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       swizzle_a != SwizzleType::SWIZZLE_32_8 || prefers_swizzle_32_8(t),
       "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
@@ -802,6 +828,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
     check_blockwise_e8m0fnu_arch_supported();
+    // v1 hard-wires NO_SWIZZLE below. gfx1250 only reads the pre-swizzled
+    // order, which v1 cannot name.
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !is_gfx1250_mx_swizzle(),
+        "gfx1250 MX block scaling requires SWIZZLE_32_8 scales. "
+        "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
 
     int packed_factor = 1;
     if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
@@ -825,7 +857,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 
   // v1 has no swizzle argument, so it can only express the default layout.
-  // Callers wanting the gfx950 32x8-tiled scales must use `_scaled_mm_v2`.
+  // gfx950 callers who want the 32x8 tile, and every gfx1250 MX caller, must
+  // use `_scaled_mm_v2` and pass SWIZZLE_32_8.
   return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, SwizzleType::NO_SWIZZLE, SwizzleType::NO_SWIZZLE, bias, use_fast_accum, out, {}, scale_result);
 }
 
@@ -1244,8 +1277,8 @@ _scaled_mxfp8_mxfp8(
   int64_t scale_a_elems, scale_b_elems;
   [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
-    scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
-    scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
+    scale_a_elems = mx_swizzle_32_8_numel(mat_a.size(0), mat_a.size(1));
+    scale_b_elems = mx_swizzle_32_8_numel(mat_b.size(1), mat_b.size(0));
     scale_layout = "SWIZZLE_32_8";
   } else {
     scale_a_elems = ceil_div<int64_t>(mat_a.size(0), 32) * mat_a.size(1);
@@ -1332,8 +1365,8 @@ _scaled_mxfp4_mxfp4(
   int64_t scale_a_elems, scale_b_elems;
   [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
-    scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
-    scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
+    scale_a_elems = mx_swizzle_32_8_numel(mat_a.size(0), K_multiplier * mat_a.size(1));
+    scale_b_elems = mx_swizzle_32_8_numel(mat_b.size(1), K_multiplier * mat_b.size(0));
     scale_layout = "SWIZZLE_32_8";
   } else {
     scale_a_elems = ceil_div<int64_t>(K_multiplier * mat_a.size(0), 32) * mat_a.size(1);

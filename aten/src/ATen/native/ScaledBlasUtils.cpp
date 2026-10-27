@@ -8,6 +8,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/GroupedMMUtils.h>
@@ -420,14 +421,23 @@ void validate_scaled_mm_v2_inputs(
     // query the device, so a request for it on an unsupported arch reaches this
     // size check first whenever the two layouts' counts differ. Name the
     // requirement, in `check_mx_swizzle`'s words, so that case is not
-    // misdiagnosed as a plain size mismatch.
-    [[maybe_unused]] const char* scale_layout_hint = is_mx_32_8
+    // misdiagnosed as a plain size mismatch. gfx1250 supports the enum, so it
+    // does not get that hint.
+    const bool gfx1250_mx_swizzle = is_mx_32_8 && at::globalContext().hasROCM() &&
+        at::detail::getCUDAHooks().isGPUArch({"gfx1250"});
+    [[maybe_unused]] const char* scale_layout_hint =
+        is_mx_32_8 && !gfx1250_mx_swizzle
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
-    if (is_mx_32_8) {
+    if (is_mx_32_8 && gfx1250_mx_swizzle) {
+      // gfx1250: rows * round_up(K/32, 4).
+      expected_a_elems = M * sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      expected_b_elems = N * sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      scale_layout = "SWIZZLE_32_8";
+    } else if (is_mx_32_8) {
       // 32x8-tiled scale layout (hipBLASLt BLK32_UE8M0_32_8).
       expected_a_elems = sym_round_up(M, 32) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 8);

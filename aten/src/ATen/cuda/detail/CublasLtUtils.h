@@ -2,6 +2,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/core/ScalarType.h>
@@ -185,7 +186,11 @@ inline int cublasLtMatmulScaleMode(
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
       if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
 #if defined(USE_ROCM) && ROCM_VERSION >= 71300
-        return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+        // gfx950 selects the 32x8 scale mode. gfx1250 keeps the default
+        // 1x32 block scale mode.
+        if (!at::detail::getCUDAHooks().isGPUArch({"gfx1250"})) {
+          return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+        }
 #else
         TORCH_CHECK(
             false,

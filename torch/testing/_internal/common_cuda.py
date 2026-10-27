@@ -633,11 +633,39 @@ def _get_torch_rocm_version():
     return tuple(int(x) for x in rocm_version.split("."))
 
 def rocm_mx_swizzle(mat_dtype):
-    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
-    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+    """Whether this device takes MX block scales for `mat_dtype` pre-swizzled.
+
+    Both archs request SwizzleType.SWIZZLE_32_8. gfx950 uses a 32x8 tile.
+    gfx1250 uses a different order. `mx_scale_swizzle` builds the matching bytes.
+    """
+    if not torch.version.hip:
         return False
-    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
-    return _get_torch_rocm_version() >= min_version
+    version = _get_torch_rocm_version()
+    if evaluate_gfx_arch_within(["gfx950"]):
+        min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+        return version >= min_version
+    if evaluate_gfx_arch_within(["gfx1250"]):
+        return version >= (7, 14)
+    return False
+
+
+def mx_scale_swizzle(scale, mat_dtype):
+    """Flatten MX scales into the layout this device's scaled_mm expects.
+
+    gfx950 uses a 32x8 tile. gfx1250 uses its own order.
+    Other ROCm archs and XPU are returned unchanged.
+    """
+    from torch.testing._internal.common_quantized import to_blocked, to_mx_swizzled_gfx1250
+
+    if torch.version.hip:
+        if not rocm_mx_swizzle(mat_dtype):
+            return scale
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            return to_mx_swizzled_gfx1250(scale)
+        return to_blocked(scale, swizzle_32_8=True)
+    if scale.device.type == "xpu":
+        return scale
+    return to_blocked(scale)
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:
