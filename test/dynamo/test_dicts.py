@@ -81,6 +81,108 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(result, fn(x, mapping))
             self.assertIs(result[1], next(iter(mapping)))
 
+    def test_ordered_dict_copy_key_identity_guard(self):
+        def fn(x, mapping):
+            key = next(iter(mapping.copy()))
+            return x + 1, key, id(key)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
+            result = compiled(x, mapping)
+            self.assertEqual(result, fn(x, mapping))
+            self.assertIs(result[1], next(iter(mapping)))
+
+    @parametrize("subclass", [False, True])
+    @parametrize("storage_order", [False, True])
+    def test_ordered_dict_copy_reordered_input(self, storage_order, subclass):
+        class Mapping(OrderedDict):
+            pass
+
+        mapping_type = Mapping if subclass else OrderedDict
+
+        def fn(x, mapping):
+            return x + 1, mapping.copy()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(3)
+        for order in ("abc", "cba", "cba"):
+            mapping = mapping_type(
+                (key, x + index)
+                for index, key in enumerate(order if storage_order else "abc")
+            )
+            if not storage_order:
+                for key in order:
+                    mapping.move_to_end(key)
+            actual = compiled(x, mapping)
+            self.assertEqual(actual, fn(x, mapping))
+            self.assertEqual(list(actual[1]), list(mapping))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("failure", ["exception", "graph_break"])
+    def test_ordered_dict_copy_key_comparison_exception(self, failure):
+        class Key:
+            def __init__(self, value):
+                self.value = value
+                self.fail = False
+
+            def __hash__(self):
+                return 1
+
+            def __eq__(self, other):
+                if self.fail:
+                    if failure == "exception":
+                        raise ValueError("key equality failed during copy")
+                    torch._dynamo.graph_break()
+                return self.value == other.value
+
+        class Mapping(OrderedDict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                if key.value == 1:
+                    self.first.fail = True
+                return value
+
+        def make_input():
+            first, second = Key(1), Key(2)
+            mapping = Mapping([(first, 1), (second, 2)])
+            mapping.first = first
+            return mapping
+
+        def fn(x, mapping):
+            try:
+                mapping.copy()
+            except ValueError as error:
+                return x + 1, str(error)
+            return x + 2, "not raised"
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if failure == "exception":
+            self.assertEqual(compiled(x, make_input()), fn(x, make_input()))
+        else:
+            with self.assertRaisesRegex(Unsupported, "Call to.*graph_break") as caught:
+                compiled(x, make_input())
+            self.assertNotIn(
+                "Dictionary mutated during iteration", str(caught.exception)
+            )
+
+    def test_hook_dict_copy_guard_keys(self):
+        def hook(module, args, output):
+            return output + 1
+
+        def fn(x, module):
+            return x + 1, module._forward_hooks.copy()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            module.register_forward_hook(hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+
     @parametrize("owner", [dict, OrderedDict])
     @parametrize("method", ["keys", "values", "items", "input_keys"])
     @parametrize("reordered", [False, True])
@@ -694,6 +796,63 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, view), fn(x, view))
         self.assertEqual(counter.frame_count, 2)
 
+    @parametrize("bound", [False, True])
+    def test_ordered_dict_subclass_copy(self, bound):
+        class Mapping(OrderedDict):
+            def __init__(self):
+                self.events = ["init"]
+                super().__init__()
+
+            def __getitem__(self, key):
+                self.events.append(("get", key))
+                return super().__getitem__(key) + 1
+
+            def __setitem__(self, key, value):
+                self.events.append(("set", key))
+                super().__setitem__(key, value)
+
+            def __iter__(self):
+                raise AssertionError("copy must use OrderedDict's stored keys")
+
+        def fn(x):
+            mapping = Mapping()
+            OrderedDict.__setitem__(mapping, "a", x)
+            result = mapping.copy() if bound else OrderedDict.copy(mapping)
+            return result, result.events, mapping.events
+
+        x = torch.ones(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual[0]), Mapping)
+        self.assertEqual(actual[1:], (["init", ("set", "a")], ["init", ("get", "a")]))
+        self.assertEqual(actual, expected)
+
+    @parametrize("method", ["__getitem__", "__setitem__"])
+    def test_ordered_dict_subclass_copy_mutates_source(self, method):
+        state = types.SimpleNamespace(source=None)
+
+        class Mapping(OrderedDict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                if method == "__getitem__":
+                    state.source.pop("b")
+                return value
+
+            def __setitem__(self, key, value):
+                if method == "__setitem__":
+                    state.source.pop("b")
+                super().__setitem__(key, value)
+
+        def fn(x):
+            source = Mapping()
+            OrderedDict.__setitem__(source, "a", x)
+            OrderedDict.__setitem__(source, "b", x + 1)
+            state.source = source
+            return source.copy()
+
+        with self.assertRaisesRegex(Unsupported, "Dictionary mutated during iteration"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
     @parametrize("method", ["keys", "items"])
     @parametrize("update", [False, True])
     def test_ordered_dict_update_reads_descriptor_once(self, method, update):
@@ -746,6 +905,34 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("bound", [False, True])
+    @parametrize("external", [False, True])
+    def test_dict_copy_descriptor(self, mapping_type, bound, external):
+        def fn(x, mapping):
+            if not external:
+                mapping = mapping_type(a=x, b=x + 1)
+                if mapping_type is OrderedDict:
+                    mapping.move_to_end("a")
+            if bound:
+                result = dict.copy.__get__(mapping)()
+            else:
+                result = dict.copy(mapping)
+            return result, result is mapping, result["a"] is mapping["a"]
+
+        x = torch.ones(1)
+        mapping = mapping_type(a=x, b=x + 1)
+        if mapping_type is OrderedDict:
+            mapping.move_to_end("a")
+        expected = fn(x, mapping)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        self.assertEqual(actual, expected)
+        self.assertIs(type(actual[0]), dict)
+        self.assertEqual(
+            list(actual[0]), ["b", "a"] if mapping_type is OrderedDict else ["a", "b"]
+        )
+        self.assertEqual(actual[1:], (False, True))
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize("method", ["copy", "get"])
     def test_aliased_dict_method_descriptor(self, mapping_type, method):
         Mapping = type("Mapping", (mapping_type,), {method: getattr(dict, method)})
@@ -779,7 +966,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("override_iter", [False, True])
-    @parametrize("copy", [False])
+    @parametrize("copy", [False, True])
     def test_dict_update_probes_subclass_keys(self, override_iter, copy):
         class Mapping(dict):
             @property
@@ -805,6 +992,33 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         self.assertEqual(fn(x), ({"a": x}, int(override_iter) + int(not copy)))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("empty", [False, True])
+    def test_dict_copy_descriptor_mapping_override(self, mapping_type, empty):
+        class Mapping(mapping_type):
+            def __iter__(self):
+                return super().__iter__()
+
+            def keys(self):
+                return ["other"]
+
+            def __getitem__(self, key):
+                return dict.__getitem__(self, "a") + 1
+
+            def copy(self):
+                raise AssertionError("dict.copy must bypass copy")
+
+        def fn(x):
+            mapping = Mapping() if empty else Mapping(a=x)
+            return dict.copy(mapping), x + 2
+
+        x = torch.ones(1)
+        expected = ({}, x + 2) if empty else ({"other": x + 1}, x + 2)
+        self.assertEqual(fn(x), expected)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertIs(type(actual[0]), dict)
 
     @parametrize("bound", [False, True])
     def test_dict_descriptor_arity_on_ordered_dict(self, bound):
