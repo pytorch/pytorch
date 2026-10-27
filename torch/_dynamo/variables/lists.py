@@ -2407,6 +2407,41 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def _bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        method: str,
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            return VariableTracker.build(
+                tx, getattr(self.data, method)(*const_args, **const_kwargs)
+            )
+        except (MemoryError, OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "split")
+
+    def bytearray_rsplit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "rsplit")
+
     def bytearray_hex(
         self,
         tx: "InstructionTranslatorBase",
@@ -2523,14 +2558,64 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(None)
 
+    def bytearray_insert(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_insert_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        check_positional(tx, "insert", len(args), 2, 2)
+        index = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+        item = pynumber_index(tx, args[1])
+        if not item.is_python_constant():
+            return None
+        new_data = bytearray(self.data)
+        try:
+            new_data.insert(index, item.as_python_constant())
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer: do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    def bytearray_pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_pop_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        check_positional(tx, "pop", len(args), 0, 1)
+        index = -1
+        if args:
+            index = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+        new_data = bytearray(self.data)
+        try:
+            result = new_data.pop(index)
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+        return ConstantVariable.create(result)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
+        "split": Method(bytearray_split),
+        "rsplit": Method(bytearray_rsplit),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
         "extend": Method(bytearray_extend),
+        "insert": Method(bytearray_insert),
+        "pop": Method(bytearray_pop),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

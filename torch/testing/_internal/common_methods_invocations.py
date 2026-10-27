@@ -6104,6 +6104,10 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
             continue
         yield SampleInput(make_arg(shape), rep_dim)
 
+    # Transposed, sliced, and a size-1 dim whose stride exceeds int32.
+    for arg in (make_arg((3, 4)).t(), make_arg((7, 9))[1::2, 2::2], make_arg((1, 4)).as_strided((1, 4), (2**32, 1))):
+        yield SampleInput(arg.detach().requires_grad_(requires_grad), (2, 3))
+
 
 def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
     shapes_and_args = (
@@ -12331,15 +12335,6 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
-               # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_strided_layout',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
@@ -21537,13 +21532,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                    promotes_int_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
-                   skips=(
-                       # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
-                       # of dtype torch.float32 into an out= with dtype torch.long
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                       # NotImplementedError: The operator 'aten::logit_' is not currently implemented for the MPS device
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-                   ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit),
     OpInfo('where',
@@ -22164,37 +22152,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
-            # mps and xpu refuse 5-D bicubic in eager. Not listed: test_dtypes, where a
+            # mps refuses 5-D bicubic in eager. Not listed: test_dtypes, where a
             # raising sample only marks a dtype partially supported, and test_out_warning,
             # which returns on the first sample, a 4-D bilinear one.
-            # TODO: drop these when mps / xpu implement 5-D bicubic.
+            # TODO: drop these when mps implements 5-D bicubic.
             # MPS TestConsistency has its own entry in common_mps.py.
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
-                         "test_noncontiguous_samples", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon",
-                         "test_variant_consistency_eager", device_type="xpu"),
-            # not instantiated on mps
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
-                         "test_operator", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
-                         "test_backward", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
-                         "test_view_replay", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestMathBits",
-                         "test_neg_view", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
-                         "test_fake_crossref_backward_no_amp", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
-                         "test_fake_crossref_backward_amp", device_type="xpu"),
-            # the gradient suites run on xpu, which claims float64
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
-                         "test_fn_grad", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
-                         "test_fn_gradgrad", device_type="xpu"),
         )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -22215,6 +22181,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.skip, "TestBwdGradients", "test_fn_grad", device_type="cuda", dtypes=(torch.float64,), active_if=TEST_WITH_ROCM or TEST_WITH_TORCHINDUCTOR),
             # https://github.com/pytorch/pytorch/issues/179743
             DecorateInfo(unittest.skip, "TestJit", "test_variant_consistency_jit", device_type="cuda", dtypes=(torch.float32,), active_if=IS_LINUX),
+            DecorateInfo(unittest.skip, "TestBwdGradients", "test_fn_gradgrad", device_type="xpu"),
         ),),
     # TODO: Remove grid_sampler_3d tests once `nn.functional.grid_sample` has
     # MPS support for all cases.
@@ -23712,11 +23679,6 @@ python_ref_db = [
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
-            # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='xpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
-                         dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
