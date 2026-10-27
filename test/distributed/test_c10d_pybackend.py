@@ -1243,6 +1243,22 @@ class TestPyBackendOptions(TestCase):
         self.assertIsNot(backend.merge_opts, parent_opts)
         self.assertEqual(backend.merge_opts.value, 4)
 
+    def test_split_group_none_options(self) -> None:
+        # None options mean defaults; splitGroup must not dereference null.
+        backend = OptionsBackend(0, 1, lambda: None)
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.split_opts.backend, "splittable-python-backend")
+        self.assertEqual(backend.split_opts._timeout, timedelta(minutes=30))
+
+    def test_merge_remote_group_none_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: None)
+        timeout = timedelta(seconds=7)
+        create_process_group(backend).merge_remote_group(dist.HashStore(), 1, timeout)
+        self.assertIs(type(backend.merge_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.merge_opts.backend, "splittable-python-backend")
+        self.assertEqual(backend.merge_opts._timeout, timeout)
+
     @parametrize("cls", [SelfCopyOptions, SlicingCopyOptions])
     def test_split_group_bad_copy(self, cls) -> None:
         parent_opts = cls(1)

@@ -4090,7 +4090,17 @@ Args:
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
           .def_property_readonly(
-              "options", BACKEND_VIRTUAL_PROPERTY(getBackendOptions))
+              "options",
+              BACKEND_VIRTUAL_PROPERTY(getBackendOptions),
+              R"(The backend's ``Backend.Options``.
+
+Python subclasses may override this property and return ``None`` if they have no
+backend-specific options. ``split()`` and ``merge()`` then receive a plain
+``Backend.Options`` named after the backend, except that ``split()`` on the
+group's default backend receives a copy of the ``opts`` passed to
+``ProcessGroup.split_group`` (``pg_options`` for ``dist.split_group``), if any.
+A ``timeout`` passed to ``split_group`` or ``merge_remote_group`` overrides the
+received options' timeout.)")
           .def(
               "get_error",
               &::c10d::Backend::getError,
