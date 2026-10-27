@@ -1177,6 +1177,28 @@ class TestTransformersAccelerator(NNTestCase):
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
+    def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
+        # The fused kernel always returns a contiguous tensor, so its meta rule
+        # must not hand back the strides of a non-contiguous src: inductor asserts
+        # the fallback's runtime metadata against them.
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=4,
+            dim_feedforward=64,
+            dropout=0.0,
+            batch_first=True,
+        ).to(device).eval()
+
+        x = torch.rand(4, 64, 16, device=device).transpose(1, 2).contiguous().transpose(1, 2)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+        self.assertEqual(eager_out, compiled_out)
+
 
 
     @onlyAccelerator
@@ -3613,6 +3635,23 @@ class TestSDPAAccelerator(NNTestCase):
         finally:
             if prev_fa_library is not None:
                 torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_sm107_runtime_version(self, device):
+        unsupported = (
+            torch.cuda.get_device_capability(device) == (10, 7)
+            and torch.backends.cudnn.version() < 92500
+        )
+        query = torch.empty(2, 4, 128, 64, device=device, dtype=torch.float16)
+        key = torch.empty_like(query)
+        value = torch.empty_like(query)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+            self.assertEqual(torch.backends.cuda.can_use_cudnn_attention(params), not unsupported)
+            expected = SDPBackend.MATH if unsupported else SDPBackend.CUDNN_ATTENTION
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), expected.value)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):

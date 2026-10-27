@@ -137,6 +137,18 @@ struct sgn_functor {
   }
 };
 
+struct signbit_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, bool> operator()(
+      const T x) {
+    return ::metal::signbit(float(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, bool> operator()(const T x) {
+    return x < T(0);
+  }
+};
+
 struct sin_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -760,6 +772,13 @@ struct pow_scalar_functor {
   }
 };
 
+struct frac_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return static_cast<T>(float(x) - trunc(float(x)));
+  }
+};
+
 struct round_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -804,6 +823,10 @@ REGISTER_ROUNDING_OPS(float);
 REGISTER_ROUNDING_OPS(half);
 REGISTER_ROUNDING_OPS(bfloat);
 
+REGISTER_UNARY_OP(frac, float, float);
+REGISTER_UNARY_OP(frac, half, half);
+REGISTER_UNARY_OP(frac, bfloat, bfloat);
+
 REGISTER_UNARY_OP(sqr, char, char);
 REGISTER_UNARY_OP(sqr, uchar, uchar);
 REGISTER_UNARY_OP(sqr, short, short);
@@ -840,6 +863,15 @@ REGISTER_UNARY_OP(logical_not, float, bool);
 REGISTER_UNARY_OP(logical_not, bfloat, bool);
 REGISTER_UNARY_OP(logical_not, float2, bool);
 REGISTER_UNARY_OP(logical_not, half2, bool);
+
+// Unsigned and bool inputs never reach the stub, see signbit_out
+REGISTER_UNARY_OP(signbit, char, bool);
+REGISTER_UNARY_OP(signbit, short, bool);
+REGISTER_UNARY_OP(signbit, int, bool);
+REGISTER_UNARY_OP(signbit, long, bool);
+REGISTER_UNARY_OP(signbit, half, bool);
+REGISTER_UNARY_OP(signbit, bfloat, bool);
+REGISTER_UNARY_OP(signbit, float, bool);
 
 REGISTER_UNARY_OP(abs, int, int);
 REGISTER_UNARY_OP(abs, long, long);
