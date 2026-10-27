@@ -153,6 +153,13 @@ class OperatorBase:
                 )
             self.py_kernels[k] = fn
             self._dispatch_cache.clear()
+            if (
+                isinstance(self, OpOverload)
+                and k == DispatchKey.CompositeImplicitAutograd
+            ):
+                torch._C._fake_dispatch_register_python_cia(
+                    self._schema.name, self._schema.overload_name
+                )
             return fn
 
         return inner
@@ -578,6 +585,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def __deepcopy__(self, memo=None):
         return self
 
+    def __copy__(self):
+        return self
+
 
 def _to_flat_tuple(args, kwargs):
     return pytree.arg_tree_leaves(*args, **kwargs)
@@ -900,6 +910,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
+        return self
+
+    def __copy__(self):
         return self
 
     def __repr__(self):
@@ -1257,6 +1270,9 @@ class OpOverloadPacket(Generic[_P, _T]):
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
+        return self
+
+    def __copy__(self):
         return self
 
     def __repr__(self):
