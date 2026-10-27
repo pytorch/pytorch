@@ -5084,7 +5084,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
@@ -5110,7 +5110,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_low_level(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["qualname", "opoverload"]:
@@ -5140,7 +5140,7 @@ with warnings.catch_warnings(record=True) as w:
                     self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_list_input(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
@@ -5168,7 +5168,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
 
@@ -5191,7 +5191,7 @@ with warnings.catch_warnings(record=True) as w:
             self.assertEqual(y2.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times_different_devices(self):
         @torch.library.custom_op("mylib::my_sin", mutates_args=())
         def my_sin(x: Tensor) -> Tensor:
