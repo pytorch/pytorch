@@ -72,7 +72,7 @@
 
         {%- if K_LOOP_OVER_TILES | default(0) %}
 
-        # XPU keeps 2D block IO for A only when its K offset comes from a tile index.
+        # Intel's alignment check rejects the nested-loop IV; k_idx * BLOCK_K proves the even-element K offset needed for A's 2D block IO.
         for k_idx in tl.range(0, tl.cdiv(K, BLOCK_K)):
             rk_desc = (k_idx * BLOCK_K).to(tl.int32)
         {%- else %}

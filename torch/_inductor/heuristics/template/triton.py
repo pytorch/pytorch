@@ -29,8 +29,8 @@ from ...kernel.mm import (
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
-    xpu_persistent_mm_template,
     xpu_non_persistent_mm_template,
+    xpu_persistent_mm_template,
 )
 from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
@@ -4133,38 +4133,45 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
         keep = None
         if (
             op_name == "mm"
+            and isinstance(kernel_inputs, MMKernelInputs)
             and config.max_autotune_gemm_search_space != "EXHAUSTIVE"
             and _xpu_descriptor_row_major(kernel_inputs) is not None
         ):
             m, n, k = kernel_inputs.mnk_symbolic()
-            keep = {
-                (
-                    c.kwargs["BLOCK_M"],
-                    c.kwargs["BLOCK_N"],
-                    c.kwargs["BLOCK_K"],
-                    c.num_stages,
-                    c.num_warps,
-                )
-                for c in self.preprocess_mm_configs(
-                    m,
-                    n,
-                    k,
-                    configs=self.xpu_template_companion_configs,
-                    dtype_size=kernel_inputs.dtype().itemsize,
-                    op_name=op_name,
-                    **kwargs,
-                )
-            }
+            keep = OrderedSet(
+                [
+                    (
+                        c.kwargs["BLOCK_M"],
+                        c.kwargs["BLOCK_N"],
+                        c.kwargs["BLOCK_K"],
+                        c.num_stages,
+                        c.num_warps,
+                    )
+                    for c in self.preprocess_mm_configs(
+                        m,
+                        n,
+                        k,
+                        configs=self.xpu_template_companion_configs,
+                        dtype_size=kernel_inputs.dtype().itemsize,
+                        op_name=op_name,
+                        **kwargs,
+                    )
+                ]
+            )
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
         ):
-            if keep is None or (
-                template_kwargs["BLOCK_M"],
-                template_kwargs["BLOCK_N"],
-                template_kwargs["BLOCK_K"],
-                template_kwargs["num_stages"],
-                template_kwargs["num_warps"],
-            ) in keep:
+            if (
+                keep is None
+                or (
+                    template_kwargs["BLOCK_M"],
+                    template_kwargs["BLOCK_N"],
+                    template_kwargs["BLOCK_K"],
+                    template_kwargs["num_stages"],
+                    template_kwargs["num_warps"],
+                )
+                in keep
+            ):
                 yield template_kwargs
 
 
@@ -4187,6 +4194,17 @@ class XPUPersistentTMATemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use persistent_mm_configs
         self.mm_configs = self.persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {**template_kwargs, "K_LOOP_OVER_TILES": True}
 
 
 @register_template_heuristic(persistent_tma_mm_template.uid, "xpu", op_name="addmm")

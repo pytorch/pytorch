@@ -3025,7 +3025,8 @@ def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
     from torch.testing._internal.common_xpu import get_xpu_arch, XPUArch
     from torch.utils._triton import has_triton_stable_tma_api
 
-    if not has_triton_stable_tma_api() or get_xpu_arch() < XPUArch.Xe2:
+    arch = get_xpu_arch()
+    if not has_triton_stable_tma_api() or arch is None or arch < XPUArch.Xe2:
         return False
     return _xpu_descriptor_operands_compatible(matrices)
 
