@@ -845,12 +845,6 @@ class ProcessGroup:
     @property
     def group_desc(self) -> str: ...
 
-class _FakeProcessGroupOptions(Backend.Options):
-    fake_option: int
-    error_on_collective: bool
-    simulate_uniform_ranks: bool
-    def __init__(self) -> None: ...
-
 class FakeWork(Work):
     seq_id: int
     def __init__(self, result: list[Tensor] = ...) -> None: ...
