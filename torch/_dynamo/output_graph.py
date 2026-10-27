@@ -115,7 +115,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
+from .graph_bytecode_inputs import UserObjectRegistry
 from .graph_deduplication import apply_graph_deduplication
 from .graph_id_filter import (
     get_backend_override_for_compile_id,
@@ -176,7 +176,6 @@ from .variables.builder import (
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
-from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -481,6 +480,10 @@ class OutputGraphGuardsState:
     # without it pins the index. Deserializing has to rebuild whichever kind was
     # saved, not whichever the loading process happens to be configured for.
     compile_on_one_rank: bool = False
+    # torch.fx.traceback annotation active when the frame started tracing
+    fx_annotation: dict[str, Any] | None = None
+    # ___unnamed_scope_* key -> source of the namespace it was minted for
+    unnamed_scope_sources: dict[str, Source] = dc_field(default_factory=dict)
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -506,6 +509,8 @@ class OutputGraphGuardsState:
             functorch_layers=self.functorch_layers,
             current_device=self.current_device,
             global_state_guard=self.global_state_guard,
+            fx_annotation=self.fx_annotation,
+            unnamed_scope_sources=self.unnamed_scope_sources,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -660,6 +665,8 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.export_constraints,
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
             output_graph_guards_state.compile_on_one_rank,
+            fx_annotation=output_graph_guards_state.fx_annotation,
+            unnamed_scope_sources=output_graph_guards_state.unnamed_scope_sources,
         )
 
         self.import_sources = import_sources or {}
@@ -742,6 +749,7 @@ class OutputGraph(OutputGraphCommon):
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,
+            fx_annotation=torch.fx.traceback._get_current_annotation(),
             # initial_global_state is only None during NopTest.
             global_state_guard=torch._dynamo.convert_frame.initial_global_state
             or torch._C._dynamo.guards.GlobalStateGuard(),
@@ -855,6 +863,7 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
+        self.user_objects = UserObjectRegistry()
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
@@ -1221,6 +1230,8 @@ class OutputGraph(OutputGraphCommon):
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.FX_ANNOTATION))
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
@@ -1820,7 +1831,9 @@ class OutputGraph(OutputGraphCommon):
         return wrap_name(name)
 
     def handle_aliases_for_stolen_lists(
-        self, tx: "InstructionTranslatorBase"
+        self,
+        tx: "InstructionTranslatorBase",
+        stack_values: list[VariableTracker],
     ) -> tuple[list[Instruction], dict[Source, Source]]:
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
         maybe_gm = self.local_scope.get("self")
@@ -1831,20 +1844,21 @@ class OutputGraph(OutputGraphCommon):
         alias_insts = []
         needs_alias: dict[str, list[VariableTracker]] = {}
 
-        queue = [
-            *tx.stack,
-            *tx.symbolic_locals.values(),
-            *self.side_effects.store_attr_mutations.keys(),
+        # Match codegen_suffix's reconstruction roots, including inlined frames.
+        reconstruct_values: list[Any] = [
+            stack_values,
+            self.side_effects._get_modified_vars(),
+            self.side_effects.save_for_backward,
+            self.side_effects.tensor_hooks,
+            self.backward_state,
+            tx.debug_locals,
         ]
+        cur_tx = tx
+        while cur_tx.parent is not None:
+            reconstruct_values.append(cur_tx.post_prune_cell_and_freevars)
+            cur_tx = cur_tx.parent
 
-        while queue:
-            x = queue.pop()
-            if isinstance(x, BaseListVariable):
-                if not isinstance(x.items, list):
-                    raise AssertionError(f"x.items must be a list, got {type(x.items)}")
-                queue += x.items
-                continue
-
+        def visit(x: VariableTracker) -> None:
             if not (
                 (
                     x not in self.side_effects.store_attr_mutations
@@ -1854,12 +1868,14 @@ class OutputGraph(OutputGraphCommon):
                 and isinstance(x.source.base, LocalSource)
                 and x.source.base.local_name in stolen_list_names
             ):
-                continue
+                return
 
             stolen_name = x.source.base.local_name
             if stolen_name not in needs_alias:
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
+
+        VariableTracker.visit(visit, reconstruct_values, side_effects=self.side_effects)
 
         # pyrefly: ignore [implicit-any]
         visited = {}
@@ -2137,8 +2153,9 @@ class OutputGraph(OutputGraphCommon):
             raise AssertionError("export does not support pregraph_bytecode")
         self.add_output_instructions(self.pregraph_bytecode)
 
+        stack_values_flat = [val for vals in all_stack_values for val in vals]
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(
-            self.root_tx
+            tx, stack_values_flat
         )
         self.add_output_instructions(alias_insts)
 
@@ -2205,7 +2222,6 @@ class OutputGraph(OutputGraphCommon):
         # NOTE: cells will be loaded into continuation functions directly by symbolic_convert
 
         # this determines the order that values are codegen'd to the stack
-        stack_values_flat = [val for vals in all_stack_values for val in vals]
         stored_graph_output_var = False
         graph_output_var = None
 
@@ -2963,6 +2979,8 @@ class OutputGraph(OutputGraphCommon):
             if next(gm.parameters(), None) is not None:
                 # If dynamo produces a graph with parameters, skip package stuff
                 # Bypass output graph
+                if self.package is not None:
+                    self.package.note_compute()
                 self.bypass_package(
                     "Graph contains named parameters due to static addresses.",
                     gm=gm.print_readable(
@@ -3182,7 +3200,7 @@ class OutputGraph(OutputGraphCommon):
                 raise AssertionError("root_tx must not be None")
             cg = PyCodegen(self.root_tx)
 
-            if has_user_objects():
+            if self.user_objects.needs_pre_graph_store():
                 # NB: This is where we store possible user objects before running the graph
                 # index_to_user_object_weakref is the function used in the graph to translate
                 # the dynamo-generated index into the actual object passed to the compiled function.
@@ -3196,7 +3214,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
                 tmp_vars = []
-                for constructor in index_to_bytecode_constructor:
+                for constructor in self.user_objects.bytecode_constructors:
                     constructor(cg)
                     var_name = (
                         self.new_var()
@@ -3208,7 +3226,7 @@ class OutputGraph(OutputGraphCommon):
                 for var_name in tmp_vars:
                     cg.append_output(cg.create_load(var_name))
 
-                cg.call_function(len(index_to_bytecode_constructor), False)
+                cg.call_function(len(tmp_vars), False)
                 cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):
@@ -3808,6 +3826,37 @@ err_epilogue = (
 )
 
 
+def resolve_op_overload(
+    output_graph: OutputGraph,
+    target: torch._ops.OpOverloadPacket,
+    args: Any,
+    kwargs: Any,
+) -> torch._ops.OpOverload:
+    overloads = tuple(target.overloads())
+    if len(overloads) == 1:
+        return getattr(target, overloads[0])
+
+    args, kwargs = torch.fx.node.map_aggregate(
+        (args, kwargs),
+        lambda arg: arg.node if isinstance(arg, torch.fx.Proxy) else arg,
+    )
+    args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
+        output_graph.current_tx, (args, kwargs), False
+    )
+    try:
+        overload = torch._C._jit_resolve_packet(
+            target._qualified_op_name, *args, **kwargs
+        )
+    except RuntimeError as e:
+        unimplemented(
+            gb_type="Error when attempting to resolve op packet",
+            context="",
+            explanation=str(e),
+            hints=[],
+        )
+    return getattr(target, overload)
+
+
 def check_pt2_compliant_op(
     output_graph: OutputGraph, kind: str, target: Any, args: Any, kwargs: Any
 ) -> None:
@@ -3841,10 +3890,8 @@ def check_pt2_compliant_op(
 
     if isinstance(target, torch._ops.OpOverloadPacket):
         overloads = tuple(target.overloads())
-        # Optimization: Overload resolution is expensive.
-        # If there's only one overload, we know what it will resolve to.
+        op = resolve_op_overload(output_graph, target, args, kwargs)
         if len(overloads) == 1:
-            op = getattr(target, overloads[0])
             if torch.Tag.pt2_compliant_tag in op.tags:
                 encountered_compliant_op(op)
                 return
@@ -3856,29 +3903,13 @@ def check_pt2_compliant_op(
             )
             return
 
-        args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
-            output_graph.current_tx, (args, kwargs), False
-        )
-        try:
-            overload = torch._C._jit_resolve_packet(
-                target._qualified_op_name, *args, **kwargs
-            )
-        except RuntimeError as e:
-            unimplemented(
-                gb_type="Error when attempting to resolve op packet",
-                context="",
-                explanation=str(e),
-                hints=[],
-            )
-
-        op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
         else:
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                f"which resolves to the overload ({overload}) that is "
+                f"which resolves to the overload ({op._overloadname}) that is "
                 f"not PT2 compliant.",
             )
 
