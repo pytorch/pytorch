@@ -1296,16 +1296,15 @@ def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]
             )
 
 
-@contextlib.contextmanager
-def _revert_trace_patches(patcher: _Patcher) -> Iterator[None]:
-    """Revert ``patcher``'s patches and those of the traces its trace runs inside,
-    innermost first: a nested trace patches over the enclosing trace's patches."""
-    with contextlib.ExitStack() as stack:
-        current: _Patcher | None = patcher
-        while current is not None:
-            stack.enter_context(_maybe_revert_all_patches(current))
-            current = current.enclosing
-        yield
+def _trace_patchers(patcher: _Patcher) -> list[_Patcher]:
+    """``patcher`` and the patchers of the traces its trace runs inside, innermost
+    first: a nested trace patches over the enclosing trace's patches."""
+    patchers = []
+    current: _Patcher | None = patcher
+    while current is not None:
+        patchers.append(current)
+        current = current.enclosing
+    return patchers
 
 
 def _patch_wrapped_functions(patcher: _Patcher) -> None:
@@ -1344,7 +1343,7 @@ def _no_torch_function_modes() -> Iterator[None]:
 
 
 def _resolve_lazy_imports(
-    patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
+    patcher: _Patcher, frame_dict: dict[str, Any], names: tuple[str, ...] | None = None
 ) -> None:
     """Resolve the unresolved lazy imports among ``names`` (default: all) of
     ``frame_dict`` with the patches of ``patcher`` and of any trace its trace runs
@@ -1364,27 +1363,38 @@ def _resolve_lazy_imports(
     is_lazy_import = getattr(importlib, "is_lazy_import", None)
     if is_lazy_import is None:
         return
-    lazy_names = [
-        name
-        for name in (frame_dict if names is None else names)
-        if name in frame_dict and is_lazy_import(frame_dict, name)
-    ]
+
+    def unresolved(is_lazy: Callable[[dict[str, Any], str], bool]) -> list[str]:
+        candidates = list(frame_dict) if names is None else names
+        return [
+            name
+            for name in candidates
+            if name in frame_dict and is_lazy(frame_dict, name)
+        ]
+
+    lazy_names = unresolved(is_lazy_import)
     if lazy_names:
         from torch.utils._python_dispatch import _disable_current_modes
 
         registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
-        with (
-            _revert_trace_patches(patcher),
-            _is_fx_tracing_context(False),
-            _disable_current_modes(),
-            _no_torch_function_modes(),
-        ):
-            for name in lazy_names:
-                _ = frame_dict[name]
-        # A module body it ran can register torch.fx.wrap targets this trace has not
-        # patched yet; patching is idempotent for the rest.
+        with contextlib.ExitStack() as stack:
+            for trace_patcher in _trace_patchers(patcher):
+                stack.enter_context(_maybe_revert_all_patches(trace_patcher))
+            stack.enter_context(_is_fx_tracing_context(False))
+            stack.enter_context(_disable_current_modes())
+            stack.enter_context(_no_torch_function_modes())
+            # A module body can add lazy entries to the scope, e.g. a submodule
+            # import to its package's globals; each resolves only once.
+            while lazy_names:
+                for name in lazy_names:
+                    _ = frame_dict[name]
+                lazy_names = unresolved(is_lazy_import)
+        # A module body it ran can register torch.fx.wrap targets the traces have
+        # not patched yet; patching is idempotent for the rest. Outermost first, so
+        # an inner trace leaves the name to the patch that outlives it.
         if (len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)) != registered:
-            _patch_wrapped_functions(patcher)
+            for trace_patcher in reversed(_trace_patchers(patcher)):
+                _patch_wrapped_functions(trace_patcher)
 
 
 def _autowrap_check(
