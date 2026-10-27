@@ -731,12 +731,12 @@ _MAIN_MODULES = ("__main__", "__mp_main__")
 
 
 def registering_module(frame: Any) -> str | None:
-    """The module whose import runs a registration made from ``frame``, ``"torch"``
-    for one torch makes on first use, or None when that is not known.
+    """The module whose import runs a registration made from ``frame``, or None
+    when no import does.
 
     Past the registration APIs' functions, a registration made from a module's
-    top-level code belongs to that module. One made inside a torch function is
-    torch's own, run on first use whatever is being imported at the time. One made
+    top-level code belongs to that module. One made inside a torch function has
+    none: torch runs it on first use, whatever is being imported at the time. One made
     inside any other function belongs to the nearest module-level frame on the
     stack, so a helper or a factory a module runs at import counts for that module.
     The main module (``__main__``, or ``__mp_main__`` in a multiprocessing worker)
@@ -762,7 +762,7 @@ def registering_module(frame: Any) -> str | None:
     if frame.f_code.co_name != "<module>" and _in_package(
         frame.f_globals.get("__name__"), ("torch",)
     ):
-        return "torch"
+        return None
     while frame is not None and frame.f_code.co_name != "<module>":
         frame = frame.f_back
     module = frame.f_globals.get("__name__") if frame is not None else None

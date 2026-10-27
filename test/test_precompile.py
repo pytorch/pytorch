@@ -9564,7 +9564,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 self._modules_of_graph_calling(torch.ops.quantized.add.default), {}
             )
 
-    def test_an_op_torch_registers_on_first_use_needs_no_module(self):
+    def test_an_op_torch_registers_on_first_use_is_reported_not_imported(self):
         from torch._precompile import _custom_op_modules
 
         op_name = f"{self._namespace('lazy')}::f"
@@ -9585,10 +9585,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         self._import_module_from_source(
             f"import {torch_module.__name__} as lazy\n\nlazy.first_use_too()\n"
         )
-        with self.assertNoLogs("torch._precompile", level="WARNING"):
+        # No import brings such an op back, and the importer is not blamed.
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
             self.assertEqual(
                 _custom_op_modules({(op_name, ""), (f"{op_name}_too", "")}), {}
             )
+        self.assertIn(op_name, "\n".join(logs.output))
+        self.assertIn(f"{op_name}_too", "\n".join(logs.output))
 
     def test_a_registered_op_needs_the_overload_the_graph_calls(self):
         from torch._precompile_driver import _custom_op_registered

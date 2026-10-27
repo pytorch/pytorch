@@ -2087,15 +2087,14 @@ def _importable(name: str | None) -> str | None:
     return None
 
 
-# torch registers the op itself; the same value the op registry records for a
-# registration made inside one of torch's functions.
-_TORCH_BUILTIN = "torch"
+# An op torch's own C++ registers, which every process has.
+_TORCH_BUILTIN = "torch builtin"
 
 
 def _custom_op_module(op_name: str, overload: str) -> str | None:
     """The importable module that registers ``op_name``, ``_TORCH_BUILTIN`` for an
-    op torch registers itself (in its C++, or inside one of its functions), or None
-    when neither is known.
+    op torch's own C++ registers, or None when neither is known (an op torch
+    registers on first use among them: no import brings it back).
 
     ``torch.library.Library.define`` (which ``torch.library.custom_op`` and the other
     Python registration APIs call) records the module whose import ran it, when that
@@ -2111,8 +2110,6 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
         pystub[0] if pystub is not None else None,
         singleton.registering_module(f"{op_name}.{overload}" if overload else op_name),
     ):
-        if recorded == _TORCH_BUILTIN:
-            return _TORCH_BUILTIN
         module = _importable(recorded)
         if module is not None:
             return module
@@ -2150,9 +2147,9 @@ def _custom_op_modules(
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
             "importable module is known to register (a registration run from "
-            "__main__ or from a module missing from sys.modules, or a C++ op "
-            "without set_python_module); the artifact serves only where something "
-            "else registers them first",
+            "__main__, from a module missing from sys.modules or by torch on first "
+            "use, or a C++ op without set_python_module); the artifact serves only "
+            "where something else registers them first",
             ", ".join(sorted(unrecorded)),
         )
     return {module: tuple(sorted(ops)) for module, ops in sorted(modules.items())}
@@ -2235,8 +2232,6 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
-    if compiled._gm is None:
-        raise PrecompileError("internal: graph missing before _compile()")
     _write_custom_op_imports(
         buf,
         _custom_op_modules(
