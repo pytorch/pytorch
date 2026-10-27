@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import operator
+import re
 import unittest
 from unittest.mock import patch
 
@@ -248,6 +249,14 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
 
+    @staticmethod
+    def _normalize_torch_function_mode_guard_reason(reason, mode_type=None):
+        reason = re.sub(r"^\d+/\d+:", "<compile_id>:", reason)
+        reason = re.sub(r"output_graph\.py:\d+", "output_graph.py:<line>", reason)
+        if mode_type is not None:
+            reason = reason.replace(f"{mode_type.__module__}.", "<module>.")
+        return reason
+
     def test_torch_function_mode_guard_recompile_hint(self):
         class ModeA(BaseTorchFunctionMode):
             pass
@@ -268,16 +277,90 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         compiled(x)
         with ModeA():
             compiled(x)
-        self.assertIn("expects no active TorchFunctionMode", "\n".join(failures))
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0]),
+            """<compile_id>: ___check_torch_function_mode_stack()                          # _dynamo/output_graph.py:<line> in init_ambient_guards (HINT: This compiled version expects no active TorchFunctionMode; TorchFunctionMode can change PyTorch operations, so the number, class identity, and order of modes must match. Redefining a mode class creates a different class even with the same name; reuse the original mode classes in the same order.)""",
+        )
 
         failures.clear()
+
+        def g(x):
+            return x + 2
+
+        compiled_with_mode = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(g)
         with ModeA():
-            compiled(x)
+            compiled_with_mode(x)
         self.assertEqual(failures, [])
         with ModeB():
+            compiled_with_mode(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0], ModeA),
+            """<compile_id>: ___check_torch_function_mode_stack()                          # _dynamo/output_graph.py:<line> in init_ambient_guards (HINT: This compiled version expects TorchFunctionMode classes ['<module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint.<locals>.ModeA'] in this order; TorchFunctionMode can change PyTorch operations, so the number, class identity, and order of modes must match. Redefining a mode class creates a different class even with the same name; reuse the original mode classes in the same order.)""",
+        )
+
+    def test_torch_function_mode_guard_recompile_hint_order(self):
+        class ModeA(BaseTorchFunctionMode):
+            pass
+
+        class ModeB(BaseTorchFunctionMode):
+            pass
+
+        failures = []
+        x = torch.ones(2)
+
+        def f(x):
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(f)
+        with ModeA(), ModeB():
             compiled(x)
-        self.assertIn("TorchFunctionMode classes", "\n".join(failures))
-        self.assertIn("ModeA", "\n".join(failures))
+        with ModeB(), ModeA():
+            compiled(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0], ModeA),
+            """<compile_id>: ___check_torch_function_mode_stack()                          # _dynamo/output_graph.py:<line> in init_ambient_guards (HINT: This compiled version expects TorchFunctionMode classes ['<module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_order.<locals>.ModeA', '<module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_order.<locals>.ModeB'] in this order; TorchFunctionMode can change PyTorch operations, so the number, class identity, and order of modes must match. Redefining a mode class creates a different class even with the same name; reuse the original mode classes in the same order.)""",
+        )
+
+    def test_torch_function_mode_guard_recompile_hint_identity(self):
+        def make_mode_class():
+            class Mode(BaseTorchFunctionMode):
+                pass
+
+            return Mode
+
+        first_mode = make_mode_class()
+        second_mode = make_mode_class()
+        self.assertIsNot(first_mode, second_mode)
+        self.assertEqual(first_mode.__qualname__, second_mode.__qualname__)
+
+        failures = []
+        x = torch.ones(2)
+
+        def f(x):
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(f)
+        with first_mode():
+            compiled(x)
+        with second_mode():
+            compiled(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0], first_mode),
+            """<compile_id>: ___check_torch_function_mode_stack()                          # _dynamo/output_graph.py:<line> in init_ambient_guards (HINT: This compiled version expects TorchFunctionMode classes ['<module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_identity.<locals>.make_mode_class.<locals>.Mode'] in this order; TorchFunctionMode can change PyTorch operations, so the number, class identity, and order of modes must match. Redefining a mode class creates a different class even with the same name; reuse the original mode classes in the same order.)""",
+        )
 
     def test_torch_function_mode_preserves_cuda_rng_state(self):
         class ConstantReturnMode(TorchFunctionMode):

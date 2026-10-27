@@ -3816,17 +3816,20 @@ class GuardBuilder(GuardBuilderBase):
         modes = self.check_fn_manager.torch_function_mode_stack
         if modes is None:
             raise AssertionError("torch_function_mode_stack must not be None")
-        mode_names = [type(mode).__qualname__ for mode in modes]
+        mode_names = [
+            f"{type(mode).__module__}.{type(mode).__qualname__}" for mode in modes
+        ]
         expected = (
             f"TorchFunctionMode classes {mode_names!r} in this order"
             if mode_names
             else "no active TorchFunctionMode"
         )
         reason = (
-            f"This compiled version expects {expected}; the current modes differ "
-            "in number, class, or order. TorchFunctionMode can override PyTorch "
-            "operations. Use the same mode classes in the same order to satisfy "
-            "this guard."
+            f"This compiled version expects {expected}; TorchFunctionMode can "
+            "change PyTorch operations, so the number, class identity, and order "
+            "of modes must match. Redefining a mode class creates a different "
+            "class even with the same name; reuse the original mode classes "
+            "in the same order."
         )
         self.check_fn_manager.torch_function_mode_stack_check_fn = (
             make_torch_function_mode_stack_guard(modes)
