@@ -214,10 +214,13 @@ class FunctionSpec:
         self.defaults = defaults
         self.kwdefaults = kwdefaults
 
-        # Map positional-default names → their index in self.defaults
-        self.pos_default_map = dict(
-            zip(self.all_pos_names[-len(self.defaults) :], range(len(self.defaults)))
-        )
+        # Map positional-default names to their index in self.defaults. As in
+        # CPython, parameter i takes defaults[i - first]; leading extra defaults
+        # (more defaults than parameters) are never used.
+        first = len(self.all_pos_names) - len(self.defaults)
+        self.pos_default_map = {
+            name: i - first for i, name in enumerate(self.all_pos_names) if i >= first
+        }
 
 
 def _get_spec(func: FunctionType) -> FunctionSpec:
@@ -495,8 +498,7 @@ class BaseUserFunctionVariable(VariableTracker):
                 entry = self.lookup_tp_getset_member(args[0].as_python_constant())
                 if entry is not None:
                     out = entry.setter(self, tx, value)
-                    if out is not None:
-                        return out
+                    return out if out is not None else ConstantVariable.create(None)
             dict_method = "__setitem__" if value is not None else "__delitem__"
             return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
@@ -838,8 +840,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def _set_type_params(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
     ) -> "VariableTracker":
-        if value is not None and not issubclass(maybe_get_python_type(value), tuple):
-            raise_type_error(tx, "__type_params__ must be set to a tuple object")
+        # func_set_type_params: del (NULL) is rejected too.
+        if value is None or not issubclass(maybe_get_python_type(value), tuple):
+            raise_type_error(tx, "__type_params__ must be set to a tuple")
         store_attr_mutation(tx, self, "__type_params__", value)
         return ConstantVariable.create(None)
 
@@ -875,11 +878,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     tp_members = {
         "__doc__": Member(
-            getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
+            getset_load_or_build(lambda vt: vt.fn.__doc__, "__doc__"),
             getset_set("__doc__"),
         ),
         "__module__": Member(
-            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
+            getset_load_or_build(lambda vt: vt.fn.__module__, "__module__"),
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
@@ -888,11 +891,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     tp_getset = {
         "__get__": GetSet(_get_dunder_get, readonly_setter),
         "__name__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
+            getset_load_or_build(lambda vt: vt.fn.__name__, "__name__"),
             _set_name,
         ),
         "__qualname__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
+            getset_load_or_build(lambda vt: vt.fn.__qualname__, "__qualname__"),
             _set_qualname,
         ),
         "__code__": GetSet(
@@ -2098,37 +2101,41 @@ class UserMethodVariable(BaseUserFunctionVariable):
         # method has tp_descr_get (3.10 and 3.13+); see tp_getset below.
         return self
 
-    # __self__ / __func__ are read-only members on method objects.
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # method_getattro: a name defined on the method type resolves there;
+        # anything else (__name__, __defaults__, __dict__, ...) is read off
+        # __func__.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c
+        from .object_protocol import generic_getattr
+
+        if any(name in t.__dict__ for t in types.MethodType.__mro__):
+            return super().tp_getattro_impl(tx, name)
+        return generic_getattr(tx, self.im_func, name)
+
+    def _get_doc(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        # method_get_doc returns __func__.__doc__.
+        return generic_getattr(tx, self.im_func, "__doc__")
+
+    def _set_doc(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> Never:
+        # A getset with a NULL setter (getset_set).
+        msg = "attribute '__doc__' of 'method' objects is not writable"
+        raise_attribute_error(tx, msg)
+
+    # The members and getsets of the method type itself.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
         "__self__": Member(lambda s, _: s.im_self, readonly_setter),
         "__func__": Member(lambda s, _: s.im_func, readonly_setter),
-        "__module__": Member(
-            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
-            getset_set("__module__"),
-        ),
     }
 
-    # method_getattro forwards everything else to __func__; these accessors
-    # already do that through the get_code()/get_globals() delegation above.
     tp_getset = {
-        "__doc__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
-            readonly_setter,
-        ),
-        "__name__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
-            _set_name,
-        ),
-        "__qualname__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
-            _set_qualname,
-        ),
-        "__code__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
-            unmodeled_setter,
-        ),
-        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
+        "__doc__": GetSet(_get_doc, _set_doc),
     }
 
     if "__get__" not in types.MethodType.__dict__:
@@ -2311,6 +2318,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             and not issubclass(maybe_get_python_type(value), tuple)
         ):
             raise_type_error(tx, "__defaults__ must be set to a tuple object")
+        # None and del both clear the slot; keep the field None, not a None VT.
+        if value is not None and value.is_constant_match(None):
+            value = None
         self.defaults = value
         return ConstantVariable.create(None)
 
@@ -2324,6 +2334,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             and not issubclass(maybe_get_python_type(value), dict)
         ):
             raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
+        # None and del both clear the slot; keep the field None, not a None VT.
+        if value is not None and value.is_constant_match(None):
+            value = None
         self.kwdefaults = value
         return ConstantVariable.create(None)
 
@@ -2402,8 +2415,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(maybe_get_python_type(value), tuple):
-            raise_type_error(tx, "__type_params__ must be set to a tuple object")
+        # func_set_type_params: del (NULL) is rejected too.
+        if value is None or not issubclass(maybe_get_python_type(value), tuple):
+            raise_type_error(tx, "__type_params__ must be set to a tuple")
         store_attr_mutation(tx, self, "__type_params__", value)
 
     def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -2658,11 +2672,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwargs: dict[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
         code = self.get_code()
+        defaults = tuple(self.defaults.items) if self.defaults else ()  # type: ignore[attr-defined]
+        # inspect.signature mis-binds more defaults than parameters; CPython
+        # only uses the last co_argcount of them.
+        defaults = defaults[max(0, len(defaults) - code.co_argcount) :]
         func = types.FunctionType(
             code,
             self.f_globals,
             self.fn_name.as_python_constant(),
-            tuple(self.defaults.items) if self.defaults else None,  # type: ignore[attr-defined]
+            defaults or None,
             tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
@@ -3054,13 +3072,16 @@ class SkipFunctionVariable(VariableTracker):
             )
         else:
             if config.dont_skip_tracing:
-                from .builder import SourcelessBuilder
+                from .. import trace_rules
 
-                # re-build the function, attempting to not skip
-                rebuilt_fn = SourcelessBuilder.create(tx, self.value)
+                # Re-run the trace rules under the patched config. Not
+                # SourcelessBuilder.create: it would return the VT side effects
+                # already track for this function, i.e. this skipped VT.
+                rule = trace_rules.lookup(self.value)
                 # if we still get SkipFunctionVariable, then we *really* should skip this function
-                if not isinstance(rebuilt_fn, SkipFunctionVariable):
-                    return rebuilt_fn.call_function(tx, args, kwargs)
+                if rule is not None and not issubclass(rule, SkipFunctionVariable):
+                    # pyrefly: ignore[bad-argument-count]
+                    return rule(self.value).call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             module_or = getattr(self.value, "__module__", None)
             module_name = "<unknown module>" if module_or is None else str(module_or)
@@ -3193,9 +3214,11 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     attribute. For example, torch.jit.script/trace have the original function at
     their _torchdynamo_inline attribute. Similarly, functions with
     __script_if_tracing_wrapper have the original attr at "__original_fn".
-    """
 
-    _cpython_type = types.FunctionType
+    The VT stands for the wrapper, not the inline target: attributes resolve
+    through the wrapper's real type and instance __dict__, as in CPython.
+    get_function()/get_code() return the inline target, for Dynamo's own use.
+    """
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -3203,10 +3226,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         self.attr_to_trace = attr_to_trace
 
     def python_type(self) -> type:
-        return types.FunctionType
-
-    def get_module(self) -> str:
-        return self.wrapper_obj.__module__
+        return type(self.wrapper_obj)
 
     def get_name(self) -> str:
         return self.wrapper_obj.__name__
@@ -3220,34 +3240,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_code(self) -> types.CodeType:
         return self.get_function().__code__
 
-    # The wrapper is not a function object, so these must not fall through to
-    # the function getsets the MRO walk would find (python_type() reports
-    # FunctionType). They read the wrapper via the get_* accessors above; the
-    # function-only slots (__defaults__ et al.) are deliberately absent.
-    tp_members = {
-        "__doc__": Member(
-            getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
-            getset_set("__doc__"),
-        ),
-        "__module__": Member(
-            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
-            getset_set("__module__"),
-        ),
-    }
-
     tp_getset = {
-        "__name__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
-            _set_name,
-        ),
-        "__qualname__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
-            _set_qualname,
-        ),
-        "__code__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
-            unmodeled_setter,
-        ),
         "__dict__": GetSet(
             lambda s, tx: s.get_dict_vt(tx),
             unmodeled_setter,
@@ -3265,6 +3258,14 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self):
         return getattr(self.wrapper_obj, self.attr_to_trace)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
+        return VariableTracker.build(tx, hasattr(self.wrapper_obj, name))
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3372,6 +3373,30 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         return self.wrapper_obj
 
 
+class FunctionWrapperVariable(WrapperUserFunctionVariable):
+    """A wrapper that is itself a function (torch.compile, script_if_tracing)."""
+
+    _cpython_type = types.FunctionType
+
+    tp_getset = {
+        "__name__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
+            _set_qualname,
+        ),
+    }
+
+
+class LruCacheWrapperVariable(WrapperUserFunctionVariable):
+    """functools.lru_cache wrapper: update_wrapper copies the function attrs
+    into its instance __dict__, and its type defines no other slot."""
+
+    _cpython_type = functools._lru_cache_wrapper
+
+
 class WrapperUserMethodVariable(BaseUserFunctionVariable):
     """
     Similar to WrapperUserFunctionVariable, but for methods. Sibling class
@@ -3397,9 +3422,6 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
 
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
-
-    def get_module(self) -> str:
-        return self.fn.get_module()
 
     def get_name(self) -> str:
         return self.fn.get_name()
