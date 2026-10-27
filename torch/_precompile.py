@@ -431,12 +431,11 @@ class DynamoTracer:
     kernel that cannot be frozen. With ``require_tuned_backward=False`` it is
     frozen with its first config that autotuning would not skip for spilling
     registers (the first, if all spill), tuning off, and reported with a warning
-    and a
-    ``precompile_triton_untuned_kernels`` artifact. Every serving process then
-    runs it with that config, without ``no_compilation()`` too, which can cost
-    performance. The opt-in still refuses such a kernel if its source also
-    serves a forward, if none of its instances has a launcher with a static
-    compile result to freeze, or if its cubin cannot be carried. The same holds,
+    and a ``precompile_triton_untuned_kernels`` artifact. Every serving process
+    then runs it with that config, without ``no_compilation()`` too, which can cost
+    performance. The opt-in still refuses such a kernel if its source also serves
+    a forward, if none of its instances has a launcher with a static compile
+    result to freeze, or if its cubin cannot be carried. The same holds,
     whether or not a call ran it, for a backward kernel loaded from an artifact
     frozen untuned earlier in this process: it stays untuned here, so the default
     refuses it (capture in a fresh process, or without loading that artifact) and
