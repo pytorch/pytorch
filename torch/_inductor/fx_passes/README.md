@@ -4,7 +4,7 @@ These are the invariants and idioms that Inductor (GPU) post-grad FX passes may 
 ## Fake Tensor metadata on node
 Each FX node has metadata on it, and in particular, stores a faketensor representing the metadata of that node `node.meta['val']`. This FakeTensor records the node's shape, stride, and storage (which determines aliasing). However, various passes may change the faketensor values, and so consistency must be maintained.
 
-Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning.
+Passes may assume that FakeTensor metadata is consistent when they begin. If a rewrite makes downstream metadata stale, the pass must update the affected metadata itself or use `FakeTensorUpdater` from `torch._inductor.fx_utils`. Create `FakeTensorUpdater(gm)` before rewriting the graph, then call its `incremental_update()` method afterwards, before returning. The updater detects changes relative to its snapshot at construction; creating it after the rewrite will not detect those changes. The outermost graph's input/output semantics must remain unchanged after the updater is created.
 
 ## Operator arguments
 Passes cannot assume that an operator's arguments have been normalized into `Node.args`, because manually constructed nodes may place schema arguments in `Node.kwargs`. When inspecting a known operator, use `get_arg_value(node, index, kwarg_name)` to handle either representation:
@@ -74,7 +74,7 @@ def f(x: Tensor):
 ```
 cannot be turned into a no-op, as this would change the semantics of the compiled graph.
 
-- Saved activations that appear as inputs to backward graphs are internal compiler values and are not subject to these boundary aliasing constraints.
+- Saved activations that appear as inputs to backward graphs are internal compiler values, but rewrites must preserve the values saved for backward, including across input mutations performed by the graph or runtime epilogue. A clone that saves an input's value before mutation must not be replaced with an alias that exposes the mutated value to backward.
 
 ## Alias analysis
 To determine whether two tensors alias (e.g. whether `c = op1(a)` aliases `a`),
@@ -103,7 +103,7 @@ The following invariants apply to intermediate tensors:
 
 These invariants do not apply to user-visible graph inputs and outputs, whose externally visible metadata must be preserved.
 
-Saved activations are internal compiler values that appear as inputs to backward graphs, so they follow the intermediate-tensor rules instead.
+Saved activations are internal compiler values that appear as inputs to backward graphs, so they follow the intermediate-tensor layout rules. Layout changes must still preserve the values saved for backward, including across input mutations, as described in [Altering Aliasing](#altering-aliasing).
 
 ## Topological order of nodes
 FX passes must NOT assume that the current graph-list order is topological. Earlier passes may leave dependencies out of list order, and passes are not generally required to restore topological order after each rewrite.
