@@ -65,6 +65,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    check_aot_cudagraphs,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
@@ -1865,6 +1866,8 @@ class _InProcessFxCompile(FxCompile):
                                 output_strides.append(None)
 
                     _check_triton_bf16_support(graph)
+                    if graph.aot_mode and config.aot_inductor.cudagraphs:
+                        check_aot_cudagraphs(graph)
 
                     # TODO: The switching between AOT mode and not here is a bit
                     # messy, but it's localized to the block of code below so I'm
