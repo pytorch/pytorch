@@ -10,7 +10,9 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/env.h>
 
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -34,19 +36,30 @@ class IgnoreWarnings : public c10::WarningHandler {
   void process(const c10::Warning& /*warning*/) override {}
 };
 
+bool strict_cuda_graph_env() {
+  auto value = c10::utils::get_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH");
+  return value.has_value() && value->c_str()[0] != '0';
+}
+
 // Ends a capture whose graph won't be used. The stream stops capturing and the
 // allocator stops routing to the pool even when the capture was invalidated,
-// so errors are ignored, as is the warning about an empty graph.
-void discard_capture(CUDAGraphState& state) noexcept {
+// so errors are ignored, as is the warning about an empty graph, unless
+// AOTI_RUNTIME_STRICT_CUDA_GRAPH is set.
+void discard_capture(CUDAGraphState& state) {
   auto stream = std::exchange(state.capture_stream, std::nullopt);
   if (!stream.has_value()) {
+    return;
+  }
+  at::cuda::CUDAStreamGuard stream_guard(*stream);
+  if (strict_cuda_graph_env()) {
+    state.graph.capture_end_pre();
     return;
   }
   IgnoreWarnings ignore_warnings;
   c10::WarningUtils::WarningHandlerGuard warning_guard(&ignore_warnings);
   try {
-    at::cuda::CUDAStreamGuard stream_guard(*stream);
     state.graph.capture_end_pre();
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
   }
 }
@@ -182,11 +195,11 @@ AOTITorchError aoti_torch_create_cuda_graph(CUDAGraphHandle* ret_graph) {
 
 AOTITorchError aoti_torch_delete_cuda_graph(CUDAGraphHandle graph) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* state = reinterpret_cast<CUDAGraphState*>(graph);
+    std::unique_ptr<CUDAGraphState> state(
+        reinterpret_cast<CUDAGraphState*>(graph));
     if (state != nullptr) {
       discard_capture(*state);
     }
-    delete state;
   });
 }
 
