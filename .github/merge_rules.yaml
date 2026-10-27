@@ -196,8 +196,7 @@
 
 - name: MPS
   patterns:
-  - test/test_mps.py
-  - test/inductor/test_mps_basic.py
+  - test/**
   - torch/testing/_internal/common_mps.py
   - torch/testing/_internal/common_methods_invocations.py
   - torch/testing/_internal/opinfo/**
@@ -484,7 +483,6 @@
   patterns:
   - test/cpp/profiler/**
   - test/profiler/**
-  - third_party/kineto
   - torch/_C/_profiler.pyi
   - torch/autograd/profiler*
   - torch/csrc/autograd/profiler*
@@ -606,6 +604,17 @@
   - pull
   - inductor
 
+- name: c10 utilities
+  patterns:
+  - c10/util/**
+  - c10/test/util/**
+  approved_by:
+  - r-barnes
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
@@ -667,6 +676,7 @@
   - sanrise
   - scotts
   - sevenEng
+  - shawnxu26
   - SherlockNoMad
   - slayton58
   - soulitzer

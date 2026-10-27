@@ -48,6 +48,8 @@ if TYPE_CHECKING:
     # An installed artifact carries the pickled Dynamo package and its backend
     # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
     _PACKAGE: str = ""
+    # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
+    _ALLOW_SERVE_TIME_COMPILES: bool = False
     BACKEND: str = ""
     FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
@@ -419,7 +421,9 @@ def _build_multigraph_forward():
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
     calls it captured, and anything else is a coverage gap the caller has to
-    hear about.
+    hear about. The exception is a frame Dynamo gave up on during the capture
+    (eager_fallback): the capture ran its other calls eagerly, so a miss of it
+    runs eagerly here too, with a warning once per frame.
     """
     import base64
     import hashlib
@@ -466,6 +470,8 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
+    # After the version checks: a torch without it fails them cleanly first.
+    from torch._dynamo.eval_frame import _warn_eager_fallback_miss
 
     def _import(module_name):
         if module_name == "__main__":
@@ -588,6 +594,8 @@ def _build_multigraph_forward():
         # from f_locals and every guard on it misses.
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
+        # Dynamo gave up on the frame during capture: a miss runs eagerly.
+        eager_fallback = frame["eager_fallback"]
 
         def _function(code, closure):
             f = types.FunctionType(code, scope, target.co_name, defaults, closure)
@@ -647,6 +655,9 @@ def _build_multigraph_forward():
                 for manager, variant in bound:
                     if manager.check(f_locals):
                         return variant(*args, **kwargs)
+            if eager_fallback:
+                _warn_eager_fallback_miss(target)
+                return _function(target, closure)(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call ({len(variants)} captured). Either a guard on the call's "
@@ -738,7 +749,10 @@ def _build_installed_forward():
     callback is a _RefuseRecompileCallback bound at load, which
     _callback_from_stance keeps even under stances that would compile, so, as
     for a standalone artifact, a call no captured variant covers raises instead
-    of compiling.
+    of compiling, or runs eagerly for a frame the capture ran eagerly (its
+    code is in the callback's eager_codes). load(allow_serve_time_compiles=True)
+    flips the artifact's _ALLOW_SERVE_TIME_COMPILES = False to True to keep the
+    ordinary compiling callback instead.
     """
     import base64
     import importlib
@@ -809,18 +823,27 @@ def _build_installed_forward():
                 f"would still serve any call the installed entries miss: load this "
                 f"artifact in a fresh process."
             )
-        context = torch._dynamo.optimize(BACKEND, package=package)
-        if not isinstance(context, OptimizeContext):
-            raise _PrecompileError(
-                "precompile: an installed artifact serves through Dynamo, which is "
-                "disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
-                "enable_dynamo killswitch)."
+        # A serve-time compile is not part of the artifact: record it nowhere.
+        # caching_precompile would make optimize(package=None) create its own
+        # package, which context(fn) fills from the on-disk Dynamo cache.
+        with torch._dynamo.config.patch(caching_precompile=False):
+            context = torch._dynamo.optimize(
+                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
             )
-        # The refusal is this callable's own callback, not the process-global
-        # stance, so other threads' compiles are unaffected. It must be bound
-        # before context(fn), which captures the callback when it wraps.
-        context.callback = _RefuseRecompileCallback(context.callback)
-        compiled = context(fn)
+            if not isinstance(context, OptimizeContext):
+                raise _PrecompileError(
+                    "precompile: an installed artifact serves through Dynamo, which "
+                    "is disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
+                    "enable_dynamo killswitch)."
+                )
+            # The refusal is this callable's own callback, not the process-global
+            # stance, so other threads' compiles are unaffected. It must be bound
+            # before context(fn), which captures the callback when it wraps.
+            if not _ALLOW_SERVE_TIME_COMPILES:
+                flagged = [e.eager_fallback and not e.bypassed for _, e in entries]
+                eager = [t for t, f in zip(targets, flagged) if f]
+                context.callback = _RefuseRecompileCallback(context.callback, eager)
+            compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
         raise

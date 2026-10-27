@@ -744,10 +744,7 @@ class ConvertFrameAssert:
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
         # pyrefly: ignore [bad-assignment]
-        while (
-            prev_frame
-            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
-        ):
+        while prev_frame and prev_frame.f_code.co_filename == __file__:
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
         if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
             return disabled
@@ -1744,13 +1741,6 @@ def _compile(
 
     check_compilation_allowed("Dynamo graph compilation")
 
-    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
-        # Overlap the one-time source hashing for Inductor's cache keys with
-        # Dynamo and AOTAutograd tracing.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
-
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
@@ -1853,6 +1843,9 @@ def _compile(
                     package=package,
                 )
         except exc.SkipFrame as e:
+            if package is not None:
+                # Dynamo runs this frame eagerly from now on, so a load does too.
+                package.record_eager_fallback(code)
             if one_graph:
                 log.debug("No graph captured with export/fullgraph=True")
             if e._torch_dynamo_tracer_output is None:
@@ -2529,6 +2522,19 @@ class ConvertFrame:
 
             if not config.suppress_errors and not soft_fail:
                 raise
+
+            package = self._inner_convert._package
+            if (
+                package is not None
+                and isinstance(e, (Unsupported, UserError))
+                and e.frame_exec_strategy is None
+                and e.apply_to_code
+            ):
+                # Dynamo gave up on the frame and skips it from now on, so a load
+                # runs it eagerly too. A recompile limit hit sets RUN_ONLY instead
+                # and stays a coverage gap. These are exactly the soft failures
+                # Dynamo skips the frame for whatever suppress_errors says.
+                package.record_eager_fallback(code)
 
             # Suppress the error.  NB: It's very important to do the
             # suppression logging HERE, where the actual suppression

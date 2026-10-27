@@ -1376,6 +1376,24 @@ torch.ones(10) * 2
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].input_shapes, [[2, 3], [], [3]])
 
+    def test_input_with_poisoned_storage(self):
+        # Metadata-only placeholders (e.g. released cudagraph-tree outputs)
+        # throw on data pointer access. Recording such an input must not leave
+        # the op without its inputs and shift every later op's inputs.
+        placeholder = torch.empty(4, 4)
+        torch._C._set_storage_data_ptr_access_error_msg(
+            placeholder.untyped_storage()._cdata, "placeholder has no data"
+        )
+        x = torch.ones(3, 5)
+        with profile(record_shapes=True) as prof:
+            placeholder.view(16)
+            torch.add(x, x)
+
+        (view,) = [e for e in prof.events() if e.name == "aten::view"]
+        (add,) = [e for e in prof.events() if e.name == "aten::add"]
+        self.assertEqual(view.input_shapes[0], [4, 4])
+        self.assertEqual(add.input_shapes[:2], [[3, 5], [3, 5]])
+
     def test_concrete_inputs_profiling(self):
         x = torch.rand(2, 6)
         with profile(record_shapes=True) as p:
@@ -2025,12 +2043,20 @@ with open(sys.argv[1], "w") as f:
     json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
 """
         with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
             result = subprocess.run(
                 [sys.executable, "-c", script, filename],
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=120,
+                env=env,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             with open(filename) as f:
@@ -4671,8 +4697,7 @@ class TestProfilerEventsParityCudaOnly(TestCase):
 
         failure_msg = """\
 ====================================================================================
-IMPORTANT: Are you making a Kineto change or bumping the third_party/kineto
-submodule hash and seeing this message?
+IMPORTANT: Are you making a Kineto change and seeing this message?
 
 New metadata keys (see below) were found in the Chrome trace JSON that are not
 yet exposed through the profiler's events() API (i.e. EventMetadata in

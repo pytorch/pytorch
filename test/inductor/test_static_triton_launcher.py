@@ -4,9 +4,11 @@ import os
 import pickle
 import random
 import shutil
+import sys
 import tempfile
 import unittest
 import weakref
+from functools import partial
 from types import SimpleNamespace
 from unittest import mock
 
@@ -26,6 +28,7 @@ from torch._inductor.runtime.static_triton_launcher import (
 from torch._inductor.runtime.triton_compat import (
     CompiledKernel,
     JITFunction,
+    OutOfResources,
     tl,
     triton,
 )
@@ -58,7 +61,9 @@ def _patched_getitem(self, grid):
 
 class TestStaticTritonLauncherUnit(TestCase):
     @staticmethod
-    def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
+    def _global_scratch_kernel(
+        kernel_cls=StaticallyLaunchedCudaKernel, **metadata_overrides
+    ):
         fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
         src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
         metadata = SimpleNamespace(
@@ -68,6 +73,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             global_scratch_size=32,
             global_scratch_align=16,
         )
+        metadata.__dict__.update(metadata_overrides)
 
         class FakeCompiledKernel(SimpleNamespace):
             launch_enter_hook = None
@@ -83,6 +89,33 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel = kernel_cls(compiled_kernel)
         kernel.function = 1
         return kernel
+
+    def test_tensor_memory_limit(self):
+        make_kernel = partial(self._global_scratch_kernel, global_scratch_size=0)
+        for version in [(3, 5), (3, 8), (3, 9)]:
+            with mock.patch(
+                "torch._inductor.runtime.static_triton_launcher.get_triton_version",
+                return_value=version,
+            ):
+                for arch in [75, 80, 86, 89, 90, 100, 101, 103, 107, 110, 120, 121]:
+                    limit = 576 if arch == 107 and version >= (3, 8) else 512
+                    target = SimpleNamespace(arch=arch)
+                    with self.subTest(arch=arch, version=version):
+                        make_kernel(tmem_size=limit, target=target)
+                        with self.assertRaises(OutOfResources) as error:
+                            make_kernel(tmem_size=limit + 1, target=target)
+                        self.assertEqual(
+                            error.exception.args, (limit + 1, limit, "tensor memory")
+                        )
+        for metadata in [{}, {"target": None}, {"target": SimpleNamespace()}]:
+            with self.subTest(metadata=metadata):
+                make_kernel(tmem_size=512, **metadata)
+                with self.assertRaises(OutOfResources) as error:
+                    make_kernel(tmem_size=513, **metadata)
+                self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
+        for size in [None, 0]:
+            make_kernel(tmem_size=size)
+        make_kernel()
 
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
@@ -768,6 +801,56 @@ class TestStaticTritonLauncher(TestCase):
                 f"{launcher.arg_tys}i",
                 (arg0, 0),
                 stream,
+            )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_close_releases_kernel_capsule(self):
+        # _load_kernel must hand over its only capsule reference. An extra one
+        # keeps the capsule alive for the process lifetime, so its destructor
+        # never runs and neither close() nor the autotuner's launcher release
+        # frees the kernel and its Level Zero module.
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        function = launcher.function
+
+        # An object held by exactly one name, so the comparison does not depend
+        # on whether getrefcount counts its own argument reference.
+        throwaway = object()
+        baseline = sys.getrefcount(throwaway)
+        self.assertEqual(
+            sys.getrefcount(function),
+            baseline + 1,
+            "the launcher attribute must be the only reference besides ours",
+        )
+        launcher.close()
+        self.assertEqual(
+            sys.getrefcount(function), baseline, "close() did not drop the capsule"
+        )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_load_kernel_unknown_name_raises(self):
+        # zeKernelCreate failing is the one load error path reachable from
+        # python. Whether the module was freed on the way out is not observable
+        # from python, so this only pins down that the failure surfaces as an
+        # exception; it passes without the fix too.
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        from torch._C import _StaticXpuLauncher
+
+        with self.assertRaisesRegex(RuntimeError, "L0 runtime error"):
+            _StaticXpuLauncher._load_kernel(
+                cubin_file, "no_such_kernel", 0, device_interface.current_device()
             )
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")

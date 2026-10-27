@@ -155,8 +155,8 @@ bool check_nvfp4_recipe_single_scale(
 
 /**
  * Both inputs must be fp8
- * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B:
- * {Blockwise_128x128 (float)
+ * A, B must only have 1 scale each, A: {Blockwise_1x128 (float/e8m0fnu), B:
+ * {Blockwise_128x128 (float/e8m0fnu)
  */
 bool check_deepseek_recipe(
     ScalingType expected_recipe_a,
@@ -177,11 +177,19 @@ bool check_deepseek_recipe(
     return false;
   }
 
-  // Need {Blockwise_1x128, float} for A, {Blockwise_128x128, float} for B
+  // Need expected recipe with float scales, or e8m0fnu scales (both must
+  // match). e8m0fnu scales are used by DeepSeek-V4-Flash but only enabled
+  // on XPU for now; TODO for CUDA/ROCm.
   if (recipe_a[0] != expected_recipe_a) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
   if (recipe_b[0] != expected_recipe_b) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
+  auto scale_dtype_a = scales_a[0].scalar_type();
+  bool e8m0_allowed = scales_a[0].is_xpu();
+  if (scale_dtype_a != ScalarType::Float &&
+      !(e8m0_allowed && scale_dtype_a == ScalarType::Float8_e8m0fnu)) {
+    return false;
+  }
+  // scale_dtype_b is implied to be valid once it matches scale_dtype_a.
+  if (scale_dtype_a != scales_b[0].scalar_type()) return false;
 
   return true;
 }
