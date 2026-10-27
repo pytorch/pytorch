@@ -556,10 +556,8 @@ class _CudnnDirs(NamedTuple):
 
 
 def _existing_cudnn_lib(home: str, version: str | None) -> str | None:
-    parts = ['lib', _windows_arch(), 'cudnn.lib']
-    if version is not None:
-        parts = ['lib', version, _windows_arch(), 'cudnn.lib']
-    path = os.path.join(home, *parts)
+    middle = (version,) if version is not None else ()
+    path = os.path.join(home, 'lib', *middle, _windows_arch(), 'cudnn.lib')
     return path if os.path.isfile(path) else None
 
 
@@ -572,11 +570,7 @@ def _pick_cudnn_version(
     if not qualified or not cuda:
         return None
     parsed = Version(cuda)
-    major = getattr(parsed, "major", None)
-    minor = getattr(parsed, "minor", None)
-    if major is None or minor is None:
-        return None
-    wanted = (major, minor)
+    wanted = (parsed.major, parsed.minor)
     for item in qualified:
         if item[0] == wanted:
             return item
@@ -587,22 +581,33 @@ def _pick_cudnn_version(
 
 
 @functools.cache
-def _warn_cudnn_major_mismatch(home: str, found: str, cuda: str) -> None:
+def _warn_cudnn_major_mismatch(
+    home: str, found: str, cuda: str | None,
+) -> None:
     # Path lookup stays uncached. Only this log is keyed, so one install
     # does not warn again from include_paths, library_paths, and ldflags.
+    if cuda:
+        logger.warning(
+            "cuDNN install at %s has CUDA %s, which does not match "
+            "torch CUDA %s. Those version directories are not used.",
+            home,
+            found,
+            cuda,
+        )
+        return
     logger.warning(
-        "cuDNN install has CUDA %s, which does not match torch CUDA %s. "
+        "cuDNN install at %s has CUDA %s, but torch has no CUDA version. "
         "Those version directories are not used.",
+        home,
         found,
-        cuda,
     )
 
 
 def _resolve_cudnn_dirs() -> _CudnnDirs:
     # Windows cuDNN 9 for CUDA 13+ nests include and lib under one
-    # <major.minor>. Linux call sites keep their old flat paths.
+    # <major.minor>. Callers already skip this on Linux.
     home = CUDNN_HOME
-    if not IS_WINDOWS or home is None:
+    if home is None:
         return _CudnnDirs(None, None)
     include_root = os.path.join(home, 'include')
     flat_lib = _existing_cudnn_lib(home, None)
@@ -627,13 +632,12 @@ def _resolve_cudnn_dirs() -> _CudnnDirs:
             os.path.join(include_root, name), os.path.dirname(library))
     if qualified:
         found = ', '.join(name for _key, name, _library in sorted(qualified))
-        _warn_cudnn_major_mismatch(
-            home, found, torch.version.cuda or 'unknown')
+        _warn_cudnn_major_mismatch(home, found, torch.version.cuda)
     include = include_root if os.path.isdir(include_root) else None
     if flat_lib is not None:
         library_dir = os.path.dirname(flat_lib)
     else:
-        flat_dir = os.path.join(home, 'lib', _windows_arch())
+        flat_dir = os.path.join(home, _windows_cuda_lib_dir())
         library_dir = flat_dir if os.path.isdir(flat_dir) else None
     return _CudnnDirs(include, library_dir)
 

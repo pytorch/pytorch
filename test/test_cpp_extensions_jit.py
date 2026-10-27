@@ -233,6 +233,13 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
             )
             with open(os.path.join(root, "include", "cudnn.h"), "w"):
                 pass
+            dirs = self._selected_cudnn(cpp, root, "13.4")
+            self.assertEqual(
+                dirs.include, os.path.join(root, "include", "13.10")
+            )
+            self.assertEqual(
+                dirs.library, os.path.join(root, "lib", "13.10", arch)
+            )
             flat_lib = os.path.join(root, "lib", arch)
             os.makedirs(flat_lib, exist_ok=True)
             with open(os.path.join(flat_lib, "cudnn.lib"), "w"):
@@ -265,7 +272,7 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                     dirs.include, os.path.join(root, "include", "12.8")
                 )
                 self.assertEqual(dirs.library, library)
-                if not cpp.IS_HIP_EXTENSION:
+                if not IS_HIP_EXTENSION:
                     includes = cpp.include_paths(device_type="cuda")
                     libs = cpp.library_paths(device_type="cuda")
                     self.assertIn(dirs.include, includes)
@@ -290,14 +297,29 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 self.assertEqual(len(caught.records), 1)
                 self.assertEqual(again, dirs)
                 message = "\n".join(caught.output)
+                self.assertIn(root, message)
                 self.assertIn("13.0", message)
                 self.assertIn("12.6", message)
                 self.assertEqual(dirs.include, os.path.join(root, "include"))
                 self.assertNotEqual(dirs.include, other)
                 self.assertIsNone(dirs.library)
-                if not cpp.IS_HIP_EXTENSION:
+                if not IS_HIP_EXTENSION:
                     flags = cpp._prepare_ldflags([], True, False, False, False)
                     self.assertFalse(any("13.0" in flag for flag in flags))
+        with tempfile.TemporaryDirectory() as root:
+            self._write_cudnn_version(root, "13.0")
+            with (
+                mock.patch.object(cpp, "CUDNN_HOME", root),
+                mock.patch("torch.version.cuda", None),
+            ):
+                with self.assertLogs(cpp.__name__, level="WARNING") as caught:
+                    dirs = cpp._resolve_cudnn_dirs()
+                message = "\n".join(caught.output)
+                self.assertIn(root, message)
+                self.assertIn("no CUDA version", message)
+                self.assertNotIn("unknown", message)
+                self.assertEqual(dirs.include, os.path.join(root, "include"))
+                self.assertIsNone(dirs.library)
 
     @unittest.skipIf(IS_WINDOWS, "historical Linux cuDNN paths")
     @unittest.skipIf(IS_HIP_EXTENSION, "historical Linux cuDNN paths")
