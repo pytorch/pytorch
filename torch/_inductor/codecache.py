@@ -49,6 +49,7 @@ import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import (
+    DeviceInterface,
     get_interface_for_device,
     get_registered_device_interfaces,
 )
@@ -1569,20 +1570,21 @@ class FxGraphHashDetails:
                     device_types.add(factory_device)
         return device_types
 
-    @classmethod
-    def _mm_template_allow_tf32(
-        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    @staticmethod
+    def _template_allow_tf32(
+        device_types: OrderedSet[str],
+        allow_tf32: Callable[[type[DeviceInterface]], bool],
     ) -> tuple[tuple[str, bool], ...]:
         # NotImplementedError means this device has no DeviceInterface.
-        # allow_tf32() itself is not caught: a broken implementation should
+        # allow_tf32 itself is not caught: a broken implementation should
         # fail the compile instead of being cached as ALLOW_TF32=False.
         flags: list[tuple[str, bool]] = []
-        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
+        for device_type in sorted(device_types):
             try:
                 iface = get_interface_for_device(device_type)
             except NotImplementedError:
                 continue
-            flags.append((device_type, bool(iface.allow_tf32())))
+            flags.append((device_type, bool(allow_tf32(iface))))
         return tuple(flags)
 
     def __init__(
@@ -1724,7 +1726,15 @@ class FxGraphHashDetails:
         # precision string is already in cuda_matmul_settings; this records the
         # resolved flag for every device in the graph so other backends
         # invalidate the FX graph cache when their flag changes.
-        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
+        device_types = self._graph_device_types(gm, example_inputs)
+        self.mm_template_allow_tf32 = self._template_allow_tf32(
+            device_types, lambda iface: iface.allow_tf32()
+        )
+        # The conv templates follow DeviceInterface.conv_allow_tf32, which no
+        # other field here covers.
+        self.conv_template_allow_tf32 = self._template_allow_tf32(
+            device_types, lambda iface: iface.conv_allow_tf32()
+        )
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
