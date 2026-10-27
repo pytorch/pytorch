@@ -567,19 +567,55 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 values = view_owner.values
                 items = view_owner.items
 
+        view_type = type(getattr(view_owner(), view_name)())
+
         def fn(x, mapping):
-            return x + 1, getattr(mapping, view_name)()
+            view = getattr(mapping, view_name)()
+            return x + 1, view, type(view), isinstance(view, view_type)
 
         mapping = Mapping(a=1, b=2)
         mapping.move_to_end("a")
         x = torch.ones(1)
-        expected_tensor, expected_view = fn(x, mapping)
-        actual_tensor, actual_view = torch.compile(fn, backend="eager", fullgraph=True)(
-            x, mapping
-        )
+        expected_tensor, expected_view, _, _ = fn(x, mapping)
+        actual_tensor, actual_view, actual_type, matches_type = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, mapping)
         self.assertEqual(actual_tensor, expected_tensor)
         self.assertIs(type(actual_view), type(expected_view))
+        self.assertIs(actual_type, view_type)
+        self.assertTrue(matches_type)
         self.assertEqual(list(actual_view), list(expected_view))
+
+    @parametrize("bound", [False, True])
+    def test_ordered_dict_subclass_copy(self, bound):
+        class Mapping(OrderedDict):
+            def __init__(self):
+                self.events = ["init"]
+                super().__init__()
+
+            def __getitem__(self, key):
+                self.events.append(("get", key))
+                return super().__getitem__(key) + 1
+
+            def __setitem__(self, key, value):
+                self.events.append(("set", key))
+                super().__setitem__(key, value)
+
+            def __iter__(self):
+                raise AssertionError("copy must use OrderedDict's stored keys")
+
+        def fn(x):
+            mapping = Mapping()
+            OrderedDict.__setitem__(mapping, "a", x)
+            result = mapping.copy() if bound else OrderedDict.copy(mapping)
+            return result, result.events, mapping.events
+
+        x = torch.ones(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual[0]), Mapping)
+        self.assertEqual(actual[1:], (["init", ("set", "a")], ["init", ("get", "a")]))
+        self.assertEqual(actual, expected)
 
     @parametrize("method", ["keys", "items"])
     @parametrize("update", [False, True])
@@ -840,6 +876,23 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x - 1, "no error"
 
         x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("update", [False, True])
+    def test_ordered_dict_update_pair_iterator_consumption(self, update):
+        def fn(x):
+            pair = iter((1, 2, 3, 4))
+            try:
+                if update:
+                    OrderedDict().update([pair])
+                else:
+                    OrderedDict([pair])
+            except ValueError as exc:
+                return x + 1, str(exc), list(pair)
+            return x - 1, "no error", list(pair)
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x)[2], [4])
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("reported_type", [OrderedDict, defaultdict])
@@ -1133,9 +1186,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(expected, (x + 50, mutation_call))
         else:
             self.assertEqual(expected, (x + (operation is operator.ne), mutation_call))
-        with self.assertRaisesRegex(
-            Unsupported, "Dictionary mutated during comparison"
-        ):
+        with self.assertRaisesRegex(Unsupported, "Dictionary mutated during iteration"):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
 
@@ -1157,9 +1208,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x + operation(left, right), len(left)
 
         x = torch.randn(3)
-        with self.assertRaisesRegex(
-            Unsupported, "Dictionary mutated during comparison"
-        ):
+        with self.assertRaisesRegex(Unsupported, "Dictionary mutated during iteration"):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 

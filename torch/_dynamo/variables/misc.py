@@ -1389,6 +1389,8 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     Represents a torch._C._ImperativeEngine instance.
     """
 
+    _cpython_type = torch._C._ImperativeEngine
+
     def __init__(
         self,
         value: torch._C._ImperativeEngine,
