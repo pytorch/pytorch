@@ -10,11 +10,11 @@ import torch
 from torch import Tensor
 from torch._C import ScriptObject
 from torch._C._autograd import DeviceType
-from torch.distributed.distributed_c10d import GroupName
-from torch.futures import Future
-from torch.testing._internal.distributed.fake_pg import (  # Runtime alias for BC
+from torch.distributed._backends.fake import (  # Runtime alias for BC
     FakeProcessGroup as FakeProcessGroup,
 )
+from torch.distributed.distributed_c10d import GroupName
+from torch.futures import Future
 
 # This module is defined in torch/csrc/distributed/c10d/init.cpp
 

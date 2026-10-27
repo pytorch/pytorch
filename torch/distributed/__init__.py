@@ -99,7 +99,7 @@ if is_available():
     def _c10d_getattr(name: str):
         # FakeProcessGroup moved from C++ to Python; keep the old path working.
         if name == "FakeProcessGroup":
-            from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
+            from torch.distributed._backends.fake import FakeProcessGroup
 
             return FakeProcessGroup
         raise AttributeError(

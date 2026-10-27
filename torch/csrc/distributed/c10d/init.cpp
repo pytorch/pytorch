@@ -316,8 +316,8 @@ auto init_nogil() {
 
 // Implements Backend.Options.__copy__ (memo is None) and __deepcopy__. C++
 // options are copied via clone(). For a Python subclass, this creates the same
-// type without calling its __init__ and (deep) copies the instance __dict__.
-// Unlike copy.copy, __slots__ and __getstate__/__setstate__ are not used.
+// type without calling its __init__ and (deep) copies the instance __dict__
+// and set __slots__. Unlike copy.copy, __getstate__/__setstate__ are not used.
 py::object copyBackendOptions(const py::object& self, const py::object& memo) {
   auto opts = self.cast<c10::intrusive_ptr<::c10d::Backend::Options>>();
   if (dynamic_cast<::c10d::PyBackendOptions*>(opts.get()) == nullptr) {
@@ -330,15 +330,23 @@ py::object copyBackendOptions(const py::object& self, const py::object& memo) {
   auto cls = py::type::of(self);
   auto copy = cls.attr("__new__")(cls);
   py::type::of<::c10d::Backend::Options>().attr("__init__")(copy, self);
-  if (!py::hasattr(self, "__dict__")) {
-    return copy;
-  }
-  py::object dict = self.attr("__dict__");
   if (!memo.is_none()) {
     memo[py::int_(reinterpret_cast<uintptr_t>(self.ptr()))] = copy;
-    dict = py::module_::import("copy").attr("deepcopy")(dict, memo);
   }
-  copy.attr("__dict__").attr("update")(dict);
+  auto copyValue = [&](const py::object& value) -> py::object {
+    if (memo.is_none()) {
+      return value;
+    }
+    return py::module_::import("copy").attr("deepcopy")(value, memo);
+  };
+  if (py::hasattr(self, "__dict__")) {
+    copy.attr("__dict__").attr("update")(copyValue(self.attr("__dict__")));
+  }
+  for (auto name : py::module_::import("copyreg").attr("_slotnames")(cls)) {
+    if (py::hasattr(self, name)) {
+      py::setattr(copy, name, copyValue(py::getattr(self, name)));
+    }
+  }
   return copy;
 }
 
@@ -4098,12 +4106,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
 Python subclasses of this class are supported. Copies made by ``copy.copy``
 and by ``split_group``/``merge_remote_group`` keep the subclass and a shallow
-copy of its instance ``__dict__`` (``__slots__`` are not copied);
-``copy.deepcopy`` deep copies the ``__dict__``. To customize copies made by
-``copy.copy``, ``split_group`` and ``merge_remote_group``, override
-``__copy__`` and start from ``super().__copy__()`` so the base fields are kept;
-``copy.deepcopy`` does not call ``__copy__``. Python subclasses of other
-backends' options classes are not supported.
+copy of its instance ``__dict__`` and ``__slots__``; ``copy.deepcopy`` deep
+copies them. To customize copies made by ``copy.copy``, ``split_group`` and
+``merge_remote_group``, override ``__copy__`` and start from
+``super().__copy__()`` so the base fields are kept; ``copy.deepcopy`` does not
+call ``__copy__``. Python subclasses of other backends' options classes are not
+supported.
 )")
           .def(
               init_nogil<

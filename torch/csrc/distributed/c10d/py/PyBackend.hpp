@@ -27,26 +27,19 @@ class PyBackendOptions : public Backend::Options {
     if (PyObject* ptr = pyobj_slot()->load_pyobj()) {
       self = pybind11::reinterpret_borrow<pybind11::object>(ptr);
     } else {
-      // Returns a new reference.
-      self = pybind11::reinterpret_steal<pybind11::object>(
-          pybind11::detail::find_registered_python_instance(
-              const_cast<Backend::Options*>(
-                  static_cast<const Backend::Options*>(this)),
-              pybind11::detail::get_type_info(typeid(Backend::Options))));
+      // Returns the registered Python object if there is one.
+      self = pybind11::cast(
+          static_cast<const Backend::Options*>(this),
+          pybind11::return_value_policy::reference);
     }
-    // Without a live Python object the Python attributes are already gone.
-    TORCH_CHECK_TYPE(
-        self,
+    // Otherwise pybind wraps this as a plain Backend.Options: the Python
+    // object and its attributes are already gone.
+    TORCH_CHECK(
+        !pybind11::type::of(self).is(pybind11::type::of<Backend::Options>()),
         "cannot clone Python Backend.Options: its Python object was destroyed");
     auto copy = self.attr("__copy__")();
     checkCopy(self, copy);
-    auto result = castAndPreserve(copy);
-    // pybind re-wraps a PyBackendOptions whose Python object died as a plain
-    // Backend.Options, whose copy is not a PyBackendOptions.
-    TORCH_CHECK_TYPE(
-        dynamic_cast<PyBackendOptions*>(result.get()) != nullptr,
-        "cannot clone Python Backend.Options: its Python object was destroyed");
-    return result;
+    return castAndPreserve(copy);
   }
 
   // Checks that copy is a new instance of self's type (or a subclass), so a

@@ -1041,17 +1041,17 @@ class SplittableBackend(dist.BackendBase):
         return SplittableBackend(ranks.index(self.rank()), len(ranks))
 
 
-class NoneOptionsBackend(SplittableBackend):
-    options = None
-
-    def split(self, store, ranks, opts):
-        self.split_opts = opts
-        return super().split(store, ranks, opts)
-
-
 class FieldOptions(dist.BackendBase.Options):
     def __init__(self, value):
         super().__init__("field-options")
+        self.value = value
+
+
+class SlotOptions(dist.BackendBase.Options):
+    __slots__ = ("value", "unset")
+
+    def __init__(self, value):
+        super().__init__("slot-options")
         self.value = value
 
 
@@ -1132,6 +1132,28 @@ class TestPyBackendOptions(TestCase):
         self.assertIs(copied.self_ref, copied)
         self.assertEqual(copied.global_ranks_in_group, [2])
 
+    def test_copy_slotted_python_options(self) -> None:
+        opts = SlotOptions([1])
+        copied = copy.copy(opts)
+        self.assertIs(type(copied), SlotOptions)
+        self.assertIs(copied.value, opts.value)
+        self.assertFalse(hasattr(copied, "unset"))
+        deep = copy.deepcopy(opts)
+        self.assertEqual(deep.value, [1])
+        self.assertIsNot(deep.value, opts.value)
+
+    def test_copy_ignores_pickle_state_hooks(self) -> None:
+        class StateOptions(FieldOptions):
+            def __getstate__(self):
+                raise AssertionError("__getstate__ called")
+
+            def __setstate__(self, state):
+                raise AssertionError("__setstate__ called")
+
+        opts = StateOptions([1])
+        self.assertIs(copy.copy(opts).value, opts.value)
+        self.assertEqual(copy.deepcopy(opts).value, [1])
+
     def test_deepcopy_base_options(self) -> None:
         opts = dist.BackendBase.Options("base")
         opts.group_desc = "desc"
@@ -1160,6 +1182,12 @@ class TestPyBackendOptions(TestCase):
         self.assertEqual(child_opts.value, 1)
         # splitGroup writes the child's group name into its copy only.
         self.assertNotEqual(child_opts.group_name, parent_opts.group_name)
+
+    def test_split_group_slotted_python_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: SlotOptions(2))
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), SlotOptions)
+        self.assertEqual(backend.split_opts.value, 2)
 
     def test_split_group_temporary_python_options(self) -> None:
         # Only C++ references the options and their copy, so their Python
@@ -1214,6 +1242,19 @@ class TestPyBackendOptions(TestCase):
         self.assertIs(type(backend.merge_opts), FieldOptions)
         self.assertIsNot(backend.merge_opts, parent_opts)
         self.assertEqual(backend.merge_opts.value, 4)
+
+    def test_split_group_none_options(self) -> None:
+        # None options mean defaults; splitGroup must not dereference null.
+        backend = OptionsBackend(0, 1, lambda: None)
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.split_opts.backend, "splittable-python-backend")
+
+    def test_merge_remote_group_none_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: None)
+        create_process_group(backend).merge_remote_group(dist.HashStore(), 1)
+        self.assertIs(type(backend.merge_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.merge_opts.backend, "splittable-python-backend")
 
     @parametrize("cls", [SelfCopyOptions, SlicingCopyOptions])
     def test_split_group_bad_copy(self, cls) -> None:
@@ -1281,17 +1322,6 @@ class TestPyBackendSplitGroup(TestCase):
             self.assertEqual(t, torch.ones(2))
         finally:
             dist.destroy_process_group()
-
-    def test_split_group_none_options(self) -> None:
-        # options returning None makes ProcessGroup::splitGroup clone default
-        # Options instead of failing.
-        backend = NoneOptionsBackend(0, 1)
-        split = create_process_group(backend).split_group([0])
-        self.assertIsInstance(
-            split._get_backend(torch.device("cpu")), SplittableBackend
-        )
-        self.assertIs(type(backend.split_opts), dist.BackendBase.Options)
-        self.assertEqual(backend.split_opts.backend, "splittable-python-backend")
 
 
 class TestPyBackendProcessGroup(MultiProcessTestCase):

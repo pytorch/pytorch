@@ -2723,7 +2723,7 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == Backend.FAKE:
-                from torch.testing._internal.distributed.fake_pg import FakeStore
+                from torch.distributed._backends.fake import FakeStore
 
                 store = FakeStore()
             else:

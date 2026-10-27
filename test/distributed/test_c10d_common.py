@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import importlib
 import os
 import pickle
 import re
@@ -365,6 +366,43 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("gloo", looked_up)
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "needs installed entry points")
+    def test_fake_backend_entrypoint(self):
+        from torch.distributed._backends import fake
+
+        with unittest.mock.patch.dict(dist.Backend._plugins):
+            dist.Backend._plugins.pop("FAKE", None)
+            dist.Backend._ensure_backend_registered("fake")
+            creator = dist.Backend._plugins["FAKE"].creator_fn
+        self.assertIs(creator, fake._create_fake_pg)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "needs installed entry points")
+    def test_fake_backend_without_import(self):
+        script = (
+            "import sys, torch, torch.distributed as dist\n"
+            "print('torch.distributed._backends.fake' in sys.modules)\n"
+            "dist.init_process_group('fake', rank=0, world_size=2)\n"
+            "print('torch.testing._internal.distributed.fake_pg' in sys.modules)\n"
+            "pg = dist.distributed_c10d._get_default_group()\n"
+            "print(type(pg._get_backend(torch.device('cpu'))).__module__)\n"
+        )
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], text=True, timeout=120
+        )
+        self.assertEqual(
+            out.split(), ["False", "False", "torch.distributed._backends.fake"]
+        )
+
+    def test_fake_backend_testing_shim_registers(self):
+        from torch.distributed._backends import fake
+        from torch.testing._internal.distributed import fake_pg
+
+        with unittest.mock.patch.dict(dist.Backend._plugins):
+            dist.Backend._plugins.pop("FAKE", None)
+            importlib.reload(fake_pg)
+            creator = dist.Backend._plugins["FAKE"].creator_fn
+        self.assertIs(creator, fake._create_fake_pg)
 
     @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
@@ -3362,6 +3400,12 @@ class ReduceOpTest(TestCase):
             premul_sum = c10d.ReduceOp.PREMUL_SUM(scale)
             self.assertIsInstance(premul_sum, c10d.ReduceOp)
             self.assertEqual(premul_sum.factor, scale)
+
+        # `op` is writable, so PREMUL_SUM can lack its factor supplement.
+        reduce_op = c10d.ReduceOp(c10d.ReduceOp.SUM)
+        reduce_op.op = c10d.ReduceOp.PREMUL_SUM
+        with self.assertRaisesRegex(RuntimeError, "has no factor"):
+            reduce_op.factor
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
