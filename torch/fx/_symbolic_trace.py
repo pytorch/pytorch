@@ -1364,31 +1364,35 @@ def _resolve_lazy_imports(
     if is_lazy_import is None:
         return
 
-    def unresolved(is_lazy: Callable[[dict[str, Any], str], bool]) -> list[str]:
-        candidates = list(frame_dict) if names is None else names
-        return [
-            name
-            for name in candidates
-            if name in frame_dict and is_lazy(frame_dict, name)
-        ]
+    def unresolved(
+        is_lazy: Callable[[dict[str, Any], str], bool], first_target: int
+    ) -> list[tuple[dict[str, Any], str]]:
+        scope = list(frame_dict) if names is None else names
+        entries = [(frame_dict, name) for name in scope]
+        # Plus the torch.fx.wrap targets registered since, which patching reads
+        # once the window has closed.
+        new_targets = list(_wrapped_fns_to_patch.items())[first_target:]
+        entries += [(target_dict, name) for (_, name), target_dict in new_targets]
+        return [(d, name) for d, name in entries if name in d and is_lazy(d, name)]
 
-    lazy_names = unresolved(is_lazy_import)
-    if lazy_names:
+    registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
+    lazy = unresolved(is_lazy_import, registered[0])
+    if lazy:
         from torch.utils._python_dispatch import _disable_current_modes
 
-        registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
         with contextlib.ExitStack() as stack:
             for trace_patcher in _trace_patchers(patcher):
                 stack.enter_context(_maybe_revert_all_patches(trace_patcher))
             stack.enter_context(_is_fx_tracing_context(False))
             stack.enter_context(_disable_current_modes())
             stack.enter_context(_no_torch_function_modes())
-            # A module body can add lazy entries to the scope, e.g. a submodule
-            # import to its package's globals; each resolves only once.
-            while lazy_names:
-                for name in lazy_names:
-                    _ = frame_dict[name]
-                lazy_names = unresolved(is_lazy_import)
+            # A module body can add lazy entries to the scope (a submodule import
+            # binds it on its package) or register a wrap target bound lazily;
+            # each resolves only once.
+            while lazy:
+                for d, name in lazy:
+                    _ = d[name]
+                lazy = unresolved(is_lazy_import, registered[0])
         # A module body it ran can register torch.fx.wrap targets the traces have
         # not patched yet; patching is idempotent for the rest. Outermost first, so
         # an inner trace leaves the name to the patch that outlives it.
