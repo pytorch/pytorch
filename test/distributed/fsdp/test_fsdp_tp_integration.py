@@ -2,6 +2,7 @@
 import copy
 import sys
 from collections import OrderedDict
+from typing import ClassVar
 
 import torch
 from torch import distributed as dist
@@ -85,6 +86,19 @@ def distribute_rmsnorm(module, device_mesh):
 
 
 class TestTPFSDPIntegration(FSDPTestContinuous):
+    # The workers are reused for every test in this class, and each new mesh adds
+    # NCCL communicators that hold /dev/shm until the workers exit, so build the
+    # (dp, tp) mesh once and share it across tests.
+    _dp_tp_mesh: ClassVar[DeviceMesh | None] = None
+
+    @classmethod
+    def _get_dp_tp_mesh(cls) -> DeviceMesh:
+        if cls._dp_tp_mesh is None:
+            cls._dp_tp_mesh = init_device_mesh(
+                device_type, (cls.world_size // 2, 2), mesh_dim_names=("dp", "tp")
+            )
+        return cls._dp_tp_mesh
+
     def _get_params_and_sharding_info(
         self,
         model: SimpleModel,
@@ -282,11 +296,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
             sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
         )
-        mesh_2d = init_device_mesh(
-            device_type,
-            (self.world_size // tensor_parallel_size, tensor_parallel_size),
-            mesh_dim_names=["dp", "tp"],
-        )
+        mesh_2d = self._get_dp_tp_mesh()
         # Shard with TP and then wrap with FSDP
         sequence_parallelize_plan = {
             "net1": ColwiseParallel(input_layouts=Shard(0)),
@@ -365,9 +375,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         """
         Tests TP + FSDP extension with correct gradient (i.e. no ACT)
         """
-        mesh_2d = init_device_mesh(
-            device_type, (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
-        )
+        mesh_2d = self._get_dp_tp_mesh()
 
         class TestModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -417,9 +425,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_sync_module_state(self):
-        mesh_2d = init_device_mesh(
-            device_type, (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
-        )
+        mesh_2d = self._get_dp_tp_mesh()
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
 
