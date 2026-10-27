@@ -3846,6 +3846,15 @@ class TestFakeTensorProp(TestCase):
                 # mask.nonzero() is memoized.
                 self.assertTrue(statically_known_true(sx == sy))
 
+    def test_nonzero_unique_memo_invalidated_by_mutation(self):
+        for op in (torch.nonzero, torch.unique):
+            with self.subTest(op=op.__name__), FakeTensorMode(shape_env=ShapeEnv()):
+                x = torch.randint(0, 3, (10,))
+                n = op(x).shape[0]
+                self.assertTrue(statically_known_true(op(x).shape[0] == n))
+                x.add_(1)
+                self.assertFalse(statically_known_true(op(x).shape[0] == n))
+
 
 make_propagate_real_tensors_cls(TestFakeTensorProp)
 
