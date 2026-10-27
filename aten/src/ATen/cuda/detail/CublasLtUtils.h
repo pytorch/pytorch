@@ -186,9 +186,8 @@ inline int cublasLtMatmulScaleMode(
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
       if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
 #if defined(USE_ROCM) && ROCM_VERSION >= 71300
-        // gfx950 selects the 32x8 scale mode. gfx1250 keeps the default
-        // 1x32 block scale mode.
-        if (!at::detail::getCUDAHooks().isGPUArch({"gfx1250"})) {
+        // Only gfx950 SWIZZLE_32_8 uses the SCALE_BLK32_UE8M0_32_8_EXT.
+        if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
           return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
         }
 #else
@@ -199,6 +198,7 @@ inline int cublasLtMatmulScaleMode(
 #endif
       }
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
+      // gfx1250 SWIZZLE_32_8 and gfx950 NO_SWIZZLE enter here.
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #else
       TORCH_CHECK(
