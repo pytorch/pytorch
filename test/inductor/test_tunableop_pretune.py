@@ -114,7 +114,7 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
             mock.patch("torch._inductor.tunableop.submit", side_effect=_record)
         )
         stack.enter_context(mock.patch("torch._inductor.tunableop.BenchmarkJob", _Job))
-        stack.enter_context(config.patch({"aten_tunableop_ladder": ladder}))
+        stack.enter_context(config.patch({"cuda.aten_tunableop_ladder": ladder}))
         yield submitted
 
 
