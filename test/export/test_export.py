@@ -6384,22 +6384,27 @@ def forward(self, x):
             with self.assertWarnsRegex(UserWarning, warn_re):
                 ep = export(foo, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
 
-    def test_detect_leak_nonstrict_hop_output(self):
+    def test_detect_leak_nonstrict_module_input_param(self):
         global_list = []
 
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                y = torch.cond(x.sum() > 0, torch.cos, torch.sin, (x,))
-                global_list.append(y)
-                return y + 1
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(4))
 
-        # A higher-order op registers its outputs with the tracer itself rather
-        # than through proxy_call. Other fakes may also be reported, so check
-        # for the cond output specifically.
+        class Foo(torch.nn.Module):
+            def forward(self, x, inner):
+                global_list.append(inner.w)
+                return x * inner.w
+
+        # The parameters of an nn.Module input are fakified before leak tracking
+        # starts, so FakeTensor.__init__ does not record them; set_proxy_slot
+        # does when tracing registers them.
         with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
-            warn_re = re.compile(r"from node 'getitem':.*y = torch\.cond\(", re.S)
-            with self.assertWarnsRegex(UserWarning, warn_re):
-                export(Foo(), (torch.randn(4, 4),), strict=False)
+            with self.assertWarnsRegex(
+                UserWarning, "Detected 1 fake tensors that are still alive"
+            ):
+                export(Foo(), (torch.randn(4), Inner()), strict=False)
 
     def test_export_cyclic_reference_leak(self):
         class Node:
