@@ -290,7 +290,7 @@ def restore_cpp_kernel(key: str, binary_path: str) -> None:
 
 
 def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:
-    missing = sorted(key for key, path in kernels.items() if not os.path.exists(path))
+    missing = sorted(path for path in kernels.values() if not os.path.exists(path))
     if missing:
         raise RuntimeError(f"Cannot export C++ kernels with no binary: {missing}")
     binaries: dict[str, bytes] = {}

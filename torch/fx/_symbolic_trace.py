@@ -1315,14 +1315,15 @@ def _resolve_lazy_imports(
     patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
 ) -> None:
     """Resolve the unresolved lazy imports among ``names`` (default: all) of
-    ``frame_dict`` with ``patcher``'s patches reverted and FX's tracing flag off.
+    ``frame_dict`` with ``patcher``'s patches reverted, FX's tracing flag off and
+    no dispatch mode active.
 
     Reading an unresolved lazy import runs its module body, which must not see the
     globals and ``torch.nn.Module`` methods FX patched for the trace, nor take
     itself to be traced (a module that calls a ``torch.compile``'d function at
-    import). Under make_fx, its proxy and fake modes stay on. Only FX's own reads
-    go through here; a lazy import the traced code itself reads resolves as any
-    other code it runs, with the patches applied.
+    import), nor create its module-level tensors under make_fx's fake or proxy
+    mode. Only FX's own reads go through here; a lazy import the traced code
+    itself reads resolves as any other code it runs, with the patches applied.
     ``importlib.is_lazy_import`` exists only on PEP 690-style lazy-import runtimes
     (e.g. Cinder).
     """
@@ -1335,8 +1336,14 @@ def _resolve_lazy_imports(
         if name in frame_dict and is_lazy_import(frame_dict, name)
     ]
     if lazy_names:
+        from torch.utils._python_dispatch import _disable_current_modes
+
         registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
-        with _maybe_revert_all_patches(patcher), _is_fx_tracing_context(False):
+        with (
+            _maybe_revert_all_patches(patcher),
+            _is_fx_tracing_context(False),
+            _disable_current_modes(),
+        ):
             for name in lazy_names:
                 _ = frame_dict[name]
         # A module body it ran can register torch.fx.wrap targets this trace has not
