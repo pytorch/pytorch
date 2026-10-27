@@ -7131,7 +7131,8 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn, backend="eager")(x)
 
-    def test_method_descriptor_preserves_polyfill_trace_rule(self):
+    @parametrize("bound", [False, True])
+    def test_method_descriptor_preserves_polyfill_trace_rule(self, bound):
         class C:
             def __init__(self, value):
                 self.value = value
@@ -7139,12 +7140,28 @@ class GraphModule(torch.nn.Module):
         descriptor = object.__reduce_ex__
 
         def fn(obj):
-            reduction = descriptor(obj, 4)
+            reduction = obj.__reduce_ex__(4) if bound else descriptor(obj, 4)
             return reduction[2]["value"] + 1
 
         obj = C(torch.ones(1))
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(obj), fn(obj)
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 13), "__replace__ added in 3.13")
+    @parametrize("bound", [False, True])
+    def test_method_descriptor_namespace_replace(self, bound):
+        def fn(x, obj):
+            if bound:
+                result = obj.__replace__(value=x + 1)
+            else:
+                result = types.SimpleNamespace.__replace__(obj, value=x + 1)
+            return result.value, obj.value, type(result), result is obj
+
+        x = torch.ones(1)
+        obj = types.SimpleNamespace(value=x)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
         )
 
     def test_classmethod_descriptor_mro_sources(self):
