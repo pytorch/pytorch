@@ -41,6 +41,18 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_impl(
   return AOTIModelContainerRunner::run_impl(input_handles, stream_handle);
 }
 
+std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_cuda_graph_impl(
+    std::vector<AtenTensorHandle>& input_handles,
+    void* stream_handle,
+    int64_t max_graphs) {
+  if (stream_handle == nullptr) {
+    at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
+    stream_handle = reinterpret_cast<void*>(cuda_stream.stream());
+  }
+  return AOTIModelContainerRunner::run_cuda_graph_impl(
+      input_handles, stream_handle, max_graphs);
+}
+
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
     const std::vector<at::Tensor>& inputs,
     const at::cuda::CUDAStream& cuda_stream) {

@@ -316,6 +316,9 @@ int munmap(void* addr, size_t length) {
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef USE_CUDA
+#include <torch/csrc/inductor/aoti_runtime/cudagraph_manager.h>
+#endif // USE_CUDA
 #ifdef USE_MPS
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #endif // USE_MPS
@@ -1437,6 +1440,90 @@ class AOTInductorModelBase {
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
   }
 
+#ifdef USE_CUDA
+  // Like run(), but runs the model as CUDA graphs through this instance's
+  // CudaGraphManager. Its graphs and memory pool rely on run_finished_: the
+  // container hands the instance out again only once the previous call's
+  // replay has finished.
+  void run_cuda_graph(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      const CudaGraphOptions& options) {
+    AOTI_RUNTIME_CHECK(
+        cudagraphs_,
+        "Running as CUDA graphs requires compiling the model with "
+        "aot_inductor.cudagraphs=True");
+    if (!run_finished_) {
+      cudaEvent_t run_finished = nullptr;
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
+      run_finished_.emplace(run_finished);
+    }
+    if (cudagraph_manager_) {
+      cudagraph_manager_->set_options(options);
+    } else {
+      cudagraph_manager_ =
+          std::make_unique<CudaGraphManager>(device_idx_, options);
+    }
+
+    auto inputs =
+        steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
+    std::vector<AtenTensorHandle> borrowed_inputs;
+    borrowed_inputs.reserve(inputs.size());
+    for (const auto& input : inputs) {
+      borrowed_inputs.push_back(input.get());
+    }
+    auto* model = static_cast<Model*>(this);
+    // The manager lends its inputs, while run_impl steals them, so the model
+    // gets new handles to the same tensors.
+    auto region = [&](AtenTensorHandle* region_inputs,
+                      AtenTensorHandle* region_outputs,
+                      cudaStream_t region_stream) {
+      std::vector<RAIIAtenTensorHandle> owned_inputs;
+      owned_inputs.reserve(borrowed_inputs.size());
+      for (size_t i = 0; i < borrowed_inputs.size(); ++i) {
+        AtenTensorHandle handle = nullptr;
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_new_tensor_handle(region_inputs[i], &handle));
+        owned_inputs.emplace_back(handle);
+      }
+      std::vector<AtenTensorHandle> raw_inputs;
+      raw_inputs.reserve(owned_inputs.size());
+      for (auto& input : owned_inputs) {
+        raw_inputs.push_back(input.release());
+      }
+      model->run_impl(
+          raw_inputs.data(), region_outputs, region_stream, proxy_executor);
+    };
+    cudagraph_manager_->run(
+        region,
+        borrowed_inputs.data(),
+        borrowed_inputs.size(),
+        output_handles,
+        num_outputs(),
+        stream);
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
+  }
+
+  // Drops this instance's CUDA graphs, which keep reading the constants they
+  // were captured with, once its last call has finished.
+  void reset_cuda_graphs() {
+    if (!cudagraph_manager_) {
+      return;
+    }
+    if (run_finished_) {
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
+    }
+    cudagraph_manager_->reset();
+  }
+#endif // USE_CUDA
+
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
@@ -2108,6 +2195,13 @@ class AOTInductorModelBase {
   // Generated model uses this device index to create CUDA guards.
   int32_t device_type_{};
   int32_t device_idx_{};
+
+  // Set by generated code when compiled with aot_inductor.cudagraphs=True,
+  // which checks at compile time that the model can be captured.
+  bool cudagraphs_{false};
+#ifdef USE_CUDA
+  std::unique_ptr<CudaGraphManager> cudagraph_manager_;
+#endif // USE_CUDA
 };
 
 // Codegen-ed classes can derive from this to keep pointers to loaded kernels.
