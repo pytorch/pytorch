@@ -1966,6 +1966,51 @@ class TestFX(JitTestCase):
             [node.target for node in graph.nodes if node.op == "call_module"], ["sub"]
         )
 
+    def test_a_lazily_imported_module_can_register_a_wrapped_function(self):
+        from torch.fx import _symbolic_trace
+
+        helper = types.ModuleType("lazy_fx_helper")
+        exec("def leaf(x):\n    return x + 1\n", helper.__dict__)
+        unresolved = object()
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # What the module body's torch.fx.wrap("leaf") registers.
+                    key = (id(helper.__dict__), "leaf")
+                    _symbolic_trace._wrapped_fns_to_patch[key] = helper.__dict__
+                    value = helper
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def m_forward(self, x):
+            return lazy_fx_helper.leaf(x)  # noqa: F821
+
+        class M(torch.nn.Module):
+            forward = types.FunctionType(
+                m_forward.__code__,
+                Globals(__builtins__=builtins, lazy_fx_helper=unresolved),
+                "forward",
+            )
+
+        leaf = helper.leaf
+        with (
+            unittest.mock.patch.dict(_symbolic_trace._wrapped_fns_to_patch),
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is unresolved,
+                create=True,
+            ),
+        ):
+            graph = torch.fx.Tracer().trace(M())
+        # Kept as a leaf, as when the module is imported before the trace.
+        self.assertIn(
+            leaf, [n.target for n in graph.nodes if n.op == "call_function"]
+        )
+        self.assertIs(helper.leaf, leaf)
+
     def test_lazy_import_can_run_a_compiled_function(self):
         compiled = torch.compile(lambda t: t + 1, backend="eager")
 

@@ -1335,9 +1335,14 @@ def _resolve_lazy_imports(
         if name in frame_dict and is_lazy_import(frame_dict, name)
     ]
     if lazy_names:
+        registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
         with _maybe_revert_all_patches(patcher), _is_fx_tracing_context(False):
             for name in lazy_names:
                 _ = frame_dict[name]
+        # A module body it ran can register torch.fx.wrap targets this trace has not
+        # patched yet; patching is idempotent for the rest.
+        if (len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)) != registered:
+            _patch_wrapped_functions(patcher)
 
 
 def _autowrap_check(
