@@ -101,8 +101,10 @@ class TestFakePG(TestCase):
             # One real device backend means real peers: sync over gloo.
             "cpu:gloo,cuda:fake": (gloo, None),
             "cpu:fake,cuda:nccl": (gloo, None),
-            # An MPI default group has no store for a gloo group to use.
+            # An MPI default group has no store for a gloo group to use; one whose
+            # devices have different backends does.
             "mpi": (None, None),
+            "cpu:mpi,cuda:nccl": (gloo, None),
         }
         for config, expected in cases.items():
             for gloo_available, backend in zip((True, False), expected):
@@ -110,6 +112,9 @@ class TestFakePG(TestCase):
                     self.subTest(config=config, gloo=gloo_available),
                     unittest.mock.patch.object(
                         dist, "get_backend_config", return_value=config
+                    ),
+                    unittest.mock.patch.object(
+                        dist, "get_backend", return_value=config
                     ),
                     unittest.mock.patch.object(
                         dist, "is_gloo_available", return_value=gloo_available
