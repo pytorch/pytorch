@@ -87,7 +87,7 @@ RUN bash ./install_llvm_tools.sh && rm -f install_llvm_tools.sh
 FROM base as cuda
 ARG BASE_CUDA_VERSION
 # Provide python3 for the NCCL build.
-RUN ln -sf /opt/python/cp310-cp310/bin/python3 /usr/local/bin/python3
+RUN ln -sf /opt/python/cp311-cp311/bin/python3 /usr/local/bin/python3
 
 # Install CUDA
 ADD ./common/install_cuda.sh install_cuda.sh
