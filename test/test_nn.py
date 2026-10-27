@@ -3687,32 +3687,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
         self.assertTrue(torch.isfinite(out2).all().item())
 
-    @parametrize_test("use_pos_weight", [False, True])
-    def test_bce_with_logits_numerical_stability(self, use_pos_weight):
-        dtype = torch.float64
-        values = [37.42994775023705, -37.42994775023705]
-        labels = [1.0, 0.0]
-
-        x = torch.tensor(values, dtype=dtype, requires_grad=True)
-        target = torch.tensor(labels, dtype=dtype)
-        pos_weight = (
-            torch.ones(2, dtype=dtype) if use_pos_weight else None
-        )
-
-        loss = F.binary_cross_entropy_with_logits(
-            x, target, pos_weight=pos_weight, reduction="sum"
-        )
-        loss.backward()
-
-        expected_grad = torch.sigmoid(
-            torch.tensor([-37.42994775023705, -37.42994775023705],
-                         dtype=dtype)
-        ) * torch.tensor([-1.0, 1.0], dtype=dtype)
-
-        self.assertEqual(
-            x.grad, expected_grad, atol=0, rtol=1e-12
-        )
-
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
         target = torch.rand(16, 4)
@@ -6479,6 +6453,21 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 class TestNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("use_pos_weight", [False, True])
+    @parametrize_test("create_graph", [False, True])
+    def test_bce_with_logits_numerical_stability(self, device, dtype, use_pos_weight, create_graph):
+        x = torch.tensor([37.42994775023705, -37.42994775023705], device=device, dtype=dtype, requires_grad=True)
+        target = torch.tensor([1.0, 0.0], device=device, dtype=dtype)
+        pos_weight = torch.tensor([2.0, 3.0], device=device, dtype=dtype) if use_pos_weight else None
+
+        loss = F.binary_cross_entropy_with_logits(x, target, pos_weight=pos_weight, reduction="sum")
+        (grad,) = torch.autograd.grad(loss, x, create_graph=create_graph)
+
+        scale = torch.tensor([-2.0 if use_pos_weight else -1.0, 1.0], device=device, dtype=dtype)
+        expected_grad = torch.sigmoid(-x.detach().abs()) * scale
+        self.assertEqual(grad, expected_grad)
 
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
