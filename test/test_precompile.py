@@ -7816,6 +7816,38 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertIsNone(saved.kernel.inductor_meta["combo_tuning_groups"])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_keeps_a_kernel_frozen_untuned_untuned(self):
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
+
+        never_run = _never_run(_static_runtime_kernel(32))
+        never_run.inductor_meta["coordinate_descent_tuning"] = True
+        never_run._should_coordesc_tune = True
+        payload, report = _freeze_triton_kernel(
+            "source", [never_run], require_tuned_backward=False
+        )
+        self.assertIsNotNone(report)
+        # A later capture in this process runs the kernel loaded from that record,
+        # whose one static launcher looks tuned.
+        loaded = _static_runtime_kernel(32)
+        loaded.inductor_meta = pickle.loads(payload).kernel.inductor_meta
+        loaded.is_backward, loaded._forward_use = True, False
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
+            _freeze_triton_kernel("source", [loaded], require_tuned_backward=True)
+        source = failure.exception.sources[0]
+        self.assertEqual([r["reason"] for r in source["instances"]], ["frozen_untuned"])
+        self.assertTrue(source["untuned_backward_eligible"])
+        payload, report = _freeze_triton_kernel(
+            "source", [loaded], require_tuned_backward=False
+        )
+        self.assertEqual(report["source_key"], "source")
+        self.assertTrue(
+            pickle.loads(payload).kernel.inductor_meta["precompile_frozen_untuned"]
+        )
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_refuses_untuned_when_an_instance_ran(self):
         from torch.compiler._runtime_cache import (
             _freeze_triton_kernel,
