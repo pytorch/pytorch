@@ -11973,6 +11973,28 @@ _GROUPED_MM_CK_TILE_CASES = [
     subtest(((2048, 256), (2880, 256), [96, 256], False), name="ck_tile_2d_2d_n2880"),
 ]
 
+# Every ck_tile config of each arch as "A/B layout, tile, waves, warp tile, padded dims, 1-element C stores", which
+# test_grouped_gemm_ck_tile_config_coverage requires the cases above to launch. RC is forward, RR dX and CR dW; each
+# layout also has the unaligned config (C1). Update this table when the configs in ck_tile_group_gemm.hip change.
+_GROUPED_MM_CK_TILE_CONFIGS = {
+    "gfx950": {
+        "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
+        "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
+        "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
+        "RR 128x128x64 4w 32x32x16 -N-", "RR 256x128x64 4w 16x16x32 MNK C1",
+        "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
+        "CR 256x128x64 4w 16x16x32 MNK C1",
+    },
+    "gfx942": {
+        "RC 128x192x64 4w 32x32x16 -N-", "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-",
+        "RC 256x192x64 4w 16x16x32 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
+        "RR 256x64x64 4w 16x16x32 ---", "RR 256x256x32 8w 32x32x16 ---", "RR 128x128x64 4w 16x16x32 ---",
+        "RR 256x128x32 4w 16x16x32 ---", "RR 128x64x64 4w 16x16x32 ---", "RR 256x128x32 4w 16x16x32 -N-",
+        "RR 256x128x64 4w 16x16x32 MNK C1",
+        "CR 128x128x64 4w 32x32x16 --K", "CR 256x128x64 4w 16x16x32 MNK", "CR 256x128x64 4w 16x16x32 MNK C1",
+    },
+}
+
 
 class TestGroupedMM(TestCase):
     def setUp(self):
@@ -12073,6 +12095,42 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
             self.grouped_mm_helper(a, b, offs, backward=False)
+
+    # test_grouped_gemm_rocm_backend only checks results. Check that its cases launch every ck_tile config of this arch,
+    # read from the kernel names, so a retune or another CU count can't drop a config from coverage unnoticed.
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_grouped_gemm_ck_tile_config_coverage(self, device):
+        from torch.profiler import profile, ProfilerActivity
+
+        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
+        if arch not in _GROUPED_MM_CK_TILE_CONFIGS:
+            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        dtype = torch.bfloat16
+        alignment = 16 // dtype.itemsize
+        names = set()
+        with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
+            for a_shape, b_shape, offsets, backward in (c.arg_values for c in _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES):
+                if any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
+                    continue  # unaligned 16-bit cases never reach ck_tile
+                for strided, a_row_major, b_row_major in itertools.product([False, True], repeat=3):
+                    a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
+                    b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
+                    offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
+                    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                        self.grouped_mm_helper(a, b, offs, backward=backward)
+                    names |= {e.name for e in prof.events() if "GroupedGemmKernel" in e.name}
+        shape_re = (r"TileGemmShape<ck_tile::sequence<(\d+), (\d+), (\d+)>, ck_tile::sequence<(\d+), (\d+), 1>, "
+                    r"ck_tile::sequence<(\d+), (\d+), (\d+)>")
+        traits_re = r"TileGemmUniversalTraits<(\w+), (\w+), (\w+), \w+, ck_tile::tensor_layout::gemm::(\w)\w*, ck_tile::tensor_layout::gemm::(\w)"
+        configs = set()
+        for name in names:
+            m, n, k, waves_m, waves_n, wm, wn, wk = re.search(shape_re, name).groups()
+            pad_m, pad_n, pad_k, a_layout, b_layout = re.search(traits_re, name).groups()
+            pads = "".join(d if p == "true" else "-" for d, p in zip("MNK", (pad_m, pad_n, pad_k)))
+            c1 = " C1" if "NoSplitKEpilogue" in name else ""
+            configs.add(f"{a_layout}{b_layout} {m}x{n}x{k} {int(waves_m) * int(waves_n)}w {wm}x{wn}x{wk} {pads}{c1}")
+        self.assertEqual(configs, _GROUPED_MM_CK_TILE_CONFIGS[arch])
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
