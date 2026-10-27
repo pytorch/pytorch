@@ -9347,6 +9347,35 @@ import torch
 
 def fn(x):
     return torch.ops.{ns}.triple.default(x.sin()) + 1
+
+
+class Child(torch.nn.Module):
+    def forward(self, x):
+        y = torch.ops.{ns}.triple.default(x.sin())
+        torch._dynamo.graph_break()
+        return y + 1
+
+
+child = Child()
+
+
+def step(x):
+    return child(x * 2) + 1
+
+
+def train_fn(x):
+    x = x.detach().requires_grad_()
+    torch.ops.{ns}.triple.default(x.sin()).sum().backward()
+    return x.grad
+
+
+def cond_fn(x):
+    return torch.cond(
+        x.sum() > 0,
+        lambda y: torch.ops.{ns}.triple.default(y),
+        lambda y: y.cos(),
+        (x,),
+    )
 """
 
 
@@ -9429,14 +9458,19 @@ print("custom op phase ok:", phase)
 class TestPrecompileCustomOpModules(TestCase):
     @skipIfCrossRef
     @parametrize(
-        "tracer,backend,entry",
+        "tracer,backend,entry,mode",
         [
-            ("make_fx", "eager", "fn"),
-            ("make_fx", "inductor", "fn"),
+            ("make_fx", "eager", "fn", None),
+            ("make_fx", "inductor", "fn", None),
+            ("dynamo", "eager", "fn", "standalone"),
+            ("dynamo", "inductor", "fn", "standalone"),
+            ("dynamo", "eager", "step", "installed"),
+            ("dynamo", "inductor", "cond_fn", "standalone"),
+            ("dynamo", "inductor", "train_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
-        self, tracer, backend, entry
+        self, tracer, backend, entry, mode
     ):
         with tempfile.TemporaryDirectory() as directory:
             tag = uuid.uuid4().hex
@@ -9474,6 +9508,8 @@ class TestPrecompileCustomOpModules(TestCase):
             ]
             # The backward's op is registered by a module the forward op's imports.
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module,)!r}")
+            if mode is not None:
+                self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
 
 class TestPrecompileCustomOpRecording(TestCase):
@@ -9500,6 +9536,27 @@ class TestPrecompileCustomOpRecording(TestCase):
         graph.output(z)
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(_op_names(gm), {(called_name, ""), (passed_name, "")})
+
+    def test_a_capture_records_the_ops_of_each_backend_graph(self):
+        from torch._dynamo.precompile_package import _CapturePackage
+
+        first, first_name = self._op("first")
+        second, second_name = self._op("second")
+
+        def graph(op):
+            return torch.fx.symbolic_trace(lambda x: op._opoverload(x) + 1)
+
+        # The artifact unions these over only the backends it serves.
+        package = _CapturePackage(lambda x: x)
+        package.add_backend_graph("__compiled_fn_1", graph(first))
+        package.add_backend_graph("__compiled_fn_2", graph(second))
+        self.assertEqual(
+            package.op_names,
+            {
+                "__compiled_fn_1": {(first_name, "")},
+                "__compiled_fn_2": {(second_name, "")},
+            },
+        )
 
 
 if __name__ == "__main__":
