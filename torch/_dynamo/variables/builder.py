@@ -229,20 +229,22 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
+from .descriptors import (
+    BoundBuiltinMethodVariable,
+    GetSetDescriptorVariable,
+    MemberDescriptorVariable,
+    MethodWrapperVariable,
+    PropertyVariable,
+)
 from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
-    BoundBuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
-    GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
-    MemberDescriptorVariable,
-    MethodWrapperVariable,
-    PropertyVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,

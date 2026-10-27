@@ -124,7 +124,6 @@ from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
-    _resolve_descriptor_get,
     generic_is_true,
     generic_repr,
     is_nb_not_implemented,
@@ -325,30 +324,6 @@ def is_pydantic_dataclass_cls(value: object) -> bool:
         inspect.isclass(value)
         and dataclasses.is_dataclass(value)
         and "__is_pydantic_dataclass__" in getattr(value, "__dict__", {})
-    )
-
-
-# Types whose instances are data descriptors (have __get__ + (__set__ or __delete__)).
-# CPython invokes data descriptors found on the type MRO *before* checking
-# the instance __dict__.  This set is used by is_data_descriptor for a fast
-# O(1) check before falling back to the generic hasattr probe.
-KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
-    {
-        property,
-        _collections._tuplegetter,
-        types.MemberDescriptorType,
-        types.GetSetDescriptorType,
-    }
-)
-
-
-def is_data_descriptor(obj: object) -> bool:
-    """Return True if *obj* is a data descriptor (has __get__ and (__set__ or __delete__))."""
-    tp = type(obj)
-    if tp in KNOWN_DATA_DESCRIPTOR_TYPES:
-        return True
-    return hasattr(tp, "__get__") and (
-        hasattr(tp, "__set__") or hasattr(tp, "__delete__")
     )
 
 
@@ -649,6 +624,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # 5. if cls_attr exists (plain) → return as-is
         # 6. if meta_attr is a non-data descriptor or plain → return
         # 7. raise AttributeError
+        from .descriptors import is_data_descriptor
 
         # Step 1-2: Metaclass data descriptors.
         # For type(cls) is type, these are C-level getset/member descriptors
@@ -675,6 +651,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # produce a bound method. For everything else, defer to GetAttrVariable
         # which routes call_function through call_method at runtime.
         if meta_attr is not NO_SUCH_SUBOBJ:
+            from .descriptors import _resolve_descriptor_get
+
             metacls_source = TypeSource(self.source) if self.source else None
             metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
             result = _resolve_descriptor_get(
@@ -2586,6 +2564,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     type_attr, self, source=source
                 )
 
+        from .descriptors import is_data_descriptor
+
         if is_cython_function(type_attr):
             raise AssertionError(
                 f"Cannot trace Cython function {name} on user-defined type {self.python_type_name()}"
@@ -3805,6 +3785,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
 
+        from .descriptors import is_data_descriptor
+
         # Step 2: Data descriptors on the type take priority over instance dict.
         if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
             return self.resolve_data_descriptor(tx, name, type_attr, source)
@@ -4257,6 +4239,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         if not self._object_has_getattribute:
+            from .descriptors import is_data_descriptor
+
             type_attr = self.lookup_class_mro_attr(name)
             if (
                 (type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr))

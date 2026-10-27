@@ -45,7 +45,6 @@ from ..source import (
     Source,
     TypeDictSource,
     TypeMROSource,
-    TypeSource,
 )
 from ..utils import specialize_symnode
 from .base import (
@@ -2279,78 +2278,6 @@ def mro_attr_source(
     return None
 
 
-def _resolve_descriptor_get(
-    tx: "InstructionTranslatorBase",
-    type_attr: object,
-    obj: VariableTracker,
-    class_vt: VariableTracker,
-    source: "Source | None",
-    name: str,
-) -> "VariableTracker | None":
-    """Invoke tp_descr_get on a type attribute if it's a descriptor.
-
-    Handles all descriptor types that have dedicated VTs with
-    tp_descr_get_impl.  Returns None if type_attr is not a recognized
-    descriptor type (plain class variable).
-    """
-    import types as _types
-
-    if isinstance(type_attr, property):
-        # The property object lives on the type, not the instance: anchoring it at
-        # obj.source would make PropertyVariable's fget source read the *result* of
-        # the getter and then ask an int for .fget.
-        prop_source = (
-            mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
-            if obj.source
-            else None
-        )
-        prop_vt = variables.PropertyVariable(type_attr, source=prop_source)
-        return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.MemberDescriptorType):
-        md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
-        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.GetSetDescriptorType):
-        gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
-        return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
-    _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
-    if isinstance(type_attr, _tuplegetter):
-        tg_vt = variables.TupleGetterVariable(type_attr, source=source)
-        return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, staticmethod):
-        sm_vt = variables.StaticMethodVariable.from_descriptor(
-            tx, type_attr, source=source
-        )
-        return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, classmethod):
-        cm_vt = variables.ClassMethodVariable.from_descriptor(
-            tx, type_attr, name, source=source
-        )
-        return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.ClassMethodDescriptorType):
-        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
-        return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.WrapperDescriptorType):
-        wd_vt = variables.WrapperDescriptorVariable(
-            type_attr, owner=class_vt, source=source
-        )
-        return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.MethodDescriptorType):
-        md_vt = variables.MethodDescriptorVariable(
-            type_attr, owner=class_vt, source=source
-        )
-        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(
-            variables.UserFunctionVariable(
-                type_attr, source=source and AttrSource(source, "__func__")
-            ),
-            obj,
-            source=source,
-        )
-
-    return None
-
-
 # BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
 # does not handle it, so it falls through to _UnhandledDescriptorError
 # and generic_getattr's GetAttrVariable fallback.
@@ -2396,7 +2323,7 @@ def object_generic_getattr(
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
       7. AttributeError
     """
-    from .user_defined import is_data_descriptor
+    from .descriptors import _resolve_descriptor_get, is_data_descriptor
 
     py_type = obj.python_type()
     source = obj.source and AttrSource(obj.source, name)
@@ -2470,7 +2397,7 @@ def generic_getattr(
     to obj.tp_getattro_impl(tx, name).  On NotImplementedError, falls back
     to GetAttrVariable (deferred resolution).
     """
-    from .user_defined import is_data_descriptor
+    from .descriptors import is_data_descriptor
 
     # NOTE [Tensor "grad" and "_grad" attr]
     if obj.is_tensor() and name == "_grad":
