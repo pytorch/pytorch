@@ -1395,9 +1395,11 @@ void ldl_diagonal_panel(
 template <typename scalar_t, bool hermitian>
 void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& info, int n, int lda) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
-  auto* dLD = static_cast<scalar_t*>(LD.data_ptr());
-  auto* dipiv = static_cast<int*>(pivots.data_ptr());
-  auto* dinfo = static_cast<int*>(info.data_ptr());
+  const auto batch_size = batchCount(LD);
+  const int64_t matrix_stride = matrixStride(LD);
+  auto* LD_data = static_cast<scalar_t*>(LD.data_ptr());
+  auto* pivots_data = static_cast<int*>(pivots.data_ptr());
+  auto* info_data = static_cast<int*>(info.data_ptr());
 
   auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
   auto* dstep = static_cast<int*>(panel_step_holder.data_ptr());
@@ -1411,81 +1413,69 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   auto* dpart_idx = static_cast<int*>(part_idx.data_ptr());
 
   const auto nb = ldl::panel_width<scalar_t>(n);
-  int step = 0;
 
-  // Right-Down-Diagonal-looking blocked LDLT/LDLH:
-  // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
-  // and factor diagonal panels, then update the trailing matrix with a GEMM
-  while (step < n) {
-    // 1. Panel factorization {
-    // Panel ends land on the nb grid, which is what aligns the trailing GEMM (see
-    // panel_width). It is step + 1 that is snapped, not step: the panel kernel leaves its
-    // last column to the next panel, so step comes back one below the previous panel end.
-    const auto panel_end = std::min(((step + 1) / nb + 1) * nb, n);
-    const auto curr_nb = panel_end - step;
-    ldl_diagonal_panel<scalar_t, hermitian>(
-      dLD, n, lda,
-      curr_nb, step, dstep,
-      dipiv, dinfo,
-      dpart_max, dpart_idx, max_coop_blocks
-    );
-    // }
+  // The matrices of the batch are factored one at a time
+  for (const auto i : c10::irange(batch_size)) {
+    auto* dLD = LD_data + i * matrix_stride;
+    auto* dipiv = pivots_data + i * n;
+    auto* dinfo = info_data + i;
+    int step = 0;
 
-    // 2. Trailing matrix update of B[panel_end:, panel_end:] {
-    // D2H to update the step on the host
-    auto curr_step = panel_step_holder.item().toInt();
-    if (panel_end < n) {
-      // TODO: LD22 is symmetric/Hermitian, so updating its lower triangle suffices.
-      // cuBLAS syrkx/herkx with W = op(U12) as an m x k matrix (a transpose, e.g. via
-      // cublas<t>geam) beats this gemm by 1.2-1.9x for n >= 16384 on H100 (1.6-1.9x
-      // at n = 24576). That requires the panel kernel to stop reading the upper
-      // triangle of LD22 (candidate column, swaps).
-      at::cuda::blas::gemm(
-        'n', 'n',
-        n - panel_end, n - panel_end, curr_step - step,
-        /*alpha=*/static_cast<scalar_t>(-1),
-        /*L21=*/dLD + LinOff(panel_end, step, lda), lda,
-        /*U12=*/dLD + LinOff(step, panel_end, lda), lda,
-        /*beta=*/static_cast<scalar_t>(1),
-        /*LD22=*/dLD + LinOff(panel_end, panel_end, lda), lda
+    // Right-Down-Diagonal-looking blocked LDLT/LDLH:
+    // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
+    // and factor diagonal panels, then update the trailing matrix with a GEMM
+    while (step < n) {
+      // 1. Panel factorization {
+      // Panel ends land on the nb grid, which is what aligns the trailing GEMM (see
+      // panel_width). It is step + 1 that is snapped, not step: the panel kernel leaves its
+      // last column to the next panel, so step comes back one below the previous panel end.
+      const auto panel_end = std::min(((step + 1) / nb + 1) * nb, n);
+      const auto curr_nb = panel_end - step;
+      ldl_diagonal_panel<scalar_t, hermitian>(
+        dLD, n, lda,
+        curr_nb, step, dstep,
+        dipiv, dinfo,
+        dpart_max, dpart_idx, max_coop_blocks
       );
-    }
-    // }
+      // }
 
-    // Finish iteration
-    step = curr_step;
+      // 2. Trailing matrix update of B[panel_end:, panel_end:] {
+      // D2H to update the step on the host
+      auto curr_step = panel_step_holder.item().toInt();
+      if (panel_end < n) {
+        // TODO: LD22 is symmetric/Hermitian, so updating its lower triangle suffices.
+        // cuBLAS syrkx/herkx with W = op(U12) as an m x k matrix (a transpose, e.g. via
+        // cublas<t>geam) beats this gemm by 1.2-1.9x for n >= 16384 on H100 (1.6-1.9x
+        // at n = 24576). That requires the panel kernel to stop reading the upper
+        // triangle of LD22 (candidate column, swaps).
+        at::cuda::blas::gemm(
+          'n', 'n',
+          n - panel_end, n - panel_end, curr_step - step,
+          /*alpha=*/static_cast<scalar_t>(-1),
+          /*L21=*/dLD + LinOff(panel_end, step, lda), lda,
+          /*U12=*/dLD + LinOff(step, panel_end, lda), lda,
+          /*beta=*/static_cast<scalar_t>(1),
+          /*LD22=*/dLD + LinOff(panel_end, panel_end, lda), lda
+        );
+      }
+      // }
+
+      // Finish iteration
+      step = curr_step;
+    }
   }
 }
 
-// Factors a single matrix: the panel kernels run on a 1x1x1 grid.
-static void ldl_factor_blas3_single(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
-  int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
-  int lda = std::max(cuda_int_cast(LD.stride(-1), "LD.stride(-1)"), std::max(1, n));
-  info.zero_();
-
-  // Disabling TF32 in GEMMs
-  NoTF32Guard disable_tf32;
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LD.scalar_type(), "ldl_factor_blas3_kernel", [&] {
-    // Real types: symmetric and Hermitian coincide, so one instantiation suffices
-    constexpr bool is_complex = c10::is_complex<scalar_t>::value;
-    if (hermitian && is_complex) {
-      ldl_factor_panels<scalar_t, /*hermitian=*/is_complex>(LD, pivots, info, n, lda);
-    } else {
-      ldl_factor_panels<scalar_t, /*hermitian=*/false>(LD, pivots, info, n, lda);
-    }
-  });
-}
-
-void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
-  const auto n = LD.size(-1);
+// Hermitian LDL, i.e. symmetric for real dtypes
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info) {
+  const int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
   if (LD.numel() == 0) {
     return;
   }
   // As in LAPACK, the imaginary part of a Hermitian diagonal is ignored. It has to
   // go before any GEMM: one non-finite there would turn the real part into NaN via
   // beta * C = (1 + 0i) * C, as 0 * inf is NaN.
-  if (hermitian && LD.is_complex()) {
+  if (LD.is_complex()) {
     at::imag(LD.diagonal(0, -2, -1)).zero_();
   }
   if (n == 1) {
@@ -1504,24 +1494,19 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
   // Scoped, so that the copy is freed before the factorization.
   {
     auto L21 = LD.tril(-1);
-    if (hermitian) {
-      L21.conj_physical_();
-    }
+    L21.conj_physical_();
     LD.add_(L21.mT());
   }
 
-  const auto batch_size = batchCount(LD);
-  if (batch_size == 1) {
-    ldl_factor_blas3_single(LD, pivots, info, hermitian);
-  } else {
-    // view, not reshape: a silent copy would discard the in-place result.
-    auto LD_3d = LD.view({-1, n, n});
-    auto pivots_2d = pivots.view({-1, n});
-    auto info_1d = info.view({-1});
-    for (const auto i : c10::irange(batch_size)) {
-      ldl_factor_blas3_single(LD_3d[i], pivots_2d[i], info_1d[i], hermitian);
-    }
-  }
+  const int lda = std::max(cuda_int_cast(LD.stride(-1), "LD.stride(-1)"), std::max(1, n));
+  info.zero_();
+
+  // Disabling TF32 in GEMMs
+  NoTF32Guard disable_tf32;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LD.scalar_type(), "ldl_factor_blas3_kernel", [&] {
+    ldl_factor_panels<scalar_t, /*hermitian=*/c10::is_complex<scalar_t>::value>(LD, pivots, info, n, lda);
+  });
 
   // ldl solver does not read the upper triangular part of the LD tensor.
   // However, to be consistent with LAPACK/CUSOLVER, we zero it out.
