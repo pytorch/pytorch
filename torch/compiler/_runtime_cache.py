@@ -365,6 +365,9 @@ class _UnresolvedTritonExport(RuntimeError):
 def _triton_export_rejection(kernel: CachingAutotuner) -> str | None:
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
+    # A record frozen untuned, loaded back: its one static launcher looks tuned.
+    if kernel.inductor_meta.get("precompile_frozen_untuned"):
+        return "frozen_untuned"
     if len(kernel.launchers) != 1:
         return "launcher_count_not_one"
     result = getattr(kernel.launchers[0], "_compile_result", None)
@@ -489,7 +492,7 @@ def _freeze_untuned_backward(
     reject: Callable[[CachingAutotuner, dict[str, object]], None],
 ) -> tuple[bytes, dict[str, object]] | None:
     """The frozen record of a backward source no instance ran, with tuning turned
-    off and the first static config one loaded that autotuning would not skip for
+    off, marked untuned, and the first static config one loaded that autotuning would not skip for
     spilling registers (the first, if all spill), and its untuned report; None if
     no instance has one whose cubin it can carry."""
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
@@ -524,6 +527,7 @@ def _freeze_untuned_backward(
             **saved.inductor_meta,
             "coordinate_descent_tuning": False,
             "combo_tuning_groups": None,
+            "precompile_frozen_untuned": True,
         }
         payload = _pickle_frozen_triton_kernel(key, kernel, saved, saved_result)
         if not isinstance(payload, bytes):
@@ -584,9 +588,13 @@ def _freeze_triton_kernel(
     # either. Its configs compute the same values up to floating-point reduction
     # order, so unless the caller requires tuned backward kernels, it is frozen
     # untuned. A source a forward instance shares is still refused: a forward no
-    # call ran means the capture missed a path serving may need.
+    # call ran means the capture missed a path serving may need. A record frozen
+    # untuned and loaded back stays untuned, whether or not this capture ran it.
     untuned = None
-    if (
+    frozen_untuned = any(
+        kernel.inductor_meta.get("precompile_frozen_untuned") for kernel in instances
+    )
+    if frozen_untuned or (
         instances
         and not any(kernel._forward_use for kernel in instances)
         and not any(kernel._launched for kernel in instances)
