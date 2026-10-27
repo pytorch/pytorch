@@ -490,11 +490,13 @@ void initPythonBindings(PyObject* module) {
                 p.trace_only);
           },
           [](const py::tuple& t) { // __setstate__
+            // Index 8 is a string only in the current layout, which tells it
+            // apart from older layouts of the same length.
             TORCH_CHECK(
-                t.size() == 11,
-                "Expected 11 values in _ExperimentalConfig state, got ",
+                t.size() == 11 && py::isinstance<py::str>(t[8]),
+                "Unrecognized _ExperimentalConfig state with ",
                 t.size(),
-                ". Pickles from older PyTorch versions are not supported.");
+                " values. Pickles from older PyTorch versions are not supported.");
 
             py::list py_perf_events = t[1].cast<py::list>();
             std::vector<std::string> performance_events;

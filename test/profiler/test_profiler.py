@@ -1041,15 +1041,22 @@ class TestProfiler(TestCase):
             self.assertEqual(copied.__getstate__(), config.__getstate__())
 
     def test_experimental_config_rejects_old_pickle_state(self):
-        # Pickles from before PyTorch 2.16 use a different layout. Recent ones
-        # have more values than the current state.
-        state = _ExperimentalConfig().__getstate__() + (False,)
-        # Unpickling calls __setstate__ on an object made by __new__. pybind
-        # ignores __setstate__ on an already initialized object, so this test
-        # can't use _ExperimentalConfig().
-        config = _ExperimentalConfig.__new__(_ExperimentalConfig)
-        with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
-            config.__setstate__(state)
+        # Pickles from before PyTorch 2.16 use a different layout, with more,
+        # fewer, or the same number of values as the current state.
+        state = _ExperimentalConfig().__getstate__()
+        old_states = [
+            state + (False,),
+            state[:-1],
+            (False, [], False, False, False, False, False, False, False, "", False),
+        ]
+        for old_state in old_states:
+            # Unpickling calls __setstate__ on an object made by __new__. pybind
+            # ignores __setstate__ on an already initialized object, so this
+            # test can't use _ExperimentalConfig().
+            config = _ExperimentalConfig.__new__(_ExperimentalConfig)
+            with self.subTest(old_state=old_state):
+                with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
+                    config.__setstate__(old_state)
 
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
