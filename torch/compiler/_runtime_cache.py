@@ -542,7 +542,7 @@ def _freeze_untuned_backward(
                 ),
                 static[0],
             )
-            spills = kernel._skips_for_spilling(chosen_launcher)
+            skipped_for_spilling = kernel._skips_for_spilling(chosen_launcher)
             saved, saved_result = _detached_for_freeze(kernel, chosen)
             kernel_name = kernel.inductor_meta.get("kernel_name")
             compile_id = getattr(kernel, "compile_id", None)
@@ -562,8 +562,9 @@ def _freeze_untuned_backward(
             "compile_id": str(compile_id) if compile_id is not None else None,
             "direction": "backward",
             "static_config_count": len(static),
-            # Every config spilled past the autotuning threshold, so it froze one too.
-            "spills": spills,
+            # Autotuning would skip every config for spilling registers, so it froze
+            # one of them.
+            "skipped_for_spilling": skipped_for_spilling,
         }
     return None
 
@@ -832,7 +833,7 @@ def _report_untuned_triton_kernels(untuned: list[dict[str, object]]) -> None:
         "with the first of its static configs that autotuning would not skip for "
         "spilling registers (the first, if all spill): %s. The "
         "precompile_triton_untuned_kernels artifact lists them all, and which "
-        "spill.",
+        "froze a config autotuning would skip.",
         len(names),
         ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
     )
