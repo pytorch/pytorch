@@ -1192,13 +1192,15 @@ class AOTInductorTestsTemplate:
         _ = model(*input1)
 
         ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
-        torch._inductor.aoti_compile_and_package(
+        package_path = torch._inductor.aoti_compile_and_package(
             ep,
             inductor_configs={
                 "aot_inductor.use_runtime_constant_folding": True,
                 "aot_inductor.use_consts_asm_build": False,
             },
         )
+        compiled = torch._inductor.aoti_load_package(package_path)
+        self.assertEqual(compiled(*input1), model(*input1))
 
     @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])

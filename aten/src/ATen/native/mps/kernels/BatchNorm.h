@@ -3,7 +3,7 @@
 
 // Per-channel Welford partial (mean, M2, count), stored as packed_float3
 C10_METAL_CONSTEXPR uint32_t BN_PARTIAL_SIZE = 3;
-enum class BNStat : uint32_t { Mean, Scale, Shift, NumStats };
+enum class BNStat : uint32_t { Mean, Scale, Shift, DyScale, NumStats };
 enum class BNParam : uint32_t {
   Weight,
   Bias,
@@ -11,6 +11,14 @@ enum class BNParam : uint32_t {
   RunningVar,
   SaveMean,
   SaveInvstd,
+  NumParams
+};
+enum class BNBackwardParam : uint32_t {
+  Weight,
+  Mean,
+  Var,
+  GradWeight,
+  GradBias,
   NumParams
 };
 
