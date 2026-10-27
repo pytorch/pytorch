@@ -54,10 +54,10 @@ class Status(NamedTuple):
         # An id that isn't one is left out rather than raising, which would lose
         # the reply itself
         valid = comment_id is not None and 0 < comment_id <= MAX_COMMENT_ID
-        command = f" comment={comment_id}" if valid else ""
+        suffix = f" comment={comment_id}" if valid else ""
         return (
             f"<!-- mergebot-status: {self.command.value} {self.result.value}"
-            f"{command} -->"
+            f"{suffix} -->"
         )
 
 

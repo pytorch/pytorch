@@ -3813,7 +3813,11 @@ def main() -> None:
     except Exception as e:
         handle_exception(e)
 
-        if args.comment_id and args.pr_num:
+        if isinstance(e, LandedError):
+            # The merge landed: keep the record merge_into saved, if it got that
+            # far, rather than overwrite it with a failure
+            print("Merge landed, not recording it as failed")
+        elif args.comment_id and args.pr_num:
             # Finally, upload the record to s3, we don't have access to the
             # list of pending and failed checks here, but they are not really
             # needed at the moment

@@ -4210,7 +4210,7 @@ class TestMainStatusTags(NoNetworkTestCase):
         self.post = self.patch("trymerge.gh_post_pr_comment")
         self.merge = self.patch("trymerge.merge")
         self.patch("trymerge.gh_remove_label")
-        self.patch("trymerge.save_merge_record")
+        self.record = self.patch("trymerge.save_merge_record")
         self.patch("trymerge.GitHubPR.get_merge_base", return_value="base-sha")
         self.patch("trymerge.GitHubPR.get_author", return_value="author")
         self.patch("trymerge.GitHubPR.last_commit_sha", return_value="head-sha")
@@ -4223,6 +4223,8 @@ class TestMainStatusTags(NoNetworkTestCase):
         trymerge_main()
         self.assertEqual(self.statuses(), [MERGE_FAILURE])
         self.assertTrue(self.post.call_args.args[3].startswith("## Merge failed"))
+        self.record.assert_called_once()
+        self.assertTrue(self.record.call_args.kwargs["is_failed"])
 
     def test_closed_pr_is_tagged_failure(self) -> None:
         self.info.return_value = {**stacked_pr_info(base="main"), "closed": True}
@@ -4246,6 +4248,8 @@ class TestMainStatusTags(NoNetworkTestCase):
             body.startswith("## The merge landed, but a step after it failed\n")
         )
         self.assertIn("**Reason**: close failed", body)
+        # The record merge_into saved for the landed merge is not overwritten
+        self.record.assert_not_called()
 
     def test_failure_after_a_revert_landed_is_untagged(self) -> None:
         self.args.revert = True
