@@ -99,7 +99,13 @@ static PyObject* THPStorage_copy_(
       src.nbytes(),
       " bytes");
 
-  at::storage_copy(self_, src, non_blocking);
+  // Match Tensor.copy_: blocking CUDA->CPU copies may wait on prior GPU work,
+  // so release the GIL around the native copy so other Python threads can run.
+  // See https://github.com/pytorch/pytorch/issues/200410
+  {
+    pybind11::gil_scoped_release no_gil;
+    at::storage_copy(self_, src, non_blocking);
+  }
 
   return Py_NewRef(self);
 

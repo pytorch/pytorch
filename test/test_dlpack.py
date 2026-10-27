@@ -2,18 +2,22 @@
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import xfailCUDAIfSM89OrLaterOnWindows
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    xfailCUDAIfSM89OrLaterOnWindows,
+)
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
+    onlyAccelerator,
     onlyCUDA,
     onlyNativeDeviceTypes,
-    onlyOn,
+    skipCUDAIf,
     skipCUDAIfNotRocm,
     skipMeta,
+    skipMPS,
     skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
@@ -21,7 +25,10 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     IS_JETSON,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
@@ -54,6 +61,125 @@ class TensorDLPackWrapper:
 
 
 class TestTorchDlPack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # These tests exercise the parts of the DLPack protocol that don't depend on
+    # where the tensor lives: export rejections, stride handling and the NumPy
+    # producer path.
+
+    def test_dlpack_invalid_cpu_stream(self):
+        x = make_tensor((5,), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
+            x.__dlpack__(stream=0)
+
+    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
+    def test_dlpack_export_requires_grad(self):
+        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(BufferError, r"require gradient"):
+            x.__dlpack__()
+
+    def test_dlpack_export_is_conj(self):
+        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+        y = torch.conj(x)
+        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
+            y.__dlpack__()
+
+    def test_dlpack_export_non_strided(self):
+        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
+        y = torch.conj(x)
+        with self.assertRaisesRegex(BufferError, r"strided"):
+            y.__dlpack__()
+
+    def test_dlpack_normalize_strides(self):
+        x = torch.rand(16)
+        y = x[::3][:1]
+        self.assertEqual(y.shape, (1,))
+        self.assertEqual(y.stride(), (3,))
+        z = from_dlpack(y)
+        self.assertEqual(z.shape, (1,))
+        # Stride normalization has been removed, strides should be preserved
+        self.assertEqual(z.stride(), (3,))
+
+    @xfailIfTorchDynamo
+    def test_from_dlpack_negative_strides(self):
+        # torch.from_dlpack() on a NumPy array with negative strides used to
+        # abort the process instead of raising a catchable Python exception.
+        # See https://github.com/pytorch/pytorch/issues/188023.
+        import numpy as np
+
+        # 1-D negative stride
+        a1 = np.arange(8.0)[::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a1)
+
+        # 2-D, one negative axis
+        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a2)
+
+    def test_dlpack_copy_fallback(self):
+        """Test that copy parameter works even with producers that don't support it"""
+        import numpy as np
+
+        # Test copy=True - should work even if NumPy doesn't support copy parameter
+        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t = from_dlpack(np_array, copy=True)
+
+        # Verify it's a copy by modifying tensor and checking NumPy unchanged
+        t[0] = 999.0
+        self.assertEqual(np_array[0], 1.0)
+
+        # Test copy=None (default) - should be zero-copy view
+        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        t2 = from_dlpack(np_array2)
+        t2[0] = 999.0
+        self.assertEqual(np_array2[0], 999.0)
+
+    def test_dlpack_unsupported_dtype_error(self):
+        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+
+        with self.assertRaisesRegex(
+            BufferError, ".* types are not supported by dlpack"
+        ):
+            from_dlpack(inp)
+
+    @parametrize(
+        "dtype",
+        # Note: NumPy DLPack bool support only landed in 1.25.
+        all_types_and_complex_and(torch.half, torch.uint16, torch.uint32, torch.uint64),
+    )
+    def test_numpy_dlpack_protocol_conversion(self, dtype):
+        import numpy as np
+
+        t = make_tensor((5,), dtype=dtype, device="cpu")
+
+        if hasattr(np, "from_dlpack"):
+            # DLPack support only available from NumPy 1.22 onwards.
+            # Here, we test having another framework (NumPy) calling our
+            # Tensor.__dlpack__ implementation.
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
+
+        # We can't use the array created above as input to from_dlpack.
+        # That's because DLPack imported NumPy arrays are read-only.
+        # Thus, we need to convert it to NumPy by using the numpy() method.
+        t_arr = t.numpy()
+
+        # Transform the NumPy array back using DLPack.
+        res = from_dlpack(t_arr)
+
+        self.assertEqual(t, res)
+        self.assertEqual(t.data_ptr(), res.data_ptr())
+
+
+class TestTorchDlPackDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     exact_dtype = True
 
     @skipMeta
@@ -116,8 +242,8 @@ class TestTorchDlPack(TestCase):
         stream.synchronize()
         return z
 
-    @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
+    @skipMPS
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
@@ -128,8 +254,8 @@ class TestTorchDlPack(TestCase):
         z = self._dlpack_conversion_with_streams(stream, x)
         self.assertEqual(z, x)
 
-    @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
+    @skipMPS
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -204,25 +330,27 @@ class TestTorchDlPack(TestCase):
         y5_dl = torch.from_dlpack(y5)
         self.assertEqual(y5, y5_dl)
 
-    @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
+    @skipMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
+        stream_a = torch.Stream()
+        stream_b = torch.Stream()
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
-        with torch.cuda.stream(stream_a):
+        with stream_a:
             x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.native_handle))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
 
-    @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
+    @skipMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -232,12 +360,12 @@ class TestTorchDlPack(TestCase):
         torch.float4_e2m1fn_x2,
     )
     def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
-        with torch.cuda.stream(stream_a):
+        stream_a = torch.Stream()
+        stream_b = torch.Stream()
+        with stream_a:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.native_handle))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
@@ -364,12 +492,6 @@ class TestTorchDlPack(TestCase):
                 x.__dlpack__(stream=0)
 
     @skipMeta
-    def test_dlpack_invalid_cpu_stream(self):
-        x = make_tensor((5,), dtype=torch.float32, device="cpu")
-        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
-            x.__dlpack__(stream=0)
-
-    @skipMeta
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_dlpack_tensor_on_different_device(self, devices):
@@ -384,66 +506,11 @@ class TestTorchDlPack(TestCase):
             with torch.accelerator.device_index(torch.device(dev1).index):
                 x.__dlpack__()
 
-    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
-    @skipMeta
-    def test_dlpack_export_requires_grad(self):
-        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
-        with self.assertRaisesRegex(BufferError, r"require gradient"):
-            x.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_export_is_conj(self):
-        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
-        y = torch.conj(x)
-        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
-            y.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_export_non_strided(self):
-        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
-        y = torch.conj(x)
-        with self.assertRaisesRegex(BufferError, r"strided"):
-            y.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_normalize_strides(self):
-        x = torch.rand(16)
-        y = x[::3][:1]
-        self.assertEqual(y.shape, (1,))
-        self.assertEqual(y.stride(), (3,))
-        z = from_dlpack(y)
-        self.assertEqual(z.shape, (1,))
-        # Stride normalization has been removed, strides should be preserved
-        self.assertEqual(z.stride(), (3,))
-
-    @xfailIfTorchDynamo
-    @skipMeta
-    @onlyCPU
-    def test_from_dlpack_negative_strides(self, device):
-        # torch.from_dlpack() on a NumPy array with negative strides used to
-        # abort the process instead of raising a catchable Python exception.
-        # See https://github.com/pytorch/pytorch/issues/188023.
-        import numpy as np
-
-        # 1-D negative stride
-        a1 = np.arange(8.0)[::-1]
-        with self.assertRaisesRegex(
-            RuntimeError, "Storage size calculation overflowed"
-        ):
-            torch.from_dlpack(a1)
-
-        # 2-D, one negative axis
-        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
-        with self.assertRaisesRegex(
-            RuntimeError, "Storage size calculation overflowed"
-        ):
-            torch.from_dlpack(a2)
-
     @skipMeta
     @onlyNativeDeviceTypes
     def test_automatically_select_in_creation(self, device):
         # Create a new tensor, and wrap it using TensorDLPackWrapper.
-        tensor = torch.rand(10)
+        tensor = torch.rand(10, device=device)
         wrap = TensorDLPackWrapper(tensor)
         # Create a new tensor from the wrapper.
         # This should identify that the wrapper class provides the DLPack methods
@@ -483,41 +550,6 @@ class TestTorchDlPack(TestCase):
         # Consumer should still be able to process a smaller version capsule.
         test(device, max_version=(2, 0))
 
-    @skipMeta
-    @onlyCPU
-    @dtypes(
-        # Note: NumPy DLPack bool support only landed in 1.25.
-        *all_types_and_complex_and(
-            torch.half,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        )
-    )
-    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
-        import numpy as np
-
-        t = make_tensor((5,), dtype=dtype, device=device)
-
-        if hasattr(np, "from_dlpack"):
-            # DLPack support only available from NumPy 1.22 onwards.
-            # Here, we test having another framework (NumPy) calling our
-            # Tensor.__dlpack__ implementation.
-            np_from_dlpack = np.from_dlpack(t)
-            np_from_copy = t.numpy()
-            self.assertEqual(np_from_dlpack, np_from_copy)
-
-        # We can't use the array created above as input to from_dlpack.
-        # That's because DLPack imported NumPy arrays are read-only.
-        # Thus, we need to convert it to NumPy by using the numpy() method.
-        t_arr = t.numpy()
-
-        # Transform the NumPy array back using DLPack.
-        res = from_dlpack(t_arr)
-
-        self.assertEqual(t, res)
-        self.assertEqual(t.data_ptr(), res.data_ptr())
-
     def _test_from_dlpack(self, device, out_device=None, copy=None):
         if isinstance(device, str):
             device = torch.device(device)
@@ -542,8 +574,7 @@ class TestTorchDlPack(TestCase):
             # Otherwise, inp should be copied.
             self.assertNotEqual(inp.data_ptr(), out.data_ptr())
 
-    @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
     def test_copy(self, device):
         # Force-copy same device tensor.
         self._test_from_dlpack(device, copy=True)
@@ -552,9 +583,7 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device="cpu")
         self._test_from_dlpack(device, out_device="cpu", copy=True)
 
-    @skipMeta
-    @onlyOn(["xpu", "cuda"])
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3077")
+    @onlyAccelerator
     def test_no_copy(self, device):
         # No copy, since tensor lives in the same device.
         self._test_from_dlpack(device)
@@ -562,29 +591,10 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device=device)
         self._test_from_dlpack(device, out_device=device, copy=False)
 
-    @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
-
-    def test_dlpack_copy_fallback(self):
-        """Test that copy parameter works even with producers that don't support it"""
-        import numpy as np
-
-        # Test copy=True - should work even if NumPy doesn't support copy parameter
-        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        t = from_dlpack(np_array, copy=True)
-
-        # Verify it's a copy by modifying tensor and checking NumPy unchanged
-        t[0] = 999.0
-        self.assertEqual(np_array[0], 1.0)
-
-        # Test copy=None (default) - should be zero-copy view
-        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
-        t2 = from_dlpack(np_array2)
-        t2[0] = 999.0
-        self.assertEqual(np_array2[0], 999.0)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -597,20 +607,9 @@ class TestTorchDlPack(TestCase):
         ):
             inp.__dlpack__(max_version=(1, 0), dl_device=(dl_device_type, 0))
 
-    @skipMeta
-    @onlyCPU
-    def test_dlpack_unsupported_dtype_error(self, device):
-        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
-
-        with self.assertRaisesRegex(
-            BufferError, ".* types are not supported by dlpack"
-        ):
-            from_dlpack(inp)
-
     @xfailCUDAIfSM89OrLaterOnWindows
     @skipMeta
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
     def test_dlpack_exchange_api(self, device):
         """Comprehensive test of all DLPack Exchange API functions using inline C++"""
         # Check that the C API capsule exists and get it
@@ -847,7 +846,6 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
     def test_dlpack_exchange_api_sliced(self, device):
         # Regression: on MPS, DLTensor.data is an opaque id<MTLBuffer>, so
         # toDLPackNonOwning must export the storage base and carry the view
@@ -915,10 +913,9 @@ class TestTorchDlPack(TestCase):
         )
         module.check_sliced_dltensor(base, sliced, api_capsule)
 
-    @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     def test_numpy_cross_device_transfer(self, device):
-        """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA/XPU).
+        """Test cross-device transfer from NumPy (CPU) to PyTorch on an accelerator.
 
         This tests the fix for issue #169186 where torch.from_dlpack(numpy_array, device="cuda")
         would fail with "unsupported device requested" because PyTorch incorrectly asked
@@ -966,23 +963,22 @@ class TestTorchDlPack(TestCase):
         t_cpu[0] = 999
         self.assertEqual(np_array2[0], 999)
 
-    @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     @deviceCountAtLeast(2)
     def test_numpy_cross_device_multi_gpu(self, devices):
-        """Test cross-device transfer to specific CUDA devices (cuda:0, cuda:1, etc)."""
+        """Test cross-device transfer to specific accelerator devices by index."""
         import numpy as np
 
         dev0, dev1 = devices[:2]
         np_array = np.arange(5, dtype=np.float32)
 
-        # Test transfer to cuda:0
+        # Test transfer to the first device
         t0 = from_dlpack(np_array, device=dev0)
         self.assertEqual(t0.device, torch.device(dev0))
         expected = torch.arange(5, dtype=torch.float32, device=dev0)
         self.assertEqual(t0, expected)
 
-        # Test transfer to cuda:1
+        # Test transfer to the second device
         t1 = from_dlpack(np_array, device=dev1)
         self.assertEqual(t1.device, torch.device(dev1))
         expected = torch.arange(5, dtype=torch.float32, device=dev1)
@@ -991,9 +987,30 @@ class TestTorchDlPack(TestCase):
         # Verify they're on different devices
         self.assertNotEqual(t0.device, t1.device)
 
+    @onlyAccelerator
+    @skipCUDAIf(not SM80OrLater, "SM80+ required")
+    @skipIfTorchDynamo(
+        "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
+    )
+    def test_readonly_wrapper_bare_capsule_is_valid(self, device):
+        a = torch.randn(8, device=device, dtype=torch.float32)
+        a_cow = a._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        addr = a_cow.const_data_ptr()
 
+        # Bare-capsule protocol: from_dlpack() calls __dlpack__() directly and
+        # ignores __dlpack_c_exchange_api__ (the fast path covered by
+        # TestReadOnlyDLPack.test_wrapper_routes_fast_path_to_const_api).
+        back = torch.from_dlpack(ReadOnlyTensorWrapper(a_cow))
+
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertEqual(a_cow.const_data_ptr(), addr)
+        torch.testing.assert_close(back, a)
+
+
+instantiate_parametrized_tests(TestTorchDlPack)
 instantiate_device_type_tests(
-    TestTorchDlPack, globals(), allow_mps=True, allow_xpu=True
+    TestTorchDlPackDevice, globals(), allow_mps=True, allow_xpu=True
 )
 
 
@@ -1005,6 +1022,8 @@ instantiate_device_type_tests(
     "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
 )
 class TestReadOnlyDLPack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # These tests exercise the read-only DLPack export path and the
     # ReadOnlyTensorWrapper subclass. The behavior (const_data_ptr export, the
     # READ_ONLY flag, copy-on-write preservation, op rejection) is device
