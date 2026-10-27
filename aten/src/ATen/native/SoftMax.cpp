@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
@@ -392,6 +393,15 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
   auto grad_ = grad.contiguous();
   auto output_ = output.contiguous();
+  // The kernels read grad and output again after writing grad_input (see
+  // log_softmax_backward_fixup in cpu/SoftMaxKernel.cpp), so they must not
+  // overlap.
+  if (at::get_overlap_status(grad_input, grad_) != MemOverlapStatus::No) {
+    grad_ = grad_.clone();
+  }
+  if (at::get_overlap_status(grad_input, output_) != MemOverlapStatus::No) {
+    output_ = output_.clone();
+  }
 
   if (output.numel() != 0) {
     if (grad_.dim() == 0)

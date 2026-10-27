@@ -1680,6 +1680,17 @@ def error_inputs_multi_margin_loss(op, device, **kwargs):
                      error_type=ValueError, error_regex='only p == 1 and p == 2 supported')
 
 
+def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, **kwargs)
+    # Rows whose max dominates, including a tied max, so that the derivative
+    # checks cover the paths of the CPU and CUDA kernels that avoid cancellation
+    # (see Note [Accurate log_softmax] in ATen/native/cpu/LogSoftmaxKernelImpl.h).
+    t = torch.tensor([[9., -9., -9., 0.], [0., 8., 1., -2.], [3., 3., -5., 0.]],
+                     device=device, dtype=dtype)
+    yield SampleInput(t.clone().requires_grad_(requires_grad), args=(1,))
+    yield SampleInput(t.t().contiguous().requires_grad_(requires_grad), args=(0,))
+
+
 def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((), (0,), True),
@@ -21513,7 +21524,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_out=True,
         aten_backward_name='_log_softmax_backward_data',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_softmax_variant,
+        sample_inputs_func=sample_inputs_log_softmax,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=True),

@@ -29,22 +29,28 @@ inline namespace CPU_CAPABILITY {
 // count them and add (count - 1) to R. Testing x_j - max == 0, not x_j == max,
 // keeps the NaN result for rows containing inf.
 //
-// The backward, grad_input_i = g_i - exp(y_i) * sum_j g_j, cancels in the same
-// situation: exp(y_i) rounds to 1 and the target gradient of cross entropy
-// becomes 0. Where exp(y_i) > 1/2 (normally at most one element per row, but
-// rounded outputs of tied maxima can both exceed it) we evaluate the
-// algebraically identical
-//   -g_i * expm1(y_i) - exp(y_i) * (sum_j g_j - g_i)
-// in which both terms are accurate; for the one-hot gradient produced by
-// nll_loss, sum_j g_j - g_i is exactly 0 at the target. Elsewhere
-// 1 - exp(y_i) >= 1/2, so for a one-hot gradient the usual form loses at most
-// a couple of ulps.
+// The backward, grad_input_i = g_i - exp(y_i) * S with S = sum_j g_j, cancels
+// in the same situation: exp(y_i) rounds to 1 and the target gradient of cross
+// entropy becomes 0. Where exp(y_i) > 1/2 (normally at most one element per
+// row, but rounded outputs of tied maxima can both exceed it), g_i and S have
+// the same sign and S is finite, we evaluate the algebraically identical
+//   (g_i - S) - S * expm1(y_i).
+// For the one-hot gradient produced by nll_loss, g_i - S is exactly 0 at the
+// target and S * expm1(y_i) is accurate. Requiring the same sign keeps g_i - S
+// from overflowing; we test g_i * S >= 0, which may overflow (keeping its sign)
+// or underflow to 0 (when one of them is too small for g_i - S to overflow).
+// Requiring a finite S keeps the old result (+-inf rather than NaN) when S is
+// infinite. Elsewhere the usual form is kept: with opposite signs it does not
+// cancel, and where 1 - exp(y_i) >= 1/2 it loses at most a couple of ulps for a
+// one-hot gradient.
 //
-// The CPU and CUDA kernels implement this. Still using the old formulas: the
-// MPS, XPU, Vulkan, Metal and out-of-tree (e.g. MTIA) kernels, sparse
-// log_softmax, the torch/_decomp decompositions and torch/_refs log_softmax (so
-// torch.compile differs from eager here), the chunked F.linear_cross_entropy
-// path, and the forward-mode and double-backward formulas in derivatives.yaml.
+// The CPU kernels (the backward in SoftMaxKernel.cpp) and the CUDA kernels
+// implement this. Still using the old formulas: the MPS, XPU, Vulkan, Metal and
+// out-of-tree (e.g. MTIA) kernels, sparse log_softmax, the torch/_decomp
+// decompositions and torch/_refs log_softmax (so torch.compile differs from
+// eager here), the TorchScript NNC and oneDNN Graph lowerings, the chunked
+// F.linear_cross_entropy path, and the forward-mode and double-backward
+// formulas in derivatives.yaml.
 
 // exp(shifted), or 0 where shifted == 0 (an element equal to the max).
 template <typename Vec>
@@ -54,7 +60,7 @@ inline Vec vec_log_softmax_exp_without_max(Vec shifted) {
 
 // sum_j exp(data[j] - max_input) without one argmax term, in one pass.
 template <typename scalar_t>
-inline vec::vec_scalar_t<scalar_t> log_softmax_sum_without_max(
+inline vec::vec_scalar_t<scalar_t> log_softmax_sum(
     const scalar_t* data,
     int64_t size,
     vec::vec_scalar_t<scalar_t> max_input) {
@@ -63,10 +69,17 @@ inline vec::vec_scalar_t<scalar_t> log_softmax_sum_without_max(
   const Vec max_vec(max_input);
   Vec sum_vec(0);
   Vec max_count_vec(0);
-  auto accumulate = [&](Vec x) {
+  // Accumulates the first count lanes of x.
+  auto accumulate = [&](Vec x, int64_t count = Vec::size()) {
     Vec shifted = x - max_vec;
-    sum_vec += vec_log_softmax_exp_without_max(shifted);
-    max_count_vec += shifted.eq(Vec(0));
+    Vec exp_vec = vec_log_softmax_exp_without_max(shifted);
+    Vec is_max = shifted.eq(Vec(0));
+    if (count < Vec::size()) {
+      exp_vec = Vec::set(Vec(0), exp_vec, count);
+      is_max = Vec::set(Vec(0), is_max, count);
+    }
+    sum_vec += exp_vec;
+    max_count_vec += is_max;
   };
   int64_t d = 0;
   if constexpr (vec::is_reduced_floating_point_v<scalar_t>) {
@@ -76,52 +89,26 @@ inline vec::vec_scalar_t<scalar_t> log_softmax_sum_without_max(
       accumulate(x0);
       accumulate(x1);
     }
+    if (d < size) {
+      const int64_t count = size - d;
+      auto [x0, x1] = vec::convert_to_float<scalar_t>(bVec::loadu(data + d, count));
+      accumulate(x0, std::min<int64_t>(count, Vec::size()));
+      if (count > Vec::size()) {
+        accumulate(x1, count - Vec::size());
+      }
+    }
   } else {
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
       accumulate(Vec::loadu(data + d));
+    }
+    if (d < size) {
+      accumulate(Vec::loadu(data + d, size - d), size - d);
     }
   }
   auto add = [](Vec& x, Vec& y) { return x + y; };
   acc_t sum = vec::vec_reduce_all<acc_t>(add, sum_vec);
   acc_t max_count = vec::vec_reduce_all<acc_t>(add, max_count_vec);
-  for (; d < size; d++) {
-    acc_t shifted = static_cast<acc_t>(data[d]) - max_input;
-    if (shifted == acc_t(0)) {
-      max_count += acc_t(1);
-    } else {
-      sum += std::exp(shifted);
-    }
-  }
   return sum + (max_count - acc_t(1));
-}
-
-// The backward takes the expm1 form where exp(output) > 1/2.
-constexpr double kLogHalf = -0.69314718055994531;
-
-// grad_output - exp(output) * grad_sum, without cancellation when exp(output)
-// is close to 1.
-template <typename Vec>
-inline Vec vec_log_softmax_backward(Vec grad_output, Vec output, Vec grad_sum) {
-  using value_t = typename Vec::value_type;
-  const Vec prob = output.exp();
-  const Vec simple = grad_output - prob * grad_sum;
-  const Vec near_one = output > Vec(static_cast<value_t>(kLogHalf));
-  // Skip the expm1 unless some lane needs it.
-  if (near_one.zero_mask() == (1 << Vec::size()) - 1) {
-    return simple;
-  }
-  const Vec accurate = (Vec(0) - grad_output) * output.expm1() -
-      prob * (grad_sum - grad_output);
-  return Vec::blendv(simple, accurate, near_one);
-}
-
-template <typename scalar_t>
-inline scalar_t log_softmax_backward(scalar_t grad_output, scalar_t output, scalar_t grad_sum) {
-  const scalar_t prob = std::exp(output);
-  if (output > static_cast<scalar_t>(kLogHalf)) {
-    return -grad_output * std::expm1(output) - prob * (grad_sum - grad_output);
-  }
-  return grad_output - prob * grad_sum;
 }
 
 template <typename scalar_t>
@@ -169,7 +156,7 @@ void serial_vec_log_softmax_lastdim_range(
       int64_t i = ii + j;
       const scalar_t* input_data = input_data_base + i * dim_size;
       scalar_t max_input = max_input_arr[j];
-      tmp_sum_scalar[j] = log_softmax_sum_without_max(input_data, dim_size, max_input);
+      tmp_sum_scalar[j] = log_softmax_sum(input_data, dim_size, max_input);
     }
     // See [Note AVX-SSE transitions] for why this should call the
     // vectorized version (aside from perf improvements).

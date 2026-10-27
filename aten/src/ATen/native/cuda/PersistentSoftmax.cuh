@@ -51,14 +51,16 @@ __device__ __forceinline__ acc_t log_softmax_log_sum(acc_t sum, acc_t max_count)
 // The backward takes the expm1 form where exp(output) > 1/2.
 constexpr double kLogSoftmaxLogHalf = -0.69314718055994531;
 
-// grad_output - exp(output) * grad_sum without cancellation.
+// The gradient of log_softmax: grad_output - exp(output) * grad_sum, without
+// cancellation when exp(output) is close to 1.
 template <typename acc_t>
 __device__ __forceinline__ acc_t log_softmax_backward_element(acc_t grad_output, acc_t output, acc_t grad_sum) {
-  const acc_t prob = std::exp(output);
-  if (C10_UNLIKELY(output > static_cast<acc_t>(kLogSoftmaxLogHalf))) {
-    return -grad_output * std::expm1(output) - prob * (grad_sum - grad_output);
+  if (C10_UNLIKELY(output > static_cast<acc_t>(kLogSoftmaxLogHalf) &&
+                   grad_output * grad_sum >= acc_t(0) &&
+                   std::abs(grad_sum) < std::numeric_limits<acc_t>::infinity())) {
+    return (grad_output - grad_sum) - grad_sum * std::expm1(output);
   }
-  return grad_output - prob * grad_sum;
+  return grad_output - std::exp(output) * grad_sum;
 }
 
 template <typename acc_t, int WARP_BATCH, int WARP_SIZE, template<typename> class ReduceOp>

@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, xfailIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -12622,7 +12622,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(loss.double(), ref_loss, atol=0, rtol=rtol)
         self._assert_cross_entropy_grad_close(x.grad[valid], ref_grad, logits[valid], rtol)
 
-    @onlyOn(["cpu", "cuda"])  # Other backends' log_softmax kernels are unchanged.
+    @onlyOn(["cpu", "cuda"])  # Tests the CPU and CUDA kernels changed here.
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     @parametrize_test("dim_size", [5, 1500, 11000, 40001])
     @parametrize_test("layout", ["lastdim", "spatial16", "spatial67"])
@@ -12658,10 +12658,61 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[4, 1].item(), -math.log(2), atol=4e-3, rtol=0)
         self.assertEqual(out[4, 3].item(), -math.log(2), atol=4e-3, rtol=0)
 
-    @onlyOn(["cpu", "cuda"])
-    @skipIfTorchDynamo("gradgradcheck's undefined grad check fails under Dynamo for cross_entropy")
-    @parametrize_test("num_classes", [3, 50])
-    def test_cross_entropy_loss_confident_target_gradgradcheck(self, device, num_classes):
+    @onlyOn(["cpu", "cuda"])  # Tests the CPU and CUDA kernels changed here.
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("grad_case", ["mixed_sign", "inf"])
+    @parametrize_test("layout", ["lastdim", "spatial16", "spatial67"])
+    def test_log_softmax_backward_large_grad(self, device, dtype, grad_case, layout):
+        # exp(out[0]) > 1/2, so the backward may take the expm1 form for
+        # element 0. It must give the result of grad - exp(out) * sum(grad):
+        # - mixed_sign: grad[0] - sum(grad) overflows, while the gradient
+        #   itself and the partial sums of sum(grad) (in the order the kernels
+        #   add three elements) are finite.
+        # - inf: sum(grad) is inf, so the gradient is -inf, not NaN, at
+        #   element 0.
+        num_rows = 1 if layout == "lastdim" else int(layout[len("spatial"):])
+        x = torch.tensor([[1., 0., 0.]], dtype=dtype, device=device).repeat(num_rows, 1)
+        x.requires_grad_()
+        if grad_case == "mixed_sign":
+            grad = torch.tensor([[0.59, -0.515, -0.515]], dtype=torch.double, device=device)
+            grad = grad * torch.finfo(dtype).max
+        else:
+            grad = torch.tensor([[1., float("inf"), 0.]], dtype=torch.double, device=device)
+        grad = grad.repeat(num_rows, 1)
+        if layout != "lastdim":
+            # (1, C, L): reduce over a dim that is not the last one.
+            out = F.log_softmax(x.t().unsqueeze(0), dim=1).squeeze(0).t()
+        else:
+            out = F.log_softmax(x, dim=1)
+        out.backward(grad.to(dtype))
+        out64 = out.detach().double()
+        expected = grad - out64.exp() * grad.sum(1, keepdim=True)
+        if grad_case == "mixed_sign":
+            self.assertTrue(x.grad.isfinite().all())
+        else:
+            self.assertTrue((x.grad[:, 0] == float("-inf")).all())
+        self.assertEqual(x.grad.double(), expected, atol=0, rtol=1e-5)
+
+    @onlyOn(["cpu", "cuda"])  # Tests the CPU and CUDA kernels changed for confident rows.
+    @dtypes(torch.float, torch.bfloat16)
+    @parametrize_test("alias", ["grad_output", "output"])
+    @parametrize_test("layout", ["lastdim", "spatial67"])
+    def test_log_softmax_backward_out_aliases_input(self, device, dtype, alias, layout):
+        # The backward recomputes the confident elements after writing
+        # grad_input; an out= that aliases an input must still be correct.
+        logits, _ = self._confident_cross_entropy_inputs(1000, dtype, device)
+        dim = 1
+        if layout != "lastdim":
+            logits = logits[torch.arange(67, device=device) % logits.size(0)].t().contiguous()
+            dim = 0
+        out = F.log_softmax(logits, dim=dim)
+        grad = torch.randn_like(out)
+        expected = torch._log_softmax_backward_data(grad, out, dim, dtype)
+        result = torch._log_softmax_backward_data(
+            grad, out, dim, dtype, out=grad if alias == "grad_output" else out)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
+    def _confident_cross_entropy_fn(self, num_classes, device):
         logits, target = self._confident_cross_entropy_inputs(num_classes, torch.double, device)
         # gradcheck perturbs inputs by 1e-6, so keep margins moderate.
         logits = logits[[0, 1, 5, 6, 7]].requires_grad_()
@@ -12671,10 +12722,22 @@ class TestNNDeviceType(NNTestCase):
         def fn(x):
             return F.cross_entropy(x, target, weight=weight, reduction="sum")
 
+        return fn, logits
+
+    # The derivatives of log_softmax itself on confident rows are checked by the
+    # log_softmax OpInfo samples.
+    @onlyOn(["cpu", "cuda"])
+    @parametrize_test("num_classes", [3, 50])
+    def test_cross_entropy_loss_confident_target_gradcheck(self, device, num_classes):
+        fn, logits = self._confident_cross_entropy_fn(num_classes, device)
         self.assertTrue(gradcheck(fn, (logits,)))
+
+    @onlyOn(["cpu", "cuda"])
+    @xfailIfTorchDynamo  # gradgradcheck's undefined grad check fails under Dynamo for cross_entropy
+    @parametrize_test("num_classes", [3, 50])
+    def test_cross_entropy_loss_confident_target_gradgradcheck(self, device, num_classes):
+        fn, logits = self._confident_cross_entropy_fn(num_classes, device)
         self.assertTrue(gradgradcheck(fn, (logits,)))
-        self.assertTrue(gradcheck(lambda x: F.log_softmax(x, dim=1), (logits,)))
-        self.assertTrue(gradgradcheck(lambda x: F.log_softmax(x, dim=1), (logits,)))
 
     def test_smoothl1loss_backward_zero_beta(self, device):
         input = torch.randn(300, 256, requires_grad=True, device=device)
