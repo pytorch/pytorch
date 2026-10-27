@@ -10013,7 +10013,7 @@ class TestPrecompileCustomOpModules(TestCase):
         from torch._precompile import _custom_op_modules
 
         # The fake is torch.empty_like, from module "torch", which never registers
-        # the op: only a triton_op's fake names the user's module.
+        # the op.
         ns = f"precompile_builtin_fake_{uuid.uuid4().hex}"
         op = self._define_op(ns, "scripted", module="__main__", fake=False)
         op.register_fake(torch.empty_like)
@@ -10141,19 +10141,21 @@ class TestPrecompileCustomOpModules(TestCase):
     def test_custom_op_modules_follow_a_triton_op_to_its_user_function(self):
         from torch._precompile import _custom_op_modules
 
-        # triton_op wraps the user's function in its own, which it passes to
-        # custom_op, and registers the user's function as the op's fake.
+        # triton_op passes custom_op a wrapper of the user's function, and registers
+        # the user's function as the op's fake.
         ns = f"precompile_triton_op_{uuid.uuid4().hex}"
 
         def user_fn(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
         user_fn.__module__ = "unittest"
-        torch.library.triton_op(f"{ns}::kernel", mutates_args=())(user_fn)
+        op = torch.library.triton_op(f"{ns}::kernel", mutates_args=())(user_fn)
         self.addCleanup(_undefine_custom_op, f"{ns}::kernel")
-        self.assertEqual(
-            _custom_op_modules({f"{ns}::kernel"}), {"unittest": (f"{ns}::kernel",)}
-        )
+        expected = {"unittest": (f"{ns}::kernel",)}
+        self.assertEqual(_custom_op_modules({f"{ns}::kernel"}), expected)
+        # A later fake replaces the user's function, but not where the op is defined.
+        op.register_fake(torch.empty_like)
+        self.assertEqual(_custom_op_modules({f"{ns}::kernel"}), expected)
 
     def test_import_custom_op_modules(self):
         from torch._precompile_driver import _import_custom_op_modules

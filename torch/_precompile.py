@@ -2147,20 +2147,17 @@ def _custom_op_modules(
             defining[name] = packet
     for op_name, qualname in sorted(defining.items()):
         opdef = OPDEFS[qualname]
-        defined_in = [module_of(opdef._init_fn)]
-        if defined_in[0] is not None and torch_wrapper(defined_in[0]):
-            # triton_op: the user's function is the fake; torch wrapped it.
-            defined_in.append(module_of(opdef._abstract_fn))
-
-        reasons = {n: unusable(n) for n in dict.fromkeys(defined_in)}
-        name = next((n for n, reason in reasons.items() if reason is None), None)
-        if name is None:
+        # Unwrapped: triton_op passes custom_op a wrapper of the user's function.
+        name = module_of(inspect.unwrap(opdef._init_fn))
+        reason = unusable(name)
+        if reason is not None or name is None:
             log.warning(
                 "precompile: no module a serving process can import registers custom "
-                "op %s (%s); the artifact serves only where it is already registered "
-                "by its first call",
+                "op %s (%r: %s); the artifact serves only where it is already "
+                "registered by its first call",
                 op_name,
-                ", ".join(f"{n!r}: {reason}" for n, reason in reasons.items()),
+                name,
+                reason,
             )
             continue
         modules.setdefault(name, []).append(op_name)
