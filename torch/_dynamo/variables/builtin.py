@@ -105,7 +105,6 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    pydict_check,
     pydict_checkexact,
 )
 from .lists import (
@@ -523,14 +522,18 @@ class BaseBuiltinVariable(VariableTracker):
                 )
                 items[ConstantVariable.create(key)] = value_vt
             return variables.MappingProxyVariable(variables.ConstDictVariable(items))
-        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+        if isinstance(
+            attr, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
-            from .functions import MethodDescriptorVariable
+            from .functions import MethodDescriptorVariable, WrapperDescriptorVariable
 
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
                 owner = VariableTracker.build(tx, attr.__objclass__)
+            if isinstance(attr, types.WrapperDescriptorType):
+                return WrapperDescriptorVariable(attr, owner=owner, source=source)
             return MethodDescriptorVariable(attr, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
@@ -3599,27 +3602,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
-            if not pydict_check(obj):
-                if isinstance(resolved_fn, types.WrapperDescriptorType):
-                    raise_type_error(
-                        tx,
-                        f"descriptor '{name}' requires a 'dict' object "
-                        f"but received a '{obj.python_type_name()}'",
-                    )
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for 'dict' objects doesn't apply "
-                    f"to a '{obj.python_type_name()}' object",
-                )
-            if name in ("keys", "values", "items", "update") and isinstance(
-                obj, ConstDictVariable
-            ):
-                result = ConstDictVariable.tp_methods[name](
-                    obj, tx, name, args[1:], kwargs
-                )
-                if result is not None:
-                    return result
-                return super().call_method(tx, name, args, kwargs)
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
