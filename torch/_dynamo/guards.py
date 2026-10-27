@@ -1453,6 +1453,12 @@ def check_closure(value: object, metadata: Any) -> bool:
 
 
 def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, ...]:
+    # Most OrderedDicts retain storage order; avoid allocating a key-position map.
+    if all(
+        stored is linked
+        for stored, linked in zip(dict.keys(value), collections.OrderedDict.keys(value))
+    ):
+        return tuple(range(dict.__len__(value)))
     positions = {id(key): index for index, key in enumerate(dict.keys(value))}
     return tuple(positions[id(key)] for key in collections.OrderedDict.keys(value))
 
@@ -3808,15 +3814,13 @@ class GuardBuilder(GuardBuilderBase):
             )
         membership = _nn_module_hook_membership(self.get(guard), hooks_name, flags_name)
 
-        def guard_fn(module: Any, hooks_name: str, flags_name: str) -> bool:
+        def guard_fn(module: Any) -> bool:
             return (
                 _nn_module_hook_membership(module, hooks_name, flags_name) == membership
             )
 
-        self.add_python_lambda_leaf_guard_to_root(
-            [code],
-            get_verbose_code_parts([code], guard),
-            _get_closure_vars() | {"___check_hook_membership": guard_fn},
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts([code], guard), guard.user_stack
         )
         self._set_guard_export_info(guard, [code])
         self.already_added_code_parts.add(code)
@@ -4956,6 +4960,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         return dict.fromkeys(elems).keys()
 
     @classmethod
+    def _restore_ordered_dict_state(
+        cls,
+        value: collections.OrderedDict[Any, Any],
+        state: tuple[dict[str, Any], tuple[Any, ...]],
+    ) -> None:
+        attrs, keys = state
+        value.__dict__ = attrs
+        for key in keys:
+            collections.OrderedDict.move_to_end(value, key)
+
+    @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
 
@@ -5269,6 +5284,18 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
+
+        if type(obj) is collections.OrderedDict:
+            # Native pickle normalizes storage to linked order, invalidating
+            # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
+            return (
+                collections.OrderedDict,
+                (),
+                (vars(obj), tuple(collections.OrderedDict.keys(obj))),
+                None,
+                iter(dict.items(obj)),
+                type(self)._restore_ordered_dict_state,
+            )
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
