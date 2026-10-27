@@ -644,6 +644,13 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 // A graph handle captures once: after capture_end it can only be replayed,
 // if it was instantiated, and deleted. Deleting it frees the graph and its
 // reference to the pool's memory.
+//
+// Calls on one handle must not overlap. AOTI runs each inference thread on its
+// own model instance and stream, and each instance has its own pool and
+// graphs; thread-local capture mode lets other threads keep launching work
+// while one captures. A pool takes one capture at a time, and graphs captured
+// into it one after another share its memory. Once every graph captured into
+// a pool is deleted, the pool can't take another capture.
 struct CUDAMemPoolOpaque;
 using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
 
