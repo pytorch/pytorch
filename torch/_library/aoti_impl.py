@@ -32,10 +32,18 @@ __all__ = [
 
 @dataclass(frozen=True)
 class AOTTarget:
-    """Compile target handed to a ``register_aot_impl`` builder."""
+    """Compile target handed to a ``register_aot_impl`` builder.
+
+    The builder is called once per specialization (see
+    ``torch._inductor.aoti_impl``). ``name`` is unique per specialization:
+    export the kernel under it (CuTeDSL: ``export_to_c(...,
+    function_name=target.name)``) so specializations don't collide at link
+    time. ``workdir`` is a fresh directory per specialization.
+    """
 
     arch: str  # e.g. "sm_90"
-    workdir: Path  # scratch dir for artifacts; kept for the .pt2 build
+    workdir: Path
+    name: str
     device: str = "cuda"
 
 
@@ -45,18 +53,22 @@ class TVMFFIKernel:
 
     ``objects`` are object files (``.o``) to link into the AOTI wrapper's
     companion library. ``symbol`` is the ``__tvm_ffi_<name>`` entry point.
-    ``args`` is the packed-call order: schema argument names for inputs,
-    ``out{i}`` for the i-th output (allocated by the generated shim from the
-    fake outputs), and schema argument names for scalars. If ``None``, the
-    default is all tensor inputs, then outputs, then scalar inputs (the
-    CuTeDSL ``export_to_c`` convention). ``link_libs`` are extra shared
-    libraries (full paths) the companion library links against, e.g. the
-    DSL runtime.
+    ``args`` is the packed-call order. Each entry is a schema argument name
+    (a list arg expands to its elements, an absent ``Optional`` arg packs as
+    None), ``out{i}`` for the i-th output (allocated by the generated shim
+    from the fake outputs), or a literal ``None`` / bool / int / float for a
+    slot the kernel expects but the op does not expose. If ``args`` is
+    ``None``, the default is all tensor inputs, then outputs, then scalar
+    inputs (the CuTeDSL ``export_to_c`` convention). A scalar schema argument
+    left out of ``args`` is treated as a compile-time constant the builder
+    baked into the kernel, so its value becomes part of the specialization.
+    ``link_libs`` are extra shared libraries (full paths) the companion
+    library links against, e.g. the DSL runtime.
     """
 
     objects: list[Union[str, Path]]
     symbol: str
-    args: list[str] | None = None
+    args: list[Union[str, None, bool, int, float]] | None = None
     link_libs: list[Union[str, Path]] = field(default_factory=list)
 
     def __post_init__(self):
@@ -69,8 +81,13 @@ class TVMFFIKernel:
             raise ValueError(
                 f"TVMFFIKernel symbol must be a valid C identifier, got {self.symbol!r}"
             )
-        if self.args is not None and not all(isinstance(a, str) for a in self.args):
-            raise TypeError("TVMFFIKernel args must be a list of str")
+        if self.args is not None and not all(
+            a is None or isinstance(a, (str, bool, int, float)) for a in self.args
+        ):
+            raise TypeError(
+                "TVMFFIKernel args entries must be argument names (str) or "
+                "None / bool / int / float literals"
+            )
 
 
 _AOT_IMPLS: dict[str, Callable[..., Any]] = {}
