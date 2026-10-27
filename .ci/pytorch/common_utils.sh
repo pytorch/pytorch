@@ -205,6 +205,7 @@ function install_fbgemm() {
   local build_variant=$1
 
   local fbgemm_commit
+  # fbgemm pin is the v1.5.0-rc3 tag commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
@@ -263,6 +264,7 @@ function install_fbgemm() {
 
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
+  # torchrec pin is the release/v1.4.0 branch head (untagged)
   torchrec_commit=$(get_pinned_commit torchrec)
 
   pip_uninstall torchrec-nightly
@@ -352,7 +354,8 @@ function install_flash_attn_cute() {
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
     flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK do not pin CuTeDSL, so install the pinned version first.
+  install_cutlass_dsl
   pip_install \
     "$flash_attn_package" \
     quack-kernels==0.6.5 \
