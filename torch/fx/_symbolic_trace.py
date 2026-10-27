@@ -1311,18 +1311,38 @@ def _patch_wrapped_functions(patcher: _Patcher) -> None:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
 
 
+@contextlib.contextmanager
+def _no_torch_function_modes() -> Iterator[None]:
+    """Pop the torch function modes but the default device's, which code run
+    normally would see too."""
+    from torch.utils._device import DeviceContext
+
+    depth = torch._C._len_torch_function_stack()
+    stack = [torch._C._pop_torch_function_stack() for _ in range(depth)]
+    kept = [mode for mode in reversed(stack) if isinstance(mode, DeviceContext)]
+    for mode in kept:
+        torch._C._push_on_torch_function_stack(mode)
+    try:
+        yield
+    finally:
+        for _ in kept:
+            torch._C._pop_torch_function_stack()
+        for mode in reversed(stack):
+            torch._C._push_on_torch_function_stack(mode)
+
+
 def _resolve_lazy_imports(
     patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
 ) -> None:
     """Resolve the unresolved lazy imports among ``names`` (default: all) of
     ``frame_dict`` with ``patcher``'s patches reverted, FX's tracing flag off and
-    no dispatch mode active.
+    no dispatch or torch function mode active but the default device.
 
     Reading an unresolved lazy import runs its module body, which must not see the
     globals and ``torch.nn.Module`` methods FX patched for the trace, nor take
     itself to be traced (a module that calls a ``torch.compile``'d function at
-    import), nor create its module-level tensors under make_fx's fake or proxy
-    mode. Only FX's own reads go through here; a lazy import the traced code
+    import), nor run under make_fx's fake, proxy or pre-dispatch modes or
+    export's torch function handlers. Only FX's own reads go through here; a lazy import the traced code
     itself reads resolves as any other code it runs, with the patches applied.
     ``importlib.is_lazy_import`` exists only on PEP 690-style lazy-import runtimes
     (e.g. Cinder).
@@ -1343,6 +1363,7 @@ def _resolve_lazy_imports(
             _maybe_revert_all_patches(patcher),
             _is_fx_tracing_context(False),
             _disable_current_modes(),
+            _no_torch_function_modes(),
         ):
             for name in lazy_names:
                 _ = frame_dict[name]

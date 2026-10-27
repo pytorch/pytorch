@@ -2034,6 +2034,52 @@ class TestFX(JitTestCase):
         )
         self.assertIs(helper.leaf, leaf)
 
+    def test_lazy_import_runs_outside_pre_dispatch_tracing(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        unresolved = object()
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # A module body that builds a table without grad.
+                    with torch.no_grad():
+                        value = torch.ones(1)
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def sub_forward(self, x):
+            return x + 1
+
+        class Sub(torch.nn.Module):
+            forward = types.FunctionType(
+                sub_forward.__code__,
+                Globals(__builtins__=builtins, table=unresolved),
+                "forward",
+            )
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+
+            def forward(self, x):
+                return self.sub(x)
+
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is unresolved,
+            create=True,
+        ):
+            gm = make_fx(Root(), pre_dispatch=True)(torch.ones(2))
+        # The module body's no_grad is not recorded into the traced graph.
+        self.assertNotIn(
+            torch._C._set_grad_enabled,
+            [n.target for n in gm.graph.nodes if n.op == "call_function"],
+        )
+
     def test_lazy_import_runs_outside_make_fx_modes(self):
         from torch._subclasses.fake_tensor import FakeTensor
         from torch.fx.experimental.proxy_tensor import make_fx
