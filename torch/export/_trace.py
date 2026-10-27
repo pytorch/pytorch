@@ -83,6 +83,7 @@ from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import (
     allow_non_fake_inputs_temporarily,
     FakeTensorMode,
+    is_fake_tensor,
 )
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
@@ -2515,9 +2516,7 @@ def _export_for_training(
     # see fake tensor constants.
     if not strict and not has_ambient_mode:
         for const, val in export_artifact.aten.constants.items():
-            if torch._subclasses.fake_tensor.is_fake_tensor(
-                val
-            ) and _is_bogus_const_name(const):
+            if is_fake_tensor(val) and _is_bogus_const_name(const):
                 error_msg = (
                     f"We found a fake tensor in the exported program constant's list. "
                     f"This typically means our tracing system encountered an op that "
