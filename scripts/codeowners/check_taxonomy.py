@@ -235,7 +235,9 @@ def find_ownership_errors(
             owner_lists[pattern.labels].add(owners)
     conflicting_lists = [
         f"{', '.join(labels)}: "
-        + " | ".join(" ".join(owners) or "none" for owners in sorted(map(sorted, lists)))
+        + " | ".join(
+            " ".join(owners) or "none" for owners in sorted(map(sorted, lists))
+        )
         for labels, lists in owner_lists.items()
         if len(lists) > 1
     ]
@@ -492,15 +494,17 @@ def main() -> int:
     missing_groups = sorted(declared_group_set - report.groups)
     missing_sections = sorted(declared_group_set - section_group_set)
     undeclared_sections = sorted(section_group_set - declared_group_set)
-    has_errors = bool(missing_groups or missing_sections or undeclared_sections) or any(
-        ownership_errors.values()
-    ) or any(
-        (
-            report.uncovered,
-            report.duplicates,
-            report.stale,
-            report.ineffective,
-            report.source_order_mismatches,
+    has_errors = (
+        bool(missing_groups or missing_sections or undeclared_sections)
+        or any(ownership_errors.values())
+        or any(
+            (
+                report.uncovered,
+                report.duplicates,
+                report.stale,
+                report.ineffective,
+                report.source_order_mismatches,
+            )
         )
     )
     if not args.lintrunner:
@@ -521,7 +525,10 @@ def main() -> int:
             (len(missing_groups), "missing effective surfaces"),
             (len(missing_sections), "missing grouped sections"),
             (len(undeclared_sections), "undeclared grouped sections"),
-            *((len(entries), title.lower()) for title, entries in ownership_errors.items()),
+            *(
+                (len(entries), title.lower())
+                for title, entries in ownership_errors.items()
+            ),
         ]
         failures = [f"{count} {name}" for count, name in failure_counts if count]
         emit_lint_error(
