@@ -131,6 +131,17 @@ is overridden to `ieee`.
 
 We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
 
+On NVIDIA GPUs, the convolution kernels that `torch.compile` generates itself (for example with
+`mode="max-autotune"`) use TF32 only if `torch.backends.cudnn.conv.fp32_precision` is `tf32`, like eager cuDNN
+convolutions. When cuDNN is turned off (`torch.backends.cudnn.enabled = False`), they use full FP32. 1x1
+convolutions that `torch.compile` turns into matrix multiplications follow `torch.backends.cuda.matmul.fp32_precision`
+instead. For example, this turns off TF32 for eager convolutions and for the generated convolution kernels:
+
+```python
+torch.backends.cudnn.conv.fp32_precision = "ieee"
+model = torch.compile(model, mode="max-autotune")
+```
+
 ```{warning}
 
   Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
@@ -896,7 +907,6 @@ You can now define a new memory pool by passing this allocator to {class}`torch.
 pool = torch.cuda.MemPool(allocator)
 ```
 
-
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
@@ -1004,6 +1014,54 @@ with torch.cuda.use_mem_pool(pool):
      requirements (`CU_MULTICAST_GRANULARITY_RECOMMENDED`, `CU_MULTICAST_GRANULARITY_MINIMUM`),
      and can cause your workload to run out of memory.
 ```
+
+
+(cuda-memory-python-allocators)=
+## Python-defined CUDA allocators
+
+Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
+allocator with Python callables:
+
+```python
+from cuda.bindings import runtime
+
+
+def alloc(size: int, _device: int, _stream: int) -> int | None:
+    err, ptr = runtime.cudaMalloc(size)
+    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+
+def free(ptr: int, _size: int, _device: int, _stream: int) -> None:
+    (err,) = runtime.cudaFree(ptr)
+    if err != runtime.cudaError_t.cudaSuccess:
+        raise RuntimeError(f"cudaFree failed with error {err}")
+
+
+pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+```
+
+The size passed to the free callback is the size of the backing segment.
+An allocator may use it when releasing the segment, as needed, or ignore it
+when the pointer alone is sufficient.
+
+Return `None` or zero when an allocation cannot be satisfied. This lets the
+caching allocator release cached blocks, retry the allocation, notify OOM
+observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
+fails. Other exceptions raised by the allocation callback propagate normally.
+Exceptions raised by the free callback produce a warning and are swallowed.
+
+The ``device`` argument is the segment's CUDA device ordinal and ``stream`` is
+the raw address of its allocation stream. PyTorch does not make them current
+before entering the callback. Allocators using APIs that rely on current CUDA
+state are responsible for establishing the appropriate device and stream.
+
+Callbacks can be invoked concurrently from multiple threads, so their Python
+and native state must be thread-safe, including in a no-GIL Python build.
+
+During CUDA graph capture, the allocation callback runs in relaxed capture
+mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
+APIs, but it must not launch work on or synchronize the capturing stream,
+synchronize the device, or begin or end capture.
 
 
 ## Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
