@@ -1,12 +1,7 @@
 from typing import Any
 
 import torch.fx
-from torch._subclasses.fake_tensor import (
-    FakeTensorMode,
-    is_fake_tensor,
-    maybe_get_fake_device,
-    maybe_set_fake_device,
-)
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
@@ -118,14 +113,13 @@ class FakeTensorProp(torch.fx.Interpreter):
         # input FakeTensors during propagation. Save and restore so the
         # caller's inputs are not permanently corrupted.
         saved_devices = [
-            (a, device)
+            (a, a.fake_device)
             for a in args
-            if isinstance(a, torch.Tensor)
-            and (device := maybe_get_fake_device(a)) is not None
+            if isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         ]
         with self._mode:
             try:
                 return super().run(*args)
             finally:
                 for fake, device in saved_devices:
-                    maybe_set_fake_device(fake, device)
+                    fake.fake_device = device

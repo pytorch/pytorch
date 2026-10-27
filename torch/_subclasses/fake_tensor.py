@@ -48,7 +48,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
-from torch.utils.weak import WeakIdKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -216,28 +215,14 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
-    # Keys are the fake tensors to check for leaks; values are unused.
-    non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
-        self.non_strict_export_fake_tensor_tracker = WeakIdKeyDictionary()
+        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
 
 
 fake_tensor_tls = FakeTensorTLS()
-
-
-# Called from FakeTensor.__init__, and from set_proxy_slot for every tensor
-# registered with a tracer. The latter also records C++ fakes, which have no
-# Python __init__, and fakes created before is_exporting() is set, such as the
-# nn.Module input parameters fakified by _fakify_module_inputs.
-def track_fake_tensor_for_export(t: object) -> None:
-    if (
-        torch.compiler.is_exporting()
-        and torch._export.config.detect_non_strict_fake_tensor_leaks
-        and is_fake_tensor(t)
-    ):
-        fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -396,36 +381,6 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
         fake_mode = maybe_get_fake_mode(x)
         if fake_mode is not None:
             cast(Any, fake_mode).set_item_memo(x, memo)
-
-
-# The SymInt memos of a fake (nonzero_memo, unique_memo,
-# unique_consecutive_memo). A C++ fake has no SymNumberMemoDescriptor, so this
-# keeps the descriptor's state in the tensor's __dict__ under the same names,
-# and like the descriptor drops the memo once the tensor is mutated or
-# fake_mode's epoch changes.
-def maybe_get_sym_memo(x: Tensor, name: str, fake_mode: FakeTensorMode) -> Any:
-    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        return getattr(x, name)
-    memo = getattr(x, f"_{name}", None)
-    if memo is None:
-        return None
-    if not x.is_inference() and getattr(x, f"_{name}_vc", None) != x._version:
-        return None
-    if getattr(x, f"_{name}_epoch", None) != fake_mode.epoch:
-        return None
-    return memo
-
-
-def maybe_set_sym_memo(
-    x: Tensor, name: str, value: SymInt | int, fake_mode: FakeTensorMode
-) -> None:
-    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        setattr(x, name, value)
-        return
-    setattr(x, f"_{name}", value)
-    if not x.is_inference():
-        setattr(x, f"_{name}_vc", x._version)
-    setattr(x, f"_{name}_epoch", fake_mode.epoch)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
@@ -1444,7 +1399,11 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
-        track_fake_tensor_for_export(self)
+        if (
+            torch.compiler.is_exporting()
+            and torch._export.config.detect_non_strict_fake_tensor_leaks
+        ):
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
