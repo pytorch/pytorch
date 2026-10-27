@@ -505,8 +505,8 @@ if __name__ == '__main__':
         finally:
             os.remove(path)
         stderr = proc.stderr.decode("utf-8", errors="replace")
-        # The worker faults the device. Distributed tests disable early
-        # termination, so the following case must still run.
+        # The spawned worker's device-side assert is reported in stderr.
+        # On CUDA, unittest records that failure as this test's error.
         self.assertTrue(
             has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
