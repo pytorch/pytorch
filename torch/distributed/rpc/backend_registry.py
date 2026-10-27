@@ -3,6 +3,7 @@
 
 import collections
 import enum
+import sys
 from typing import cast
 
 import torch
@@ -95,6 +96,18 @@ def register_backend(
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
+
+    # Keep the public ``torch.distributed.rpc.BackendType`` re-export aligned with
+    # the freshly created enum. ``__init__.py`` binds that name by value
+    # (``from .backend_registry import BackendType``), so without this a newly
+    # registered backend stays invisible through the public ``rpc.BackendType``
+    # and ``init_rpc`` rejects ``rpc.BackendType.TENSORPIPE``. See #104620.
+    _rpc_package = sys.modules.get(__name__.rpartition(".")[0])
+    if _rpc_package is not None and hasattr(_rpc_package, "BackendType"):
+        # ``_rpc_package`` is a dynamically populated module, so the type checker
+        # cannot see the ``BackendType`` attribute re-exported in ``__init__.py``.
+        # pyrefly: ignore [missing-attribute]
+        _rpc_package.BackendType = BackendType
 
     return BackendType[backend_name]
 
