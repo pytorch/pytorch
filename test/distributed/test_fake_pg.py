@@ -149,14 +149,14 @@ class TestFakePG(TestCase):
 
         get_backend = dist.ProcessGroup._get_backend
 
-        def cuda_without_options(pg, device):
-            if pg is default_pg and device.type == "cuda":
+        def cpu_without_options(pg, device):
+            if pg is default_pg and device.type == "cpu":
                 return NoOptions()
             return get_backend(pg, device)
 
         timeout = timedelta(minutes=5)
-        # The cuda backend, listed first, has no options to read; the CPU one,
-        # which object collectives use, keeps the configured timeout.
+        # The CPU backend, which object collectives use and so is read first, has
+        # no options to read; the cuda one keeps the configured timeout.
         dist.init_process_group(
             backend="cuda:gloo,cpu:gloo",
             rank=0,
@@ -168,7 +168,7 @@ class TestFakePG(TestCase):
         with (
             unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
             unittest.mock.patch.object(
-                dist.ProcessGroup, "_get_backend", cuda_without_options
+                dist.ProcessGroup, "_get_backend", cpu_without_options
             ),
         ):
             pg = dynamo_distributed.get_compile_sync_pg()
