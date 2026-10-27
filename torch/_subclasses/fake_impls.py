@@ -2332,11 +2332,7 @@ def bincount(
         return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
 
     if weights.device.type == "mps":
-        dtype = (
-            weights.dtype
-            if weights.dtype in (torch.float32, torch.int32, torch.float16)
-            else torch.int32
-        )
+        dtype = torch.float32
     else:
         dtype = weights.dtype if weights.dtype == torch.float32 else torch.float64
     return weights.new_empty(new_size, dtype=dtype)  # type: ignore[return]
@@ -2388,6 +2384,10 @@ def fake_alias(
     if not isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return NotImplemented
     return _fake_alias(fake_mode, x)
+
+
+# C++ FakeTensor runs alias's C++ meta kernel instead.
+torch._C._fake_dispatch_deregister_op_impl("aten::alias", "")
 
 
 # pyrefly: ignore [implicit-any]
