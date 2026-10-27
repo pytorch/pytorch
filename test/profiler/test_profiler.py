@@ -1015,35 +1015,30 @@ class TestProfiler(TestCase):
             unpickled = pickle.loads(pickled)
             self.assertIsInstance(unpickled, _ExperimentalConfig)
 
-            # Test with non-default values
+            # Alternate the flags in pickled order so that a flag read from a
+            # neighboring slot gets the wrong value.
             config = _ExperimentalConfig(
                 verbose=True,
                 performance_events=["event1", "event2"],
-                enable_cuda_sync_events=True,
+                enable_cuda_sync_events=False,
                 disable_external_correlation=True,
-                profile_all_threads=True,
+                profile_all_threads=False,
                 capture_overload_names=True,
-                record_python_gc_info=True,
+                record_python_gc_info=False,
                 expose_kineto_event_metadata=True,
                 custom_profiler_config="custom_config",
-                # Only custom_profiler_config and trace_only are readable from
-                # Python, so the round trip is checked through them. trace_only
-                # is true while adjust_timestamps, which precedes it in the
-                # pickled state, keeps its false default, so reading one slot
-                # too early fails the test.
+                adjust_timestamps=False,
                 trace_only=True,
             )
             pickled = pickle.dumps(config)
             unpickled = pickle.loads(pickled)
             self.assertIsInstance(unpickled, _ExperimentalConfig)
-            self.assertEqual(unpickled.custom_profiler_config, "custom_config")
-            self.assertTrue(unpickled.trace_only)
+            self.assertEqual(unpickled.__getstate__(), config.__getstate__())
 
             # Test deepcopy (which uses pickle internally)
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
-            self.assertEqual(copied.custom_profiler_config, "custom_config")
-            self.assertTrue(copied.trace_only)
+            self.assertEqual(copied.__getstate__(), config.__getstate__())
 
     def test_experimental_config_rejects_old_pickle_state(self):
         # Pickles from before PyTorch 2.16 use a different layout. Recent ones
