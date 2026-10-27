@@ -2004,10 +2004,14 @@ def _op_names_in_source(source: str) -> set[str]:
     """
     names = set()
     for line in source.splitlines():
-        code = line.split("#", 1)[0].split("//", 1)[0]
-        for match in _PYTHON_OP_CALL.finditer(_STRING_LITERAL.sub('""', code)):
+        # Strings blanked in place, so a "#" or "//" in one ends no line early.
+        blanked = _STRING_LITERAL.sub(lambda m: " " * len(m[0]), line)
+        # A torch.ops call is Python, where "//" is floor division; a dispatcher
+        # call is C++, where it starts a comment.
+        for match in _PYTHON_OP_CALL.finditer(blanked.split("#", 1)[0]):
             names.add(_op_name(*match.groups()))
-        for match in _DISPATCHER_OP_CALL.finditer(code):
+        cpp = line[: len(blanked.split("//", 1)[0])]
+        for match in _DISPATCHER_OP_CALL.finditer(cpp):
             groups = match.group(1, 2, 3) if match.group(1) else match.group(4, 5, 6)
             names.add(_op_name(*groups))
     return names

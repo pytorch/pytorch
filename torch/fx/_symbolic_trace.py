@@ -1313,20 +1313,18 @@ def _patch_wrapped_functions(patcher: _Patcher) -> None:
 
 @contextlib.contextmanager
 def _no_torch_function_modes() -> Iterator[None]:
-    """Pop the torch function modes but the default device's, which code run
-    normally would see too."""
+    """Pop the torch function modes above the default device's, which code run
+    normally would see too. That one stays at the bottom of the stack, where
+    ``torch.set_default_device`` replaces it."""
     from torch.utils._device import DeviceContext
 
     depth = torch._C._len_torch_function_stack()
     stack = [torch._C._pop_torch_function_stack() for _ in range(depth)]
-    kept = [mode for mode in reversed(stack) if isinstance(mode, DeviceContext)]
-    for mode in kept:
-        torch._C._push_on_torch_function_stack(mode)
+    if stack and isinstance(stack[-1], DeviceContext):
+        torch._C._push_on_torch_function_stack(stack.pop())
     try:
         yield
     finally:
-        for _ in kept:
-            torch._C._pop_torch_function_stack()
         for mode in reversed(stack):
             torch._C._push_on_torch_function_stack(mode)
 

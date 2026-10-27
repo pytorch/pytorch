@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    slowTest,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON
@@ -7926,6 +7927,54 @@ class TestPrecompileRuntimeCache(TestCase):
                 [c.kwargs["metadata_fn"]().get("name") for c in trace.call_args_list],
             )
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_untuned_triton_kernels_are_reported_once_written(self):
+        from torch.compiler import _runtime_cache
+
+        unlaunched = _never_run(_static_runtime_kernel(32))
+        unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
+
+        def freeze(write):
+            with _runtime_cache.capture_scope():
+                _runtime_cache._capture.triton_kernels["untuned"] = [unlaunched]
+                _runtime_cache.freeze_runtime_cache(
+                    lambda: None, write, require_tuned_backward=False
+                )
+
+        def traced(trace):
+            calls = trace.call_args_list
+            return [c.kwargs.get("metadata_fn", dict)().get("name") for c in calls]
+
+        def failed_write(artifact):
+            raise OSError("write failed")
+
+        # A capture that fails in the write, or before it in _freeze_cpp_kernels,
+        # reports nothing as frozen untuned.
+        with (
+            mock.patch("torch._logging.trace_structured") as trace,
+            self.assertNoLogs("torch.compiler._runtime_cache", "WARNING"),
+        ):
+            with self.assertRaisesRegex(OSError, "write failed"):
+                freeze(failed_write)
+            with (
+                mock.patch.object(
+                    _runtime_cache,
+                    "_freeze_cpp_kernels",
+                    side_effect=RuntimeError("missing.so"),
+                ),
+                self.assertRaisesRegex(RuntimeError, "missing.so"),
+            ):
+                freeze(lambda artifact: None)
+        self.assertNotIn("precompile_triton_untuned_kernels", traced(trace))
+        written = []
+        with (
+            mock.patch("torch._logging.trace_structured") as trace,
+            self.assertLogs("torch.compiler._runtime_cache", "WARNING"),
+        ):
+            freeze(written.append)
+        self.assertEqual(len(written), 1)
+        self.assertIn("precompile_triton_untuned_kernels", traced(trace))
+
     def test_static_records_follow_cache_reset(self):
         import hashlib
 
@@ -9791,24 +9840,47 @@ def _undefine_custom_op(qualname):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileCustomOpModules(TestCase):
+    # One case per form of artifact: each runs in up to five fresh processes.
+    @skipIfCrossRef
+    @parametrize(
+        "tracer,backend,entry,mode",
+        [
+            ("make_fx", "inductor", "fn", None),
+            ("dynamo", "inductor", "fn", "standalone"),
+            ("dynamo", "eager", "step", "installed"),
+            ("dynamo", "inductor-cpp-wrapper", "fn", "standalone"),
+        ],
+    )
+    def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
+        self, tracer, backend, entry, mode
+    ):
+        self._check_load_imports_custom_op_modules(
+            tracer, backend, entry, mode, serving=True
+        )
+
+    # The ops each backend and entry leaves in the served code.
+    @slowTest
     @skipIfCrossRef
     @parametrize(
         "tracer,backend,entry,mode",
         [
             ("make_fx", "eager", "fn", None),
-            ("make_fx", "inductor", "fn", None),
             ("dynamo", "eager", "fn", "standalone"),
-            ("dynamo", "inductor", "fn", "standalone"),
-            ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "subclass_fn", "standalone"),
             ("dynamo", "inductor", "grad_fn", "standalone"),
             ("dynamo", "inductor", "out_fn", "standalone"),
-            ("dynamo", "inductor-cpp-wrapper", "fn", "standalone"),
             ("dynamo", "inductor-cpp-wrapper", "list_fn", "standalone"),
         ],
     )
-    def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
+    def test_load_imports_the_modules_of_the_custom_ops_each_entry_calls(
         self, tracer, backend, entry, mode
+    ):
+        self._check_load_imports_custom_op_modules(
+            tracer, backend, entry, mode, serving=False
+        )
+
+    def _check_load_imports_custom_op_modules(
+        self, tracer, backend, entry, mode, *, serving
     ):
         with tempfile.TemporaryDirectory() as directory:
             tag = uuid.uuid4().hex
@@ -9826,7 +9898,7 @@ class TestPrecompileCustomOpModules(TestCase):
             phases = ["capture", "replay"]
             # The serving-process cases depend on the artifact's form, not on what
             # the entry calls, so they run once per form.
-            if entry in ("fn", "step"):
+            if serving:
                 phases += ["registered", "missing"]
             # Once for each driver that checks versions: standalone and installed.
             if (tracer, backend, entry) in (
@@ -10154,6 +10226,10 @@ class TestPrecompileCustomOpModules(TestCase):
             'PyObject* op = PyUnicode_FromString("torch.ops.mylib.halves.default");\n'
             # An op lowered to an extern kernel is named in its size assert.
             "assert_size_stride(buf3, (4,), (1,), 'torch.ops.mylib.extern.default')\n"
+            # Floor division, and a "#" in a string, end no Python line.
+            "buf4 = s0 // 2 + torch.ops.mylib.floored(buf3)\n"
+            "buf5 = f('#', torch.ops.mylib.hashed(buf4))\n"
+            'buf6 = aoti_torch_call_dispatcher("mylib::after_slashes", "//", args);\n'
         )
         self.assertEqual(
             _op_names_in_source(source),
@@ -10164,6 +10240,9 @@ class TestPrecompileCustomOpModules(TestCase):
                 "mylib::cpp_fallback",
                 "mylib::cpp_schema",
                 "mylib::halves",
+                "mylib::floored",
+                "mylib::hashed",
+                "mylib::after_slashes",
             },
         )
 
