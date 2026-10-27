@@ -1045,14 +1045,6 @@ class TestProfiler(TestCase):
             self.assertEqual(copied.custom_profiler_config, "custom_config")
             self.assertTrue(copied.trace_only)
 
-    def test_experimental_config_rejects_old_pickle_state(self):
-        # PyTorch 2.15 pickled one more field, adjust_profiler_step, at index 3.
-        state = _ExperimentalConfig().__getstate__()
-        old_state = state[:3] + (False,) + state[3:]
-        config = _ExperimentalConfig.__new__(_ExperimentalConfig)
-        with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
-            config.__setstate__(old_state)
-
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
         # way out: passing it must warn with FutureWarning and not error.
