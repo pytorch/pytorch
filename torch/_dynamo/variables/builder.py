@@ -203,6 +203,7 @@ from ..utils import (
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
     namedtuple_fields,
+    odict_keys,
     odict_values,
     proxy_args_kwargs,
     range_iterator,
@@ -2519,6 +2520,7 @@ class VariableBuilder:
             result = FrozenDataClassVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             if all(ConstantVariable.is_literal(k) for k in value):
                 # Model the view over its owning dict (the view's only gc
                 # referent) so mutations of the dict are visible through it.
@@ -2530,7 +2532,9 @@ class VariableBuilder:
                 # Same key guards as ConstDictVariable.dict_keys installs.
                 install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
                 self.tx.output.guard_on_key_order.add(dict_source)
-                return DictKeysVariable(dict_vt, source=self.source)
+                return DictKeysVariable(
+                    dict_vt, source=self.source, is_ordered=type(value) is odict_keys
+                )
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",
