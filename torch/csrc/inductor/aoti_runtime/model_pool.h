@@ -62,7 +62,7 @@ class ModelPool {
     void mark_in_flight() {
       AOTI_RUNTIME_CHECK(
           model_ != nullptr, "The lease no longer holds a model");
-      pool_->return_model_in_flight(model_);
+      pool_->return_model_to_in_flight(model_);
       model_ = nullptr;
     }
 
@@ -217,7 +217,7 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  void return_model_in_flight(Model* model) {
+  void return_model_to_in_flight(Model* model) {
     {
       std::lock_guard lk(models_mutex_);
       checked_out_models_.erase(model);
