@@ -1312,6 +1312,16 @@
       ]
     }
   ],
+  "GB2453": [
+    {
+      "Gb_type": "Unsupported Decimal context operation",
+      "Context": "operation",
+      "Explanation": "Dynamo only supports constant Decimal operations in a fresh, explicit local context.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0755": [
     {
       "Gb_type": "nb_negative_impl not implemented",

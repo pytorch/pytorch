@@ -26,6 +26,7 @@ import builtins
 import collections
 import contextlib
 import dataclasses
+import decimal
 import enum
 import functools
 import inspect
@@ -1345,6 +1346,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from .tensor import CurrentDeviceVariable
 
         constant_args = check_constant_args(args, kwargs)
+
+        if self.value is decimal.Decimal or self.value is decimal.Context:
+            from .decimal import DecimalContextVariable, DecimalVariable
+
+            cls = (
+                DecimalVariable
+                if self.value is decimal.Decimal
+                else DecimalContextVariable
+            )
+            return cls.create(tx, args, kwargs)
 
         if isinstance(self.value, type) and type_disallows_instantiation(self.value):
             raise_type_error(tx, f"cannot create '{self.value.__name__}' instances")

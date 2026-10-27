@@ -24,6 +24,7 @@ import contextlib
 import contextvars
 import copy
 import dataclasses
+import decimal
 import enum
 import functools
 import gc
@@ -135,6 +136,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrProxySource,
     AttrSource,
+    CallFunctionNoArgsSource,
     CallMethodItemSource,
     ChainedSource,
     ConstDictKeySource,
@@ -1106,6 +1108,7 @@ class VariableBuilder:
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
+            (decimal.Decimal, cls.wrap_decimal),
             ((re.Pattern, re.Match), cls.wrap_regex_pattern),
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
@@ -1126,6 +1129,14 @@ class VariableBuilder:
                 result[t] = fn
 
         return result
+
+    def wrap_decimal(self, value: decimal.Decimal) -> VariableTracker:
+        from .decimal import DecimalVariable
+
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        source = CallFunctionNoArgsSource(AttrSource(self.source, "as_tuple"))
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return DecimalVariable(value, source=self.source)
 
     def wrap_regex_pattern(
         self, value: re.Pattern[Any] | re.Match[Any]
@@ -5708,6 +5719,10 @@ class SourcelessBuilder:
             value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
         ):
             return UserDefinedObjectVariable(value)
+        elif type(value) is decimal.Decimal:
+            from .decimal import DecimalVariable
+
+            return DecimalVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
             return ConstantLikeVariable(value)
         elif type(value) is types.DynamicClassAttribute:

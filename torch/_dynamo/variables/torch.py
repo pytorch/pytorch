@@ -25,6 +25,8 @@ This is a core part of Dynamo's tracing system, translating torch operations int
 traceable graph nodes while preserving correct semantics and handling edge cases.
 """
 
+import cmath
+import decimal
 import enum
 import functools
 import inspect
@@ -1345,6 +1347,92 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             converted = [pyfloat_as_double(tx, arg) for arg in args]
             return self.call_function(tx, converted, {})
+
+        @register(decimal.localcontext)
+        def handle_decimal_localcontext(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .decimal import DecimalLocalContextVariable
+
+            return DecimalLocalContextVariable.create(tx, list(args), kwargs)
+
+        @register(decimal.getcontext)
+        def handle_decimal_getcontext(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .decimal import _unsupported
+
+            no_keywords(tx, "decimal.getcontext", kwargs)
+            check_positional(tx, "getcontext", len(args), 0, 0)
+            if not tx.output.decimal_contexts:
+                _unsupported("getcontext outside an explicit local context")
+            return tx.output.decimal_contexts[-1]
+
+        @register(math.factorial)
+        def handle_decimal_factorial(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .decimal import DecimalVariable
+
+            if not any(isinstance(arg, DecimalVariable) for arg in args):
+                return None
+            no_keywords(tx, "math.factorial", kwargs)
+            check_positional(tx, "factorial", len(args), 1, 1)
+            return self.call_function(tx, [pynumber_index(tx, args[0])], {})
+
+        @register(math.isclose, cmath.isclose)
+        def handle_decimal_isclose(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .decimal import _unsupported, DecimalVariable
+            from .object_protocol import pyfloat_as_double
+
+            if not any(
+                isinstance(arg, DecimalVariable) for arg in (*args, *kwargs.values())
+            ):
+                return None
+            if (
+                len(args) > 2
+                or set(kwargs) - {"a", "b", "rel_tol", "abs_tol"}
+                or any(name in kwargs for name in ("a", "b")[: len(args)])
+                or len(args) + sum(name in kwargs for name in ("a", "b")) != 2
+            ):
+                _unsupported("math.isclose argument binding with Decimal")
+
+            def convert(
+                arg: VariableTracker, tolerance: bool = False
+            ) -> VariableTracker:
+                if (
+                    tolerance
+                    or self.value is math.isclose
+                    or isinstance(arg, DecimalVariable)
+                ):
+                    return pyfloat_as_double(tx, arg)
+                if not arg.is_python_constant():
+                    _unsupported("cmath.isclose with a non-constant complex operand")
+                return arg
+
+            # Argument Clinic converts in signature order, not keyword order.
+            bound = {**dict(zip(("a", "b"), args)), **kwargs}
+            converted = [convert(bound[name]) for name in ("a", "b")]
+            keywords = {
+                name: convert(bound[name], tolerance=True)
+                for name in ("rel_tol", "abs_tol")
+                if name in bound
+            }
+            return self.call_function(tx, converted, keywords)
 
         @register(math.radians)
         def handle_radians(
