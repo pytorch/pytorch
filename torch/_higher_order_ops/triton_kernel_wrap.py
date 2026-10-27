@@ -3,11 +3,13 @@ import collections
 import copy
 import dataclasses
 import functools
+import importlib
 import inspect
 import itertools
 import logging
 import operator
 import threading
+import types
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -44,6 +46,7 @@ if TYPE_CHECKING:
     )
 
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.base import VariableTracker
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._guards import Source
@@ -86,10 +89,11 @@ TMAExperimentalMetadata = tuple[
 ]
 
 # e.g. for host-side Triton TMA API call ``TensorDescriptor.from_tensor(ptr, [32, 64])``
-# the metadata will look like ``("stable", ([32, 64],))``
+# the metadata will look like
+# ``("stable", ([32, 64], "triton.tools.tensor_descriptor", "TensorDescriptor"))``
 TMAStableMetadata = tuple[
     str,  # type of TMA ("experimental" or "stable")
-    tuple[list[IntLikeType],],  # block_shape
+    tuple[list[IntLikeType], str, str],  # block_shape, module, class
 ]
 
 
@@ -113,18 +117,168 @@ def maybe_unpack_tma_experimental_metadata(
 
 def create_tma_stable_metadata(
     block_shape: list[IntLikeType],
+    descriptor_module: str,
+    descriptor_class: str,
 ) -> TMAStableMetadata:
-    return ("stable", (block_shape,))
+    return ("stable", (block_shape, descriptor_module, descriptor_class))
 
 
 def maybe_unpack_tma_stable_metadata(
     tma_meta: TMAExperimentalMetadata | TMAStableMetadata,
-) -> tuple[list[IntLikeType]] | None:
+) -> tuple[list[IntLikeType], str, str] | None:
     if not tma_meta or len(tma_meta) != 2:
         return None
     if tma_meta[0] == "stable":
         return tma_meta[1]  # type: ignore[return-value]
     return None
+
+
+def get_importable_tma_descriptor_path(
+    descriptor_type: type[Any],
+) -> tuple[str, str] | None:
+    module_name = descriptor_type.__module__
+    class_name = descriptor_type.__name__
+    if module_name == "__main__":
+        return None
+    try:
+        resolved = getattr(importlib.import_module(module_name), class_name)
+    except (AttributeError, ImportError):
+        return None
+    return (module_name, class_name) if resolved is descriptor_type else None
+
+
+def get_tma_descriptor_factory_signature(
+    factory: Callable[..., Any],
+) -> inspect.Signature:
+    """Inspect Python parameters and defaults without wrapper/signature metadata."""
+    function = factory.__func__ if isinstance(factory, types.MethodType) else factory
+    if not isinstance(function, types.FunctionType):
+        raise TypeError("TMA descriptor factory must be a Python function")
+    function_copy = types.FunctionType(
+        function.__code__,
+        function.__globals__,
+        function.__name__,
+        function.__defaults__,
+        function.__closure__,
+    )
+    function_copy.__kwdefaults__ = function.__kwdefaults__
+    if isinstance(factory, types.MethodType):
+        return inspect.signature(types.MethodType(function_copy, factory.__self__))
+    return inspect.signature(function_copy)
+
+
+def bind_tma_descriptor_factory_call(
+    factory: Callable[..., Any],
+    args: list["VariableTracker"],
+    kwargs: dict[str, "VariableTracker"],
+) -> tuple["VariableTracker", "VariableTracker", list[tuple[str, int | None]]] | None:
+    """Validate a call and locate supplied defaults for guarding.
+
+    Bound-method signatures omit cls, so default indices are computed from
+    that signature even though __defaults__ belongs to the underlying function.
+    """
+    from torch._dynamo.utils import constants_identical
+
+    parameter = inspect.Parameter
+    positional = (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    variadic = (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
+    arg_names = ("tensor", "block_shape")
+    canonical_call = len(args) <= 2 and set(kwargs) == set(arg_names[len(args) :])
+    tensor = block_shape = None
+    try:
+        signature = get_tma_descriptor_factory_signature(factory)
+        parameters = list(signature.parameters.values())
+        bound = signature.bind(*args, **kwargs).arguments
+        forwarding_factory = False
+        if canonical_call:
+            tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
+            block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+            forwarding_factory = all(
+                param.kind in variadic
+                or (
+                    index < 2
+                    and param.kind in positional
+                    and bound.get(param.name) is (tensor, block_shape)[index]
+                )
+                for index, param in enumerate(parameters)
+            )
+        if not forwarding_factory:
+            if len(parameters) < 2 or not all(
+                param.kind in positional and param.name in bound
+                for param in parameters[:2]
+            ):
+                return None
+            tensor, block_shape = (bound[param.name] for param in parameters[:2])
+        if tensor is None or block_shape is None or not tensor.is_tensor():
+            return None
+        signature.bind(tensor, block_shape)
+    except (TypeError, ValueError):
+        return None
+
+    if forwarding_factory:
+        return tensor, block_shape, []
+
+    supplied_options = [
+        (index, param)
+        for index, param in enumerate(parameters[2:], 2)
+        if param.name in bound
+    ]
+    function = factory.__func__ if isinstance(factory, types.MethodType) else factory
+    if supplied_options and (
+        hasattr(function, "__wrapped__")
+        or getattr(function, "__signature__", None) is not None
+    ):
+        return None
+
+    scalar_types = (str, bool, int, float, complex, bytes, type(None))
+    if any(
+        param.kind not in (*positional, parameter.KEYWORD_ONLY)
+        or type(param.default) not in scalar_types
+        or not bound[param.name].is_python_constant()
+        or type(bound[param.name].as_python_constant()) is not type(param.default)
+        or not constants_identical(
+            bound[param.name].as_python_constant(), param.default
+        )
+        for _, param in supplied_options
+    ):
+        return None
+
+    positional_count = sum(param.kind in positional for param in parameters)
+    default_offset = positional_count - len(function.__defaults__ or ())
+    supplied_defaults = []
+    for index, param in supplied_options:
+        default_index = (
+            None if param.kind == parameter.KEYWORD_ONLY else index - default_offset
+        )
+        supplied_defaults.append((param.name, default_index))
+    return tensor, block_shape, supplied_defaults
+
+
+def _validate_host_tma_descriptor_factory(arg: Any) -> None:
+    try:
+        signature = get_tma_descriptor_factory_signature(type(arg).from_tensor)
+        bound = signature.bind(arg.base, list(arg.block_shape))
+    except (TypeError, ValueError):
+        raise RuntimeError(
+            "TMA descriptor must be reconstructible with from_tensor(base, block_shape)"
+        ) from None
+
+    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    if any(
+        param.name not in bound.arguments
+        and param.kind not in variadic
+        and param.name not in ("padding", "round_f32_to_tf32")
+        for param in signature.parameters.values()
+    ):
+        raise RuntimeError("TMA descriptor factory has unsupported optional arguments")
+
+    bound.apply_defaults()
+    padding = bound.arguments.get("padding", "zero")
+    rounding = bound.arguments.get("round_f32_to_tf32", False)
+    if padding != arg.padding or rounding != getattr(arg, "round_f32_to_tf32", False):
+        raise RuntimeError(
+            "TMA descriptor factory defaults do not reproduce the captured descriptor"
+        )
 
 
 def maybe_unpack_host_tma_descriptor(
@@ -133,9 +287,10 @@ def maybe_unpack_host_tma_descriptor(
     """Split a host-side (stable API) TMA descriptor into its base tensor and the
     metadata needed to rebuild it downstream. Returns None for non-descriptor args.
 
-    Only descriptors equivalent to ``TensorDescriptor.from_tensor(base, block_shape)``
-    can be represented: the metadata carries just the block shape, so the descriptor's
-    shape/strides must be the base tensor's own.
+    Only descriptors equivalent to their class's ``from_tensor(base, block_shape)``
+    can be represented: the metadata carries the block shape and class identity,
+    so shape/strides must match the base tensor and factory defaults must match.
+    Optional factory arguments must use the supported padding and rounding names.
     """
     from torch.utils._triton import has_triton_tensor_descriptor_host_tma
 
@@ -169,7 +324,19 @@ def maybe_unpack_host_tma_descriptor(
             "carried through the graph."
         )
 
-    return base, create_tma_stable_metadata(list(arg.block_shape))
+    descriptor_type = type(arg)
+    descriptor_path = get_importable_tma_descriptor_path(descriptor_type)
+    if descriptor_path is None:
+        raise RuntimeError("TMA descriptor class must be importable")
+
+    _validate_host_tma_descriptor_factory(arg)
+
+    descriptor_module, descriptor_class = descriptor_path
+    return base, create_tma_stable_metadata(
+        list(arg.block_shape),
+        descriptor_module,
+        descriptor_class,
+    )
 
 
 # TMADescriptorMetadata maps kernel parameter names to the metadata that allows
@@ -246,6 +413,24 @@ class KernelSideTable:
 
 
 kernel_side_table = KernelSideTable()
+
+
+# Before Triton 3.2 (https://github.com/triton-lang/triton/pull/5083), Autotuner
+# stored these as argument indices in reset_idx and restore_idx.
+def get_reset_to_zero_args(kernel: "TritonAutotunerType") -> list[str]:
+    if hasattr(kernel, "reset_idx"):
+        # pyrefly: ignore [missing-attribute]
+        return [kernel.fn.arg_names[i] for i in kernel.reset_idx]
+    # pyrefly: ignore [missing-attribute]
+    return list(kernel.reset_to_zero)
+
+
+def get_restore_value_args(kernel: "TritonAutotunerType") -> list[str]:
+    if hasattr(kernel, "restore_idx"):
+        # pyrefly: ignore [missing-attribute]
+        return [kernel.fn.arg_names[i] for i in kernel.restore_idx]
+    # pyrefly: ignore [missing-attribute]
+    return list(kernel.restore_value)
 
 
 ###############################################################################
@@ -357,9 +542,10 @@ def generate_ttir(
                 tma_descriptor_metadata.get(name, None)
             )
         ) is not None:
-            from triton.tools.tensor_descriptor import TensorDescriptor
-
-            block_shape = stable_meta[0]
+            block_shape, descriptor_module, descriptor_class = stable_meta
+            descriptor_type = getattr(
+                importlib.import_module(descriptor_module), descriptor_class
+            )
             with torch._C._DisableTorchDispatch():
                 # need 16-byte aligned strides
                 elements_per_dim = max(1, 16 // a.dtype.itemsize)
@@ -367,7 +553,7 @@ def generate_ttir(
                     [elements_per_dim] * len(block_shape), dtype=a.dtype
                 )
 
-            ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
+            ordered_args[name] = descriptor_type.from_tensor(base_tensor, block_shape)
         elif is_fake_tensor(a) or isinstance(a, torch._inductor.ir.TensorBox):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
@@ -404,10 +590,11 @@ def generate_ttir(
             return []
 
         if is_stable_tensor_descriptor_arg(arg):
-            stable_meta = maybe_unpack_tma_stable_metadata(
-                tma_descriptor_metadata[name]
-            )
-            if stable_meta is None:
+            if (
+                stable_meta := maybe_unpack_tma_stable_metadata(
+                    tma_descriptor_metadata[name]
+                )
+            ) is None:
                 raise AssertionError(f"Failed to unpack stable TMA metadata for {name}")
             block_shape = stable_meta[0]
             tensor_rank = len(block_shape)
@@ -1600,11 +1787,12 @@ def triton_kernel_wrapper_mutation_dense(
                     raise AssertionError(
                         f"Failed to unpack stable TMA metadata for key {k}"
                     )
-                from triton.tools.tensor_descriptor import TensorDescriptor
+                block_shape, descriptor_module, descriptor_class = stable_meta
+                descriptor_type = getattr(
+                    importlib.import_module(descriptor_module), descriptor_class
+                )
 
-                block_shape = stable_meta[0]
-
-                kwargs[k] = TensorDescriptor.from_tensor(tensor, block_shape)
+                kwargs[k] = descriptor_type.from_tensor(tensor, block_shape)
 
     # move as many positional arguments from dicts to args as we
     # can to circumvent the bug with the kwargs and pre_/post_hook:
@@ -2351,10 +2539,14 @@ class TritonHOPifier:
             prune_configs_by = {
                 "perf_model": variable.kernel.perf_model,
                 "early_config_prune": variable.kernel.early_config_prune,
-                "configs_top_k": variable.kernel.configs_top_k,
+                "top_k": variable.kernel.configs_top_k,
             }
             new_kernel = autotune(
-                configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                configs=new_configs,
+                key=[],
+                prune_configs_by=prune_configs_by,
+                reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                restore_value=get_restore_value_args(variable.kernel),
             )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
@@ -2393,11 +2585,15 @@ class TritonHOPifier:
                 prune_configs_by = {
                     "perf_model": variable.kernel.perf_model,
                     "early_config_prune": variable.kernel.early_config_prune,
-                    "configs_top_k": variable.kernel.configs_top_k,
+                    "top_k": variable.kernel.configs_top_k,
                 }
 
                 new_kernel = autotune(
-                    configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                    configs=new_configs,
+                    key=[],
+                    prune_configs_by=prune_configs_by,
+                    reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                    restore_value=get_restore_value_args(variable.kernel),
                 )(variable.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
@@ -2447,11 +2643,15 @@ class TritonHOPifier:
                     prune_configs_by = {
                         "perf_model": variable.kernel.perf_model,
                         "early_config_prune": variable.kernel.early_config_prune,
-                        "configs_top_k": variable.kernel.configs_top_k,
+                        "top_k": variable.kernel.configs_top_k,
                     }
 
                     new_kernel = autotune(
-                        configs=new_configs, prune_configs_by=prune_configs_by, key=[]
+                        configs=new_configs,
+                        prune_configs_by=prune_configs_by,
+                        key=[],
+                        reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                        restore_value=get_restore_value_args(variable.kernel),
                     )(variable.kernel.fn)
                     new_var = self.recreate_variable(
                         variable,
@@ -2515,7 +2715,12 @@ class TritonHOPifier:
 
             # after pruning the configs, create a new autotuner object with
             # these configs and recurse.
-            new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
+            new_kernel = autotune(
+                configs=pruned_configs,
+                key=[],
+                reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                restore_value=get_restore_value_args(variable.kernel),
+            )(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = self.recreate_variable(
@@ -2536,6 +2741,13 @@ class TritonHOPifier:
             config_kwarg_names = set().union(
                 *(set(config.kwargs) for config in variable.kernel.configs)
             )
+            # Eager Triton launches with config.all_kwargs(), which includes a
+            # set maxnreg, so a launch kwarg maxnreg is a duplicate there too.
+            if any(
+                getattr(config, "maxnreg", None) is not None
+                for config in variable.kernel.configs
+            ):
+                config_kwarg_names.add("maxnreg")
             config_conflicts = sorted(set(launch_kwargs) & config_kwarg_names)
             if config_conflicts:
                 self.raise_unsupported(
