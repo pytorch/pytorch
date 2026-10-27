@@ -1747,6 +1747,66 @@ def add(x, y):
             _import_module.cache_clear()
             torch._dynamo.reset()
 
+    @parametrize("fullgraph", [False, True])
+    def test_imported_replacement_module_attribute_mutation(self, fullgraph):
+        name = "torch_test_package_imported_replacement_module"
+        alias = f"__import_{name}"
+        old = types.ModuleType(name)
+        old.VALUE = 1
+        replacement = types.ModuleType(name)
+        replacement.VALUE = 10
+        newest = types.ModuleType(name)
+        newest.VALUE = 20
+
+        def warm(x):
+            import torch_test_package_imported_replacement_module as imported
+
+            return x + imported.VALUE
+
+        def fn(x, offset):
+            import torch_test_package_imported_replacement_module as imported
+
+            imported.VALUE += 1
+            return x + imported.VALUE + offset, imported
+
+        self.addCleanup(sys.modules.pop, name, None)
+        self.addCleanup(fn.__globals__.pop, alias, None)
+        self.addCleanup(_import_module.cache_clear)
+        _import_module.cache_clear()
+        sys.modules[name] = old
+        x = torch.randn(3, 2)
+        self.assertEqual(torch.compile(warm, backend="eager", fullgraph=True)(x), x + 1)
+        self.assertIs(_import_module(name), old)
+
+        sys.modules[name] = replacement
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        result, imported = compiled(x, 0)
+        self.assertEqual(result, x + 11)
+        self.assertIs(imported, replacement)
+        self.assertEqual(replacement.VALUE, 11)
+        self.assertEqual(old.VALUE, 1)
+        self.assertEqual(counter.frame_count, 1)
+
+        replacement.VALUE = 10
+        with torch.compiler.set_stance("fail_on_recompile"):
+            result, imported = compiled(x, 0)
+        self.assertEqual(result, x + 11)
+        self.assertIs(imported, replacement)
+        self.assertEqual(replacement.VALUE, 11)
+        self.assertEqual(old.VALUE, 1)
+
+        replacement.VALUE = 10
+        sys.modules[name] = newest
+        # Changing offset forces a retrace independently of the module replacement.
+        result, imported = compiled(x, 1)
+        self.assertEqual(result, x + 22)
+        self.assertIs(imported, newest)
+        self.assertEqual(newest.VALUE, 21)
+        self.assertEqual(replacement.VALUE, 10)
+        self.assertEqual(old.VALUE, 1)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_import_name_replay_dummy_module(self):
         name = "torch_test_package_replay_dummy_module"
         recorded_name = f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_0_None_{name}"
