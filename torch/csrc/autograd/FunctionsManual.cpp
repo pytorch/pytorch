@@ -2723,6 +2723,8 @@ Tensor binary_cross_entropy_with_logits_backward(
 
   // If there are subclassed tensors use the out of place version
   const bool out_of_place = at::areAnyTensorSubclassLike({input, target}) ||
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      (isDefined(pos_weight) && at::isTensorSubclassLike(*pos_weight)) ||
       at::GradMode::is_enabled();
   auto neg_part = out_of_place ? input.neg().sigmoid().mul(target)
                                : input.neg().sigmoid_().mul_(target);
@@ -2733,8 +2735,8 @@ Tensor binary_cross_entropy_with_logits_backward(
   }
 
   auto grad_input = out_of_place
-      ? input.sigmoid().mul(1 - target).sub(neg_part)
-      : input.sigmoid().mul_(1 - target).sub_(neg_part);
+      ? input.sigmoid().mul(at::rsub(target, 1)).sub(neg_part)
+      : input.sigmoid().mul_(at::rsub(target, 1)).sub_(neg_part);
 
   if (at::isTensorSubclassLike(grad) || at::GradMode::is_enabled()) {
     grad_input = grad_input.mul(grad);
