@@ -2155,6 +2155,145 @@ class TestFX(JitTestCase):
             leaf, [n.target for n in graph.nodes if n.op == "call_function"]
         )
 
+    def test_wrap_targets_registered_in_a_revert_window_wait_for_its_end(self):
+        from torch.fx import _symbolic_trace
+
+        unresolved = object()
+
+        def leaf(x):
+            return x + 1
+
+        helper_scope = {"leaf": leaf}
+        in_window = []
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # The helper's body: torch.fx.wrap("leaf").
+                    key = (id(helper_scope), "leaf")
+                    _symbolic_trace._wrapped_fns_to_patch[key] = helper_scope
+                    value = object()
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def inner_forward(self, x):
+            return x * 2
+
+        class Inner(torch.nn.Module):
+            forward = types.FunctionType(
+                inner_forward.__code__,
+                Globals(__builtins__=builtins, helper=unresolved),
+                "forward",
+            )
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                # As Dynamo reverts FX's patches to compile under an FX trace.
+                with _symbolic_trace._maybe_revert_all_patches():
+                    torch.fx.Tracer().trace(Inner())
+                    in_window.append(helper_scope["leaf"] is leaf)
+                return helper_scope["leaf"](x)
+
+        with (
+            unittest.mock.patch.dict(_symbolic_trace._wrapped_fns_to_patch),
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is unresolved,
+                create=True,
+            ),
+        ):
+            graph = torch.fx.Tracer().trace(Outer())
+        self.assertEqual(in_window, [True])
+        self.assertIn(
+            leaf, [n.target for n in graph.nodes if n.op == "call_function"]
+        )
+
+    def test_an_earlier_lazily_bound_wrap_target_resolves_outside_every_trace(self):
+        from torch.fx import _symbolic_trace
+
+        unresolved = object()
+        original_call = torch.nn.Module.__call__
+        saw_original = {}
+
+        def target(x):
+            return x + 1
+
+        def other(x):
+            return x - 1
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    saw_original[name] = torch.nn.Module.__call__ is original_call
+                    value = target if name == "f" else object()
+                    dict.__setitem__(self, name, value)
+                    if name == "helper":
+                        # Its body registers another wrap target.
+                        key = (id(other_scope), "other")
+                        _symbolic_trace._wrapped_fns_to_patch[key] = other_scope
+                return value
+
+        # A module the traced code imports: torch.fx.wrap("f"), f bound lazily.
+        target_scope = Globals(f=unresolved)
+        other_scope = {"other": other}
+
+        def register():
+            key = (id(target_scope), "f")
+            _symbolic_trace._wrapped_fns_to_patch[key] = target_scope
+
+        def inner_forward(self, x):
+            register_target()  # noqa: F821
+            return self.relu(self.sub(x))
+
+        def sub_forward(self, x):
+            return x + 1
+
+        class Sub(torch.nn.Module):
+            forward = types.FunctionType(
+                sub_forward.__code__,
+                Globals(__builtins__=builtins, helper=unresolved),
+                "forward",
+            )
+
+        class Inner(torch.nn.Module):
+            forward = types.FunctionType(
+                inner_forward.__code__,
+                {"__builtins__": builtins, "register_target": register},
+                "forward",
+            )
+
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+                self.relu = torch.nn.ReLU()
+
+        inner_graphs = []
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                inner_graphs.append(torch.fx.Tracer().trace(Inner()))
+                return x
+
+        with (
+            unittest.mock.patch.dict(_symbolic_trace._wrapped_fns_to_patch),
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is unresolved,
+                create=True,
+            ),
+        ):
+            torch.fx.Tracer().trace(Outer())
+        self.assertEqual(saw_original, {"helper": True, "f": True})
+        # The inner trace still intercepts its later submodule call.
+        [inner_graph] = inner_graphs
+        self.assertEqual(
+            [n.target for n in inner_graph.nodes if n.op == "call_module"], ["relu"]
+        )
+
     def test_lazy_imports_a_module_body_adds_are_resolved_too(self):
         unresolved = object()
         original_call = torch.nn.Module.__call__
