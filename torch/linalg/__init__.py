@@ -322,9 +322,10 @@ Returns:
 Examples::
 
     >>> A = torch.randn(3, 3)
-    >>> Ainv, info = torch.linalg.solve_ex(A)
-    >>> torch.dist(torch.linalg.inv(A), Ainv)
-    tensor(0.)
+    >>> B = torch.randn(3, 2)
+    >>> X, info = torch.linalg.solve_ex(A, B)
+    >>> torch.dist(A @ X, B)
+    tensor(4.9958e-07)
     >>> info
     tensor(0, dtype=torch.int32)
 
@@ -1071,7 +1072,7 @@ Examples::
     >>> B = torch.randn(2, 3, 4)
     >>> X = torch.linalg.ldl_solve(LD, pivots, B)
     >>> torch.linalg.norm(A @ X - B)
-    >>> tensor(0.0001)
+    tensor(0.0001)
 """,
 )
 
@@ -3075,12 +3076,12 @@ Keyword args:
 Example::
 
     >>> x = torch.tensor([1, 2, 3, 5])
-    >>> linalg.vander(x)
+    >>> torch.linalg.vander(x)
     tensor([[  1,   1,   1,   1],
             [  1,   2,   4,   8],
             [  1,   3,   9,  27],
             [  1,   5,  25, 125]])
-    >>> linalg.vander(x, N=3)
+    >>> torch.linalg.vander(x, N=3)
     tensor([[ 1,  1,  1],
             [ 1,  2,  4],
             [ 1,  3,  9],
@@ -3119,7 +3120,7 @@ Examples::
 
     >>> v1 = torch.randn(3, 2)
     >>> v2 = torch.randn(3, 2)
-    >>> linalg.vecdot(v1, v2)
+    >>> torch.linalg.vecdot(v1, v2)
     tensor([ 0.3223,  0.2815, -0.1944])
     >>> torch.vdot(v1[0], v2[0])
     tensor(0.3223)
