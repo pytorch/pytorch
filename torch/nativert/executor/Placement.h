@@ -9,8 +9,9 @@
 namespace torch::nativert {
 
 /**
- * Returns true if the two devices are the same and has the same device index
- * (if cuda).
+ * Returns true if the two devices are the same type and index. For
+ * accelerators, an unset index falls back to the current device index.
+ * Non-accelerator types (e.g. CPU, Meta) ignore index entirely.
  */
 bool isSameDevice(const c10::Device& device1, const c10::Device& device2);
 
