@@ -1948,6 +1948,46 @@ class TestCachingAutotunerLaunched(TestCase):
             self.assertIs(AsyncCompile().triton("triton_", source).result(), autotuner)
         self.assertEqual((autotuner.is_backward, autotuner._forward_use), (False, True))
 
+    def test_forward_use_survives_resolving_a_shared_compile_twice(self):
+        from concurrent.futures import Future
+
+        from torch._inductor.async_compile import (
+            AsyncCompile,
+            CompiledTritonKernels,
+            loading_graph,
+        )
+
+        for forward_first in (True, False):
+            autotuner = self._make_autotuner()
+            autotuner.prepare_for_pickle()
+            task = Future()
+            task.set_result((autotuner, 0))
+            pool = MagicMock()
+            pool.submit.return_value = task
+            source = f"# a compile a backward and a forward share {id(autotuner)}"
+            self.addCleanup(CompiledTritonKernels.remove_future, source)
+            with (
+                patch.object(AsyncCompile, "use_process_pool", return_value=True),
+                patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+                patch.object(
+                    AsyncCompile, "should_use_thread_workers", return_value=False
+                ),
+                patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+                patch.object(autotuner, "precompile"),
+            ):
+                with loading_graph(True):
+                    backward = AsyncCompile().triton("triton_", source)
+                with loading_graph(False):
+                    forward = AsyncCompile().triton("triton_", source)
+                first, second = forward, backward
+                if not forward_first:
+                    first, second = second, first
+                self.assertIs(first.result(), autotuner)
+                autotuner._launched = True
+                self.assertIs(second.result(), autotuner)
+            flags = autotuner._forward_use, autotuner._launched
+            self.assertEqual(flags, (True, True))
+
 
 class TestFastLauncherDeviceSupport(TestCase):
     @staticmethod
