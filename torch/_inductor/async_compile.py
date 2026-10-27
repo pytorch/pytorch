@@ -690,13 +690,13 @@ class AsyncCompile:
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
-                kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
                 # Only restore after unpickle in process mode
                 # Thread mode doesn't pickle, so kernel is already in correct state
                 if not self.should_use_thread_workers():
                     kernel.restore_after_unpickle(old_values=None)
+                kernel.set_compile_info(compile_id, is_backward)
 
                 kernel.precompile(
                     warm_cache_only=False,
