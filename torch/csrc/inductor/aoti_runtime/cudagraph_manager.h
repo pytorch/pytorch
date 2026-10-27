@@ -1,0 +1,395 @@
+#pragma once
+
+#ifdef USE_CUDA
+
+// WARNING: Be careful when adding new includes here. This header will be used
+// in model.so, and should not refer to any aten/c10 headers except the stable
+// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
+// applies to other files under torch/csrc/inductor/aoti_runtime/.
+#include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
+#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
+
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+namespace torch::aot_inductor {
+
+struct CudaGraphOptions {
+  // Eager calls with a new key before it is captured, so that lazy
+  // initialization such as kernel loading happens outside the capture.
+  int64_t warmup_calls = 1;
+  // Calls with new keys run eagerly once this many graphs exist.
+  int64_t max_graphs = 8;
+};
+
+// Deleters run in destructors, so they log errors instead of throwing.
+inline void delete_cuda_graph(void* ptr) {
+  if (aoti_torch_delete_cuda_graph(reinterpret_cast<CUDAGraphHandle>(ptr)) !=
+      AOTI_TORCH_SUCCESS) {
+    std::cerr << "CudaGraphManager: failed to delete a CUDA graph\n";
+  }
+}
+
+inline void delete_cuda_mem_pool(void* ptr) {
+  if (aoti_torch_delete_cuda_mem_pool(
+          reinterpret_cast<CUDAMemPoolHandle>(ptr)) != AOTI_TORCH_SUCCESS) {
+    std::cerr << "CudaGraphManager: failed to delete a CUDA memory pool\n";
+  }
+}
+
+// Runs a capturable piece of a model instance eagerly or as CUDA graphs, with
+// one graph per key: the inputs' dtypes, sizes and strides. An instance runs
+// one call at a time, so its graphs never replay concurrently and share one
+// memory pool: each replay copies its inputs in right before and clones its
+// outputs right after.
+class CudaGraphManager {
+ public:
+  explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
+      : device_index_(device_index), options_(checked(options)) {
+    AOTICudaGuard device_guard(device_index_);
+    // Owned rather than taken from the stream pool, so no other thread can
+    // enqueue work into a capture.
+    AOTI_RUNTIME_CUDA_CHECK(
+        cudaStreamCreateWithFlags(&capture_stream_, cudaStreamNonBlocking));
+    AOTI_RUNTIME_CUDA_CHECK(
+        cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
+  }
+
+  ~CudaGraphManager() {
+    AOTICudaGuard device_guard(device_index_);
+    // Replays may still be running on callers' streams, and deleting the pool
+    // returns their memory to the device.
+    cudaError_t code = cudaDeviceSynchronize();
+    if (code != cudaSuccess) {
+      std::cerr << "CudaGraphManager: " << cudaGetErrorString(code) << '\n';
+    }
+    graphs_.clear();
+    pool_.reset();
+    cudaEventDestroy(event_);
+    cudaStreamDestroy(capture_stream_);
+  }
+
+  CudaGraphManager(const CudaGraphManager&) = delete;
+  CudaGraphManager& operator=(const CudaGraphManager&) = delete;
+  CudaGraphManager(CudaGraphManager&&) = delete;
+  CudaGraphManager& operator=(CudaGraphManager&&) = delete;
+
+  // Calls fn(inputs, outputs, stream), or replays a capture of it. fn borrows
+  // `inputs`, writes new references into `outputs`, and must enqueue all of
+  // its GPU work on the stream it is given, which may be the capture stream.
+  template <typename Fn>
+  void run(
+      Fn&& fn,
+      AtenTensorHandle* inputs,
+      size_t num_inputs,
+      AtenTensorHandle* outputs,
+      size_t num_outputs,
+      cudaStream_t stream) {
+    if (is_stream_capturing(stream)) {
+      // The caller is capturing the whole call itself.
+      fn(inputs, outputs, stream);
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto key = make_key(inputs, num_inputs);
+    auto it = graphs_.find(key);
+    if (it == graphs_.end()) {
+      if (graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
+        warn_max_graphs();
+        fn(inputs, outputs, stream);
+        return;
+      }
+      if (warmup_counts_.size() >= kMaxWarmupKeys &&
+          warmup_counts_.count(key) == 0) {
+        warmup_counts_.clear();
+      }
+      int64_t& warmups = warmup_counts_[key];
+      if (warmups < options_.warmup_calls) {
+        ++warmups;
+        fn(inputs, outputs, stream);
+        return;
+      }
+      warmup_counts_.erase(key);
+      auto graph = capture(fn, inputs, num_inputs, num_outputs, stream);
+      it = graphs_.emplace(std::move(key), std::move(graph)).first;
+    }
+    replay(*it->second, inputs, outputs, num_outputs, stream);
+  }
+
+  // Drops all graphs, e.g. when the model's constants move. Their memory is
+  // freed when the next capture starts or the manager is destroyed.
+  void reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    graphs_.clear();
+    warmup_counts_.clear();
+  }
+
+  size_t num_graphs() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return graphs_.size();
+  }
+
+  // Keys still warming up are forgotten past this many, so a stream of
+  // one-off shapes can't grow the manager without bound.
+  static constexpr size_t kMaxWarmupKeys = 1024;
+
+ private:
+  static constexpr size_t kNoOutput = std::numeric_limits<size_t>::max();
+
+  static CudaGraphOptions checked(const CudaGraphOptions& options) {
+    AOTI_RUNTIME_CHECK(
+        options.warmup_calls >= 0, "warmup_calls must be non-negative");
+    AOTI_RUNTIME_CHECK(
+        options.max_graphs >= 0, "max_graphs must be non-negative");
+    return options;
+  }
+
+  struct Graph {
+    std::unique_ptr<CUDAGraphOpaque, DeleterFnPtr> graph{
+        nullptr,
+        delete_cuda_graph};
+    // Pool buffers holding each input's storage extent, and the input views
+    // the region was captured with.
+    std::vector<RAIIAtenTensorHandle> input_buffers;
+    std::vector<RAIIAtenTensorHandle> static_inputs;
+    // Distinct outputs, and for each output slot its index into them, or
+    // kNoOutput for a null output.
+    std::vector<RAIIAtenTensorHandle> static_outputs;
+    std::vector<size_t> output_slots;
+  };
+
+  struct TensorLayout {
+    int32_t dtype = 0;
+    int64_t dim = 0;
+    int64_t* sizes = nullptr;
+    int64_t* strides = nullptr;
+  };
+
+  static TensorLayout layout_of(AtenTensorHandle tensor) {
+    TensorLayout layout;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &layout.dtype));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(tensor, &layout.dim));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(tensor, &layout.sizes));
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_strides(tensor, &layout.strides));
+    return layout;
+  }
+
+  // Elements from a tensor's storage offset to its last element.
+  static int64_t storage_extent(const TensorLayout& layout) {
+    int64_t extent = 1;
+    for (int64_t d = 0; d < layout.dim; ++d) {
+      if (layout.sizes[d] == 0) {
+        return 0;
+      }
+      extent += (layout.sizes[d] - 1) * layout.strides[d];
+    }
+    return extent;
+  }
+
+  // A 1-D view of a tensor's storage extent, so that copying it keeps any
+  // strides, including overlapping ones.
+  static RAIIAtenTensorHandle extent_view(AtenTensorHandle tensor) {
+    int64_t extent = storage_extent(layout_of(tensor));
+    int64_t stride = 1;
+    AtenTensorHandle view = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch__reinterpret_tensor(tensor, 1, &extent, &stride, 0, &view));
+    return view;
+  }
+
+  static std::vector<int64_t> make_key(
+      AtenTensorHandle* inputs,
+      size_t num_inputs) {
+    std::vector<int64_t> key;
+    for (size_t i = 0; i < num_inputs; ++i) {
+      AOTI_RUNTIME_CHECK(inputs[i] != nullptr, "CUDA graph input is null");
+      auto layout = layout_of(inputs[i]);
+      key.push_back(layout.dtype);
+      key.push_back(layout.dim);
+      key.insert(key.end(), layout.sizes, layout.sizes + layout.dim);
+      key.insert(key.end(), layout.strides, layout.strides + layout.dim);
+    }
+    return key;
+  }
+
+  void warn_max_graphs() {
+    if (warned_max_graphs_) {
+      return;
+    }
+    warned_max_graphs_ = true;
+    std::string msg = "AOTInductor CUDA graphs: reached max_graphs=" +
+        std::to_string(options_.max_graphs) +
+        ", so calls with new input shapes run eagerly";
+    aoti_torch_warn(
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
+  }
+
+  // Takes ownership of each distinct output once; generated code can write
+  // the same handle into several output slots.
+  static void steal_outputs(
+      std::vector<AtenTensorHandle>& raw_outputs,
+      Graph& graph) {
+    for (size_t i = 0; i < raw_outputs.size(); ++i) {
+      size_t slot = kNoOutput;
+      if (raw_outputs[i] != nullptr) {
+        for (size_t j = 0; j < i; ++j) {
+          if (raw_outputs[j] == raw_outputs[i]) {
+            slot = graph.output_slots[j];
+            break;
+          }
+        }
+        if (slot == kNoOutput) {
+          slot = graph.static_outputs.size();
+          graph.static_outputs.emplace_back(raw_outputs[i]);
+        }
+      }
+      graph.output_slots.push_back(slot);
+    }
+  }
+
+  template <typename Fn>
+  std::unique_ptr<Graph> capture(
+      Fn& fn,
+      AtenTensorHandle* inputs,
+      size_t num_inputs,
+      size_t num_outputs,
+      cudaStream_t stream) {
+    if (graphs_.empty()) {
+      // The host caching allocator counts only graphs as users of a pool, not
+      // the at::cuda::MemPool, so capturing into a pool whose graphs are all
+      // gone fails an assert. Start a new pool instead. Deleting the old one
+      // frees the dropped graphs' memory, which is safe here: the model
+      // instance only gets a call once its earlier GPU work is done.
+      pool_.reset();
+      CUDAMemPoolHandle pool = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_create_cuda_mem_pool(device_index_, &pool));
+      pool_.reset(pool);
+    }
+    auto graph = std::make_unique<Graph>();
+    CUDAGraphHandle graph_handle = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(&graph_handle));
+    graph->graph.reset(graph_handle);
+
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, stream));
+    AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(capture_stream_, event_, 0));
+    std::vector<AtenTensorHandle> raw_outputs(num_outputs, nullptr);
+    {
+      // ATen allocates on the current stream, so this puts the input buffers
+      // below, allocated during the capture, into the capture's pool.
+      AOTICudaStreamGuard stream_guard(capture_stream_, device_index_);
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_graph_capture_begin(
+          graph_handle, pool_.get(), capture_stream_));
+      try {
+        std::vector<AtenTensorHandle> input_handles;
+        input_handles.reserve(num_inputs);
+        for (size_t i = 0; i < num_inputs; ++i) {
+          int32_t device_type = 0;
+          int32_t device_index = 0;
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_get_device_type(inputs[i], &device_type));
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_get_device_index(inputs[i], &device_index));
+          AOTI_RUNTIME_CHECK(
+              device_type == aoti_torch_device_type_cuda() &&
+                  device_index == device_index_,
+              "CUDA graph input " + std::to_string(i) +
+                  " is not on the model's CUDA device");
+          auto layout = layout_of(inputs[i]);
+          int64_t extent = storage_extent(layout);
+          int64_t stride = 1;
+          AtenTensorHandle buffer = nullptr;
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+              1,
+              &extent,
+              &stride,
+              layout.dtype,
+              device_type,
+              device_index_,
+              &buffer));
+          graph->input_buffers.emplace_back(buffer);
+          AtenTensorHandle view = nullptr;
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+              buffer, layout.dim, layout.sizes, layout.strides, 0, &view));
+          graph->static_inputs.emplace_back(view);
+          input_handles.push_back(view);
+        }
+        fn(input_handles.data(), raw_outputs.data(), capture_stream_);
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_cuda_graph_capture_end(graph_handle, true));
+      } catch (...) {
+        // The region's error explains the failure, so an error ending its
+        // discarded capture adds nothing.
+        (void)aoti_torch_cuda_graph_capture_end(graph_handle, false);
+        Graph discarded;
+        steal_outputs(raw_outputs, discarded);
+        throw;
+      }
+    }
+    steal_outputs(raw_outputs, *graph);
+
+    // capture_begin can allocate on the capture stream outside the pool, so
+    // the replay on the caller's stream must come after that stream's work.
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, capture_stream_));
+    AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
+    return graph;
+  }
+
+  void replay(
+      Graph& graph,
+      AtenTensorHandle* inputs,
+      AtenTensorHandle* outputs,
+      size_t num_outputs,
+      cudaStream_t stream) {
+    AOTICudaStreamGuard stream_guard(stream, device_index_);
+    for (size_t i = 0; i < graph.input_buffers.size(); ++i) {
+      auto source = extent_view(inputs[i]);
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_copy_(graph.input_buffers[i], source, 0));
+    }
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_graph_replay(graph.graph.get(), stream));
+    // Clones, so that later replays can't overwrite the outputs. Aliasing
+    // between different outputs is not preserved.
+    std::vector<RAIIAtenTensorHandle> clones;
+    clones.reserve(graph.static_outputs.size());
+    for (auto& output : graph.static_outputs) {
+      AtenTensorHandle clone = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_clone_preserve_strides(output, &clone));
+      clones.emplace_back(clone);
+    }
+    for (size_t i = 0; i < num_outputs; ++i) {
+      outputs[i] = nullptr;
+      if (graph.output_slots[i] != kNoOutput) {
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
+            clones[graph.output_slots[i]], &outputs[i]));
+      }
+    }
+  }
+
+  int32_t device_index_;
+  CudaGraphOptions options_;
+  cudaStream_t capture_stream_ = nullptr;
+  cudaEvent_t event_ = nullptr;
+  // Shared by all graphs; replaced when a capture starts with no graphs left.
+  std::unique_ptr<CUDAMemPoolOpaque, DeleterFnPtr> pool_{
+      nullptr,
+      delete_cuda_mem_pool};
+  std::mutex mutex_;
+  bool warned_max_graphs_ = false;
+  std::map<std::vector<int64_t>, int64_t> warmup_counts_;
+  std::map<std::vector<int64_t>, std::unique_ptr<Graph>> graphs_;
+};
+
+} // namespace torch::aot_inductor
+
+#endif // USE_CUDA
