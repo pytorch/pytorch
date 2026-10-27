@@ -5365,20 +5365,18 @@
 - func: logit(Tensor self, float? eps=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, MTIA, XPU: logit
-    MPS: logit_mps
+    CPU, CUDA, MPS, MTIA, XPU: logit
   tags: pointwise
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: logit_
+    CPU, CUDA, MPS, XPU: logit_
   tags: pointwise
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: logit_out
-    MPS: logit_out_mps
+    CPU, CUDA, MPS, XPU: logit_out
   tags: pointwise
 
 - func: sin(Tensor self) -> Tensor
