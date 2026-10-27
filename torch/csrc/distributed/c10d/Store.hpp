@@ -48,9 +48,9 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::string& newValue);
 
   virtual std::vector<uint8_t> compareSet(
-      const std::string& key,
-      const std::vector<uint8_t>& currentValue,
-      const std::vector<uint8_t>& newValue) {
+      const std::string& /*key*/,
+      const std::vector<uint8_t>& /*currentValue*/,
+      const std::vector<uint8_t>& /*newValue*/) {
     C10_THROW_ERROR(NotImplementedError, "Not implemented.");
   }
 
@@ -101,16 +101,18 @@ class TORCH_API Store : public torch::CustomClassHolder {
   virtual bool hasExtendedApi() const;
 
   virtual void queuePush(
-      const std::string& key,
-      const std::vector<uint8_t>& value) {
+      const std::string& /*key*/,
+      const std::vector<uint8_t>& /*value*/) {
     C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
   }
 
-  virtual std::vector<uint8_t> queuePop(const std::string& key, bool block) {
+  virtual std::vector<uint8_t> queuePop(
+      const std::string& /*key*/,
+      bool /*block*/) {
     C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
   }
 
-  virtual int64_t queueLen(const std::string& key) {
+  virtual int64_t queueLen(const std::string& /*key*/) {
     C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
   }
 

@@ -4,12 +4,35 @@
 #include <mutex>
 #include <optional>
 
+// clang-format off
+C10_DEFINE_bool(
+    torch_jit_release_simple_executor_graph,
+    false,
+    "After SimpleGraphExecutorImpl compiles its execution plan, release the unoptimized graph the plan was built from. "
+    "The plan owns its own copy, so the original is only needed until compilation finishes. Inference-only memory saving; "
+    "any future code path that rebuilds a plan from the original graph will fail.")
+// clang-format on
+
 namespace torch::jit {
 
 SimpleGraphExecutorImpl::SimpleGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph,
     std::string function_name)
     : GraphExecutorImplBase(graph, std::move(function_name)) {}
+
+const ExecutionPlan& SimpleGraphExecutorImpl::buildPlan() {
+  TORCH_CHECK(
+      graph,
+      "SimpleGraphExecutorImpl: graph was released before a plan was built");
+  auto copy = graph->copy();
+  runNooptPassPipeline(copy);
+  execution_plan_ = ExecutionPlan(copy, function_name_);
+  if (FLAGS_torch_jit_release_simple_executor_graph) {
+    graph.reset();
+  }
+
+  return *execution_plan_;
+}
 
 const ExecutionPlan& SimpleGraphExecutorImpl::getPlanFor(
     Stack& stack,
@@ -21,11 +44,7 @@ const ExecutionPlan& SimpleGraphExecutorImpl::getPlanFor(
   if (execution_plan_) {
     return *execution_plan_;
   }
-  auto copy = graph->copy();
-  runNooptPassPipeline(copy);
-  execution_plan_ = ExecutionPlan(copy, function_name_);
-
-  return *execution_plan_;
+  return buildPlan();
 }
 
 const ExecutionPlan& SimpleGraphExecutorImpl::getInputIndependentPlan() {
@@ -37,11 +56,7 @@ const ExecutionPlan& SimpleGraphExecutorImpl::getInputIndependentPlanImpl() {
   if (execution_plan_) {
     return *execution_plan_;
   }
-  auto copy = graph->copy();
-  runNooptPassPipeline(copy);
-  execution_plan_ = ExecutionPlan(copy, function_name_);
-
-  return *execution_plan_;
+  return buildPlan();
 }
 
 GraphExecutorState SimpleGraphExecutorImpl::getDebugState() {
