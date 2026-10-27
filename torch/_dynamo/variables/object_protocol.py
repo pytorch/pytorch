@@ -22,6 +22,7 @@ from typing import NoReturn, TYPE_CHECKING
 import torch
 from torch._C._dynamo import (
     get_type_slots,
+    get_type_tp_name,
     has_slot,
     PyMappingSlots,
     PyNumberSlots,
@@ -2506,7 +2507,7 @@ def object_generic_getattr(
         raise_observed_exception(
             AttributeError,
             tx,
-            args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
+            args=[f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"],
         )
 
     # Step 7: Attribute not found -- signal to caller to fall back.
