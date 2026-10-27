@@ -50,6 +50,12 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* /*noargs*/) {
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self_ = THPStorage_Unpack(self);
+  // Freed storage armed to warn: return null quietly, as Tensor.data_ptr()
+  // does.
+  if (self_.unsafeGetStorageImpl()->warn_on_data_ptr_access() &&
+      self_.nbytes() == 0) {
+    return torch::autograd::utils::wrap(static_cast<void*>(nullptr));
+  }
   // See Note [Invalid Python Storages]
   auto invalid = self_.data() == nullptr &&
       self_.device_type() != c10::DeviceType::Meta && self_.sym_nbytes() != 0;

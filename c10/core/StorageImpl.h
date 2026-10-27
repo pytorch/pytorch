@@ -158,9 +158,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   const at::DataPtr& data_ptr() const {
     if (C10_UNLIKELY(has_immutable_data_ptr_check_)) {
-      if (throw_on_immutable_data_ptr_) {
-        throw_data_ptr_access_error();
-      }
+      check_data_ptr_access();
       impl::cow::check_cow_read(this);
     }
     return data_ptr_;
@@ -168,9 +166,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   at::DataPtr& mutable_data_ptr() {
     if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
-      if (throw_on_immutable_data_ptr_) {
-        throw_data_ptr_access_error();
-      }
+      check_data_ptr_access();
       if (throw_on_mutable_data_ptr_) {
         throwNullDataPtrError();
       }
@@ -210,7 +206,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         size_bytes_is_heap_allocated_, other.size_bytes_is_heap_allocated_);
     std::swap(resizable_, other.resizable_);
     std::swap(allocator_, other.allocator_);
-    std::swap(throw_on_immutable_data_ptr_, other.throw_on_immutable_data_ptr_);
+    std::swap(data_ptr_access_check_, other.data_ptr_access_check_);
     std::swap(throw_on_mutable_data_ptr_, other.throw_on_mutable_data_ptr_);
     std::swap(
         warn_deprecated_on_mutable_data_ptr_,
@@ -225,9 +221,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void* mutable_data() {
     if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
-      if (throw_on_immutable_data_ptr_) {
-        throw_data_ptr_access_error();
-      }
+      check_data_ptr_access();
       if (throw_on_mutable_data_ptr_) {
         throwNullDataPtrError();
       }
@@ -322,16 +316,26 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   [[noreturn]] void throw_data_ptr_access_error() const;
+  void warn_data_ptr_access() const;
 
   void release_data_and_set_meta_custom_data_ptr_error_msg_(
       std::optional<std::string> s) {
-    throw_on_immutable_data_ptr_ = true;
+    data_ptr_access_check_ = DataPtrAccessCheck::Throw;
     get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
     refresh_has_data_ptr_check();
   }
 
+  // Like release_data_and_set_meta_custom_data_ptr_error_msg_, but the data
+  // accessors warn with the message and proceed instead of throwing.
+  void set_data_ptr_access_warn_msg_(std::string s) {
+    data_ptr_access_check_ = DataPtrAccessCheck::Warn;
+    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+    refresh_has_data_ptr_check();
+  }
+
+  // Clears both the throw and the warn message.
   void clear_data_ptr_access_error_msg_() {
-    throw_on_immutable_data_ptr_ = false;
+    data_ptr_access_check_ = DataPtrAccessCheck::None;
     if (extra_meta_) {
       extra_meta_->custom_data_ptr_error_msg_ = std::nullopt;
     }
@@ -369,7 +373,21 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Whether data_ptr()/data() (the immutable accessors) would throw. Lets
   // callers query without a try/catch.
   bool throw_on_immutable_data_ptr() const {
-    return throw_on_immutable_data_ptr_;
+    return data_ptr_access_check_ == DataPtrAccessCheck::Throw;
+  }
+
+  // Whether the data accessors warn (and proceed) on access.
+  bool warn_on_data_ptr_access() const {
+    return data_ptr_access_check_ == DataPtrAccessCheck::Warn;
+  }
+
+  // The message the data accessors throw or warn with, if any.
+  const std::string* data_ptr_access_msg() const {
+    if (data_ptr_access_check_ == DataPtrAccessCheck::None || !extra_meta_ ||
+        !extra_meta_->custom_data_ptr_error_msg_) {
+      return nullptr;
+    }
+    return &*extra_meta_->custom_data_ptr_error_msg_;
   }
 
   // Whether mutable_data_ptr()/mutable_data() would throw specifically because
@@ -397,13 +415,26 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
  private:
+  // What the data accessors do on access. One byte, like the bool it replaced.
+  enum class DataPtrAccessCheck : uint8_t { None, Warn, Throw };
+
+  void check_data_ptr_access() const {
+    if (data_ptr_access_check_ == DataPtrAccessCheck::Throw) {
+      throw_data_ptr_access_error();
+    } else if (data_ptr_access_check_ == DataPtrAccessCheck::Warn) {
+      warn_data_ptr_access();
+    }
+  }
+
   void refresh_has_data_ptr_check() {
-    has_immutable_data_ptr_check_ = throw_on_immutable_data_ptr_ ||
+    const bool check_access =
+        data_ptr_access_check_ != DataPtrAccessCheck::None;
+    has_immutable_data_ptr_check_ = check_access ||
         (materialize_fn_ == &impl::cow::materialize_cow &&
          data_ptr_.device().is_cuda());
     has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
         throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
-        throw_on_immutable_data_ptr_;
+        check_access;
   }
 
   void maybe_materialize() {
@@ -425,8 +456,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool has_mutable_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
   bool throw_on_mutable_data_ptr_ = false;
-  // If we should throw when data_ptr() or data() is called.
-  bool throw_on_immutable_data_ptr_ = false;
+  // Whether data_ptr()/data() and their mutable variants warn or throw.
+  DataPtrAccessCheck data_ptr_access_check_ = DataPtrAccessCheck::None;
   // If we warn when mutable_data_ptr() or mutable_data() is called.
   bool warn_deprecated_on_mutable_data_ptr_ = false;
   // Pluggable materialization hook. See MaterializeFn in StorageMaterializer.h.

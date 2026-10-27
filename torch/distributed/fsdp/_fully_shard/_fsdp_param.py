@@ -1654,15 +1654,30 @@ def _get_all_gather_output_layouts(
     return tuple(layouts)
 
 
+_FREED_BY_RESHARD_MSG = (
+    "This tensor's storage was freed by FSDP (resharded), so reading it is "
+    "invalid. This is typically caused by holding a reference to an unsharded "
+    "parameter or all-gather output across a reshard. Access it inside "
+    "forward/backward or after calling unshard()."
+)
+
+
 def alloc_storage(tensor: torch.Tensor) -> None:
     size = tensor.numel() * tensor.itemsize
     if (storage := tensor.untyped_storage()).size() != size:
+        # Clear first: resizing reads data_ptr(), which would warn
+        torch._C._clear_storage_data_ptr_access_error_msg(storage._cdata)
         storage.resize_(size)
 
 
 def free_storage(tensor: torch.Tensor) -> None:
     if (storage := tensor.untyped_storage()).size() != 0:
         storage.resize_(0)
+        # A stale reference that reaches a kernel warns with this message
+        # instead of failing with only an illegal memory access
+        torch._C._set_storage_data_ptr_access_warn_msg(
+            storage._cdata, _FREED_BY_RESHARD_MSG
+        )
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
