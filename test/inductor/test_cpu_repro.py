@@ -4783,7 +4783,6 @@ class CPUReproTests(TestCase):
                 f"Expected kernel_profile_events to be non-empty, got {len(kernel_profile_events)}"
             )
 
-    @xfailIfS390X
     @requires_vectorization
     def test_channel_shuffle_cl_output(self):
         """code and shape extracted from shufflenet_v2_x1_0"""
@@ -6321,7 +6320,6 @@ class CPUReproTests(TestCase):
         self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
         self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
 
-    @xfailIfS390X
     def test_concat_inner_vec(self):
         def fn(x, y):
             return F.relu(torch.cat([x, y], dim=1))
