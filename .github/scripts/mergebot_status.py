@@ -80,7 +80,6 @@ REVERT_FAILURE = Status(Command.REVERT, Result.FAILURE)
 MAX_COMMENT_ID = 2**63 - 1
 COMMENT_ID_RE = r"[1-9][0-9]{0,18}"
 
-TAG_PREFIX = "<!-- mergebot-status:"
 STATUS_TAG_RE = re.compile(
     r"\n<!-- mergebot-status: (?P<command>merge|revert) (?P<result>success|failure)"
     rf"(?: comment=(?P<comment_id>{COMMENT_ID_RE}))? -->\s*\Z"
@@ -100,13 +99,17 @@ def with_status(body: str, status: Status | None, comment_id: int | None = None)
     ``comment_id`` is the comment that issued the command the reply answers.
 
     The tag goes last, so a reader that checks how a reply starts
-    ("## Merge failed", "### Merge started") still matches it. Text in ``body``
-    that looks like a tag (quoted in an error message, say) is escaped, so only
-    the tag added here counts, and a code fence the body leaves open is closed
-    so the tag stays hidden.
+    ("## Merge failed", "### Merge started") still matches it, and a code fence
+    the body leaves open is closed so the tag stays hidden. Only a tag at the
+    very end of a reply counts (see parse_tag), so text in ``body`` that looks
+    like one (quoted in an error message, say) is left as it is, except at the
+    end of a reply that gets no tag, where it is escaped.
     """
-    body = body.replace(TAG_PREFIX, "&lt;!-- mergebot-status:")
     if status is None:
+        match = STATUS_TAG_RE.search(body)
+        if match is not None:
+            start = match.start() + 1  # past the newline, at the "<"
+            body = f"{body[:start]}&lt;{body[start + 1 :]}"
         return body
     body = body.rstrip()
     fence = open_fence(body)

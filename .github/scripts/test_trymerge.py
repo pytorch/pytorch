@@ -3564,7 +3564,11 @@ class TestNativeStackMain(NoNetworkTestCase):
             "trymerge.get_native_stack", return_value=NATIVE_STACK
         )
 
-    def assertRefused(self, refusal: str = TARGETS_ANOTHER_BRANCH) -> None:
+    def assertRefused(
+        self,
+        refusal: str = TARGETS_ANOTHER_BRANCH,
+        status: Status | None = MERGE_FAILURE,
+    ) -> None:
         self.assertEqual(
             self.post.call_args_list,
             [
@@ -3572,7 +3576,7 @@ class TestNativeStackMain(NoNetworkTestCase):
                     "pytorch",
                     "pytorch",
                     1002,
-                    with_status(refusal, MERGE_FAILURE, self.args.comment_id),
+                    with_status(refusal, status, self.args.comment_id),
                     dry_run=True,
                 )
             ],
@@ -3619,7 +3623,8 @@ class TestNativeStackMain(NoNetworkTestCase):
         self.args.check_mergeability = True
         trymerge_main()
         self.get_stack.assert_not_called()
-        self.assertRefused()
+        # No merge command was issued, so the refusal carries no tag
+        self.assertRefused(status=None)
 
     def test_fork_pr_does_not_read_the_stack(self) -> None:
         self.info.return_value = {**stacked_pr_info(), "isCrossRepository": True}
@@ -4307,6 +4312,46 @@ class TestMainStatusTags(NoNetworkTestCase):
             )
         )
         self.merge.assert_not_called()
+
+    def test_check_mergeability_refusals_are_untagged(self) -> None:
+        # check_mergeability_ghstack.yml runs this on PRs nobody asked to merge,
+        # with no comment id
+        self.args.check_mergeability = True
+        self.args.comment_id = None
+        local = self.patch("trymerge.GitHubPR.merge_changes_locally")
+        cases = {
+            "PR targets user/1001 rather than main": stacked_pr_info(),
+            "Can't merge closed PR": {**stacked_pr_info(base="main"), "closed": True},
+        }
+        for refusal, info in cases.items():
+            with self.subTest(refusal):
+                self.post.reset_mock()
+                self.info.return_value = info
+                trymerge_main()
+                self.assertEqual(self.statuses(), [None])
+                self.assertTrue(self.post.call_args.args[3].startswith(refusal))
+        with self.subTest("cross-repo ghstack"):
+            self.post.reset_mock()
+            self.info.return_value = stacked_pr_info(base="main")
+            with (
+                mock.patch("trymerge.GitHubPR.is_cross_repo", return_value=True),
+                mock.patch("trymerge.GitHubPR.is_ghstack_pr", return_value=True),
+            ):
+                trymerge_main()
+            self.assertEqual(self.statuses(), [None])
+        local.assert_not_called()
+        self.merge.assert_not_called()
+        # The same refusal answering a merge command is tagged
+        self.args.check_mergeability = False
+        self.args.comment_id = 12345
+        self.post.reset_mock()
+        self.info.return_value = stacked_pr_info()
+        self.patch("trymerge.get_native_stack", return_value=None)
+        trymerge_main()
+        self.assertEqual(
+            [parse_tag(call.args[3]) for call in self.post.call_args_list],
+            [Tag(MERGE_FAILURE, 12345)],
+        )
 
     def test_submodule_update_refusal_is_tagged_failure(self) -> None:
         self.patch("trymerge.GitHubPR.has_invalid_submodule_updates", return_value=True)

@@ -100,14 +100,20 @@ class TestStatusTag(TestCase):
         self.assertNotIn("@pytorchbot", MERGE_SUCCESS.tag())
 
     def test_only_the_appended_tag_counts(self) -> None:
+        # A tag quoted anywhere but the end doesn't count, so it is left as it is
         quoted = f"Error: `{MERGE_SUCCESS.tag()}`"
-        self.assertIsNone(parse_status(with_status(quoted, None)))
-        self.assertIsNone(
-            parse_status(with_status(f"Error:\n{MERGE_SUCCESS.tag()}", None))
-        )
-        self.assertEqual(
-            parse_status(with_status(quoted, MERGE_FAILURE)), MERGE_FAILURE
-        )
+        self.assertEqual(with_status(quoted, None), quoted)
+        self.assertIsNone(parse_status(quoted))
+        tagged = with_status(quoted, MERGE_FAILURE)
+        self.assertTrue(tagged.startswith(f"{quoted}\n"))
+        self.assertEqual(parse_status(tagged), MERGE_FAILURE)
+        # One ending a reply that gets no tag would count, so it is escaped
+        for end in ("", "\n", "  \r\n"):
+            ending = f"Error:\n{MERGE_SUCCESS.tag()}{end}"
+            self.assertIsNotNone(parse_status(ending))
+            escaped = with_status(ending, None)
+            self.assertIsNone(parse_status(escaped))
+            self.assertEqual(escaped, ending.replace("<", "&lt;"))
         self.assertEqual(
             parse_status(with_status(with_status("x", MERGE_SUCCESS), MERGE_FAILURE)),
             MERGE_FAILURE,
@@ -145,7 +151,7 @@ def workflow_jobs(workflow: str) -> Any:
     version changes nothing here."""
     jobs = yaml.safe_load((WORKFLOWS / workflow).read_text())["jobs"]
     for job in jobs.values():
-        for step in job["steps"]:
+        for step in job.get("steps", []):
             if "uses" in step:
                 step["uses"] = step["uses"].split("@")[0]
     return jobs
@@ -158,7 +164,7 @@ def workflow_steps(workflow: str) -> list[dict[str, Any]]:
     these decide what replies to a command."""
     steps = []
     for job in workflow_jobs(workflow).values():
-        for step in job["steps"]:
+        for step in job.get("steps", []):
             pinned = {k: v for k, v in step.items() if k not in ("name", "with", "env")}
             if "run" in step:
                 lines = [line.strip() for line in step["run"].split("\n")]
@@ -185,12 +191,28 @@ SETUP_STEPS = [
 ]
 
 
+def scripts_run(workflow: str) -> list[str]:
+    """The names of the .py files a workflow's jobs mention, by any path."""
+    return re.findall(r"\b(\w+)\.py\b", json.dumps(workflow_jobs(workflow)))
+
+
+def trymerge_workflows() -> list[str]:
+    """Every workflow that runs trymerge.py. Workflows that only import from it
+    (cherry_pick.py) post no merge or revert replies, so they are not listed."""
+    return sorted(
+        path.name
+        for path in WORKFLOWS.iterdir()
+        if path.suffix in (".yml", ".yaml") and "trymerge" in scripts_run(path.name)
+    )
+
+
 class TestMergeWorkflowSteps(TestCase):
     """The merge and revert workflows reply to commands only through code that
     tags those replies: trymerge.py, and comment_on_pr.py with the command it
     reports (tryrebase.py reports rebases, which carry no status). Any change to
     what they run fails this test, so whoever makes it checks that this still
-    holds, then updates the steps below."""
+    holds, then updates the steps below. A new workflow that runs trymerge.py
+    fails it too, until it is listed here."""
 
     STEPS = {
         "trymerge.yml": [
@@ -274,11 +296,76 @@ class TestMergeWorkflowSteps(TestCase):
         ],
     }
 
+    # Workflows that run trymerge.py with no command to answer, so their replies
+    # carry no tag (TestMainStatusTags checks trymerge.py's side)
+    NO_COMMAND = {
+        "check_mergeability_ghstack.yml": [
+            {"uses": "actions/checkout"},
+            {
+                "shell": "bash",
+                "run": [
+                    'git config --global user.email "pytorchmergebot@users.noreply.github.com"',
+                    'git config --global user.name "PyTorch MergeBot"',
+                    "git fetch origin main:main",
+                ],
+            },
+            {
+                "shell": "bash",
+                "run": [
+                    'BRANCH="${{ github.base_ref }}"',
+                    'echo "$BRANCH"',
+                    'BRANCH="${BRANCH%/base}/orig"',
+                    'echo "$BRANCH"',
+                    "WAIT_SECONDS=300",
+                    "END_WAIT=$((SECONDS+WAIT_SECONDS))",
+                    "BRANCH_EXISTS=0",
+                    "while [ $SECONDS -lt $END_WAIT ]; do",
+                    'git fetch --prune origin "${BRANCH}" || true',
+                    'if git rev-parse --verify "origin/${BRANCH}"; then',
+                    "BRANCH_EXISTS=1",
+                    "break",
+                    "fi",
+                    'echo "Waiting for branch ${BRANCH} to exist..."',
+                    "sleep 30  # Wait for 30 seconds before retrying",
+                    "done",
+                    "if [ $BRANCH_EXISTS -eq 0 ]; then",
+                    'echo "Branch ${BRANCH} not found after ${WAIT_SECONDS} seconds."',
+                    'echo "Mergeability check failed for infrastructure reasons."',
+                    "exit 1",
+                    "fi",
+                ],
+            },
+            {"uses": "actions/setup-python"},
+            {"shell": "bash", "run": ["pip install pyyaml==6.0.2"]},
+            {
+                "shell": "bash",
+                "run": [
+                    "set -ex",
+                    'python3 .github/scripts/trymerge.py --check-mergeability "${PR_NUM}"',
+                ],
+            },
+            {
+                "if": "failure()",
+                "shell": "bash",
+                "run": [
+                    "{",
+                    'echo "# PR $PR_NUM is not mergeable into main"',
+                    'echo "To debug, run the diagnostic workflow:"',
+                    'echo "https://github.com/pytorch/test-infra/actions/workflows/pr-dependencies-check.yml"',
+                    '} >> "$GITHUB_STEP_SUMMARY"',
+                ],
+            },
+        ],
+    }
+
     def test_steps_are_reviewed(self) -> None:
         self.maxDiff = None
-        for workflow, steps in self.STEPS.items():
+        for workflow, steps in (self.STEPS | self.NO_COMMAND).items():
             with self.subTest(workflow=workflow):
                 self.assertEqual(workflow_steps(workflow), steps)
+
+    def test_every_workflow_running_trymerge_is_reviewed(self) -> None:
+        self.assertEqual(trymerge_workflows(), sorted(self.STEPS | self.NO_COMMAND))
 
 
 def module_path(name: str) -> Path | None:
@@ -290,13 +377,12 @@ def module_path(name: str) -> Path | None:
 
 
 def workflow_modules() -> dict[str, ast.Module]:
-    """The scripts the merge and revert workflows run, and every module or
+    """The scripts every workflow that runs trymerge.py runs, and every module or
     package under .github/scripts they import, transitively; github_utils, where
     the comment posters are defined, is left out."""
     todo = []
-    for workflow in ("trymerge.yml", "revert.yml"):
-        text = json.dumps(workflow_jobs(workflow))
-        todo += re.findall(r"\.github/scripts/(\w+)\.py", text)
+    for workflow in trymerge_workflows():
+        todo += scripts_run(workflow)
     found: dict[str, ast.Module] = {}
     while todo:
         name = todo.pop()
@@ -416,7 +502,7 @@ def raw_posts(name: str, tree: ast.Module) -> list[tuple[str, str | None, str]]:
 
 
 class TestWorkflowScriptsPostThroughTheTaggingPath(TestCase):
-    """Across every module the merge and revert workflows run, comments are
+    """Across every module the workflows that run trymerge.py run, comments are
     posted only from the reviewed places below: trymerge.py's post_pr_comment,
     comment_on_pr.py's one reply (tagged, see TestCanceledJobComment), and
     tryrebase.py's rebase replies. A new posting path, such as a helper module
@@ -480,27 +566,32 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
 
     OUTCOMES = {"MERGE_SUCCESS", "MERGE_FAILURE", "REVERT_SUCCESS", "REVERT_FAILURE"}
 
-    def is_outcome(self, node: ast.expr) -> bool:
+    def is_status(self, node: ast.expr) -> bool:
         if isinstance(node, ast.IfExp):
-            return self.is_outcome(node.body) and self.is_outcome(node.orelse)
-        return isinstance(node, ast.Name) and node.id in self.OUTCOMES
+            return self.is_status(node.body) and self.is_status(node.orelse)
+        return self.is_none(node) or (
+            isinstance(node, ast.Name) and node.id in self.OUTCOMES
+        )
 
     @staticmethod
     def is_none(node: ast.expr) -> bool:
         return isinstance(node, ast.Constant) and node.value is None
 
+    def may_be_none(self, node: ast.expr) -> bool:
+        if isinstance(node, ast.IfExp):
+            return self.may_be_none(node.body) or self.may_be_none(node.orelse)
+        return self.is_none(node)
+
     def test_every_comment_passes_an_outcome_or_none(self) -> None:
-        """A status is one of the outcome constants (or a choice between them) or a
-        literal None, so the reviewed-notices test below sees every untagged post."""
+        """A status is one of the outcome constants or a literal None, or a choice
+        between them, so the reviewed-notices test below sees every post that can
+        go untagged."""
         self.assertGreater(len(self.posts), 10)
         for name, call, function in self.posts:
             with self.subTest(module=name, function=function, line=call.lineno):
                 status = [k.value for k in call.keywords if k.arg == "status"]
                 self.assertEqual(len(status), 1)
-                self.assertTrue(
-                    self.is_outcome(status[0]) or self.is_none(status[0]),
-                    ast.unparse(status[0]),
-                )
+                self.assertTrue(self.is_status(status[0]), ast.unparse(status[0]))
 
     def test_every_tagged_comment_names_its_command(self) -> None:
         """A tagged reply passes the id of the comment it answers (None when there
@@ -515,8 +606,10 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
                 ]
                 self.assertIn(passed, (["comment_id"], ["args.comment_id"]))
 
-    # Every comment posted without a status, with the module and function that
-    # post it. Only notices that report no merge or revert outcome belong here.
+    # Every comment that can be posted without a status, with the module and
+    # function that post it. Only notices that report no merge or revert outcome
+    # belong here, and refusals that are untagged only when no command was
+    # issued.
     # If you add or reword one, check it still reports none: a reply saying a
     # merge or revert started, landed, failed or was refused passes its status
     # instead. `result.comment` and `msg` are written by greenlight_guard.py and
@@ -559,13 +652,19 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
             "handle_exception",
             "format_failure_comment(e.__cause__, title, run_url)",
         ),
+        # Refusals, untagged only in a --check-mergeability run
+        ("trymerge", "main", 'f"Can\'t merge closed PR #{args.pr_num}"'),
+        ("trymerge", "main", "'Cross-repo ghstack merges are not supported'"),
+        ("trymerge", "main", "refusal"),
     ]
 
     def test_untagged_comments_are_the_reviewed_notices(self) -> None:
         untagged = [
             (name, function, comment_arg(call))
             for name, call, function in self.posts
-            if any(k.arg == "status" and self.is_none(k.value) for k in call.keywords)
+            if any(
+                k.arg == "status" and self.may_be_none(k.value) for k in call.keywords
+            )
         ]
         self.assertEqual(untagged, self.REVIEWED_NOTICES)
 

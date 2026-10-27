@@ -3720,13 +3720,14 @@ def main() -> None:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
 
+    # A --check-mergeability run answers no command, so its refusals carry no tag
     if pr.is_closed():
         post_pr_comment(
             org,
             project,
             args.pr_num,
             f"Can't merge closed PR #{args.pr_num}",
-            status=MERGE_FAILURE,
+            status=None if args.check_mergeability else MERGE_FAILURE,
             comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
@@ -3738,7 +3739,7 @@ def main() -> None:
             project,
             args.pr_num,
             "Cross-repo ghstack merges are not supported",
-            status=MERGE_FAILURE,
+            status=None if args.check_mergeability else MERGE_FAILURE,
             comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
@@ -3766,7 +3767,7 @@ def main() -> None:
                 project,
                 args.pr_num,
                 refusal,
-                status=MERGE_FAILURE,
+                status=None if args.check_mergeability else MERGE_FAILURE,
                 comment_id=args.comment_id,
                 dry_run=args.dry_run,
             )
