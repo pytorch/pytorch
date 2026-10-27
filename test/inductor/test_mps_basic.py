@@ -373,6 +373,15 @@ class MPSBasicTests(TestCase):
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
+    def test_assert_async_message(self):
+        def fn(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        with self.assertRaisesRegex(torch.AcceleratorError, "x must be positive"):
+            torch.compile(fn, fullgraph=True)(-torch.ones(3, device="mps"))
+            torch.mps.synchronize()
+
     def test_error_header_not_shared_across_kernels(self):
         def with_assert(x):
             torch._assert_async((x > 0).all(), "x must be positive")
