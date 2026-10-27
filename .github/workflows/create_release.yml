@@ -14,7 +14,13 @@ on:
   release:
     types: [published]
   pull_request:
-    paths: [.github/workflows/create_release.yml]
+    # The sdist is built from pyproject.toml and the submodule tree, so a change to
+    # either must exercise this job before merge, not only after.
+    paths:
+      - .github/workflows/create_release.yml
+      - pyproject.toml
+      - .gitmodules
+      - third_party/**
 
 jobs:
   check-ci:
