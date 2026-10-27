@@ -253,9 +253,10 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     }
   }
   try {
-    auto sent_data = new CudaIPCSentData(
+    auto sent_data = std::make_unique<CudaIPCSentData>(
         ref_counter_handle, ref_counter_offset, ref_counter_ptr, device);
-    return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
+    return at::DataPtr(
+        data, sent_data.release(), CudaIPCSentDataDelete, device);
   } catch (...) {
     ReturnRefCounter(ref_counter_handle, ref_counter_offset);
     throw;

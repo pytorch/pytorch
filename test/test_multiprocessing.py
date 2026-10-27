@@ -88,6 +88,8 @@ def _test_cuda_ipc_collect_during_export():
     import torch.cuda._gpu_trace as gpu_trace
 
     test_case = TestCase()
+    # Match CUDA_IPC_REF_COUNTER_FILE_SIZE in torch/csrc/CudaIPCTypes.h.
+    # This must exceed CUDA_IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
     counter_file_size = 10000
     tensors = [
         torch.empty(1, dtype=torch.uint8, device="cuda")
@@ -923,8 +925,8 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         p.start()
         try:
             p.join(60)
-            self.assertFalse(p.is_alive(), "CUDA IPC collection deadlocked")
-            self.assertEqual(p.exitcode, 0)
+            self.assertFalse(p.is_alive(), "CUDA IPC collection during export hung")
+            self.assertEqual(p.exitcode, 0, "CUDA IPC export crashed during collection")
         finally:
             if p.is_alive():
                 p.terminate()
