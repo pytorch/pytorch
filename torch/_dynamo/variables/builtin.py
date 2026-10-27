@@ -2107,7 +2107,8 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if name == "__hash__" and len(args) == 1 and not kwargs:
             arg = args[0]
-            generic_hash(tx, arg)
+            if arg.python_type() is self.fn:
+                return generic_hash(tx, arg)
 
         return super().call_method(tx, name, args, kwargs)
 

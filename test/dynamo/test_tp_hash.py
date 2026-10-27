@@ -6,6 +6,10 @@ import sys
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class TpHashTests(torch._dynamo.test_case.TestCase):
@@ -679,6 +683,46 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
     # --- Dunder __hash__ and consistency ---
 
+    @parametrize("value", [True, False])
+    def test_dunder_hash_bool_type(self, value):
+        expected = bool.__hash__(value)
+
+        def fn(x):
+            return bool.__hash__(value)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, expected)
+
+    def test_dunder_hash_object_type_preserves_base_method(self):
+        def fn(x):
+            return x.sin(), object.__hash__(5)
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_dunder_hash_bytes_type_preserves_base_method(self):
+        class HashedBytes(bytes):
+            def __hash__(self):
+                return 123
+
+        value = HashedBytes(b"hello")
+
+        def fn(x):
+            return x.sin(), bytes.__hash__(value)
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_dunder_hash_bool_type_invalid_receiver(self):
+        def fn(x):
+            return x.sin(), bool.__hash__("hello")
+
+        x = torch.tensor(0)
+        with self.assertRaises(TypeError):
+            fn(x)
+        with self.assertRaises(TypeError):
+            torch.compile(fn, backend="eager")(x)
+
     def test_dunder_hash_int(self):
         expected = (42).__hash__()
 
@@ -759,6 +803,9 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend=cnt)(torch.tensor(0))
         self.assertIsInstance(result, int)
         self.assertEqual(cnt.frame_count, 0)
+
+
+instantiate_parametrized_tests(TpHashTests)
 
 
 if __name__ == "__main__":
