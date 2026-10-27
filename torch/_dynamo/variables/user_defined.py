@@ -109,6 +109,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     GetSet,
+    maybe_get_python_type,
     Member,
     Method,
     MutationType,
@@ -129,6 +130,7 @@ from .object_protocol import (
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
+    pycallable_check,
     pynumber_as_ssize_t,
     pynumber_index,
     repr_guard,
@@ -3193,6 +3195,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            if (
+                isinstance(method, types.MethodDescriptorType)
+                and not is_torch_class(method.__objclass__)
+                and name not in self._slotdefs
+                and not trace_rules.is_polyfilled_callable(method)
+            ):
+                # An alias such as `copy = dict.copy` keeps its defining descriptor.
+                # Slots and registered polyfills retain their dispatch below.
+                return variables.MethodDescriptorVariable(
+                    method, owner=VariableTracker.build(tx, method.__objclass__)
+                ).call_function(tx, [self, *args], kwargs)
+
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -5081,19 +5095,15 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Inherited dict/OrderedDict __init__ populates the underlying storage
-        # (CPython dict_init == dict.update); defaultdict.__init__'s first arg
-        # is the default_factory and has its own path.  Mirrors call_method's
-        # __init__ handling.
-        if self._maybe_get_baseclass_method("__init__") in (
-            dict.__init__,
-            collections.OrderedDict.__init__,
-        ):
+        init = self._maybe_get_baseclass_method("__init__")
+        if init is collections.OrderedDict.__init__:
+            return OrderedDictVariable.tp_init_impl(self, tx, args, kwargs)
+        if init is dict.__init__:
             # dict_init calls the real C-level update directly, bypassing any
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            ConstDictVariable.call_method(self, tx, "update", args, kwargs)
+            ConstDictVariable.tp_methods["update"](self, tx, "update", args, kwargs)
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
@@ -5172,17 +5182,7 @@ class DefaultDictVariable(ConstDictVariable):
         val = arg.get_real_python_backed_value()
         if val is not NO_SUCH_SUBOBJ:
             return val is None or callable(val)
-        # Callables (functions, builtins, classes) are supported
-        return isinstance(
-            arg,
-            (
-                variables.BaseBuiltinVariable,
-                variables.functions.BaseUserFunctionVariable,
-                variables.functions.PolyfilledFunctionVariable,
-                variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
-                variables.UserDefinedClassVariable,
-            ),
-        )
+        return pycallable_check(maybe_get_python_type(arg))
 
     def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
@@ -5264,8 +5264,10 @@ class DefaultDictVariable(ConstDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        if key in self:
-            return self.getitem_const(tx, key)
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is not None:
+            return value
         return self.call_method(tx, "__missing__", [key], {})
 
     def nb_or_impl(
@@ -5290,25 +5292,13 @@ class DefaultDictVariable(ConstDictVariable):
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
-        # `left.items` is the storage in both cases.
-        if not isinstance(left, ConstDictVariable):
-            raise AssertionError(
-                f"Expected ConstDictVariable, got {type(left)}: {left}"
-            )
-        items = left.items
-
-        new = tx.output.side_effects.track_new_user_defined_object(
-            VariableTracker.build(tx, dict),
-            VariableTracker.build(tx, collections.defaultdict),
-            [],
-            tx=tx,
+        cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
+        new = cast(
+            ConstDictVariable, cls.call_function(tx, [self_.default_factory, left], {})
         )
-        new.default_factory = self.default_factory  # type: ignore[missing-attribute]
-        new.items.update(items)  # type: ignore[missing-attribute]
-        default_factory = new.default_factory  # type: ignore[missing-attribute]
-        tx.output.side_effects.store_attr(new, "default_factory", default_factory)
-        new.call_method(tx, "update", [right], {})
+        new.install_dict_keys_match_guard()
+        tx.output.side_effects.mutation(new)
+        new.dict_merge(tx, right)
         return new
 
     def nb_inplace_or_impl(
@@ -5972,6 +5962,8 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
+
+    _cpython_type = types.SimpleNamespace
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:
