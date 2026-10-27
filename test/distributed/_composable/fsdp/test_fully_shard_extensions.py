@@ -760,7 +760,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         fully_shard(model)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         inp = torch.randn((2, 16), device=device_type)
-        msg = "weight is unevenly sharded, so each of its Tensor all-gather inputs must have at least one dim, with the padded size 2 along dim 0, but input 0 has size (32,)"
+        msg = "weight is unevenly sharded along dim 0, so each of its Tensor all-gather inputs must have the padded size 2 along dim 0, but input 0 has size (32,)"
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             model(inp)
         # The legacy hook has no outer_size to pad with, so FSDP does not check it
@@ -1295,7 +1295,7 @@ class TestAllGatherInputValidation(TestCase):
                     self._get_layouts([tensor], [torch.empty(16 * ws)], **kwargs)
 
     def test_uneven_tensor_inputs_require_padded_size(self):
-        msg = "lin.weight is unevenly sharded, so each of its Tensor all-gather inputs must have at least one dim, with the padded size 4 along dim 0, but input 0 has size (3, 4)"
+        msg = "lin.weight is unevenly sharded along dim 0, so each of its Tensor all-gather inputs must have the padded size 4 along dim 0, but input 0 has size (3, 4)"
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             self._get_layouts([torch.ones(3, 4)], require_padded_size=True)
         self._get_layouts(
@@ -1313,7 +1313,7 @@ class TestAllGatherInputValidation(TestCase):
         self._get_layouts([torch.ones(4, 7)], require_padded_size=True)
         # A component missing the padded size along dim 0 still raises, with
         # a message naming the dim-0 requirement it has to meet
-        msg = "lin.weight is unevenly sharded, so each of its Tensor all-gather inputs must have at least one dim, with the padded size 4 along dim 0, but input 1 has size (3, 2, 3)"
+        msg = "lin.weight is unevenly sharded along dim 0, so each of its Tensor all-gather inputs must have the padded size 4 along dim 0, but input 1 has size (3, 2, 3)"
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             self._get_layouts(
                 [torch.ones(4, 4), torch.ones(3, 2, 3)], require_padded_size=True
