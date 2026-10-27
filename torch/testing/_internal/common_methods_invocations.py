@@ -18306,7 +18306,8 @@ op_db: list[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning',
+                            excluded_device_types=['xpu']),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
                # torch-xpu-ops/issues/2309
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
