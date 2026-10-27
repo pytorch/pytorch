@@ -23,8 +23,6 @@ class PathRule:
     path: str
     # Handles GitHub asks for review; empty for a commented (quiet) rule.
     notify: tuple[str, ...]
-    # CODEOWNERS section the rule is written under (kept for owners.py).
-    section: str
 
 
 @dataclass(frozen=True)
@@ -35,6 +33,8 @@ class LabelGroup:
     name: str
     labels: tuple[str, ...]
     owners: tuple[str, ...]
+    # CODEOWNERS section the group's rules are written under (kept for owners.py).
+    section: str
     paths: tuple[PathRule, ...]
 
 
@@ -47,13 +47,11 @@ class OwnershipFile:
     groups: tuple[LabelGroup, ...]
 
 
-def parse_path_rule(entry, *, section: str) -> PathRule:
+def parse_path_rule(entry) -> PathRule:
     if isinstance(entry, str):
-        return PathRule(entry, (), section)
-    ((path, value),) = entry.items()
-    if isinstance(value, list):
-        return PathRule(path, tuple(value), section)
-    return PathRule(path, tuple(value.get("notify", ())), value["section"])
+        return PathRule(entry, ())
+    ((path, notify),) = entry.items()
+    return PathRule(path, tuple(notify))
 
 
 def load_ownership(path: Path) -> OwnershipFile:
@@ -74,10 +72,8 @@ def load_ownership(path: Path) -> OwnershipFile:
                 name=entry["name"],
                 labels=tuple(entry.get("labels", ())),
                 owners=tuple(entry.get("owners", ())),
-                paths=tuple(
-                    parse_path_rule(rule, section=entry["section"])
-                    for rule in entry["paths"]
-                ),
+                section=entry["section"],
+                paths=tuple(map(parse_path_rule, entry["paths"])),
             )
             for entry in document["ownership"]
         ),
@@ -161,10 +157,7 @@ def contains(broad: str, narrow: str) -> bool:
     )
 
 
-Block = tuple[LabelGroup, list[PathRule]]
-
-
-def order_blocks(blocks: list[Block]) -> list[Block]:
+def order_blocks(groups: list[LabelGroup]) -> list[LabelGroup]:
     """Order a section's label blocks so broader patterns come before narrower ones.
 
     GitHub applies the last matching rule, so a block containing a directory that
@@ -172,23 +165,23 @@ def order_blocks(blocks: list[Block]) -> list[Block]:
     their OWNERSHIP.yaml order.
     """
 
-    def precedes(first: Block, second: Block) -> bool:
-        return any(contains(a.path, b.path) for a in first[1] for b in second[1])
+    def precedes(first: LabelGroup, second: LabelGroup) -> bool:
+        return any(contains(a.path, b.path) for a in first.paths for b in second.paths)
 
-    remaining = list(blocks)
+    remaining = list(groups)
     ordered = []
     while remaining:
         ready = next(
             (
-                block
-                for block in remaining
-                if not any(precedes(other, block) for other in remaining if other is not block)
+                group
+                for group in remaining
+                if not any(precedes(other, group) for other in remaining if other is not group)
             ),
             None,
         )
         if ready is None:
-            groups = "; ".join(", ".join(group.labels) for group, _ in remaining)
-            raise ValueError(f"label groups nest inside each other both ways: {groups}")
+            names = ", ".join(group.name for group in remaining)
+            raise ValueError(f"label groups nest inside each other both ways: {names}")
         ordered.append(ready)
         remaining.remove(ready)
     return ordered
@@ -199,20 +192,14 @@ def render_codeowners(ownership: OwnershipFile) -> str:
     for section in ownership.sections:
         lines.append(f"# [{section}]")
         lines.extend(ownership.section_notes.get(section, ()))
-        for group in ownership.groups:
+        groups = [group for group in ownership.groups if group.section == section]
+        for group in groups:
             if not group.labels:
-                lines.extend(
-                    render_rule(rule) for rule in group.paths if rule.section == section
-                )
-        blocks = [
-            (group, [rule for rule in group.paths if rule.section == section])
-            for group in ownership.groups
-            if group.labels
-        ]
-        for group, rules in order_blocks([block for block in blocks if block[1]]):
+                lines.extend(map(render_rule, group.paths))
+        for group in order_blocks([group for group in groups if group.labels]):
             lines.append(f"# label: {', '.join(group.labels)}")
             lines.append(f"# owner: {' '.join(map(handle, group.owners)) or 'none'}")
-            lines.extend(map(render_rule, rules))
+            lines.extend(map(render_rule, group.paths))
         lines.append("#")
     return "\n".join(lines) + "\n"
 

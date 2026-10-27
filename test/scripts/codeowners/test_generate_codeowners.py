@@ -36,7 +36,6 @@ ownership:
     paths:
       - /torch/_dynamo/
       - /torch/_dynamo/eval_frame.py: [alice, someone@example.com]
-      - /torch/nn/dynamo_hooks.py: {section: python_nn_api}
   - name: tvm_dynamo
     labels: ["module: dynamo", "module: tvm"]
     owners: []
@@ -82,10 +81,9 @@ class TestGenerateCodeowners(TestCase):
             "# - Sections: compiler_dynamo, python_nn_api, protected_codeownership\n",
             header,
         )
-        # Paths without a label group come first in their section, and a group's
-        # path can override its section. In python_nn_api the nn block (/torch/nn/)
-        # comes before the two blocks with paths inside it, even though
-        # OWNERSHIP.yaml lists it last; those two keep their OWNERSHIP.yaml order.
+        # Paths without a label group come first in their section. In python_nn_api
+        # the nn block (/torch/nn/) comes before the linear_cross_entropy block,
+        # whose path is inside it, even though OWNERSHIP.yaml lists nn later.
         self.assertEqual(
             sections,
             """\
@@ -107,9 +105,6 @@ class TestGenerateCodeowners(TestCase):
 # label: module: linear cross entropy
 # owner: @pearu
 /torch/nn/modules/linear_cross_entropy.py @pearu
-# label: module: dynamo
-# owner: @alice @pytorch/dev-infra
-# /torch/nn/dynamo_hooks.py
 #
 # [protected_codeownership]
 # Keep these rules last.

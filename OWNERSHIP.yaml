@@ -10,8 +10,7 @@
 # Handles are written without the leading @. A path with handles is an active
 # CODEOWNERS rule (those handles get review requests); a bare path is a
 # commented rule. `section` is the CODEOWNERS section the group's paths are
-# written under; it is kept temporarily for scripts/codeowners/owners.py and
-# can be overridden per path.
+# written under; it is kept temporarily for scripts/codeowners/owners.py.
 
 oncall_queues:
   "oncall: distributed": ["module: c10d", "module: ddp", "module: dtensor", "module: fsdp", "module: tensorpipe"]
@@ -36,7 +35,6 @@ sections:
   - backend_cuda
   - backend_mps
   - backend_xpu
-  - backend_rocm
   - backend_vulkan
   - python_core_api
   - python_nn_api
@@ -51,21 +49,15 @@ sections:
   - profiler
   - mobile_runtime
   - mobile_android
-  - mobile_delegates
   - infra_ci
-  - infra_github_automation
   - infra_build_packaging
-  - third_party_core_build_deps
   - third_party_backend_deps
-  - third_party_serialization_schema
   - benchmark_compiler
   - distributed
   - infra_developer_tools
   - infra_linting
   - infra_codegen
   - infra_test
-  - benchmark_operator_runtime
-  - benchmark_models
   - caffe2
   - serialization_package
   - compiler_export_fx
@@ -254,8 +246,8 @@ ownership:
     paths:
       - /torch/csrc/shim*: [janeyx99]
       - /torch/csrc/stable/: [janeyx99]
-      - /torch/header_only_apis.txt: {notify: [janeyx99], section: python_core_api}
-      - /torch/headeronly/: {notify: [janeyx99], section: python_core_api}
+      - /torch/header_only_apis.txt: [janeyx99]
+      - /torch/headeronly/: [janeyx99]
   - name: lazy
     labels: ["module: lazy"]
     owners: []
@@ -325,25 +317,6 @@ ownership:
       - /torch/backends/mps/
       - /torch/csrc/mps/
       - /torch/mps/
-  - name: mobile
-    labels: ["oncall: mobile"]
-    owners: []
-    section: mobile_delegates
-    paths:
-      - /aten/src/ATen/metal/: {section: backend_mps}
-      - /test/metal/: {section: backend_mps}
-      - /test/test_metal.py: {section: backend_mps}
-      - /test/cpp/jit/test_mobile_type_parser.cpp: {section: mobile_runtime}
-      - /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp: {section: mobile_runtime}
-      - /test/mobile/: {section: mobile_runtime}
-      - /test/test_mobile_optimizer.py: {section: mobile_runtime}
-      - /torch/csrc/jit/mobile/: {section: mobile_runtime}
-      - /test/test_vulkan.py
-      - /test/test_xnnpack_integration.py
-      - /torch/backends/_coreml/
-      - /torch/backends/_nnapi/
-      - /torch/backends/xnnpack/
-      - /torch/csrc/jit/backends/
   - name: xpu
     labels: ["module: xpu"]
     owners: [EikanWang, gujinghui]
@@ -357,34 +330,12 @@ ownership:
       - /torch/csrc/xpu/: [EikanWang, gujinghui]
       - /torch/xpu/: [EikanWang, gujinghui]
       - /aten/src/ATen/native/mkldnn/xpu/: [EikanWang, gujinghui]
-  - name: rocm
-    labels: ["module: rocm"]
-    owners: [jeffdaily, jithunnair-amd]
-    section: backend_rocm
-    paths:
-      - /aten/src/ATen/hip/: [jeffdaily, jithunnair-amd]
-      - /torch/backends/miopen/
-      - /c10/hip/: [jeffdaily, jithunnair-amd]
-      - /aten/src/ATen/native/miopen/: [jeffdaily, jithunnair-amd]
-      - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
-      - /torch/utils/hipify/: {notify: [jeffdaily, jithunnair-amd], section: python_core_api}
-      - /tools/amd_build/: {notify: [jeffdaily, jithunnair-amd], section: infra_developer_tools}
   - name: vulkan
     labels: ["module: vulkan"]
     owners: []
     section: backend_vulkan
     paths:
       - /aten/src/ATen/native/vulkan/
-  - name: dsl_native_ops
-    labels: ["module: dsl-native-ops"]
-    owners: [drisspg, pearu, slayton58]
-    section: python_core_api
-    paths:
-      - /torch/_native/: [slayton58, drisspg]
-      - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
-      - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
-      - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
-      - /torch/nn/modules/linear_cross_entropy*.py: {notify: [slayton58, pearu], section: python_nn_api}
   - name: complex
     labels: ["module: complex"]
     owners: [amjames, hameerabbasi]
@@ -412,6 +363,16 @@ ownership:
     section: python_nn_api
     paths:
       - /torch/nn/: [albanD, jbschlosser]
+  - name: dsl_native_ops
+    labels: ["module: dsl-native-ops"]
+    owners: [drisspg, pearu, slayton58]
+    section: python_nn_api
+    paths:
+      - /torch/_native/: [slayton58, drisspg]
+      - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
+      - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
+      - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
+      - /torch/nn/modules/linear_cross_entropy*.py: [slayton58, pearu]
   - name: nn_utils_parametrize
     labels: ["module: nn", "module: nn.utils.parametrize"]
     owners: [lezcano]
@@ -541,6 +502,25 @@ ownership:
       - /torch/csrc/autograd/profiler_python.h
       - /torch/csrc/profiler/: [scotts, ryanzhang22]
       - /torch/profiler/: [scotts, ryanzhang22]
+  - name: mobile
+    labels: ["oncall: mobile"]
+    owners: []
+    section: mobile_runtime
+    paths:
+      - /aten/src/ATen/metal/
+      - /test/metal/
+      - /test/test_metal.py
+      - /test/cpp/jit/test_mobile_type_parser.cpp
+      - /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
+      - /test/mobile/
+      - /test/test_mobile_optimizer.py
+      - /torch/csrc/jit/mobile/
+      - /test/test_vulkan.py
+      - /test/test_xnnpack_integration.py
+      - /torch/backends/_coreml/
+      - /torch/backends/_nnapi/
+      - /torch/backends/xnnpack/
+      - /torch/csrc/jit/backends/
   - name: android
     labels: ["module: android"]
     owners: []
@@ -554,7 +534,7 @@ ownership:
     section: infra_ci
     paths:
       - /.ci/: [pytorch/pytorch-dev-infra]
-      - /.github/: {notify: [pytorch/pytorch-dev-infra], section: infra_github_automation}
+      - /.github/: [pytorch/pytorch-dev-infra]
   - name: rocm_ci
     labels: ["module: ci", "module: rocm"]
     owners: [jeffdaily]
@@ -617,10 +597,10 @@ ownership:
     owners: []
     section: third_party_backend_deps
     paths:
-      - /.gitmodules: {section: third_party_core_build_deps}
-      - /requirements-build.txt: {section: third_party_core_build_deps}
-      - /requirements.txt: {section: third_party_core_build_deps}
-      - /third_party/: {section: third_party_core_build_deps}
+      - /.gitmodules
+      - /requirements-build.txt
+      - /requirements.txt
+      - /third_party/
       - /third_party/NNPACK
       - /third_party/VulkanMemoryAllocator
       - /third_party/XNNPACK
@@ -639,10 +619,10 @@ ownership:
       - /third_party/xnnpack_buck_shim.bzl
       - /third_party/xnnpack_src_defs.bzl
       - /third_party/xnnpack_wrapper_defs.bzl
-      - /third_party/flatbuffers: {section: third_party_serialization_schema}
-      - /third_party/miniz-3.0.2/: {section: third_party_serialization_schema}
-      - /third_party/onnx: {section: third_party_serialization_schema}
-      - /third_party/protobuf: {section: third_party_serialization_schema}
+      - /third_party/flatbuffers
+      - /third_party/miniz-3.0.2/
+      - /third_party/onnx
+      - /third_party/protobuf
   - name: xpu_third_party
     labels: ["module: third_party", "module: xpu"]
     owners: [EikanWang, gujinghui]
@@ -652,9 +632,9 @@ ownership:
   - name: benchmark
     labels: ["module: benchmark"]
     owners: []
-    section: benchmark_operator_runtime
+    section: benchmark_compiler
     paths:
-      - /benchmarks/: {section: benchmark_compiler}
+      - /benchmarks/
       - /benchmarks/framework_overhead_benchmark/
       - /benchmarks/functional_autograd_benchmark/
       - /benchmarks/instruction_counts/
@@ -665,14 +645,14 @@ ownership:
       - /benchmarks/sparse/
       - /benchmarks/static_runtime/
       - /test/test_functional_autograd_benchmark.py
-      - /benchmarks/compare-fastrnn-results.py: {section: benchmark_models}
-      - /benchmarks/data/: {section: benchmark_models}
-      - /benchmarks/diffusion/: {section: benchmark_models}
-      - /benchmarks/fastrnns/: {section: benchmark_models}
-      - /benchmarks/gpt_fast/: {section: benchmark_models}
-      - /benchmarks/inference/: {section: benchmark_models}
-      - /benchmarks/nested/: {section: benchmark_models}
-      - /benchmarks/transformer/: {section: benchmark_models}
+      - /benchmarks/compare-fastrnn-results.py
+      - /benchmarks/data/
+      - /benchmarks/diffusion/
+      - /benchmarks/fastrnns/
+      - /benchmarks/gpt_fast/
+      - /benchmarks/inference/
+      - /benchmarks/nested/
+      - /benchmarks/transformer/
   - name: distributed
     labels: ["oncall: distributed"]
     owners: []
@@ -729,6 +709,18 @@ ownership:
       - /torch/distributed/tensor/placement_types.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
+  - name: rocm
+    labels: ["module: rocm"]
+    owners: [jeffdaily, jithunnair-amd]
+    section: infra_developer_tools
+    paths:
+      - /aten/src/ATen/hip/: [jeffdaily, jithunnair-amd]
+      - /torch/backends/miopen/
+      - /c10/hip/: [jeffdaily, jithunnair-amd]
+      - /aten/src/ATen/native/miopen/: [jeffdaily, jithunnair-amd]
+      - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
+      - /torch/utils/hipify/: [jeffdaily, jithunnair-amd]
+      - /tools/amd_build/: [jeffdaily, jithunnair-amd]
   - name: lint
     labels: ["module: lint"]
     owners: []
