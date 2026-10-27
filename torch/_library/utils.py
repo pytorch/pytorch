@@ -706,3 +706,66 @@ def is_impure(
         return True
 
     return False
+
+
+# Modules whose functions run on behalf of a registration made elsewhere.
+_REGISTRATION_APIS = (
+    "functools",
+    "torch.library",
+    "torch._library",
+    "torch._custom_op",
+    "torch._custom_ops",
+    # Vendored libraries, whose registration helpers act for their callers.
+    "torch._vendor",
+)
+
+
+def _in_package(name: str | None, packages: Iterable[str]) -> bool:
+    return name is not None and any(
+        name == package or name.startswith(f"{package}.") for package in packages
+    )
+
+
+# Names a main module runs under; neither can be imported again.
+_MAIN_MODULES = ("__main__", "__mp_main__")
+
+
+def registering_module(frame: Any) -> str | None:
+    """The module whose import runs a registration made from ``frame``, or None
+    when no import does.
+
+    Past the registration APIs' functions, a registration made from a module's
+    top-level code belongs to that module. One made inside any function belongs to
+    the nearest module-level frame on the stack, so a helper or a factory a module
+    runs at import counts for that module, except that a torch function's
+    registration counts only for a torch module being imported (a torch helper run
+    as torch imports): otherwise torch runs it on first use, and no import does.
+    The main module (``__main__``, or ``__mp_main__`` in a multiprocessing worker)
+    cannot be imported again, so it gives no answer.
+
+    A registration made on first use, inside a non-torch function, while some
+    module is being imported is recorded under that module; an artifact importing
+    it then fails, naming the op the import did not register.
+
+    This is not the module ``Library._register_fake`` checks pystubs against, the
+    immediate caller (where the fake impl is written): it is the module whose import
+    runs the registration, which is the one an artifact has to import.
+    """
+    frame = frame.f_back if frame is not None else None
+    while (
+        frame is not None
+        and frame.f_code.co_name != "<module>"
+        and _in_package(frame.f_globals.get("__name__"), _REGISTRATION_APIS)
+    ):
+        frame = frame.f_back
+    if frame is None:
+        return None
+    torch_function = frame.f_code.co_name != "<module>" and _in_package(
+        frame.f_globals.get("__name__"), ("torch",)
+    )
+    while frame is not None and frame.f_code.co_name != "<module>":
+        frame = frame.f_back
+    module = frame.f_globals.get("__name__") if frame is not None else None
+    if torch_function and not _in_package(module, ("torch",)):
+        return None
+    return None if module in (None, *_MAIN_MODULES) else module

@@ -514,6 +514,25 @@ class TestPythonRegistration(TestCase):
         # Teardown must not raise.
         lib._destroy()
 
+    def test_define_strips_whitespace_around_schema_name(self):
+        # A schema written across lines starts with whitespace; the qualname
+        # recorded must be the name the dispatcher registered. Regression: it
+        # kept the whitespace, so the op looked defined in C++ (failing the
+        # pystub check when its Python fake impl ran), a later overload skipped
+        # the packet refresh, and teardown left the cached packet behind.
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define("\n    my_op(Tensor x) -> Tensor")
+        self.assertIn(f"{self.test_ns}::my_op", lib._op_defs)
+        packet = getattr(torch.ops, self.test_ns).my_op
+        self.assertTrue(packet.default._defined_in_python)
+        torch.library.register_fake(f"{self.test_ns}::my_op", torch.empty_like, lib=lib)
+        with FakeTensorMode():
+            self.assertEqual(packet(torch.empty(2)).shape, (2,))
+        lib.define("\n    my_op.other(Tensor x) -> Tensor")
+        self.assertIn("other", packet.overloads())
+        lib._destroy()
+        self.assertNotIn("my_op", vars(getattr(torch.ops, self.test_ns)))
+
     def test_clear_torch_ops_cache_tolerates_malformed_qualname(self):
         # Defense-in-depth: _clear_torch_ops_cache runs in a shutdown-time
         # finalizer and must never raise, even on a qualname that does not split
