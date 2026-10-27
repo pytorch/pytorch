@@ -87,6 +87,7 @@ void lstm_onednn_xpu(
           params[idx + 0].reshape({1, 1, 4, hidden_size, layer_input_size}));
       w_hh_list.push_back(
           params[idx + 1].reshape({1, 1, 4, hidden_size, hidden_size}));
+      // Clang-tidy falsely flags this if-else as identical branches
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (has_biases) {
         bias_list.push_back((params[idx + 2] + params[idx + 3])
