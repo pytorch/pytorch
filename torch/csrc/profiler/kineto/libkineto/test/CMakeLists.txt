@@ -135,21 +135,55 @@ target_include_directories(CuptiActivityProfilerTest PRIVATE
 gtest_discover_tests(CuptiActivityProfilerTest)
 
 if(KINETO_ENABLE_CUPTI_PM_SAMPLING)
-# CuptiPMSamplingTests
-add_executable(CuptiPMSamplingTests
+# CuptiPMSamplingApiTest
+add_executable(CuptiPMSamplingApiTest
     CuptiPMSamplingApiTest.cpp
-    CuptiPMSamplingControllerTest.cpp
-    CuptiPMSamplingIntegrationTest.cpp
-    CuptiPMSamplingProfilerTest.cpp
     MockCuptiPMSampling.cpp)
-target_link_libraries(CuptiPMSamplingTests PRIVATE
+target_link_libraries(CuptiPMSamplingApiTest PRIVATE
     gtest_main
     kineto_base kineto_api)
-target_include_directories(CuptiPMSamplingTests PRIVATE
+target_include_directories(CuptiPMSamplingApiTest PRIVATE
     "${LIBKINETO_DIR}"
     "${LIBKINETO_DIR}/include"
     "${LIBKINETO_DIR}/src")
-gtest_discover_tests(CuptiPMSamplingTests)
+gtest_discover_tests(CuptiPMSamplingApiTest)
+
+# CuptiPMSamplingControllerTest
+add_executable(CuptiPMSamplingControllerTest
+    CuptiPMSamplingControllerTest.cpp)
+target_link_libraries(CuptiPMSamplingControllerTest PRIVATE
+    gtest_main
+    kineto_base kineto_api)
+target_include_directories(CuptiPMSamplingControllerTest PRIVATE
+    "${LIBKINETO_DIR}"
+    "${LIBKINETO_DIR}/include"
+    "${LIBKINETO_DIR}/src")
+gtest_discover_tests(CuptiPMSamplingControllerTest)
+
+# CuptiPMSamplingIntegrationTest
+add_executable(CuptiPMSamplingIntegrationTest
+    CuptiPMSamplingIntegrationTest.cpp
+    MockCuptiPMSampling.cpp)
+target_link_libraries(CuptiPMSamplingIntegrationTest PRIVATE
+    gtest_main
+    kineto_base kineto_api)
+target_include_directories(CuptiPMSamplingIntegrationTest PRIVATE
+    "${LIBKINETO_DIR}"
+    "${LIBKINETO_DIR}/include"
+    "${LIBKINETO_DIR}/src")
+gtest_discover_tests(CuptiPMSamplingIntegrationTest)
+
+# CuptiPMSamplingProfilerTest
+add_executable(CuptiPMSamplingProfilerTest
+    CuptiPMSamplingProfilerTest.cpp)
+target_link_libraries(CuptiPMSamplingProfilerTest PRIVATE
+    gtest_main
+    kineto_base kineto_api)
+target_include_directories(CuptiPMSamplingProfilerTest PRIVATE
+    "${LIBKINETO_DIR}"
+    "${LIBKINETO_DIR}/include"
+    "${LIBKINETO_DIR}/src")
+gtest_discover_tests(CuptiPMSamplingProfilerTest)
 endif()
 
 # CuptiCallbackApiTest

@@ -36,6 +36,9 @@ struct CuptiPMSamplingConfig {
   std::chrono::nanoseconds lookbackWindow{std::chrono::seconds{1}};
 };
 
+// API calls must not overlap. The controller runs decode() on its worker during
+// sampling, then on the stop() caller's thread after joining the worker. It calls
+// all other methods on the caller's thread.
 class ICuptiPMSamplingApi {
  public:
   virtual ~ICuptiPMSamplingApi() = default;
