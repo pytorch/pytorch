@@ -9435,6 +9435,7 @@ cpp_meta_supports_symint_ops = {
     aten.arange.default,
     aten.arange.start,
     aten.arange.start_step,
+    aten.add.Tensor,
 }
 
 
