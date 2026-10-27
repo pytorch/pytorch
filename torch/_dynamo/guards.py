@@ -2987,18 +2987,20 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        def hooks_ids_fn(
-            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
-            if not are_inline_hooks(hooks):
-                return None
-
-            return tuple(map(id, hooks))
-
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                get_hooks()
+                hooks
             )
 
         code = [
