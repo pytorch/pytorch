@@ -7163,6 +7163,55 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn, backend="eager")(x)
 
+    @parametrize(
+        "base, method",
+        [
+            (list, "append"),
+            (set, "add"),
+            (collections.deque, "appendleft"),
+            (list, "pop"),
+        ],
+    )
+    @parametrize("aliased", [False, True])
+    def test_method_descriptor_mutates_container_subclass(self, base, method, aliased):
+        class Container(base):
+            mutate = getattr(base, method)
+
+        def fn(x):
+            container = Container([1, 2])
+            result = getattr(container, "mutate" if aliased else method)(
+                0 if method == "pop" else 3
+            )
+            return x + 1, list(container), result
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_method_descriptor_autograd_engine_callback(self):
+        calls = []
+
+        def callback():
+            calls.append("called")
+
+        class Callback(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                torch.autograd.Variable._execution_engine.queue_callback(callback)
+                return grad * 2
+
+        def compiler_fn(gm):
+            return torch.compile(gm, backend="eager", fullgraph=True)
+
+        x = torch.ones(1, requires_grad=True)
+        with torch._dynamo.compiled_autograd._enable(compiler_fn):
+            Callback.apply(x).sum().backward()
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+        self.assertEqual(calls, ["called"])
+
     @parametrize("bound", [False, True])
     def test_method_descriptor_preserves_polyfill_trace_rule(self, bound):
         class C:

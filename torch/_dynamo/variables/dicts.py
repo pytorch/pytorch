@@ -1188,6 +1188,9 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.source:
+            # move_to_end changes iteration order without changing dict storage.
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
         return super().dict_keys(tx, args, kwargs).clone(is_ordered=True)
 
     def dict_values(
