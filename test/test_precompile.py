@@ -8061,7 +8061,7 @@ class TestPrecompileRuntimeCache(TestCase):
                         paths=(source, cache),
                         then=record,
                     )
-                self.assertIn("'missing'", str(failure.exception.__cause__))
+                self.assertIn("missing.so", str(failure.exception.__cause__))
                 self.assertFalse(os.path.exists(cache))
                 del _runtime_cache._capture.cpp_kernels["missing"]
                 _capture_files(

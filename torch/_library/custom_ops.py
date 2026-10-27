@@ -496,10 +496,15 @@ class CustomOpDef:
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
-                # Not fn's __dict__: a __dynamo_disable that _disable_dynamo cached on
-                # fn would let calls skip the _disabled_kernel check below.
+                # The user's function, not a partial of it, so the kernel's module is
+                # theirs. Not its __dict__: a __dynamo_disable that _disable_dynamo
+                # cached on it would let calls skip the _disabled_kernel check below.
+                user_fn = fn
+                while isinstance(user_fn, functools.partial):
+                    user_fn = user_fn.func
+
                 @torch._disable_dynamo
-                @functools.wraps(fn, updated=())
+                @functools.wraps(user_fn, updated=())
                 def wrapped_fn(*args, **kwargs):
                     if device_type in self._disabled_kernel:
                         return self._init_fn(*args, **kwargs)

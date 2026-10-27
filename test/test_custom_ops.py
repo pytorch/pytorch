@@ -5586,6 +5586,7 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_disable_a_kernel_registered_after_disable_dynamo(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:
@@ -5620,6 +5621,17 @@ Please use `add.register_fake` to add an fake impl.""",
             RuntimeError, "with implementation in <module 'json'"
         ):
             f(torch.randn(3))
+
+        # Through a partial, it is still the function's module.
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x.clone()
+
+        g.register_kernel("cpu")(partial(aliasing_kernel))
+        with self.assertRaisesRegex(
+            RuntimeError, "with implementation in <module 'json'"
+        ):
+            g(torch.randn(3))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
