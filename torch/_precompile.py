@@ -1917,7 +1917,48 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
-# Operator namespaces torch registers itself; serving never needs a module for them.
+def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
+    call, directly or passed to a higher-order op."""
+    names: set[tuple[str, str]] = set()
+    for module in gm.modules():
+        graph = getattr(module, "graph", None)
+        if not isinstance(graph, torch.fx.Graph):
+            continue
+        for node in graph.nodes:
+            if node.op != "call_function":
+                continue
+            for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
+                if isinstance(op, torch._ops.OpOverloadPacket):
+                    ops = [getattr(op, name) for name in op.overloads()]
+                else:
+                    ops = [op]
+                for overload in ops:
+                    if isinstance(overload, torch._ops.OpOverload):
+                        schema = overload._schema
+                        names.add((schema.name, schema.overload_name))
+    return names
+
+
+def _custom_op_module(op_name: str, overload: str) -> str | None:
+    """The importable module that registers ``op_name``, if one is known: the one
+    defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
+    names with ``m.set_python_module``."""
+    from torch._library.custom_ops import OPDEFS
+
+    if (opdef := OPDEFS.get(op_name)) is not None:
+        name = getattr(opdef._init_fn, "__module__", None)
+    else:
+        pystub = torch._C._dispatch_pystub(op_name, overload)
+        name = pystub[0] if pystub is not None else None
+    if name is None or name == "__main__":
+        return None
+    module = sys.modules.get(name)
+    return name if getattr(module, "__spec__", None) is not None else None
+
+
+# Torch's own operator namespaces. An op in them that maps to no module is torch's
+# to register, so a capture does not report it.
 _TORCH_OP_NAMESPACES = frozenset(
     {
         "aten",
@@ -1944,59 +1985,16 @@ _TORCH_OP_NAMESPACES = frozenset(
 )
 
 
-def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
-    """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
-    call, directly or passed to a higher-order op, outside torch's namespaces."""
-    names: set[tuple[str, str]] = set()
-    for module in gm.modules():
-        graph = getattr(module, "graph", None)
-        if not isinstance(graph, torch.fx.Graph):
-            continue
-        for node in graph.nodes:
-            if node.op != "call_function":
-                continue
-            for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
-                if isinstance(op, torch._ops.OpOverloadPacket):
-                    ops = [getattr(op, name) for name in op.overloads()]
-                else:
-                    ops = [op]
-                for overload in ops:
-                    if (
-                        isinstance(overload, torch._ops.OpOverload)
-                        and overload.namespace not in _TORCH_OP_NAMESPACES
-                    ):
-                        schema = overload._schema
-                        names.add((schema.name, schema.overload_name))
-    return names
-
-
-def _custom_op_module(op_name: str, overload: str) -> str | None:
-    """The importable module that registers ``op_name``, if one is known: the one
-    defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
-    names with ``m.set_python_module``."""
-    from torch._library.custom_ops import OPDEFS
-
-    if (opdef := OPDEFS.get(op_name)) is not None:
-        name = getattr(opdef._init_fn, "__module__", None)
-    else:
-        pystub = torch._C._dispatch_pystub(op_name, overload)
-        name = pystub[0] if pystub is not None else None
-    if name is None or name == "__main__":
-        return None
-    module = sys.modules.get(name)
-    return name if getattr(module, "__spec__", None) is not None else None
-
-
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     """The modules registering the ops among ``op_names``, warning once about the
-    ops no importable module is known to register."""
+    ops outside torch's namespaces no importable module is known to register."""
     modules: set[str] = set()
     unrecorded: set[str] = set()
     for op_name, overload in op_names:
-        if (module := _custom_op_module(op_name, overload)) is None:
-            unrecorded.add(op_name)
-        else:
+        if (module := _custom_op_module(op_name, overload)) is not None:
             modules.add(module)
+        elif op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
+            unrecorded.add(op_name)
     if unrecorded:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
