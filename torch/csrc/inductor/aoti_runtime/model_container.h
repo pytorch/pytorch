@@ -265,7 +265,7 @@ class AOTInductorModelContainer {
           pool_.return_model_to_available(model);
           throw;
         }
-        pool_.return_model_to_pending(model);
+        pool_.return_model_to_in_flight(model);
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -285,7 +285,7 @@ class AOTInductorModelContainer {
       throw;
     }
 
-    pool_.return_model_to_pending(model);
+    pool_.return_model_to_in_flight(model);
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -442,7 +442,7 @@ class AOTInductorModelContainer {
         pool_.return_model_to_available(model);
         throw;
       }
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
@@ -476,7 +476,7 @@ class AOTInductorModelContainer {
         throw;
       }
 
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     }
   }
 
