@@ -8,13 +8,11 @@
 class XPUAllocatorIPCTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
-    if (GetParam()) {
-#if SYCL_COMPILER_VERSION >= 20260200
-      c10::CachingAllocator::setAllocatorSettings("expandable_segments:True");
-#else
-      GTEST_SKIP()
-          << "Expandable segment IPC sharing requires SYCL compiler 2026.2 or later.";
+#if SYCL_COMPILER_VERSION < 20260200
+    GTEST_SKIP() << "IPC sharing requires SYCL compiler 2026.2 or later.";
 #endif
+    if (GetParam()) {
+      c10::CachingAllocator::setAllocatorSettings("expandable_segments:True");
     }
   }
 
