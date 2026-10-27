@@ -513,10 +513,11 @@ def _freeze_untuned_backward(
     instances: list[CachingAutotuner],
     reject: Callable[[CachingAutotuner, dict[str, object]], None],
 ) -> tuple[bytes, dict[str, object]] | None:
-    """The frozen record of a backward source no instance ran, with tuning turned
-    off, marked untuned, and the first static config one loaded that autotuning would not skip for
-    spilling registers (the first, if all spill), and its untuned report; None if
-    no instance has one whose cubin it can carry."""
+    """Freeze, untuned, a backward source that no instance ran. Returns the frozen
+    record and its untuned report, or None if no instance has a static launcher
+    whose cubin can be carried. The record uses the first loaded static config that
+    autotuning would not skip for spilling registers (the first, if all spill), with
+    tuning turned off and the ``precompile_frozen_untuned`` marker set."""
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
     for kernel in instances:
@@ -868,9 +869,8 @@ def freeze_runtime_cache(
     first loaded static config that does not spill past the autotuning threshold,
     and reported. So is, launched or not, a backward kernel loaded from an
     artifact frozen untuned earlier in this process, which cannot be tuned in it.
-    The caller must stop compiling
-    before calling this: a kernel compiled on another thread meanwhile is neither
-    waited on nor frozen.
+    The caller must stop compiling before calling this: a kernel compiled on
+    another thread meanwhile is neither waited on nor frozen.
     """
     owner = _active_capture()
     if owner is None:
