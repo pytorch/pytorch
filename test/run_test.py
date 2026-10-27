@@ -542,12 +542,13 @@ def _torchci_report_args(
 
 
 def _torchci_reports_default() -> str | None:
-    # The CI jobs that write reports by default, widening until it's all of CI.
-    # upload-test-artifacts uploads this folder.
-    workflows = ("trunk", "pull", "slow", "inductor", "periodic-strict")
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in workflows:
-        return str(REPO_ROOT / "test/torchci-reports")
-    return None
+    # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
+    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
+    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    if not in_pytorch_ci or torch.version.xpu:
+        return None
+    return str(REPO_ROOT / "test/torchci-reports")
 
 
 def run_test(
@@ -1730,7 +1731,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",

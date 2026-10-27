@@ -131,16 +131,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
@@ -1567,10 +1563,16 @@ void ProcessGroupNCCL::shutdown() {
   // Flush all collectives
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Since NCCL 2.31, ncclCommFinalize ends with a barrier among the comm's
+    // host-local ranks. Ranks can hold different comms (e.g. lazily created
+    // 2-rank P2P comms) and iterate this map in different orders, so finalize
+    // them in one group to let NCCL progress them concurrently.
+    C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
       ncclComm->finalize();
     }
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), std::nullopt);
   }
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
   // timeout is reach, this will throw an exception.
