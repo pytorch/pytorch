@@ -5614,7 +5614,7 @@ class MemberDescriptorVariable(DescriptorVariable):
         # replay via store_attr on the target (mirrors the __slots__ path in
         # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, name, stored)
+        store_attr_mutation(tx, obj, name, stored)
         return ConstantVariable.create(None)
 
 
@@ -5774,35 +5774,19 @@ class PropertyVariable(VariableTracker):
 
     tp_members = {
         "fget": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fget,
-                "fget",
-                lambda s: s.source and AttrSource(s.source, "fget"),
-            ),
+            getset_load_or_build(lambda s: s.descriptor.fget, "fget"),
             readonly_setter,
         ),
         "fset": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fset,
-                "fset",
-                lambda s: s.source and AttrSource(s.source, "fset"),
-            ),
+            getset_load_or_build(lambda s: s.descriptor.fset, "fset"),
             readonly_setter,
         ),
         "fdel": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fdel,
-                "fdel",
-                lambda s: s.source and AttrSource(s.source, "fdel"),
-            ),
+            getset_load_or_build(lambda s: s.descriptor.fdel, "fdel"),
             readonly_setter,
         ),
         "__doc__": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.__doc__,
-                "__doc__",
-                lambda s: s.source and AttrSource(s.source, "__doc__"),
-            ),
+            getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
             getset_set("__doc__"),
         ),
     }
@@ -5865,7 +5849,10 @@ class PropertyVariable(VariableTracker):
         fn = getattr(self.descriptor, attr)
 
         if fn is None:
-            display_name = getattr(self.descriptor, "__name__", None)
+            if sys.version_info >= (3, 13):
+                display_name = getattr(self.descriptor, "__name__", "?")
+            else:
+                display_name = getattr(self.descriptor.fget, "__name__", "?")
             kind = "setter" if value is not None else "deleter"
             if sys.version_info >= (3, 11):
                 # property_descr_set formats %R of the owner's *type*, whose
