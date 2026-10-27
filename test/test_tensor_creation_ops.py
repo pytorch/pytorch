@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, onlyCUDA, expectedFailureXLA, onlyCPU
+    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -4718,40 +4718,6 @@ class TestAsArray(_TestAsArrayBase):
         with self.assertRaisesRegex(ValueError, "can't alias tensor with dtype"):
             torch.asarray(_DLPackBuffer(original), dtype=torch.float64, copy=False)
 
-    @onlyCUDA
-    def test_asarray_prefers_dlpack_over_cuda_array_interface(self, device):
-        # asarray honors copy= for DLPack, but not via __cuda_array_interface__.
-        class _DLPackAndCAI(_DLPackWrapper):
-            @property
-            def __cuda_array_interface__(self):
-                return self._tensor.__cuda_array_interface__
-
-        original = torch.arange(5, device=device)
-        alias = torch.asarray(_DLPackAndCAI(original), copy=False)
-        self.assertEqual(alias.data_ptr(), original.data_ptr())
-        copied = torch.asarray(_DLPackAndCAI(original), copy=True)
-        self.assertNotEqual(copied.data_ptr(), original.data_ptr())
-        self.assertEqual(copied, original)
-
-    @onlyCUDA
-    def test_asarray_dlpack_failure_falls_back_to_cuda_array_interface(self, device):
-        original = torch.arange(5, device=device)
-
-        class _BadDLPackAndCAI:
-            def __dlpack__(self, *args, **kwargs):
-                raise RuntimeError("dlpack export failed")
-
-            def __dlpack_device__(self):
-                # kDLCUDA, as plain ints
-                return (2, original.device.index)
-
-            @property
-            def __cuda_array_interface__(self):
-                return original.__cuda_array_interface__
-
-        result = torch.asarray(_BadDLPackAndCAI())
-        self.assertEqual(result.data_ptr(), original.data_ptr())
-
 
 class TestAsArrayCpuOnly(_TestAsArrayBase):
     hw_classification = HardwareClassification.CPU
@@ -4868,6 +4834,42 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
         with self.assertRaisesRegex(BufferError, "export needs a copy"):
             torch.asarray(_CopyingDLPack(original.clone()), copy=False)
 
+
+class TestAsArrayCudaOnly(_TestAsArrayBase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_asarray_prefers_dlpack_over_cuda_array_interface(self, device):
+        # asarray honors copy= for DLPack, but not via __cuda_array_interface__.
+        class _DLPackAndCAI(_DLPackWrapper):
+            @property
+            def __cuda_array_interface__(self):
+                return self._tensor.__cuda_array_interface__
+
+        original = torch.arange(5, device=device)
+        alias = torch.asarray(_DLPackAndCAI(original), copy=False)
+        self.assertEqual(alias.data_ptr(), original.data_ptr())
+        copied = torch.asarray(_DLPackAndCAI(original), copy=True)
+        self.assertNotEqual(copied.data_ptr(), original.data_ptr())
+        self.assertEqual(copied, original)
+
+    def test_asarray_dlpack_failure_falls_back_to_cuda_array_interface(self, device):
+        original = torch.arange(5, device=device)
+
+        class _BadDLPackAndCAI:
+            def __dlpack__(self, *args, **kwargs):
+                raise RuntimeError("dlpack export failed")
+
+            def __dlpack_device__(self):
+                # kDLCUDA, as plain ints
+                return (2, original.device.index)
+
+            @property
+            def __cuda_array_interface__(self):
+                return original.__cuda_array_interface__
+
+        result = torch.asarray(_BadDLPackAndCAI())
+        self.assertEqual(result.data_ptr(), original.data_ptr())
+
 instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
@@ -4877,6 +4879,7 @@ instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestAsArrayCpuOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestAsArrayCudaOnly, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
