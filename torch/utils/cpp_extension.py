@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import glob
 import importlib
 import importlib.abc
@@ -535,16 +536,6 @@ def _windows_cuda_lib_dir() -> str:
     return os.path.join('lib', _windows_arch())
 
 
-def _cuda_major_minor() -> str | None:
-    ver = getattr(torch.version, 'cuda', None)
-    if not ver:
-        return None
-    parts = str(ver).split('.')
-    if len(parts) >= 2:
-        return f'{parts[0]}.{parts[1]}'
-    return str(ver)
-
-
 def _cuda_version_key(name: str) -> tuple[int, int] | None:
     major, sep, minor = name.partition('.')
     if (
@@ -574,21 +565,37 @@ def _existing_cudnn_lib(home: str, version: str | None) -> str | None:
 
 def _pick_cudnn_version(
     qualified: list[tuple[tuple[int, int], str, str]],
-) -> str | None:
+) -> tuple[tuple[int, int], str, str] | None:
     # Exact torch CUDA version, else the newest minor of that same major.
     # 13.10 ranks after 13.2. A different major is not used.
-    if not qualified:
+    cuda = torch.version.cuda
+    if not qualified or not cuda:
         return None
-    wanted = _cuda_version_key(_cuda_major_minor() or '')
-    if wanted is None:
+    parsed = Version(cuda)
+    major = getattr(parsed, "major", None)
+    minor = getattr(parsed, "minor", None)
+    if major is None or minor is None:
         return None
-    for key, name, _library in qualified:
-        if key == wanted:
-            return name
+    wanted = (major, minor)
+    for item in qualified:
+        if item[0] == wanted:
+            return item
     same_major = [item for item in qualified if item[0][0] == wanted[0]]
     if not same_major:
         return None
-    return max(same_major)[1]
+    return max(same_major)
+
+
+@functools.cache
+def _warn_cudnn_major_mismatch(home: str, found: str, cuda: str) -> None:
+    # Path lookup stays uncached. Only this log is keyed, so one install
+    # does not warn again from include_paths, library_paths, and ldflags.
+    logger.warning(
+        "cuDNN install has CUDA %s, which does not match torch CUDA %s. "
+        "Those version directories are not used.",
+        found,
+        cuda,
+    )
 
 
 def _resolve_cudnn_dirs() -> _CudnnDirs:
@@ -615,19 +622,13 @@ def _resolve_cudnn_dirs() -> _CudnnDirs:
         qualified.append((key, name, library))
     chosen = _pick_cudnn_version(qualified)
     if chosen is not None:
-        _key, name, library = next(
-            item for item in qualified if item[1] == chosen)
+        _key, name, library = chosen
         return _CudnnDirs(
             os.path.join(include_root, name), os.path.dirname(library))
     if qualified:
         found = ', '.join(name for _key, name, _library in sorted(qualified))
-        cuda = getattr(torch.version, 'cuda', None) or 'unknown'
-        logger.warning(
-            "cuDNN install has CUDA %s, which does not match torch CUDA %s. "
-            "Those version directories are not used.",
-            found,
-            cuda,
-        )
+        _warn_cudnn_major_mismatch(
+            home, found, torch.version.cuda or 'unknown')
     include = include_root if os.path.isdir(include_root) else None
     if flat_lib is not None:
         library_dir = os.path.dirname(flat_lib)
@@ -2646,8 +2647,7 @@ def _jit_compile(name,
     if is_standalone:
         return _get_exec_path(name, build_directory)
 
-    return _import_module_from_library(
-        name, build_directory, is_python_module)
+    return _import_module_from_library(name, build_directory, is_python_module)
 
 def _get_hipcc_path():
     if IS_WINDOWS:

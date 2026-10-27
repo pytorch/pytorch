@@ -286,6 +286,9 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
             ):
                 with self.assertLogs(cpp.__name__, level="WARNING") as caught:
                     dirs = cpp._resolve_cudnn_dirs()
+                    again = cpp._resolve_cudnn_dirs()
+                self.assertEqual(len(caught.records), 1)
+                self.assertEqual(again, dirs)
                 message = "\n".join(caught.output)
                 self.assertIn("13.0", message)
                 self.assertIn("12.6", message)
