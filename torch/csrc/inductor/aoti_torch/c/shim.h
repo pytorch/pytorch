@@ -655,8 +655,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_mem_pool(
     CUDAMemPoolHandle* ret_pool // returns new reference
 );
 
-// Graphs captured into the pool keep its memory until they are deleted. Once
-// they all are, the pool can't be captured into again.
+// Graphs captured into the pool keep its memory until they are deleted.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool);
 
@@ -664,28 +663,31 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_graph(
     CUDAGraphHandle* ret_graph // returns new reference
 );
 
-// Deleting a graph that is being captured ends the capture, as
-// aoti_torch_cuda_graph_capture_end(graph, false) would.
+// Deleting a graph that is being captured abandons the capture: the stream
+// stops capturing and the graph isn't instantiated. The graph is deleted even
+// if ending the capture reports an error, e.g. for an invalidated capture. On
+// another thread than the capture's, it fails and the handle stays valid.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_graph(CUDAGraphHandle graph);
 
-// Starts capturing the work enqueued on `stream`, in thread-local capture
-// mode. Memory allocated on `stream` during the capture comes from `pool`.
-// The capture must end on the thread that began it.
+// Starts capturing the work enqueued on `stream`, which must belong to the
+// pool's device, in thread-local capture mode. Memory allocated on `stream`
+// during the capture comes from `pool`. The capture must end on the thread
+// that began it; capture_end on another thread fails and leaves the capture
+// running.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
     CUDAMemPoolHandle pool,
     void* stream);
 
-// Ends the capture. With instantiate false, the capture is discarded instead,
-// e.g. because the captured work failed; discarding succeeds even if the
-// capture was invalidated, unless the AOTI_RUNTIME_STRICT_CUDA_GRAPH
-// environment variable is set to a value other than 0: then discarding
-// reports errors and warnings from ending the capture. Either way the stream
-// stops capturing.
+// Ends the capture and instantiates the graph for replay. The stream stops
+// capturing even when this returns an error, e.g. for an invalidated capture.
+// To abandon a capture, e.g. because the captured work failed, delete the
+// graph instead.
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph, bool instantiate);
+aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph);
 
+// `stream` must belong to the device the graph was captured on.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_graph_replay(CUDAGraphHandle graph, void* stream);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
