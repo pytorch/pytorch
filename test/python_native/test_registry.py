@@ -910,7 +910,7 @@ class TestRegistryRuntime(TestCase):
         out = torch.ops.aten.mul.Tensor(a, b)
         self.assertTrue(torch.equal(out, torch.tensor([42.0, 42.0])))
 
-    def test_eager_profile_names_the_override(self):
+    def test_only_unprofiled_eager_calls_skip_the_native_op(self):
         self.registry.register_op_override(
             "test_dsl",
             "aten",
@@ -922,12 +922,19 @@ class TestRegistryRuntime(TestCase):
         self._install("mul.Tensor", "CPU")
         node = self.registry._graphs[("aten", "mul.Tensor", "CPU")][0]
 
-        with torch.profiler.profile() as prof:
-            out = torch.ops.aten.mul.Tensor(torch.tensor([2.0]), torch.tensor([4.0]))
+        def native_kernel(a, b):
+            raise RuntimeError("reached")
 
-        self.assertTrue(torch.equal(out, torch.tensor([42.0])))
-        names = [e.name for e in prof.events()]
-        self.assertEqual(names.count(f"_native::{node.node_id}"), 1)
+        lib = self.registry._get_or_create_library("CPU")
+        lib.impl(node.node_id, native_kernel, "CPU", allow_override=True)
+        a, b = torch.tensor([2.0]), torch.tensor([4.0])
+        mul = torch.ops.aten.mul.Tensor
+
+        self.assertTrue(torch.equal(mul(a, b), torch.tensor([42.0])))
+        with self.assertRaisesRegex(RuntimeError, "reached"):
+            self.registry.native_decomp_table()[mul](a, b)
+        with torch.profiler.profile(), self.assertRaisesRegex(RuntimeError, "reached"):
+            mul(a, b)
 
     def test_no_recursion_in_aten_backward_formula(self):
         """Backward of bmm calls bmm again; the fallback must bypass the router.

@@ -1003,9 +1003,8 @@ def _register_overrides_from_graph(
 
         if enable:
             _register_node_impl(lib, node, dispatch_key)
-            cond_impl.append(
-                (node.cond_fn, node.node_id, node.impl_fn, node.try_initialize_runtime)
-            )
+            init = node.try_initialize_runtime
+            cond_impl.append((node.cond_fn, node.node_id, node.impl_fn, init))
             node.active = True
         else:
             node.active = False
@@ -1051,9 +1050,9 @@ def _register_overrides_from_graph(
     # routing can continue. The impl is called directly: going through
     # `_native::<id>` would add a dispatcher trip for nothing, as the router
     # already sits below the autograd / autocast / Python-mode keys. While
-    # profiling, the call is wrapped in a `_native::<id>` record_function so
-    # traces show which override ran. No match falls back to the captured
-    # original kernel.
+    # profiling, it still goes through `_native::<id>` so profiles keep that op
+    # event and its input shapes. No match falls back to the captured original
+    # kernel.
     #
     # Compile/export routers run under FakeTensor where some predicates are
     # undefined (e.g. _is_cow_tensor), so we swallow cond exceptions and treat
@@ -1082,15 +1081,14 @@ def _register_overrides_from_graph(
                 if eager:
                     raise
                 continue
-            if matched:
-                if not eager:
-                    return getattr(torch.ops._native, impl_name)(*args, **kwargs)
+            if not matched:
+                continue
+            if eager:
                 if try_initialize_runtime is not None and not try_initialize_runtime():
                     continue
                 if not torch.autograd._profiler_enabled():
                     return impl_fn(*args, **kwargs)
-                with torch.autograd.profiler.record_function(f"_native::{impl_name}"):
-                    return impl_fn(*args, **kwargs)
+            return getattr(torch.ops._native, impl_name)(*args, **kwargs)
         return _NO_MATCH
 
     def eager_router(
