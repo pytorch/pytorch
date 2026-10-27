@@ -931,6 +931,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
+                self,
                 self.value,
                 tx,
                 self.source,
