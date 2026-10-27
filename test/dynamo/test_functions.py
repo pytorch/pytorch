@@ -6861,6 +6861,38 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), expected)
 
+    @parametrize("names", [("__add__", "__mul__"), ("append", "pop")])
+    def test_unbound_descriptor_comparison(self, names):
+        def fn(x):
+            first = getattr(list, names[0])
+            same = getattr(list, names[0])
+            other = getattr(list, names[1])
+            comparisons = (
+                first == same,
+                first != same,
+                first == other,
+                first != other,
+                first.__eq__(other),
+                first.__ne__(other),
+            )
+            errors = []
+            for op in (operator.lt, operator.le, operator.gt, operator.ge):
+                try:
+                    op(first, same)
+                except TypeError as exc:
+                    errors.append(str(exc))
+            return x + 1, comparisons, errors
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(
+            expected[1], (True, False, False, True, NotImplemented, NotImplemented)
+        )
+        self.assertEqual(len(expected[2]), 4)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
     @parametrize("bound", [False, True])
     def test_method_descriptor_list_subclass_getitem(self, bound):
         class List(list):
