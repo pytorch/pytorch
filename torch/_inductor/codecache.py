@@ -4350,6 +4350,9 @@ def _relocatable_command_line(cmd: str) -> str:
     for tree in sorted(torch_trees, key=len, reverse=True):
         if len(tree) > 1:
             cmd = re.sub(start + re.escape(tree) + end, "<torch>", cmd)
+    # The builder quotes a path only when it needs quoting, which says where this
+    # host put torch, not what it builds.
+    cmd = re.sub(r"(['\"])(<torch>[^'\"\s]*)\1", r"\2", cmd)
     return f"{cmd} torch_key={torch_key().hex()}"
 
 
