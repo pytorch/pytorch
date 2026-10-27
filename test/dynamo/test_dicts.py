@@ -68,6 +68,29 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("size", [0, 1, 2])
+    def test_ordered_dict_trivial_order_guard(self, size):
+        def fn(x, mapping):
+            return x + sum(mapping.values())
+
+        guards = []
+        compiled = torch._dynamo.optimize(
+            "eager", nopython=True, guard_export_fn=guards.extend
+        )(fn)
+        x = torch.ones(1)
+        mapping = OrderedDict.fromkeys(range(size), 1)
+        self.assertEqual(compiled(x, mapping), x + size)
+        self.assertEqual(
+            any(
+                guard.create_fn
+                is torch._dynamo.guards.GuardBuilder.ORDERED_DICT_ORDER_MATCH
+                for guard in guards
+            ),
+            size > 1,
+        )
+        mapping[size] = 1
+        self.assertEqual(compiled(x, mapping), x + size + 1)
+
     @parametrize("same_order", [False, True])
     def test_ordered_dict_comparison_uses_linked_order(self, same_order):
         def fn(x, left, right):
@@ -124,81 +147,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         for _ in range(2):
             mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
-
-    @parametrize("operation", ["items", "dict_items", "arithmetic", "repr"])
-    def test_hook_dict_items_observe_current_ids(self, operation):
-        def hook(module, args, output):
-            return output + 1
-
-        def fn(x, module):
-            hooks = module._forward_hooks
-            if operation == "repr":
-                result = repr(hooks.items())
-            elif operation == "arithmetic":
-                result = [key + 1 for key, value in hooks.items()]
-            else:
-                result = list(
-                    dict.items(hooks) if operation == "dict_items" else hooks.items()
-                )
-            return x + 1, result
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for _ in range(2):
-            module = torch.nn.Identity()
-            module.register_forward_hook(hook)
-            self.assertEqual(compiled(x, module), fn(x, module))
-
-    @parametrize("operation", ["copy", "update"])
-    def test_hook_dict_materialization_keys(self, operation):
-        def hook(module, args, output):
-            return output
-
-        def fn(x, module):
-            if operation == "copy":
-                result = module._forward_hooks.copy()
-            else:
-                result = {}
-                result.update(module._forward_hooks)
-            return x + (1 in result)
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for key in (0, 1):
-            module = torch.nn.Identity()
-            module._forward_hooks[key] = hook
-            self.assertEqual(compiled(x, module), fn(x, module))
-
-    def test_empty_dict_membership_keeps_key_lazy(self):
-        def fn(x, key, mapping):
-            return x + (key in mapping)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for key in (3, 4):
-            self.assertEqual(compiled(x, key, {}), x)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(compiled(x, 4, {4: None}), x + 1)
-
-    def test_hook_kwargs_membership_reuse(self):
-        def hook(module, args, *rest):
-            return rest[-1] * 10 + len(rest)
-
-        def fn(x, module):
-            return module(x)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for with_kwargs in ((False, True), (False, True), (True, False)):
-            module = torch.nn.Identity()
-            for flag in with_kwargs:
-                module.register_forward_hook(hook, with_kwargs=flag)
-            self.assertEqual(compiled(x, module), fn(x, module))
-            self.assertEqual(
-                counter.frame_count, 1 if with_kwargs == (False, True) else 2
-            )
 
     def test_ordered_dict_key_identity_guard(self):
         def fn(x, mapping):

@@ -99,7 +99,6 @@ class HashableTracker:
     does not take into account aliasing.
     """
 
-    vt: VariableTracker
     _MISSING = object()
 
     def __init__(self, vt: VariableTracker) -> None:
