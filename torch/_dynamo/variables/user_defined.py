@@ -120,12 +120,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import (
-    ConstDictVariable,
-    OrderedDictVariable,
-    pyanydict_check,
-    pyodict_check,
-)
+from .dicts import ConstDictVariable, OrderedDictVariable, pyanydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -1187,30 +1182,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self, *args
             )
-        elif self.value is collections.OrderedDict and name in (
-            "keys",
-            "values",
-            "items",
-            "update",
-        ):
-            if not args:
-                raise_type_error(
-                    tx, f"unbound method OrderedDict.{name}() needs an argument"
-                )
-            obj = args[0].realize()
-            if not pyodict_check(obj):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for 'collections.OrderedDict' objects "
-                    f"doesn't apply to a '{obj.python_type_name()}' object",
-                )
-            if isinstance(obj, OrderedDictVariable):
-                result = OrderedDictVariable.tp_methods[name](
-                    obj, tx, name, args[1:], kwargs
-                )
-                if result is not None:
-                    return result
-            return super().call_method(tx, name, args, kwargs)
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif (
@@ -3229,31 +3200,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
-            if (
-                isinstance(self, ConstDictVariable)
-                and isinstance(method, types.MethodDescriptorType)
-                and method.__objclass__ in (dict, collections.OrderedDict)
-                and method.__name__ in ("keys", "values", "items", "update")
-            ):
-                # Honor the defining dictionary type for aliased builtin descriptors.
-                if method.__objclass__ is collections.OrderedDict and not pyodict_check(
-                    self
-                ):
-                    raise_type_error(
-                        tx,
-                        f"descriptor '{method.__name__}' for 'collections.OrderedDict' objects "
-                        f"doesn't apply to a '{self.python_type_name()}' object",
-                    )
-                owner = (
-                    OrderedDictVariable
-                    if method.__objclass__ is collections.OrderedDict
-                    else ConstDictVariable
-                )
-                result = owner.tp_methods[method.__name__](
-                    self, tx, method.__name__, args, kwargs
-                )
-                if result is not None:
-                    return result
+            if isinstance(method, types.MethodDescriptorType):
+                # An alias such as `copy = dict.copy` keeps its defining descriptor.
+                return variables.MethodDescriptorVariable(
+                    method, owner=VariableTracker.build(tx, method.__objclass__)
+                ).call_function(tx, [self, *args], kwargs)
 
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
