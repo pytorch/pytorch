@@ -24,7 +24,7 @@ inline dnnl::memory make_onednn_memory(
     dnnl::engine& engine,
     const void* ptr) {
   TORCH_CHECK(
-      ptr != nullptr,
+      ptr != nullptr || md.get_size() == 0,
       "make_onednn_memory: null pointer passed for Input-only argument");
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return make_onednn_memory(md, engine, const_cast<void*>(ptr));
