@@ -2,12 +2,14 @@
 
 import functools
 import itertools
+import re
 import unittest
 import uuid
 
 import torch
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -17,6 +19,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -2444,6 +2447,216 @@ class ScanTests(TestCase):
         )
 
 
+def _gdn_step(state, x):
+    # Gated delta rule: one [V, K] state per (batch, head), reduced over K.
+    q, k, v, g, beta = x
+    state = state * g.exp()[..., None, None]
+    kv = (state * k[:, :, None, :]).sum(-1)
+    state = state + ((v - kv) * beta[..., None])[..., None] * k[:, :, None, :]
+    return state, (state * q[:, :, None, :]).sum(-1)
+
+
+def _shifted_step(carry, x):
+    # Each row reads its neighbour's previous value.
+    new = carry.roll(1, 0) + x
+    return new, new.clone()
+
+
+def _cross_row_step(carry, x):
+    new = carry * x + carry.sum()
+    return new, new.clone()
+
+
+def _matmul_step(carry, x):
+    new = (carry @ x).tanh()
+    return new, new.clone()
+
+
+class ScanDeviceLoopTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        patcher = torch._inductor.config.patch(scan_device_loop=True)
+        patcher.__enter__()
+        self.addCleanup(patcher.__exit__, None, None, None)
+
+    def _compile(self, fn, *args):
+        torch._dynamo.reset()
+        counters.clear()
+        result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        used_device_loop = counters["inductor"]["scan_device_loop"] > 0
+        # The loop variable is loop_idx, or loop_idx_iter for int64 indexing.
+        self.assertEqual(
+            re.search(r"for loop_idx\w* in range\(", "\n".join(codes)) is not None,
+            used_device_loop,
+        )
+        return result, used_device_loop
+
+    def _check(self, step, init, xs, *, device_loop, reverse=False):
+        def f(init, xs):
+            return scan(step, init, xs, reverse=reverse)
+
+        result, used_device_loop = self._compile(f, init, xs)
+        self.assertEqual(result, f(init, xs))
+        self.assertEqual(used_device_loop, device_loop)
+        return result
+
+    @requires_gpu
+    def test_gdn_recurrence(self):
+        B, T, H, K = 2, 5, 3, 16
+        torch.manual_seed(0)
+        q, k = (
+            torch.nn.functional.normalize(
+                torch.randn(T, B, H, K, device=GPU_TYPE), dim=-1
+            )
+            for _ in range(2)
+        )
+        xs = (
+            q,
+            k,
+            torch.randn(T, B, H, K, device=GPU_TYPE),
+            -torch.rand(T, B, H, device=GPU_TYPE),
+            torch.rand(T, B, H, device=GPU_TYPE),
+        )
+        init = torch.randn(B, H, K, K, device=GPU_TYPE)
+        self._check(_gdn_step, init, xs, device_loop=True)
+
+    @requires_gpu
+    @parametrize("reverse", [False, True])
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_pointwise_carry(self, reverse, dtype):
+        def step(carry, x):
+            new = (carry * x + 1).sigmoid()
+            return new, new.clone()
+
+        init = torch.randn(7, 33, device=GPU_TYPE, dtype=dtype)
+        xs = torch.randn(9, 7, 33, device=GPU_TYPE, dtype=dtype)
+        result = self._check(step, init, xs, device_loop=True, reverse=reverse)
+        # Carries round-trip through their storage dtype every step, exactly
+        # like the host loop.
+        with torch._inductor.config.patch(scan_device_loop=False):
+            host_loop, used_device_loop = self._compile(
+                lambda i, x: scan(step, i, x, reverse=reverse), init, xs
+            )
+        self.assertFalse(used_device_loop)
+        self.assertEqual(result, host_loop, atol=0, rtol=0)
+
+    @requires_gpu
+    def test_multiple_carries_and_ys(self):
+        def step(carry, x):
+            a, b = carry
+            a = a * x + b[:, None]
+            b = b + a.sum(-1)
+            return (a, b), (a.clone(), (b * 2).half())
+
+        init = (torch.randn(6, 32, device=GPU_TYPE), torch.randn(6, device=GPU_TYPE))
+        xs = torch.rand(4, 6, 32, device=GPU_TYPE)
+        self._check(step, init, xs, device_loop=True)
+
+    @requires_gpu
+    def test_bool_and_int_carries(self):
+        # 7 * 33 elements leave a partial block, so the carry loads are masked.
+        def step(carry, x):
+            flag, count = carry
+            flag = flag ^ (x > 0)
+            count = count + flag.to(count.dtype)
+            return (flag, count), count.clone()
+
+        init = (
+            torch.zeros(7, 33, device=GPU_TYPE, dtype=torch.bool),
+            torch.zeros(7, 33, device=GPU_TYPE, dtype=torch.int32),
+        )
+        xs = torch.randn(6, 7, 33, device=GPU_TYPE)
+        self._check(step, init, xs, device_loop=True)
+
+    @requires_gpu
+    def test_carry_not_read(self):
+        # The carry is overwritten every step, so its update stays a per-step store.
+        def step(carry, x):
+            new = x.sin()
+            return new, (new * 2).clone()
+
+        init = torch.randn(5, 16, device=GPU_TYPE)
+        xs = torch.randn(4, 5, 16, device=GPU_TYPE)
+        self._check(step, init, xs, device_loop=True)
+
+    @requires_gpu
+    def test_dynamic_trip_count(self):
+        # One compiled kernel must run each call's length, not the first one's.
+        def step(carry, x):
+            new = carry * 0.5 + x
+            return new, new.clone()
+
+        def f(init, xs):
+            return scan(step, init, xs)
+
+        torch._dynamo.reset()
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(f, backend=cnt, fullgraph=True, dynamic=True)
+        init = torch.randn(4, 16, device=GPU_TYPE)
+        for length in (3, 11):
+            xs = torch.randn(length, 4, 16, device=GPU_TYPE)
+            self.assertEqual(compiled(init, xs), f(init, xs))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inductor"]["scan_device_loop"], 1)
+
+    @requires_gpu
+    @parametrize("fallback_random", [False, True])
+    def test_cpu_op_in_body_keeps_host_loop(self, fallback_random):
+        # A device loop would run the CPU draw once for every step. Each step
+        # must draw again and advance the CPU generator, as the host loop does.
+        def step(carry, x):
+            new = carry + x + torch.rand((), device="cpu")
+            return new, new.clone()
+
+        def f(init, xs):
+            return scan(step, init, xs)
+
+        init = torch.randn(4, 16, device=GPU_TYPE)
+        xs = torch.zeros(5, 4, 16, device=GPU_TYPE)
+        results = []
+        for device_loop in (True, False):
+            torch._dynamo.reset()
+            counters.clear()
+            with torch._inductor.config.patch(
+                scan_device_loop=device_loop, fallback_random=fallback_random
+            ):
+                compiled = torch.compile(f, fullgraph=True)
+                compiled(init, xs)
+                torch.manual_seed(0)
+                results.append((compiled(init, xs), torch.rand(())))
+            self.assertEqual(counters["inductor"]["scan_device_loop"], 0)
+        self.assertEqual(results[0], results[1], atol=0, rtol=0)
+
+    @requires_gpu
+    def test_masked_carry_read_keeps_host_loop(self):
+        # The masked read of the carry must not reuse the unmasked load before
+        # it: masked-off lanes read the fill value.
+        def step(carry, x):
+            idx = torch.arange(carry.shape[0], device=carry.device)
+            masked = torch.ops.aten._unsafe_masked_index(carry, x > 0, [idx], 2.0)
+            new = carry * x + masked
+            return new, new.clone()
+
+        init = torch.randn(8, device=GPU_TYPE)
+        xs = torch.randn(5, 8, device=GPU_TYPE)
+        result = self._check(step, init, xs, device_loop=False)
+        with torch._inductor.config.patch(scan_device_loop=False):
+            host_loop, _ = self._compile(lambda i, x: scan(step, i, x), init, xs)
+        self.assertEqual(result, host_loop, atol=0, rtol=0)
+
+    @requires_gpu
+    @parametrize(
+        "step",
+        [_shifted_step, _cross_row_step, _matmul_step],
+        name_fn=lambda step: step.__name__.strip("_"),
+    )
+    def test_ineligible_body_keeps_host_loop(self, step):
+        init = torch.randn(8, 8, device=GPU_TYPE)
+        xs = torch.randn(5, 8, 8, device=GPU_TYPE)
+        self._check(step, init, xs, device_loop=False)
+
+
 class MapModels:
     class Simple(torch.nn.Module):
         def forward(self, map_op, x):
@@ -2793,6 +3006,7 @@ instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
 instantiate_parametrized_tests(AssociativeScanTests)
 instantiate_parametrized_tests(ScanTests)
+instantiate_parametrized_tests(ScanDeviceLoopTests)
 instantiate_parametrized_tests(MapTests)
 instantiate_parametrized_tests(SwitchTests)
 

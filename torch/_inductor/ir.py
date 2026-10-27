@@ -11732,6 +11732,8 @@ class WhileLoop(ExternKernel):
     cond_subgraph: Subgraph | None = None
     body_subgraph: Subgraph | None = None
     outputs: Sequence[MultiOutput] | None = None
+    # (num_ys, num_carries) when the loop came from decompose_scan_to_while_loop.
+    scan_layout: tuple[int, int] | None = None
 
     def __init__(
         self,
@@ -11978,6 +11980,7 @@ class WhileLoop(ExternKernel):
             unbacked_bindings=unbacked_bindings,
             stack_output=stack_output,
         )
+        while_loop.scan_layout = V.graph.current_node.meta.get("scan_layout")
 
         # Handling input mutations. Inputs can be mutated by cond_fn,
         # body_fn or both (e.g. a captured tensor mutated only in cond_fn).

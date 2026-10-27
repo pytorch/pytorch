@@ -78,6 +78,7 @@ from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
+from .scan_device_loop import ScanDeviceLoopKernelState, ScanDeviceLoopSpec
 from .simd_kernel_features import (
     DisableReduction,
     EnableReduction,
@@ -599,6 +600,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
         self._index_dtype = self.features.select_index_dtype()
+        # Set when this kernel runs every step of a scan. See NOTE [scan device loop].
+        self.scan_loop: ScanDeviceLoopKernelState | None = None
+
+    def supports_scan_device_loop(self) -> bool:
+        return False
 
     def codegen_template_body(
         self,
@@ -4344,13 +4350,42 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
-        kernels = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            {"features": kernel_features, "tiling_scores": tiling_score},
-        )
-        for kernel in kernels:
-            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+
+        def codegen_kernels(
+            scan_loop: ScanDeviceLoopSpec | None,
+        ) -> list[SIMDKernel]:
+            kernels = self.create_kernel_choices(
+                kernel_features,
+                [tiling],
+                {"features": kernel_features, "tiling_scores": tiling_score},
+            )
+            if (
+                scan_loop is not None
+                and len(kernels) == 1
+                and kernels[0].supports_scan_device_loop()
+            ):
+                kernels[0].scan_loop = ScanDeviceLoopKernelState(scan_loop)
+            # In-place reuse would alias a carry output with a temporary.
+            with (
+                config.patch(inplace_buffers=False)
+                if kernels[0].scan_loop is not None
+                else contextlib.nullcontext()
+            ):
+                for kernel in kernels:
+                    self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+            return kernels
+
+        scan_loop = self.scan_device_loop_spec(kernel_features)
+        kernels = codegen_kernels(scan_loop)
+        if (kernel_scan_loop := kernels[0].scan_loop) is not None:
+            with V.set_kernel_handler(kernels[0]):
+                kernels[0].finalize_scan_device_loop()
+            if kernel_scan_loop.failure is None:
+                kernel_scan_loop.spec.applied = True
+                counters["inductor"]["scan_device_loop"] += 1
+            else:
+                log.debug("scan device loop fallback: %s", kernel_scan_loop.failure)
+                kernels = codegen_kernels(None)
         MultiKernel.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
@@ -4407,6 +4442,31 @@ class SIMDScheduling(BaseScheduling):
                     )
 
         self.free_buffers_in_scheduler()
+
+    def scan_device_loop_spec(
+        self, kernel_features: SIMDKernelFeatures
+    ) -> ScanDeviceLoopSpec | None:
+        """The scan to fold into this kernel, if it is the body's only op besides
+        the loop bookkeeping."""
+        spec = V.graph.scan_device_loop
+        if spec is None or spec.applied:
+            return None
+        if self.scheduler is None:
+            raise AssertionError("expected self.scheduler to be set")
+        body_nodes = [
+            node
+            for node in self.scheduler.nodes
+            if not isinstance(node, scheduler.NopKernelSchedulerNode)
+            and not spec.is_loop_bookkeeping(node)
+        ]
+        if len(body_nodes) != 1:
+            return None
+        names = OrderedSet(node.get_name() for node in body_nodes[0].get_nodes())
+        if not all(
+            node.get_name() in names for node in kernel_features.scheduler_nodes()
+        ):
+            return None
+        return spec
 
     def _launch_kernel_and_cleanup(
         self,

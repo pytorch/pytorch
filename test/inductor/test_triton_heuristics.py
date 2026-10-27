@@ -41,6 +41,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -1367,6 +1368,115 @@ class TestArgumentCloneAndRestore(TestCase):
         self.assertTrue(arg.storage_offset() > 0)
 
         self._do_test(arg)
+
+
+class TestBenchMutatedArgs(TestCase):
+    @staticmethod
+    def _make_autotuner(kind):
+        # Each launch updates 16 elements of a large buffer: by overwriting them
+        # ("write_only"), in place ("inplace"), or from in_ptr0, which the test
+        # passes as a view of the same buffer ("aliased"). The kernels that read
+        # keep the largest value any launch read in `seen`, which is not a
+        # mutated arg and so is never cloned.
+        @triton.jit
+        def triton_(out_ptr0, in_ptr0, seen_ptr, xnumel, XBLOCK: tl.constexpr):
+            xoffset = tl.program_id(0) * XBLOCK
+            xindex = xoffset + tl.arange(0, XBLOCK)[:]
+            xmask = xindex < xnumel
+            tl.store(out_ptr0 + (xindex), xindex.to(tl.float32) + 1.0, xmask)
+
+        @triton.jit
+        def triton_inplace(out_ptr0, in_ptr0, seen_ptr, xnumel, XBLOCK: tl.constexpr):
+            xoffset = tl.program_id(0) * XBLOCK
+            xindex = xoffset + tl.arange(0, XBLOCK)[:]
+            xmask = xindex < xnumel
+            tmp0 = tl.load(out_ptr0 + (xindex), xmask)
+            tmp1 = tl.load(seen_ptr + (xindex), xmask)
+            tl.store(seen_ptr + (xindex), tl.maximum(tmp0, tmp1), xmask)
+            tl.store(out_ptr0 + (xindex), tmp0 + 1.0, xmask)
+
+        @triton.jit
+        def triton_aliased(out_ptr0, in_ptr0, seen_ptr, xnumel, XBLOCK: tl.constexpr):
+            xoffset = tl.program_id(0) * XBLOCK
+            xindex = xoffset + tl.arange(0, XBLOCK)[:]
+            xmask = xindex < xnumel
+            tmp0 = tl.load(in_ptr0 + (xindex), xmask)
+            tmp1 = tl.load(seen_ptr + (xindex), xmask)
+            tl.store(seen_ptr + (xindex), tl.maximum(tmp0, tmp1), xmask)
+            tl.store(out_ptr0 + (xindex), tmp0 + 1.0, xmask)
+
+        fns = {
+            "write_only": triton_,
+            "inplace": triton_inplace,
+            "aliased": triton_aliased,
+        }
+        inductor_meta = {"grid_type": "Grid1D"}
+        if kind != "inplace":
+            # out_ptr0 itself is never loaded.
+            inductor_meta["write_only_mutated_arg_names"] = ["out_ptr0"]
+        return CachingAutotuner(
+            fn=fns[kind],
+            triton_meta={
+                "signature": {
+                    "out_ptr0": "*fp32",
+                    "in_ptr0": "*fp32",
+                    "seen_ptr": "*fp32",
+                    "xnumel": "i32",
+                    "XBLOCK": "constexpr",
+                },
+                "device": DeviceProperties.create(torch.device(GPU_TYPE)),
+                "constants": {},
+                "configs": [
+                    AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2, 3), equal_to_1=())
+                ],
+            },
+            configs=[triton_config({"x": 16}, 16)],
+            save_cache_hook=False,
+            mutated_arg_names=["out_ptr0"],
+            reset_to_zero_arg_names=[],
+            optimize_mem=True,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta=inductor_meta,
+        )
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_bench_protects_mutated_args(self):
+        # Autotuning must never change the caller's buffer, through either a GPU
+        # clone or a CPU copy, and every launch of a kernel that reads a mutated
+        # arg must see its original values. A write-only buffer is protected once
+        # per config rather than per launch, so its 256MB copy stays out of the
+        # timing; that copy made configs of scan body kernels look alike and
+        # picked one at random. An output read through an overlapping view is
+        # not write-only, so it keeps per-launch protection.
+        device = torch.get_device_module(GPU_TYPE)
+        buf = torch.zeros(2**26, device=GPU_TYPE)
+        other = torch.zeros(16, device=GPU_TYPE)
+        seen = torch.zeros(16, device=GPU_TYPE)
+        copy_ms = benchmarker.benchmark_gpu(lambda: clone_preserve_strides(buf))
+        for kind in ("inplace", "write_only", "aliased"):
+            autotuner = self._make_autotuner(kind)
+            autotuner.precompile()
+            args = (buf, buf[:16] if kind == "aliased" else other, seen, 16)
+            for copy_to_cpu in (False, True):
+                with self.subTest(kind=kind, copy_to_cpu=copy_to_cpu):
+                    seen.zero_()
+                    if copy_to_cpu:
+                        # No headroom above the current allocation.
+                        device.reset_peak_memory_stats()
+                    else:
+                        # Headroom for a GPU clone of the buffer.
+                        torch.empty(2 * buf.numel(), device=GPU_TYPE)
+                    self.assertEqual(
+                        bool(autotuner.copy_args_to_cpu_if_needed(*args)),
+                        copy_to_cpu,
+                    )
+                    timings = autotuner.benchmark_all_configs(*args)
+                    self.assertEqual(buf, torch.zeros_like(buf))
+                    if kind == "write_only":
+                        self.assertLess(min(timings.values()), copy_ms / 4)
+                    else:
+                        # Every launch read the original zeros.
+                        self.assertEqual(seen, torch.zeros_like(seen))
 
 
 class TestDumpLaunchTensors(TestCase):

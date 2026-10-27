@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import collections
 import contextlib
 import contextvars
 import copy
@@ -1593,13 +1594,28 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
 
         cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
+        # A kernel never reads a write-only mutated arg, so its contents cannot
+        # affect a launch: protect it once per config, outside the timed call.
+        # Cloning or restoring a large output buffer every launch would time the
+        # copy instead of the kernel. Other mutated args are still protected
+        # before every launch, so each launch sees the original values.
+        write_only = self.write_only_mutated_args(*args, **kwargs)
+        once_cpu_copies = {n: c for n, c in cpu_copies.items() if n in write_only}
+        per_launch_cpu_copies = {
+            n: c for n, c in cpu_copies.items() if n not in write_only
+        }
+        once_args, once_kwargs = self.maybe_clone_args(
+            OrderedSet(cpu_copies) | (OrderedSet(self.mutated_arg_names) - write_only),
+            *args,
+            **kwargs,
+        )
 
         def kernel_call():
             # Resolve the raw stream at call time rather than at closure-creation
             # time so that CUDA graph capture on a different stream works correctly.
             stream = device_interface.get_raw_stream(device_interface.current_device())
             cloned_args, cloned_kwargs = self.maybe_clone_args(
-                cpu_copies, *args, **kwargs
+                OrderedSet(cpu_copies) | write_only, *once_args, **once_kwargs
             )
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             # reset to zero before evaluating any config
@@ -1649,24 +1665,27 @@ class CachingAutotuner(KernelInterface):
                         launcher.config.kwargs,
                     )
                     raise
-            self.restore_args_from_cpu(cpu_copies)
+            self.restore_args_from_cpu(per_launch_cpu_copies)
 
-        # only use profiler when not already in a profiler instance
-        if with_profiler and not autograd_profiler._is_profiler_enabled:
-            from torch._inductor.utils import do_bench_using_profiling
+        try:
+            # only use profiler when not already in a profiler instance
+            if with_profiler and not autograd_profiler._is_profiler_enabled:
+                from torch._inductor.utils import do_bench_using_profiling
 
-            return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
+                return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        benchmark_kwargs = (
-            {}
-            if self.device_props.type == "cpu"
-            else {"rep": 40, "is_vetted_benchmarking": True}
-        )
-        result = benchmarker.benchmark(
-            fn=kernel_call,
-            device=self.device_props.type,
-            **benchmark_kwargs,  # type: ignore[arg-type]
-        )
+            benchmark_kwargs = (
+                {}
+                if self.device_props.type == "cpu"
+                else {"rep": 40, "is_vetted_benchmarking": True}
+            )
+            result = benchmarker.benchmark(
+                fn=kernel_call,
+                device=self.device_props.type,
+                **benchmark_kwargs,  # type: ignore[arg-type]
+            )
+        finally:
+            self.restore_args_from_cpu(once_cpu_copies)
         # benchmarker.benchmark() only returns float("inf") when catching an
         # "invalid configuration" exception - all other exceptions are re-raised.
         # Therefore, if result is inf here, it must be due to invalid config.
@@ -1675,6 +1694,24 @@ class CachingAutotuner(KernelInterface):
                 BenchmarkFailureReason.INVALID_CONFIG
             )
         return result
+
+    def write_only_mutated_args(self, *args, **kwargs) -> OrderedSet[str]:
+        named_args = {**dict(zip(self.fn.arg_names, args)), **kwargs}
+        storages = {
+            name: arg.untyped_storage().data_ptr()
+            for name, arg in named_args.items()
+            if isinstance(arg, torch.Tensor)
+        }
+        storage_counts = collections.Counter(storages.values())
+        # An output that shares storage with another arg can be read or written
+        # through that arg, so later launches could see this launch's writes.
+        return OrderedSet(
+            name
+            for name in self.inductor_meta.get("write_only_mutated_arg_names", ())
+            if name in storages
+            and name not in self.reset_to_zero_arg_names
+            and storage_counts[storages[name]] == 1
+        )
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
         """
