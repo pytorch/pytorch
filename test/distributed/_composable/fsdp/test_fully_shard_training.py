@@ -6,6 +6,7 @@ import functools
 import gc
 import itertools
 import unittest
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
@@ -240,9 +241,20 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             else:
                 self._assert_tensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+            params_before_reshard = list(model.parameters())
             model.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+            if not reshard_after_forward:
+                # Stale references to the unsharded parameters now point at
+                # freed storage: data_ptr() stays quiet, and rebuilding a view
+                # names FSDP in the error
+                for param in params_before_reshard:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("error")
+                        self.assertEqual(param.data_ptr(), 0)
+                    with self.assertRaisesRegex(RuntimeError, "freed by FSDP"):
+                        param.as_strided(param.size(), param.stride())
 
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2, None):
