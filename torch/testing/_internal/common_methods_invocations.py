@@ -22158,15 +22158,47 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
-            # mps refuses 5-D bicubic in eager. Not listed: test_dtypes, where a
+            # mps and xpu refuse 5-D bicubic in eager. Not listed: test_dtypes, where a
             # raising sample only marks a dtype partially supported, and test_out_warning,
             # which returns on the first sample, a 4-D bilinear one.
-            # TODO: drop these when mps implements 5-D bicubic.
+            # TODO: drop these when mps / xpu implement 5-D bicubic.
             # MPS TestConsistency has its own entry in common_mps.py.
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
-                         "test_variant_consistency_eager", device_type="mps"),
+                         "test_noncontiguous_samples", device_type="xpu"),
+             DecorateInfo(unittest.expectedFailure, "TestCommon",
+                          "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_variant_consistency_eager", device_type="xpu"),
+            # not instantiated on mps
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_operator", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_backward", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_view_replay", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMathBits",
+                         "test_neg_view", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_no_amp", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_amp", device_type="xpu"),
+            # the gradient suites run on xpu, which claims float64
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_grad", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_gradgrad", device_type="xpu"),
+            # TestDecomp runs the complete OpInfo sample set and reaches the same
+            # unsupported XPU 5-D bicubic sample.
+            # XPU does not support bicubic interpolation with 5-D input.
+            # https://github.com/intel/torch-xpu-ops/issues/5542
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                device_type="xpu",
+             ),
         )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
