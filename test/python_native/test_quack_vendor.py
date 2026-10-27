@@ -1,5 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import ast
 import importlib.util
 import os
 import re
@@ -86,6 +87,30 @@ class TestQuackCache(TestCase):
 
 
 class TestQuackFlexGemmPatches(TestCase):
+    def test_no_mixed_constexpr_if_tests(self):
+        # The vendored copy does not install upstream's process-wide
+        # mixed_constexpr_if AST rewrite (other quack copies can claim its flag
+        # first), so `if const_expr(S) and/or D:` would be traced as a dynamic
+        # if. Nest the static and dynamic tests explicitly instead.
+        def is_const_expr(node):
+            func = getattr(node, "func", None)
+            return isinstance(node, ast.Call) and (
+                getattr(func, "attr", None) == "const_expr"
+                or getattr(func, "id", None) == "const_expr"
+            )
+
+        spec = importlib.util.find_spec("torch._vendor.quack")
+        vendor_root = Path(spec.submodule_search_locations[0])
+        offenders = [
+            f"{path.relative_to(vendor_root)}:{node.lineno}"
+            for path in sorted(vendor_root.rglob("*.py"))
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.BoolOp)
+            and is_const_expr(node.test.values[0])
+        ]
+        self.assertFalse(offenders, f"mixed const_expr if tests: {offenders}")
+
     def test_patch_series_holds_only_hooks(self):
         series = [
             line.split("#")[0].strip()
