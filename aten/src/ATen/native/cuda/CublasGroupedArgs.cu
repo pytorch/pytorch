@@ -97,11 +97,11 @@ __global__ void populate_cublas_grouped_args_kernel(
   n_out[i] = static_cast<IndexType>(group_n);
   k_out[i] = static_cast<IndexType>(group_k);
   CUDA_KERNEL_ASSERT(
-      !cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_a) ||
-      group_m % 4 == 0);
+      (!cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_a) ||
+       group_m % 4 == 0) && "scale_a requires group M divisible by 4\n");
   CUDA_KERNEL_ASSERT(
-      !cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_b) ||
-      group_n % 4 == 0);
+      (!cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_b) ||
+       group_n % 4 == 0) && "scale_b requires group N divisible by 4\n");
 
   lda_out[i] = lda_val;
   ldb_out[i] = ldb_val;
