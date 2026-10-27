@@ -763,7 +763,8 @@ def capture_scope() -> Iterator[None]:
 
 def _freeze_triton_kernels(
     kernels: dict[str, list[CachingAutotuner]], *, require_tuned_backward: bool
-) -> bytes:
+) -> tuple[bytes, list[dict[str, object]]]:
+    """The frozen kernels, and the report of each one frozen untuned."""
     from torch._logging import trace_structured
 
     static_kernels: dict[str, bytes] = {}
@@ -778,27 +779,6 @@ def _freeze_triton_kernels(
                 untuned.append(report)
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
-    if untuned:
-        # One warning for all of them: a training capture that ran no backward
-        # freezes every backward kernel this way.
-        names = [str(report["kernel_name"]) for report in untuned]
-        log.warning(
-            "precompile: no captured step ran %d backward Triton kernel(s), so they "
-            "are frozen untuned, each with the first of its static configs: %s. The "
-            "precompile_triton_untuned_kernels artifact lists them all.",
-            len(names),
-            ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "precompile_triton_untuned_kernels",
-                "encoding": "json",
-            },
-            payload_fn=lambda: {"kernels": untuned},
-            expect_trace_id=False,
-            record_logging_overhead=False,
-        )
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
         trace_structured(
@@ -812,7 +792,32 @@ def _freeze_triton_kernels(
             record_logging_overhead=False,
         )
         raise error
-    return pickle.dumps(static_kernels)
+    return pickle.dumps(static_kernels), untuned
+
+
+def _report_untuned_triton_kernels(untuned: list[dict[str, object]]) -> None:
+    from torch._logging import trace_structured
+
+    # One warning for all of them: a training capture that ran no backward freezes
+    # every backward kernel this way.
+    names = [str(report["kernel_name"]) for report in untuned]
+    log.warning(
+        "precompile: no captured step ran %d backward Triton kernel(s), so they are "
+        "frozen untuned, each with the first of its static configs: %s. The "
+        "precompile_triton_untuned_kernels artifact lists them all.",
+        len(names),
+        ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
+    )
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "precompile_triton_untuned_kernels",
+            "encoding": "json",
+        },
+        payload_fn=lambda: {"kernels": untuned},
+        expect_trace_id=False,
+        record_logging_overhead=False,
+    )
 
 
 def _current_root(cache: ModuleType) -> str | None:
@@ -873,7 +878,7 @@ def freeze_runtime_cache(
         with _capture_lock:
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
-        static_payload = _freeze_triton_kernels(
+        static_payload, untuned = _freeze_triton_kernels(
             kernels, require_tuned_backward=require_tuned_backward
         )
         cpp_payload = _freeze_cpp_kernels(cpp_kernels)
@@ -895,3 +900,6 @@ def freeze_runtime_cache(
         serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
         serializer.extend(artifacts.items())
         write(serializer.to_bytes())
+        # Only once they are written, so a failed capture reports nothing as frozen.
+        if untuned:
+            _report_untuned_triton_kernels(untuned)

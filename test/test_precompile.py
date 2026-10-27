@@ -7881,19 +7881,22 @@ class TestPrecompileRuntimeCache(TestCase):
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_untuned_triton_kernels_are_traced(self):
-        from torch.compiler._runtime_cache import _freeze_triton_kernels
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernels,
+            _report_untuned_triton_kernels,
+        )
 
         unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
         kernels = {"untuned": [unlaunched], "tuned": [_static_runtime_kernel(64)]}
+        payload, untuned = _freeze_triton_kernels(kernels, require_tuned_backward=False)
+        self.assertEqual(set(pickle.loads(payload)), {"untuned", "tuned"})
+        self.assertEqual([report["source_key"] for report in untuned], ["untuned"])
         with (
             mock.patch("torch._logging.trace_structured") as trace,
             self.assertLogs("torch.compiler._runtime_cache", "WARNING") as logs,
         ):
-            frozen = pickle.loads(
-                _freeze_triton_kernels(kernels, require_tuned_backward=False)
-            )
-        self.assertEqual(set(frozen), {"untuned", "tuned"})
+            _report_untuned_triton_kernels(untuned)
         # One warning for every untuned kernel.
         [warning] = logs.output
         self.assertIn("1 backward Triton kernel(s), so they are frozen", warning)
@@ -7902,20 +7905,26 @@ class TestPrecompileRuntimeCache(TestCase):
             call.kwargs["metadata_fn"](),
             {"name": "precompile_triton_untuned_kernels", "encoding": "json"},
         )
-        self.assertEqual(
-            [k["source_key"] for k in call.kwargs["payload_fn"]()["kernels"]],
-            ["untuned"],
-        )
-        # Strict: refused, and nothing is reported as untuned.
-        with (
-            mock.patch("torch._logging.trace_structured") as trace,
-            self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"),
+        self.assertEqual(call.kwargs["payload_fn"](), {"kernels": untuned})
+        # A capture that still refuses another source, or refuses this one (strict),
+        # reports nothing as frozen untuned.
+        dynamic = _never_run(_static_runtime_kernel(32))
+        dynamic.launchers = [types.SimpleNamespace(config=None)]
+        for refused, require_tuned_backward in (
+            ({**kernels, "dynamic": [dynamic]}, False),
+            (kernels, True),
         ):
-            _freeze_triton_kernels(kernels, require_tuned_backward=True)
-        self.assertNotIn(
-            "precompile_triton_untuned_kernels",
-            [c.kwargs["metadata_fn"]().get("name") for c in trace.call_args_list],
-        )
+            with (
+                mock.patch("torch._logging.trace_structured") as trace,
+                self.assertRaisesRegex(RuntimeError, "no fully resolved static"),
+            ):
+                _freeze_triton_kernels(
+                    refused, require_tuned_backward=require_tuned_backward
+                )
+            self.assertNotIn(
+                "precompile_triton_untuned_kernels",
+                [c.kwargs["metadata_fn"]().get("name") for c in trace.call_args_list],
+            )
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
