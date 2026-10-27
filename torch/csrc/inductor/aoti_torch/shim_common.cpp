@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
 #include <c10/core/DispatchKey.h>
