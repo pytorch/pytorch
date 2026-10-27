@@ -7173,7 +7173,7 @@ class GraphModule(torch.nn.Module):
     @parametrize("disallowed", [False, True])
     def test_polyfilled_user_method_respects_disallow_in_graph(self, disallowed):
         def isoformat(self, /):
-            return f"{self.year:04d}-{self.month:02d}-{self.day:02d}"
+            return f"{self.year:0>4}-{self.month:0>2}-{self.day:0>2}"
 
         original = datetime.date.isoformat
         torch.compiler.substitute_in_graph(original)(isoformat)
