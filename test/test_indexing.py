@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import math
 import operator
 import random
 import warnings
@@ -2204,27 +2205,19 @@ class TestIndexingDevice(TestCase):
             out = source.index_select(0, idx)
             self.assertEqual(out.item(), source.item())
 
-    def test_index_add_empty_index_1d(self, device):
-        dst = torch.arange(5, dtype=torch.float, device=device)
-        index = torch.empty((0,), dtype=torch.int64, device=device)
-        source = torch.empty((0,), dtype=torch.float, device=device)
-
+    @parametrize("op", ["index_add", "index_copy"])
+    @parametrize("shape", [(5,), (3, 4)])
+    def test_index_add_copy_empty_index(self, device, op, shape):
+        dst = torch.arange(math.prod(shape), dtype=torch.float, device=device).reshape(
+            shape
+        )
+        index = torch.empty(0, dtype=torch.int64, device=device)
+        source = torch.empty((0, *shape[1:]), dtype=dst.dtype, device=device)
+        kwargs = {"alpha": 2.0} if op == "index_add" else {}
         out = dst.clone()
-        out.index_add_(0, index, source, alpha=2.0)
-
+        getattr(out, op + "_")(0, index, source, **kwargs)
         self.assertEqual(out, dst)
 
-    def test_index_add_empty_index_2d(self, device):
-        dst = torch.arange(12, dtype=torch.float, device=device).reshape(3, 4)
-        index = torch.empty((0,), dtype=torch.int64, device=device)
-        source = torch.empty((0, 4), dtype=torch.float, device=device)
-
-        out = dst.clone()
-        out.index_add_(0, index, source, alpha=2.0)
-
-        self.assertEqual(out, dst)
-
-    @serialTest()
     @onlyAccelerator
     @toleranceOverride(
         {
@@ -2235,82 +2228,100 @@ class TestIndexingDevice(TestCase):
         }
     )
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
-    def test_index_add_fast_path(self, device, dtype):
-        # Originally test added for CUDA implementation:
-        # Coverage for the index_add_ TMA fast path: one eligible case + five
-        # fallback predicates per shape, asserted against a CPU reference.
-        # Shapes keep n/m <= 1 so atomicAdd-order noise on bf16/half stays
-        # within tolerance; (4096, 1024, 1024) crosses the TMA chunk_elems
-        # boundary (D > one chunk).
-        def check(out, dim, idx, src, alpha=1.0):
-            expected = (
-                out.cpu().clone().index_add_(dim, idx.cpu(), src.cpu(), alpha=alpha)
+    @parametrize(
+        "op,variant,m,n,D",
+        [
+            ("index_add", "functional", 64, 32, 264),
+            ("index_add", "inplace", 64, 32, 264),
+            ("index_add", "out", 64, 32, 264),
+            ("index_copy", "functional", 64, 32, 264),
+            ("index_copy", "inplace", 64, 32, 264),
+            ("index_copy", "out", 64, 32, 264),
+            ("index_add", "inplace", 1024, 512, 128),
+            ("index_add", "inplace", 4096, 3072, 128),
+            ("index_add", "inplace", 4096, 1024, 1024),
+        ],
+    )
+    def test_index_add_copy_fast_path(self, device, dtype, op, variant, m, n, D):
+        def check(dst, dim, idx, src, alpha=1.0):
+            kwargs = {"alpha": alpha} if op == "index_add" else {}
+            fn = getattr(torch, op)
+            expected = fn(dst.cpu(), dim, idx.cpu(), src.cpu(), **kwargs)
+            original = dst.clone()
+            if variant == "inplace":
+                result = getattr(dst, op + "_")(dim, idx, src, **kwargs)
+                self.assertIs(result, dst)
+            elif variant == "functional":
+                result = fn(dst, dim, idx, src, **kwargs)
+                self.assertTrue(result.is_contiguous())
+            else:
+                out = torch.empty_strided(
+                    dst.shape, dst.stride(), device=device, dtype=dtype
+                )
+                result = fn(dst, dim, idx, src, out=out, **kwargs)
+                self.assertIs(result, out)
+            tolerances = {"atol": 0, "rtol": 0} if op == "index_copy" else {}
+            self.assertEqual(result.cpu(), expected, **tolerances)
+            if variant != "inplace":
+                self.assertEqual(dst, original, atol=0, rtol=0)
+
+        for idx_dtype in (
+            (torch.int32, torch.int64) if op == "index_add" else (torch.int64,)
+        ):
+            src = make_tensor((n, D), device=device, dtype=dtype)
+            # Copy requires distinct indices for a deterministic reference.
+            idx = (
+                torch.randint(m, (n,), device=device, dtype=idx_dtype)
+                if op == "index_add"
+                else torch.randperm(m, device=device)[:n]
             )
-            out.index_add_(dim, idx, src, alpha=alpha)
-            self.assertEqual(out.cpu(), expected)
-
-        for m, n, D in [(1024, 512, 128), (4096, 3072, 128), (4096, 1024, 1024)]:
-            torch.accelerator.empty_cache()
-            for idx_dtype in (torch.int32, torch.int64):
-                src = make_tensor((n, D), device=device, dtype=dtype)
-                idx = torch.randint(m, (n,), device=device, dtype=idx_dtype)
-
-                # 1) Eligible -> fast path.
-                check(torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src)
-                # 2) alpha != 1 -> fallback.
+            check(torch.ones(m, D, device=device, dtype=dtype), 0, idx, src)
+            # Layout and fallback checks use only the small in-place cases.
+            if variant != "inplace" or m != 64:
+                continue
+            if op == "index_add":
                 check(
-                    torch.zeros(m, D, device=device, dtype=dtype),
-                    0,
-                    idx,
-                    src,
-                    alpha=2.5,
-                )
-                # 3) Discontiguous src -> fallback.
-                src_strided = torch.empty(n, 2 * D, device=device, dtype=dtype)[
-                    :, ::2
-                ].copy_(src)
-                check(
-                    torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src_strided
-                )
-                # 4) Misaligned self (one-element pointer offset) -> fallback.
-                self_mis = (
-                    torch.empty(m * D + 1, device=device, dtype=dtype)[1:]
-                    .view(m, D)
-                    .zero_()
-                )
-                check(self_mis, 0, idx, src)
-                # 5) dim != 0 -> fallback.
-                check(
-                    torch.zeros(D, m, device=device, dtype=dtype),
-                    1,
-                    idx,
-                    make_tensor((D, n), device=device, dtype=dtype),
-                )
-                # 6) Sliced inner dim (not is_contiguous) -> fallback.
-                sl = slice(64, 192)
-                check(
-                    torch.zeros(m, 256, device=device, dtype=dtype)[:, sl],
-                    0,
-                    idx,
-                    make_tensor((n, 256), device=device, dtype=dtype)[:, sl],
+                    torch.ones(m, D, device=device, dtype=dtype), 0, idx, src, alpha=2.5
                 )
 
-        # 7) Empty index is a no-op.
-        out = torch.randn(8, 128, device=device, dtype=dtype)
-        expected = out.clone()
-        out.index_add_(
-            0,
-            torch.empty(0, device=device, dtype=torch.int64),
-            torch.empty(0, 128, device=device, dtype=dtype),
-        )
-        self.assertEqual(out, expected)
+            src_strided = torch.empty(n, 2 * D, device=device, dtype=dtype)[
+                :, ::2
+            ].copy_(src)
+            check(torch.ones(m, D, device=device, dtype=dtype), 0, idx, src_strided)
+
+            dst_mis = (
+                torch.empty(m * D + 1, device=device, dtype=dtype)[1:]
+                .view(m, D)
+                .fill_(1)
+            )
+            check(dst_mis, 0, idx, src)
+
+            check(
+                torch.ones(D, m, device=device, dtype=dtype),
+                1,
+                idx,
+                make_tensor((D, n), device=device, dtype=dtype),
+            )
+
+            # Dense slices separated by padding remain eligible.
+            dst_padded = torch.ones(m, D + 8, device=device, dtype=dtype)[:, :D]
+            src_padded = torch.empty(n, D + 8, device=device, dtype=dtype)[:, :D].copy_(
+                src
+            )
+            check(dst_padded, 0, idx, src_padded)
+            check(
+                torch.ones(m, D, device=device, dtype=dtype),
+                0,
+                idx,
+                src[:1].expand_as(src),
+            )
 
     @serialTest()
     @onlyAccelerator
     @skipMPS
     @toleranceOverride(
         {
-            # Tolerances follow test_index_add_fast_path: this shape does
+            # Tolerances follow test_index_add_copy_fast_path: this shape does
             # ~n/m atomic adds per row (~670 here with m=13), and bf16's
             # 7-bit mantissa accumulates noise quickly under non-
             # deterministic atomicAdd ordering. fp32 stays tight.
