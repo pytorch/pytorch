@@ -387,6 +387,10 @@ class OpsWrapper(DefaultHandler):
         index = OpsWrapper._unwrap(index)
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
+    @staticmethod
+    def register_datadep_range(value, symbol):
+        return _ops.register_datadep_range(OpsWrapper._unwrap(value), symbol)
+
 
 ops: OpsHandler[Any] = OpsWrapper()
 
