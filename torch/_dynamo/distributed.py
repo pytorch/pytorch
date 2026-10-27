@@ -79,13 +79,14 @@ def _compile_sync_backend() -> str | None:
     return None
 
 
-# NB: Like get_guard_pg, this is only called when the caller explicitly asked for
-# compile time synchronization.
 def _compile_sync_pg_available() -> bool:
-    """Whether get_compile_sync_pg returns a group rather than raising."""
+    """With an initialized default group, whether get_compile_sync_pg returns a
+    group rather than raising."""
     return _COMPILE_SYNC_PG is not None or _compile_sync_backend() is not None
 
 
+# NB: Like get_guard_pg, this is only called when the caller explicitly asked for
+# compile time synchronization.
 def get_compile_sync_pg() -> dist.ProcessGroup | None:
     """
     Process group for collectives issued from inside the compiler itself, e.g. the
@@ -123,20 +124,15 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             # init_process_group was configured with.
             default_pg = dist.distributed_c10d._get_default_group()
             coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
-            # A fake backend built without options has none, so fall back to another
-            # device's backend (cuda's in cpu:fake,cuda:nccl); none has options only
-            # in a fake world.
+            # Only a fake backend has no options (it is built without any), so fall
+            # back to another device's backend (cuda's in cpu:fake,cuda:nccl); none
+            # has options only in a fake world.
             timeout = None
             for device in (torch.device(coll_device), *default_pg._device_types):
                 options = default_pg._get_backend(device).options
                 if options is not None:
                     timeout = options._timeout
                     break
-            if timeout is None and backend != dist.Backend.FAKE:
-                raise RuntimeError(
-                    "Compile time cross rank synchronization takes its timeout from "
-                    "the default process group, but none of its backends has options."
-                )
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend=backend, timeout=timeout, pg_tag="pt2_compile_sync_pg"
             )
