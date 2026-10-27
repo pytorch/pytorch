@@ -316,6 +316,55 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
+    def test_inner_reduction_no_split_threshold_is_nvidia_only(self):
+        from torch._inductor.choices import InductorChoices
+
+        choices = InductorChoices()
+        props = self._fake_cuda_device_properties()._replace(major=12)
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(
+                props._replace(type="hip"), xnumel=1, num_sm=16
+            ),
+            8192,
+        )
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(props, xnumel=1, num_sm=16),
+            32768,
+        )
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(props, xnumel=64, num_sm=16),
+            40960,
+        )
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(
+                props._replace(major=None), xnumel=1, num_sm=16
+            ),
+            8192,
+        )
+
+    def test_reduction_r0_block_cap_is_nvidia_only(self):
+        from torch._inductor.heuristics.triton_codegen.reduction import (
+            ReductionHeuristic,
+            ROCmReductionHeuristic,
+        )
+
+        def first_r0_block(heuristic, major, cc):
+            configs = heuristic.get_configs(
+                size_hints={"x": 128, "r0_": 2048},
+                inductor_meta={"reduction_hint": ReductionHint.INNER},
+                triton_meta={
+                    "device": self._fake_cuda_device_properties()._replace(
+                        major=major, cc=cc
+                    )
+                },
+            )
+            return configs[0].kwargs["R0_BLOCK"]
+
+        self.assertEqual(first_r0_block(ReductionHeuristic(), 8, 80), 2048)
+        self.assertEqual(first_r0_block(ReductionHeuristic(), 10, 100), 1024)
+        self.assertEqual(first_r0_block(ROCmReductionHeuristic(), 12, 120), 2048)
+        self.assertEqual(first_r0_block(ROCmReductionHeuristic(), 9, 95), 2048)
+
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
             pass
@@ -609,33 +658,56 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
     @parametrize(
-        "hip_version, tlx_options, expected_kwargs",
+        "hip_version, tlx_options, waves_per_eu, expected_kwargs",
         [
             (
                 "7.2",
-                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack", "test_extra_option"),
+                0,
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                    "test_extra_option": 7,
+                },
+            ),
+            (
+                "7.2",
+                (),
+                0,
                 {
                     "matrix_instr_nonkdim": 16,
                     "waves_per_eu": 0,
                     "kpack": 1,
                 },
             ),
-            ("7.2", (), {}),
+            (
+                "7.2",
+                (),
+                2,
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 2,
+                    "kpack": 1,
+                },
+            ),
             (
                 None,
                 ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                0,
                 {},
             ),
         ],
     )
-    def test_template_function_preserves_tlx_hip_options(
-        self, hip_version, tlx_options, expected_kwargs
+    def test_template_function_preserves_hip_options(
+        self, hip_version, tlx_options, waves_per_eu, expected_kwargs
     ):
         triton_meta = {
             "device": MagicMock(),
             "matrix_instr_nonkdim": 16,
-            "waves_per_eu": 0,
+            "waves_per_eu": waves_per_eu,
             "kpack": 1,
+            "test_extra_option": 7,
         }
 
         def capture_configs(_size_hints, configs, **_kwargs):
@@ -644,7 +716,7 @@ class TestTritonHeuristics(TestCase):
         with (
             patch.object(torch.version, "hip", hip_version),
             patch(
-                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                "torch._inductor.utils.tlx_only_hip_options",
                 return_value=tlx_options,
             ),
             patch(
@@ -1767,6 +1839,37 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertIsNotNone(result)
         self.assertIs(result, cfg_b)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_autotune_cache_round_trips_maxnreg(self):
+        """
+        Two configs that differ only in maxnreg must survive save + load as
+        themselves: the cached winner must come back capped, not as the
+        uncapped config with the same warps/stages.
+        """
+        from torch._inductor.runtime.autotune_cache import (
+            _load_cached_autotuning,
+            AutotuneCache,
+            AutotuneCacheBundler,
+        )
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        uncapped = triton.Config({"x": 1}, num_warps=4, num_stages=2)
+        capped = triton.Config({"x": 1}, num_warps=4, num_stages=2, maxnreg=64)
+        original_configs = [uncapped, capped]
+        configs_hash = hash_configs(original_configs)
+
+        cache = AutotuneCache(configs_hash)
+        local = MagicMock()
+        cache.local_cache = (local, "key")
+        with patch.object(AutotuneCacheBundler, "put"):
+            cache.save(capped, time_taken_ns=1_000_000)
+        saved = dict(local.put.call_args[0][1])
+        self.assertEqual(saved.get("maxnreg"), 64)
+
+        result = _load_cached_autotuning(saved, configs_hash, original_configs, {})
+        self.assertIs(result, capped)
+        self.assertNotIn("maxnreg", result.kwargs)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):

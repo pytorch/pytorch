@@ -95,6 +95,14 @@ jobs:
       - name: Install libomp
         run: |
           "${PYTORCH_ROOT}/.ci/wheel/mac/install_libomp.sh"
+      # https://github.com/actions/runner-images/issues/14548
+      - name: Install Metal toolchain if missing
+        run: |
+          if ! xcrun --sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+            xcrun --sdk macosx metal --version
+          fi
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -187,7 +195,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.10.4"
+          python-version: "3.11"
           freethreaded: false
       - uses: actions/download-artifact@v7.0.0
         name: Download Wheel Artifact
