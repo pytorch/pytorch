@@ -16,7 +16,8 @@ namespace c10 {
 
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
-// This is most backends except PrivateUse2 and PrivateUse3
+// This is most backends except PrivateUse2 and PrivateUse3. MTIA is an alias
+// of PrivateUse1.
 #define C10_FORALL_BACKEND_DEVICE_TYPES(_, extra) \
   _(CPU, extra)                                   \
   _(CUDA, extra)                                  \
@@ -29,7 +30,6 @@ namespace c10 {
   _(VE, extra)                                    \
   _(Lazy, extra)                                  \
   _(Meta, extra)                                  \
-  _(MTIA, extra)                                  \
   _(PrivateUse1, extra)
 
 enum class DeviceType : int8_t {
@@ -52,13 +52,15 @@ enum class DeviceType : int8_t {
   VE = 16, // SX-Aurora / NEC
   Lazy = 17, // Lazy Tensors
   IPU = 18, // Graphcore IPU
-  MTIA = 19, // Meta training and inference devices
+  // 19 was MTIA, which is now a PrivateUse1 backend (see the alias below)
   PrivateUse1 = 20, // PrivateUse1 device
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in c10/core/DeviceType.cpp
   //  - Change the number below
   COMPILE_TIME_MAX_DEVICE_TYPES = 21,
+  // MTIA is a PrivateUse1 backend
+  MTIA = PrivateUse1,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;

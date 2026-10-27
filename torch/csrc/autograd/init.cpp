@@ -190,13 +190,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("Metal", c10::DeviceType::Metal)
       .value("XPU", c10::DeviceType::XPU)
       .value("MPS", c10::DeviceType::MPS)
-      .value("MTIA", c10::DeviceType::MTIA)
       .value("Meta", c10::DeviceType::Meta)
       .value("HPU", c10::DeviceType::HPU)
       .value("VE", c10::DeviceType::VE)
       .value("Lazy", c10::DeviceType::Lazy)
       .value("IPU", c10::DeviceType::IPU)
-      .value("PrivateUse1", c10::DeviceType::PrivateUse1);
+      .value("PrivateUse1", c10::DeviceType::PrivateUse1)
+      // MTIA is a PrivateUse1 backend; keep it after PrivateUse1 so
+      // PrivateUse1 stays the canonical name of the shared value
+      .value("MTIA", c10::DeviceType::MTIA);
 
   using torch::autograd::CreationMeta;
   py::enum_<CreationMeta>(m, "CreationMeta")
@@ -855,7 +857,6 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
       at::autocast::is_autocast_enabled(at::kIPU) ||
       at::autocast::is_autocast_enabled(at::kXLA) ||
       at::autocast::is_autocast_enabled(at::kHPU) ||
-      at::autocast::is_autocast_enabled(at::kMTIA) ||
       at::autocast::is_autocast_enabled(at::kPrivateUse1)) {
     Py_RETURN_TRUE;
   } else {

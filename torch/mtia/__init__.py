@@ -239,6 +239,11 @@ def is_bf16_supported(including_emulation: bool = True):
     return True
 
 
+def get_amp_supported_dtype() -> list[torch.dtype]:
+    r"""Return the dtypes supported by autocast on MTIA."""
+    return [torch.bfloat16, torch.float16]
+
+
 def get_device_capability(device: Device = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -578,6 +583,7 @@ __all__ = [
     "seed_all",
     "initial_seed",
     "is_bf16_supported",
+    "get_amp_supported_dtype",
     "MTIAGraph",
     "graph",
     "graph_pool_handle",

@@ -35,7 +35,6 @@ inline bool is_device_lazy_init_supported(at::DeviceType device_type) {
       device_type == at::DeviceType::CUDA ||
       device_type == at::DeviceType::XPU ||
       device_type == at::DeviceType::HPU ||
-      device_type == at::DeviceType::MTIA ||
       device_type == at::DeviceType::PrivateUse1);
 }
 
