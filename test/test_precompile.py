@@ -7296,7 +7296,10 @@ def _static_runtime_kernel(block):
     kernel.inductor_meta = {"kernel_name": "runtime_kernel"}
     kernel.lock = threading.Lock()
     kernel.compile_results = [result]
-    kernel.launchers = [types.SimpleNamespace(config=config, _compile_result=result)]
+    kernel.launchers = [
+        types.SimpleNamespace(config=config, _compile_result=result, n_spills=0)
+    ]
+    kernel.custom_kernel = False
     kernel._cached_launcher = kernel.launchers[0]
     kernel._launched = True
     kernel.is_backward = False
@@ -7728,6 +7731,15 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(
             (report["source_key"], report["static_config_count"]), ("source", 2)
         )
+        # Not one autotuning would skip for spilling registers, unless all spill.
+        ambiguous.launchers[0].n_spills = 100
+        for expected in (128, 64):
+            payload, _ = _freeze_triton_kernel(
+                "source", [ambiguous], require_tuned_backward=False
+            )
+            config = pickle.loads(payload).kernel.compile_results[0].config
+            self.assertEqual(config.kwargs, {"XBLOCK": expected})
+            ambiguous.launchers[1].n_spills = 100
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_refuses_other_never_run_kernels(self):
