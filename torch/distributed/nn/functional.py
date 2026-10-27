@@ -114,6 +114,11 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
 
     Only the process with rank ``dst`` is going to receive the final result.
 
+    .. warning::
+        The backward broadcasts the gradient from ``dst`` and is only correct
+        for ``ReduceOp.SUM``. Gradients of the outputs on other ranks are
+        ignored.
+
     Arguments:
         tensor (Tensor): Input of the collective.
         dst (int): Destination rank.
@@ -137,6 +142,10 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
 def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
+
+    .. warning::
+        The backward all-gathers the gradient and is only correct for
+        ``ReduceOp.SUM``.
 
     Arguments:
         output (Tensor): Output tensor.
@@ -299,6 +308,12 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
 
     After the call the returned tensor is going to be bitwise
     identical in all processes.
+
+    .. warning::
+        The backward all-reduces the gradient with ``op`` and is only correct
+        for ``ReduceOp.SUM`` and ``ReduceOp.AVG``. For example, for
+        ``ReduceOp.PRODUCT`` it returns the product of the gradients rather
+        than the summed gradient times the product of the other ranks' inputs.
 
     Arguments:
         tensor (Tensor): Input of the collective.

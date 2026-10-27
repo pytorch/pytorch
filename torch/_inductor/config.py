@@ -578,6 +578,17 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# Minimum number of streaming multiprocessors a GPU needs for max_autotune_gemm
+# to consider the Triton GEMM templates. Autotuning them costs compile time
+# that only pays off on larger GPUs, so small ones fall back to ATen. None
+# keeps the per-device default (68 for CUDA, 16 for XPU); lower it for GPUs
+# such as Jetson (16-20 SMs) where the autotuned kernels still win.
+max_autotune_gemm_min_sms: int | None = (
+    int(os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_MIN_SMS"])
+    if "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_MIN_SMS" in os.environ
+    else None
+)
+
 # When True, autotuning is spread across real kernel invocations instead of
 # blocking on the first call. Each run() call executes one config and records
 # timing via CUDA events, progressively eliminating underperforming configs.
@@ -2536,6 +2547,14 @@ class triton:
         )
     )
 
+    # Backends for the partial BMM nested inside a decompose-K subgraph. This
+    # is independent of max_autotune_gemm_backends, which gates the outer MM.
+    # TRITON adds the Blackwell persistent TMA partial BMM on datacenter
+    # Blackwell when enable_persistent_tma_matmul is also set.
+    decompose_k_bmm_backends = os.environ.get(
+        "TORCHINDUCTOR_DECOMPOSE_K_BMM_BACKENDS", "ATEN"
+    )
+
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
@@ -3350,6 +3369,7 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+    "bundled_autotune_remote_cache",
 ]
 
 
