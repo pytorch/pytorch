@@ -226,6 +226,11 @@ class DeviceInterface:
         """
         return False
 
+    @staticmethod
+    def conv_allow_tf32() -> bool:
+        """Whether the backend permits conv templates to set ALLOW_TF32."""
+        return torch.backends.cudnn.fp32_precision == "tf32"
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -438,6 +443,19 @@ class CudaInterface(DeviceInterface):
     @staticmethod
     def allow_tf32() -> bool:
         return torch.backends.cuda.matmul.fp32_precision == "tf32"
+
+    @staticmethod
+    def conv_allow_tf32() -> bool:
+        # ROCm keeps the cuDNN-wide precision; MIOpen reads neither precision.
+        if torch.version.hip is not None:
+            return DeviceInterface.conv_allow_tf32()
+        # Eager cuDNN convolutions read the conv precision. Without cuDNN they
+        # ignore it, so full precision is the conservative choice.
+        return (
+            torch.backends.cudnn.enabled
+            and torch.backends.cudnn.is_available()
+            and torch.backends.cudnn.conv.fp32_precision == "tf32"  # type: ignore[attr-defined]
+        )
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
