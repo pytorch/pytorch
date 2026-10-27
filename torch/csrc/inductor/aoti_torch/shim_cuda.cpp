@@ -2,10 +2,32 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
+#include <ATen/Context.h>
+#include <ATen/cuda/CUDAGraph.h>
+#include <ATen/cuda/MemPool.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+
+#include <optional>
+
+namespace {
+
+// A CUDA graph and the stream it is being captured on, since capture_end
+// must run on that stream.
+struct CUDAGraphState {
+  at::cuda::CUDAGraph graph;
+  std::optional<at::cuda::CUDAStream> capture_stream;
+  c10::DeviceIndex device = -1;
+};
+
+CUDAGraphState* to_graph_state(CUDAGraphHandle graph) {
+  TORCH_CHECK(graph != nullptr, "CUDA graph handle is null");
+  return reinterpret_cast<CUDAGraphState*>(graph);
+}
+
+} // namespace
 
 AOTITorchError aoti_torch_create_cuda_guard(
     int32_t device_index,
@@ -108,5 +130,81 @@ AOTITorchError aoti_torch_cuda_caching_allocator_raw_delete(void* ptr) {
     if (ptr != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(ptr);
     }
+  });
+}
+
+AOTITorchError aoti_torch_create_cuda_mem_pool(
+    int32_t device_index,
+    CUDAMemPoolHandle* ret_pool) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // MemPool needs an initialized caching allocator on the current device.
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    auto device = static_cast<c10::DeviceIndex>(device_index);
+    at::cuda::CUDAGuard device_guard(device);
+    *ret_pool = reinterpret_cast<CUDAMemPoolHandle>(new at::cuda::MemPool());
+  });
+}
+
+AOTITorchError aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<at::cuda::MemPool*>(pool); });
+}
+
+AOTITorchError aoti_torch_create_cuda_graph(CUDAGraphHandle* ret_graph) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_graph = reinterpret_cast<CUDAGraphHandle>(new CUDAGraphState());
+  });
+}
+
+AOTITorchError aoti_torch_delete_cuda_graph(CUDAGraphHandle graph) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<CUDAGraphState*>(graph); });
+}
+
+AOTITorchError aoti_torch_cuda_graph_capture_begin(
+    CUDAGraphHandle graph,
+    CUDAMemPoolHandle pool,
+    void* stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto* state = to_graph_state(graph);
+    TORCH_CHECK(pool != nullptr, "CUDA memory pool handle is null");
+    auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
+    auto capture_stream = at::cuda::getStreamFromExternal(
+        static_cast<cudaStream_t>(stream), mem_pool->device());
+    at::cuda::CUDAStreamGuard stream_guard(capture_stream);
+    state->graph.capture_begin(
+        mem_pool->id(), cudaStreamCaptureModeThreadLocal);
+    state->capture_stream = capture_stream;
+    state->device = mem_pool->device();
+  });
+}
+
+AOTITorchError aoti_torch_cuda_graph_capture_end(
+    CUDAGraphHandle graph,
+    bool instantiate) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto* state = to_graph_state(graph);
+    TORCH_CHECK(
+        state->capture_stream.has_value(), "CUDA graph is not being captured");
+    // The stream stops capturing even if ending the capture fails.
+    at::cuda::CUDAStreamGuard stream_guard(*state->capture_stream);
+    state->capture_stream.reset();
+    if (instantiate) {
+      state->graph.capture_end();
+    } else {
+      state->graph.capture_end_pre();
+    }
+  });
+}
+
+AOTITorchError aoti_torch_cuda_graph_replay(
+    CUDAGraphHandle graph,
+    void* stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto* state = to_graph_state(graph);
+    TORCH_CHECK(state->device >= 0, "CUDA graph was never captured");
+    at::cuda::CUDAStreamGuard stream_guard(at::cuda::getStreamFromExternal(
+        static_cast<cudaStream_t>(stream), state->device));
+    state->graph.replay();
   });
 }
