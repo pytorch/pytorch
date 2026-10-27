@@ -2,7 +2,7 @@
 # Unpickler restricted to loading only state dicts
 # Restrict constructing types to a list defined in _get_allowed_globals()
 # Restrict BUILD operation to `Tensor`, `Parameter` and `OrderedDict` types only
-# Restrict APPEND/APPENDS to `list` (and allowlisted list subclasses)
+# Restrict APPEND/APPENDS to `list`
 # In `GLOBALS` operation do not do class lookup by name, but rather rely on dictionary
 # defined by `_get_allowed_globals()` method, that contains:
 # - torch types (Storage, dtypes, Tensor, `torch.Size`),
@@ -82,6 +82,9 @@ _blocklisted_modules = [
     "os",
     "posix",
     "nt",
+    # traceback.FrameSummary and linecache read arbitrary files
+    "traceback",
+    "linecache",
 ]
 
 _marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
@@ -146,10 +149,12 @@ def _get_user_allowed_globals():
                     f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
                 )
             f, name = f
-            rc[name] = f
         else:
-            module, name = f.__module__, f.__qualname__
-            rc[f"{module}.{name}"] = f
+            name = f"{f.__module__}.{f.__qualname__}"
+        # Blocklisted modules can't be allowlisted, even under an alias.
+        if getattr(f, "__module__", None) in _blocklisted_modules:
+            continue
+        rc[name] = f
     return rc
 
 
@@ -462,12 +467,18 @@ class Unpickler:
             elif key[0] == APPEND[0]:
                 item = self.stack.pop()
                 list_obj = self.stack[-1]
-                self._check_append_target(list_obj)
+                if type(list_obj) is not list:
+                    raise UnpicklingError(
+                        f"Can only append to lists, but got {type(list_obj)}"
+                    )
                 list_obj.append(item)
             elif key[0] == APPENDS[0]:
                 items = self.pop_mark()
                 list_obj = self.stack[-1]
-                self._check_append_target(list_obj)
+                if type(list_obj) is not list:
+                    raise UnpicklingError(
+                        f"Can only extend lists, but got {type(list_obj)}"
+                    )
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
@@ -589,15 +600,6 @@ class Unpickler:
                 f"Can only {opcode} for dict, collections.OrderedDict, "
                 f"collections.Counter, but got {type(self.stack[-1])}"
             )
-
-    def _check_append_target(self, list_obj):
-        # list subclasses allowlisted via add_safe_globals can be appended to
-        # (e.g. traceback.StackSummary); plain list is always allowed
-        if type(list_obj) is not list and not (
-            isinstance(list_obj, list)
-            and type(list_obj) in _get_user_allowed_globals().values()
-        ):
-            raise UnpicklingError(f"Can only append to lists, but got {type(list_obj)}")
 
     def persistent_load(self, pid):
         raise UnpicklingError("unsupported persistent id encountered")

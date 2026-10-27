@@ -180,6 +180,23 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
       swizzle_a != SwizzleType::SWIZZLE_32_8 || prefers_swizzle_32_8(t),
       "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
 }
+
+#if ROCM_VERSION >= 70000
+static void check_mx_problem_size(
+    int64_t m, int64_t n, int64_t k_unpacked, SwizzleType swizzle) {
+  if (swizzle == SwizzleType::SWIZZLE_32_8) {
+    TORCH_CHECK_VALUE(
+        k_unpacked % 32 == 0,
+        "K must be a multiple of 32 for SWIZZLE_32_8 block-wise scaling, got K=",
+        k_unpacked);
+    return;
+  }
+  TORCH_CHECK_VALUE(
+      m % 16 == 0 && n % 16 == 0 && k_unpacked % 128 == 0,
+      "M, N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE block-wise scaling, got M=",
+      m, ", N=", n, ", K=", k_unpacked);
+}
+#endif
 #endif
 
 // Number of 1x32 e8m0 block scales in the layout v1 `_scaled_mm` accepts: rows
@@ -792,9 +809,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       // effectively packing two elements into one byte.
       packed_factor = 2;
     }
-    TORCH_CHECK_VALUE(mat1.size(0) % 16 == 0 && (mat1.size(1) * packed_factor) % 128 == 0 &&
-                mat2.size(1) % 16 == 0,
-                "M, N must be multiples of 16 and K must be multiple of 128 for block-wise scaling");
+    check_mx_problem_size(
+        mat1.size(0),
+        mat2.size(1),
+        mat1.size(1) * packed_factor,
+        SwizzleType::NO_SWIZZLE);
 
     TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
                 out.scalar_type() == ScalarType::Half,
@@ -1260,9 +1279,7 @@ _scaled_mxfp8_mxfp8(
 #if ROCM_VERSION >= 70000
   check_blockwise_e8m0fnu_arch_supported();
 
-  TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
-              mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
-              "Matrix dimensions must be multiples of 32 for block-wise scaling");
+  check_mx_problem_size(mat_a.size(0), mat_b.size(1), mat_a.size(1), swizzle_a);
 
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
@@ -1353,9 +1370,7 @@ _scaled_mxfp4_mxfp4(
 #if ROCM_VERSION >= 70000
   check_blockwise_e8m0fnu_arch_supported();
 
-  TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
-              mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
-              "Matrix dimensions must be multiples of 32 for block-wise scaling");
+  check_mx_problem_size(mat_a.size(0), mat_b.size(1), K_multiplier * mat_a.size(1), swizzle_a);
 
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
