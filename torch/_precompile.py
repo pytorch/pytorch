@@ -2088,13 +2088,11 @@ _GUARDED_OP = re.compile(r"(?:\.ops|\['ops'\])\.(\w+)\.(\w+)(?:\.([A-Za-z]\w*))?
 
 
 class _PlaceholderType(type):
-    """The type of what :func:`_guard_op_names` rebuilds every other object of a
-    guard state as. Each is a class, since a reduction can rebuild one that the
-    stream then instantiates (a function-local NamedTuple), and takes whatever
-    else the stream asks of an object."""
+    """The metaclass of :class:`_Placeholder`, which takes whatever the stream asks
+    of an object."""
 
     def __call__(cls, *args: object, **kwargs: object) -> type:
-        return _placeholder()
+        return cls
 
     def __setstate__(cls, state: object) -> None:
         pass
@@ -2108,9 +2106,13 @@ class _PlaceholderType(type):
     extend = add = append
 
 
-def _placeholder() -> type:
-    new = staticmethod(lambda *args, **kwargs: _placeholder())
-    return _PlaceholderType("_Placeholder", (), {"__new__": new})
+class _Placeholder(metaclass=_PlaceholderType):
+    """What :func:`_guard_op_names` rebuilds every other object of a guard state
+    as. A class, since a reduction can rebuild one that the stream then
+    instantiates (a function-local NamedTuple), and instantiating it returns it."""
+
+    def __new__(cls, *args: object, **kwargs: object) -> type:
+        return cls
 
 
 def _guard_op_names(
@@ -2133,7 +2135,7 @@ def _guard_op_names(
 
     def record(name: str) -> type:
         names.add(name)
-        return _placeholder()
+        return _Placeholder
 
     recorded: dict[str, Callable[..., type]] = {
         "_unpickle_op": lambda ns, op, overload: record(_op_name(ns, op, overload)),
@@ -2143,7 +2145,7 @@ def _guard_op_names(
     def reduction(owner: object, name: str) -> object:
         if owner is GuardsStatePickler and name in recorded:
             return recorded[name]
-        return _placeholder()
+        return _Placeholder
 
     class Scanner(_GuardsStateUnpickler):
         def find_class(self, module: str, name: str) -> object:
@@ -2151,7 +2153,7 @@ def _guard_op_names(
                 return reduction
             if (module, name) == (GuardsStatePickler.__module__, "GuardsStatePickler"):
                 return GuardsStatePickler
-            return _placeholder()
+            return _Placeholder
 
     for frame in frames:
         for variant in frame["variants"]:
@@ -2323,8 +2325,9 @@ def _write_custom_op_imports(
         op_names, eager_op_names=eager_op_names, retrace=retrace
     )
     buf.writeline("# " + "=" * 70)
+    when = "" if call else ", by the driver after its version checks"
     buf.writeline(
-        "# 0. Custom op modules: imported if their ops are not registered yet"
+        f"# 0. Custom op modules: imported{when} if their ops are not registered yet"
     )
     buf.writeline("# " + "=" * 70)
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
@@ -3850,8 +3853,8 @@ def capture(
     ones by default.
 
     The artifact records the importable module defining each
-    ``torch.library.custom_op`` its compiled code calls and imports it when it
-    loads, if the op is not registered yet. That import is best effort: if it
+    ``torch.library.custom_op`` its served code calls or its guards name, and
+    imports it when it loads, if the op is not registered yet. That import is best effort: if it
     fails, or leaves the op unregistered, ``load`` warns, and the op must be
     registered by its first call, or, for a Dynamo artifact, before ``load``,
     which looks it up (its guards, and the eager backend's pickled graphs, name

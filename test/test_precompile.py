@@ -7732,13 +7732,15 @@ class TestPrecompileRuntimeCache(TestCase):
             (report["source_key"], report["static_config_count"]), ("source", 2)
         )
         # Not one autotuning would skip for spilling registers, unless all spill.
+        self.assertFalse(report["spills"])
         ambiguous.launchers[0].n_spills = 100
-        for expected in (128, 64):
-            payload, _ = _freeze_triton_kernel(
+        for expected, spills in ((128, False), (64, True)):
+            payload, report = _freeze_triton_kernel(
                 "source", [ambiguous], require_tuned_backward=False
             )
             config = pickle.loads(payload).kernel.compile_results[0].config
             self.assertEqual(config.kwargs, {"XBLOCK": expected})
+            self.assertEqual(report["spills"], spills)
             ambiguous.launchers[1].n_spills = 100
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")

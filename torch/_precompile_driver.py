@@ -911,7 +911,7 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
         except Exception as e:
             _warnings.warn(
                 f"precompile: module {module!r}, which registers custom op(s) "
-                f"{', '.join(module_ops)} this artifact's compiled graphs call, failed "
+                f"{', '.join(module_ops)} this artifact calls or guards on, failed "
                 f"to import ({type(e).__name__}: {e}); they must be registered by "
                 "their first call, or now for a Dynamo artifact, which looks them up "
                 "as it loads",
@@ -922,8 +922,8 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
         if missing:
             _warnings.warn(
                 f"precompile: importing module {module!r} did not register custom "
-                f"op(s) {', '.join(missing)}, which this artifact's compiled graphs "
-                "call; they must be registered by their first call, or now for a "
+                f"op(s) {', '.join(missing)}, which this artifact calls or guards "
+                "on; they must be registered by their first call, or now for a "
                 "Dynamo artifact, which looks them up as it loads",
                 stacklevel=2,
             )
