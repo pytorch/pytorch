@@ -43,7 +43,7 @@ jobs:
   wheel-build:
     needs: check-ci
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-26-xlarge
+    runs-on: xcode-27-xlarge
     timeout-minutes: 280
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -54,7 +54,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'
     steps:
       # BINARY_ENV_FILE needs ${RUNNER_TEMP} so it has to be populated in-step
       # rather than at the workflow env level.
@@ -63,7 +63,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
-        uses: actions/checkout@v5.1.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # Full fetch on tag pushes so the release tag is visible to
@@ -79,6 +79,14 @@ jobs:
       - name: Install libomp
         run: |
           "${PYTORCH_ROOT}/.ci/wheel/mac/install_libomp.sh"
+      # https://github.com/actions/runner-images/issues/14548
+      - name: Install Metal toolchain if missing
+        run: |
+          if ! xcrun --sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+            xcrun --sdk macosx metal --version
+          fi
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -100,7 +108,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/mac/build_all_macos_wheels.sh"
       # Upload phase: each wheel becomes its own artifact (one call per name).
       - name: Upload wheel-py3_11-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_11-cpu
@@ -108,7 +116,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_11-cpu
       - name: Upload wheel-py3_12-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_12-cpu
@@ -116,7 +124,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_12-cpu
       - name: Upload wheel-py3_13-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_13-cpu
@@ -124,7 +132,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_13-cpu
       - name: Upload wheel-py3_14-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_14-cpu
@@ -132,7 +140,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_14-cpu
       - name: Upload wheel-py3_14t-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_14t-cpu
@@ -140,7 +148,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_14t-cpu
       - name: Upload wheel-py3_15-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_15-cpu
@@ -148,7 +156,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_15-cpu
       - name: Upload wheel-py3_15t-cpu
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: wheel-py3_15t-cpu
@@ -218,24 +226,24 @@ jobs:
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-build
-    runs-on: macos-26-xlarge
+    runs-on: xcode-27-xlarge
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v5.1.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
           show-progress: false
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.10.4"
+          python-version: "3.11"
           freethreaded: false
-      - uses: actions/download-artifact@v7.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         name: Download Wheel Artifact
         with:
           name: wheel-py3_11-cpu
@@ -250,7 +258,7 @@ jobs:
             --platform macos \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
-      - uses: actions/upload-artifact@v6.0.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-release
