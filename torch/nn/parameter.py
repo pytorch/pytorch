@@ -60,7 +60,9 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
-        if type(t) is not type(data):
+        # detach() on a C++ fake Parameter returns a plain Tensor, which gets the
+        # marker below.
+        if type(t) is not type(data) and not torch._C._is_fake_tensor(data):
             raise RuntimeError(
                 f"Creating a Parameter from an instance of type {type(data).__name__} "
                 "requires that detach() returns an instance of the same type, but return "
