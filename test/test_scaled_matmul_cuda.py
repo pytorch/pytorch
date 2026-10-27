@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM10X,
     IS_SM90,
     _get_torch_cuda_version,
+    _get_torch_rocm_version,
     evaluate_gfx_arch_within,
     mx_scale_swizzle,
     rocm_mx_swizzle,
@@ -235,8 +236,14 @@ def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def rocm_nvfp4_supported() -> bool:
+    if not torch.version.hip:
+        return False
+    return evaluate_gfx_arch_within(["gfx1250"]) and _get_torch_rocm_version() >= (10, 0)
+
+
 def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
-    """The MX block-scale layout to request for `mat_dtype` on this device.
+    """Swizzle request for block scales of `mat_dtype` on this device.
 
     gfx950 takes either ROCm layout, so tests have to name the one they built
     instead of relying on `infer_scale_swizzle`, whose element counts do not
@@ -2608,7 +2615,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @skipIfRocm
     @onlyAccelerator
     @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
@@ -2637,7 +2643,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     def test_blockwise_nvfp4_with_global_scale(self, mkn, device) -> None:
         if "xpu" in device and not Xe2_Or_Later:
             raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
+        if torch.version.hip and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         M, K, N = mkn
+        if torch.version.hip and not (M % 16 == 0 and N % 16 == 0 and K % 128 == 0):
+            raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
         approx_match_sqnr_target = 15.8
@@ -2652,6 +2662,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
             swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+        elif torch.version.hip:
+            A_scale = to_mx_swizzled_gfx1250(A_scale, BLOCK_SIZE)
+            B_scale = to_mx_swizzled_gfx1250(B_scale, BLOCK_SIZE)
+            swizzle = [SwizzleType.SWIZZLE_32_8, SwizzleType.NO_SWIZZLE]
         else:
             swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.NO_SWIZZLE]
 
@@ -2749,8 +2763,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: p['test_case_name'] == 'a_eye_b_eye' and (not p['mkn'][0] == p['mkn'][1] == p['mkn'][2]),
     )
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe, device) -> None:
-        if torch.version.hip and recipe == "nvfp4":
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if torch.version.hip and recipe == "nvfp4" and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and IS_SM12X:
@@ -2960,8 +2974,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         # convert to swizzled format
         if rocm_mx_swizzle(A.dtype) or (not torch.version.hip and "xpu" not in device):
-            A_scale = mx_scale_swizzle(A_scale, A.dtype)
-            B_scale = mx_scale_swizzle(B_scale, B.dtype)
+            A_scale = mx_scale_swizzle(A_scale, A.dtype, BLOCK_SIZE)
+            B_scale = mx_scale_swizzle(B_scale, B.dtype, BLOCK_SIZE)
 
         block_recipe = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
         swizzle = mx_swizzle_for(device, A.dtype)
@@ -3004,8 +3018,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     def test_blockwise_mxfp8_nvfp4_mxfp4_error_messages(self, device, recipe) -> None:
         if "xpu" in device:
             raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
-        if recipe == "nvfp4" and torch.version.hip:
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
@@ -3038,7 +3052,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         num_k_blocks = ceil_div(K, BLOCK_SIZE_K)
         if swizzle == SwizzleType.SWIZZLE_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
-            padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+            # gfx1250 groups 128/block K-scales (4 for MX, 8 for NVFP4).
+            group = 128 // BLOCK_SIZE_K
+            padded_num_k_blocks = ceil_div(num_k_blocks, group) * group
             expected_a_size = M * padded_num_k_blocks
             expected_b_size = N * padded_num_k_blocks
         elif swizzle == SwizzleType.SWIZZLE_32_8:
@@ -3320,8 +3336,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
     )
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
-        if recipe == "nvfp4" and torch.version.hip:
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
@@ -3338,8 +3354,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         if rocm_mx_swizzle(A.dtype):
-            A_scale = mx_scale_swizzle(A_scale, A.dtype)
-            B_scale = mx_scale_swizzle(B_scale, B.dtype)
+            A_scale = mx_scale_swizzle(A_scale, A.dtype, BLOCK_SIZE)
+            B_scale = mx_scale_swizzle(B_scale, B.dtype, BLOCK_SIZE)
 
         C_ref = A_ref @ B_ref.t()
 
