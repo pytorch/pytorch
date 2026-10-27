@@ -2536,12 +2536,12 @@ def can_use_tma(
         strides: Sequence[_IntLike],
         dtype: torch.dtype,
     ) -> bool:
-        # Make sure the last dimension is contiguous
-        last_stride = strides[-1]
-        last_stride_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            last_stride
-        )
-        if not V.graph.sizevars.statically_known_equals(last_stride_hint, 1):
+        # Exactly one contiguous dim; it need not be the last one, since the mm
+        # templates build the descriptor over the transposed view for
+        # column-major operands (e.g. the col-major mat_b of _scaled_mm).
+        sizevars = V.graph.sizevars
+        hints = [sizevars.replace_backed_symbols_with_hints(st) for st in strides]
+        if sum(sizevars.statically_known_equals(h, 1) for h in hints) != 1:
             return False
 
         # Triton's type of index is uint32, so all dimensions must fit in uint32
