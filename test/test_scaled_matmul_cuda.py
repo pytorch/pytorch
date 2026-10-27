@@ -2747,8 +2747,8 @@ class TestFP8Matmul(TestCase):
         if torch.version.hip and not rocm_nvfp4_supported():
             raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         M, K, N = mkn
-        if torch.version.hip and not (M % 16 == 0 and N % 16 == 0 and K % 128 == 0):
-            raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
+        if torch.version.hip and not (M % 2 == 0 and N % 2 == 0 and K % 16 == 0):
+            raise unittest.SkipTest("gfx1250 NVFP4 requires even M and N and K a multiple of 16, skipping")
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
         approx_match_sqnr_target = 15.8
@@ -2845,10 +2845,16 @@ class TestFP8Matmul(TestCase):
 
         if torch.version.hip and recipe in ("mxfp8", "mxfp4"):
             mat_dtype = torch.float4_e2m1fn_x2 if recipe == "mxfp4" else torch.float8_e4m3fn
-            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below.
+            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below,
+            # except gfx1250 MX FP4, which also needs even M and N.
             # NO_SWIZZLE requires M and N multiples of 16 and K a multiple of 128.
             if not rocm_mx_swizzle(mat_dtype) and not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
                 raise unittest.SkipTest("M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping")
+            if recipe == "mxfp4" and evaluate_gfx_arch_within(["gfx1250"]) and (M % 2 != 0 or N % 2 != 0 or K % 32 != 0):
+                raise unittest.SkipTest("gfx1250 MX FP4 requires even M and N and K a multiple of 32, skipping")
+
+        if torch.version.hip and recipe == "nvfp4" and rocm_nvfp4_supported() and (M % 2 != 0 or N % 2 != 0 or K % 16 != 0):
+            raise unittest.SkipTest("gfx1250 NVFP4 requires even M and N and K a multiple of 16, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -3604,6 +3610,10 @@ class TestFP8Matmul(TestCase):
             # regardless of swizzle. M is not.
             got = ones_mm(8, 32, 16, SwizzleType.SWIZZLE_32_8)
             self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
+        if evaluate_gfx_arch_within(["gfx1250"]) and fp4:
+            with self.subTest(swizzle="SWIZZLE_32_8", mkn=(3, 32, 16)):
+                with self.assertRaisesRegex(ValueError, "gfx1250 MX FP4 SWIZZLE_32_8"):
+                    ones_mm(3, 32, 16, SwizzleType.SWIZZLE_32_8)
 
 
     @onlyAccelerator

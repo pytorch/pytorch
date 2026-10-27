@@ -237,9 +237,19 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
 }
 
 #if ROCM_VERSION >= 70000
+// gfx1250 MX FP4 requires even M and N and K % 32. gfx1250 MX FP8 and
+// gfx950 SWIZZLE_32_8 require K % 32. NO_SWIZZLE, including v1, keeps
+// M and N multiples of 16 and K a multiple of 128.
 static void check_mx_problem_size(
-    int64_t m, int64_t n, int64_t k_unpacked, SwizzleType swizzle) {
+    int64_t m, int64_t n, int64_t k_unpacked, SwizzleType swizzle, ScalarType dtype) {
   if (swizzle == SwizzleType::SWIZZLE_32_8) {
+    if (dtype == ScalarType::Float4_e2m1fn_x2 && is_gfx1250_mx_swizzle()) {
+      TORCH_CHECK_VALUE(
+          m % 2 == 0 && n % 2 == 0 && k_unpacked % 32 == 0,
+          "M and N must be even and K must be a multiple of 32 for gfx1250 MX FP4 SWIZZLE_32_8 block-wise scaling, got M=",
+          m, ", N=", n, ", K=", k_unpacked);
+      return;
+    }
     TORCH_CHECK_VALUE(
         k_unpacked % 32 == 0,
         "K must be a multiple of 32 for SWIZZLE_32_8 block-wise scaling, got K=",
@@ -884,7 +894,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         mat1.size(0),
         mat2.size(1),
         mat1.size(1) * packed_factor,
-        SwizzleType::NO_SWIZZLE);
+        SwizzleType::NO_SWIZZLE,
+        mat1.scalar_type());
 
     TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
                 out.scalar_type() == ScalarType::Half,
@@ -1361,7 +1372,7 @@ _scaled_mxfp8_mxfp8(
 #if ROCM_VERSION >= 70000
   check_blockwise_e8m0fnu_arch_supported();
 
-  check_mx_problem_size(mat_a.size(0), mat_b.size(1), mat_a.size(1), swizzle_a);
+  check_mx_problem_size(mat_a.size(0), mat_b.size(1), mat_a.size(1), swizzle_a, mat_a.scalar_type());
 
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
@@ -1452,7 +1463,7 @@ _scaled_mxfp4_mxfp4(
 #if ROCM_VERSION >= 70000
   check_blockwise_e8m0fnu_arch_supported();
 
-  check_mx_problem_size(mat_a.size(0), mat_b.size(1), K_multiplier * mat_a.size(1), swizzle_a);
+  check_mx_problem_size(mat_a.size(0), mat_b.size(1), K_multiplier * mat_a.size(1), swizzle_a, mat_a.scalar_type());
 
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
@@ -1521,10 +1532,12 @@ _scaled_nvfp4_nvfp4(
       "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
   const int64_t k_unpacked_a = mat_a.size(1) * 2;
   const int64_t k_unpacked_b = mat_b.size(0) * 2;
+  // gfx1250 NVFP4 requires even M and N and K % 16.
+  // The shared v2 path still requires N % 16.
   TORCH_CHECK_VALUE(
-      mat_a.size(0) % 16 == 0 && mat_b.size(1) % 16 == 0 &&
-          k_unpacked_a % 128 == 0 && k_unpacked_a == k_unpacked_b,
-      "gfx1250 NVFP4 requires M and N multiples of 16 and K a multiple of 128, got mat_a=(",
+      mat_a.size(0) % 2 == 0 && mat_b.size(1) % 2 == 0 &&
+          k_unpacked_a % 16 == 0 && k_unpacked_a == k_unpacked_b,
+      "gfx1250 NVFP4 requires even M and N and K a multiple of 16, got mat_a=(",
       mat_a.size(0), "x", k_unpacked_a, "), mat_b=(", k_unpacked_b, "x", mat_b.size(1), ")");
   scale_a_elems = blockwise_1x16_numel_gfx1250(mat_a.size(0), k_unpacked_a);
   scale_b_elems = blockwise_1x16_numel_gfx1250(mat_b.size(1), k_unpacked_b);
