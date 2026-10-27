@@ -43,6 +43,7 @@
 #include <structmember.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <sstream>
 #include <utility>
@@ -135,12 +136,16 @@ class OperatorArgsKwargsView {
       return false;
     }
     const auto& default_ivalue = *arg.default_value();
-    if (default_ivalue.isDouble() || default_ivalue.isComplexDouble()) {
-      return false;
-    }
     const auto& ivalue = arguments_[idx];
     if (default_ivalue != ivalue) {
       return false;
+    }
+    if (default_ivalue.isDouble()) {
+      double default_double = default_ivalue.toDouble();
+      double value_double = ivalue.toDouble();
+      if (std::memcmp(&default_double, &value_double, sizeof(double)) != 0) {
+        return false;
+      }
     }
     return true;
   }
