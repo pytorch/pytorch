@@ -1967,6 +1967,7 @@ _TORCH_OP_NAMESPACES = frozenset(
         "coor",
         "debugprims",
         "pippy",
+        "device_mesh",
         "onnx",
         "inductor",
         "inductor_prims",

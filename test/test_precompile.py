@@ -9622,7 +9622,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         script = textwrap.dedent(
             """
             import torch
+            import torch.onnx.ops
             from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _registered_by_torch
+            if torch.distributed.is_available():
+                import torch.distributed.fsdp
+                import torch.distributed.pipelining
+                import torch.distributed.tensor
+                import torch.distributed._ops.device_mesh
             reported = set()
             for name in torch._C._dispatch_get_all_op_names():
                 op_name, _, overload = name.partition(".")
@@ -9637,7 +9643,8 @@ class TestPrecompileCustomOpRecording(TestCase):
             """
         )
         # Only a source build records C++ schemas under torch/, so they are checked
-        # against the list itself. Namespaces this build does not register (vulkan,
+        # against the list itself. The script first imports the torch modules that
+        # register ops on import. Namespaces this build does not register (vulkan,
         # metal, nnapi, ...) are not checked.
         out = subprocess.check_output([sys.executable, "-c", script], text=True)
         # "_test" holds TorchScript's own test ops.
