@@ -6384,6 +6384,23 @@ def forward(self, x):
             with self.assertWarnsRegex(UserWarning, warn_re):
                 ep = export(foo, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
 
+    def test_detect_leak_nonstrict_hop_output(self):
+        global_list = []
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.cond(x.sum() > 0, torch.cos, torch.sin, (x,))
+                global_list.append(y)
+                return y + 1
+
+        # A higher-order op registers its outputs with the tracer itself rather
+        # than through proxy_call. Other fakes may also be reported, so check
+        # for the cond output specifically.
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
+            warn_re = re.compile(r"from node 'getitem':.*y = torch\.cond\(", re.S)
+            with self.assertWarnsRegex(UserWarning, warn_re):
+                export(Foo(), (torch.randn(4, 4),), strict=False)
+
     def test_export_cyclic_reference_leak(self):
         class Node:
             def __init__(self, tag):
