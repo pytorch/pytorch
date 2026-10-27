@@ -576,14 +576,18 @@ def getset_load_or_build(
 def getset_set(name: str) -> Callable[..., None]:
     """Setter for a GetSet/Member whose value is an already-built VT."""
 
-    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
+    def setter(
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        value: VariableTracker | None,
+    ) -> None:
+        if value is None:
+            from .constant import ConstantVariable
 
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, vt, name, value)
 
-def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:
-    """GetSet for a plain writable attribute: read via getattr(obj(self), name),
-    written through store_attr_mutation."""
-    getter = getset_load_or_build(lambda vt: getattr(obj(vt), name), name)
-    return GetSet(getter, getset_set(name))
+    return setter
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
