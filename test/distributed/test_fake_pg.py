@@ -101,6 +101,8 @@ class TestFakePG(TestCase):
             # One real device backend means real peers: sync over gloo.
             "cpu:gloo,cuda:fake": (gloo, None),
             "cpu:fake,cuda:nccl": (gloo, None),
+            # An MPI default group has no store for a gloo group to use.
+            "mpi": (None, None),
         }
         for config, expected in cases.items():
             for gloo_available, backend in zip((True, False), expected):
