@@ -123,6 +123,38 @@ TEST_P(XPUAllocatorIPCTest, SameProcessRoundTrip) {
   validateHostData(hostData.data(), numel);
 }
 
+// With expandable segments, the first allocation pins segment 0, so the shared
+// block starts at a non-zero segment index and spans several segments.
+TEST_P(XPUAllocatorIPCTest, SameProcessRoundTripMultiSegment) {
+  auto* allocator = c10::xpu::XPUCachingAllocator::get();
+  const auto seg_size =
+      c10::CachingAllocator::AcceleratorAllocatorConfig::large_segment_size();
+  auto head = allocator->allocate(seg_size);
+  const size_t size = 2 * seg_size + seg_size / 2;
+  const int numel = static_cast<int>(size / sizeof(int));
+  auto buf = allocator->allocate(size);
+  void* dev_ptr = buf.get();
+
+  std::vector<int> hostData(numel);
+  initHostData(hostData.data(), numel);
+
+  auto sh = c10::xpu::XPUCachingAllocator::shareIpcHandle(dev_ptr);
+  auto dev_ptr_ipc = c10::xpu::XPUCachingAllocator::getIpcDevPtr(sh.handle);
+  void* ipc_addr = static_cast<char*>(dev_ptr_ipc.get()) + sh.offset;
+
+  c10::xpu::getCurrentXPUStream()
+      .queue()
+      .memcpy(ipc_addr, hostData.data(), size)
+      .wait();
+  clearHostData(hostData.data(), numel);
+  c10::xpu::getCurrentXPUStream()
+      .queue()
+      .memcpy(hostData.data(), dev_ptr, size)
+      .wait();
+
+  validateHostData(hostData.data(), numel);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     AllocatorMode,
     XPUAllocatorIPCTest,
