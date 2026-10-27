@@ -3,6 +3,7 @@ import functools
 import itertools
 import math
 import os
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -17,7 +18,9 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -2143,6 +2146,75 @@ class TestSDPAPatternRegistration(TestCase):
             )
         )
         self.assertEqual([], missing_inference_names)
+
+
+class TestAttentionFusionDeviceRouting(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _match_for(self, device):
+        dev = torch.device(device)
+        tensor = SimpleNamespace(dtype=torch.float32, device=dev)
+        node = SimpleNamespace(meta={"val": tensor})
+        return SimpleNamespace(
+            kwargs={"query": node, "key": node, "value": node},
+            nodes=[],
+        )
+
+    def test_keep_attention_on_math_path(self, device):
+        from torch._inductor.fx_passes import fuse_attention
+
+        tensor_shape = (4, 16, 2, 32)
+        query = torch.randn(tensor_shape, device=device)
+        key = torch.randn(tensor_shape, device=device)
+        value = torch.randn(tensor_shape, device=device)
+        attn_mask = torch.zeros(1, 1, 16, 16, device=device)
+        inv_scale = 3.0
+        dropout_p = 0.4
+
+        sdpa_calls = 0
+
+        def fake_sdpa(*args, **kwargs):
+            nonlocal sdpa_calls
+            sdpa_calls += 1
+            return torch.empty_like(query.transpose(1, 2))
+
+        counters.clear()
+        with mock.patch.object(
+            fuse_attention, "_scaled_dot_product_attention", fake_sdpa
+        ):
+            fuse_attention._sfdp_replacement_16(
+                query, key, value, attn_mask, inv_scale, dropout_p
+            )
+
+        # CUDA keeps pattern 16 on the explicit math path (no fused SDPA call);
+        # every other device calls fused SDPA.
+        self.assertEqual(counters["inductor"]["fuse_attention"], 1)
+        on_cuda = torch.device(device).type == "cuda" and torch.version.hip is None
+        self.assertEqual(sdpa_calls, 0 if on_cuda else 1)
+
+    def test_fp32_fusion_gated_by_precision(self, device):
+        from torch._inductor.fx_passes.fuse_attention import _sfdp_params_check
+
+        match = self._match_for(device)
+        matmul = torch.backends.cuda.matmul
+        saved = matmul.fp32_precision
+        try:
+            if torch.device(device).type == "cuda":
+                # CUDA blocks fp32 fusion under "ieee" and allows it under "tf32".
+                matmul.fp32_precision = "ieee"
+                self.assertFalse(_sfdp_params_check(match))
+                matmul.fp32_precision = "tf32"
+                self.assertTrue(_sfdp_params_check(match))
+            else:
+                # Non-CUDA inherits the base fall-through and fuses regardless.
+                for precision in ("tf32", "ieee"):
+                    matmul.fp32_precision = precision
+                    self.assertTrue(_sfdp_params_check(match))
+        finally:
+            matmul.fp32_precision = saved
+
+
+instantiate_device_type_tests(TestAttentionFusionDeviceRouting, globals())
 
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
