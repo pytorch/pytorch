@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
@@ -222,7 +223,7 @@ bool check_mxfp8_recipe(
     return false;
   }
 
-  // Swizzle lengths are validated by the backend after recipe selection.
+  // One scale and one recipe per input.
   if (scales_a.size() != 1 || recipe_a.size() != 1 ||
       scales_b.size() != 1 || recipe_b.size() != 1) {
     return false;
@@ -405,8 +406,8 @@ void validate_scaled_mm_v2_inputs(
   const bool is_rw = is_single_recipe(
       recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise);
   const bool has_mnk4_swizzle =
-      (swizzle_a.size() == 1 && swizzle_a[0] == SwizzleType::SWIZZLE_MNxK4) ||
-      (swizzle_b.size() == 1 && swizzle_b[0] == SwizzleType::SWIZZLE_MNxK4);
+      std::find(swizzle_a.begin(), swizzle_a.end(), SwizzleType::SWIZZLE_MNxK4) != swizzle_a.end() ||
+      std::find(swizzle_b.begin(), swizzle_b.end(), SwizzleType::SWIZZLE_MNxK4) != swizzle_b.end();
   const bool is_mnk4_1x32 = has_mnk4_swizzle && is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
   const bool is_mnk4_1x128 = has_mnk4_swizzle && is_single_recipe(

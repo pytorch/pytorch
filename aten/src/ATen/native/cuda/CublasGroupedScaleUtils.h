@@ -29,6 +29,7 @@ C10_HOST_DEVICE inline bool cublas_grouped_scale_is_blockwise(
 
 C10_HOST_DEVICE inline bool cublas_grouped_scale_requires_outer_multiple_of_4(
     CublasGroupedScaleLayout layout) {
+  // cuBLASLt requires M and N divisible by 4 for both FP32 block scale layouts.
   return layout == CublasGroupedScaleLayout::Vec128F32 ||
       layout == CublasGroupedScaleLayout::Block128x128F32;
 }
