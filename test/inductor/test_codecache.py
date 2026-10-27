@@ -5925,46 +5925,53 @@ class TestCppCodeCacheKey(TestCase):
     def test_a_load_a_capture_opens_during_is_recorded(self):
         from torch.compiler import _runtime_cache
 
-        lookup = _runtime_cache.relocatable_cpp_key
         scope = _runtime_cache.capture_scope()
-        keys = []
 
-        def capture_opens_after_the_first_lookup(compute, *, loaded):
-            keys.append(lookup(compute, loaded=loaded))
-            if len(keys) == 1:
-                scope.__enter__()
-            return keys[-1]
+        def capture_opens():
+            # Asked as the uncached load starts, before the kernel is built.
+            scope.__enter__()
+            return False
 
         with (
             fresh_cache(),
-            mock.patch.object(
-                _runtime_cache,
-                "relocatable_cpp_key",
-                capture_opens_after_the_first_lookup,
-            ),
+            mock.patch.object(_runtime_cache, "has_frozen_cpp_kernels", capture_opens),
         ):
             try:
                 CppCodeCache.load_async(self.CODE)
-                recorded = list(_runtime_cache._capture.cpp_kernels)
+                recorded = len(_runtime_cache._capture.cpp_kernels)
             finally:
                 scope.__exit__(None, None, None)
-        self.assertIsNone(keys[0])
-        self.assertEqual(recorded, [keys[-1]])
+        self.assertEqual(recorded, 1)
 
-    def test_no_frozen_key_outside_precompile(self):
+    def test_relocatable_key_only_for_a_capture_or_replay(self):
+        from torch._inductor import codecache
         from torch.compiler import _runtime_cache
 
-        compute = mock.Mock(return_value="key")
-        key = _runtime_cache.relocatable_cpp_key
-        self.assertIsNone(key(compute, loaded=False))
-        with mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}):
-            # A kernel this process already loaded needs no frozen binary.
-            self.assertIsNone(key(compute, loaded=True))
-            compute.assert_not_called()
-            self.assertEqual(key(compute, loaded=False), "key")
-        with _runtime_cache.capture_scope():
-            # A capture records every load, memoized or not.
-            self.assertEqual(key(compute, loaded=True), "key")
+        def relocations():
+            return mock.patch.object(
+                codecache,
+                "_relocatable_command_line",
+                wraps=codecache._relocatable_command_line,
+            )
+
+        with fresh_cache(), relocations() as relocate:
+            CppCodeCache.load_async(self.CODE)
+            relocate.assert_not_called()
+            # A capture records memoized loads too, computing the key once.
+            with _runtime_cache.capture_scope():
+                CppCodeCache.load_async(self.CODE)
+                CppCodeCache.load_async(self.CODE)
+                self.assertEqual(len(_runtime_cache._capture.cpp_kernels), 1)
+            relocate.assert_called_once()
+        # A replay looks up a kernel this process has not loaded yet.
+        with (
+            fresh_cache(),
+            relocations() as relocate,
+            mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}),
+        ):
+            CppCodeCache.load_async(self.CODE)
+            CppCodeCache.load_async(self.CODE)
+            relocate.assert_called_once()
 
     @unittest.skipIf(
         sys.platform == "win32", "creating symlinks needs extra privileges on Windows"
