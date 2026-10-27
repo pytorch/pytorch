@@ -3195,8 +3195,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
-            if isinstance(method, types.MethodDescriptorType):
+            if (
+                isinstance(method, types.MethodDescriptorType)
+                and name not in self._slotdefs
+                and not trace_rules.is_polyfilled_callable(method)
+            ):
                 # An alias such as `copy = dict.copy` keeps its defining descriptor.
+                # Slots and registered polyfills retain their dispatch below.
                 return variables.MethodDescriptorVariable(
                     method, owner=VariableTracker.build(tx, method.__objclass__)
                 ).call_function(tx, [self, *args], kwargs)
@@ -5954,6 +5959,8 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
+
+    _cpython_type = types.SimpleNamespace
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:
