@@ -1462,12 +1462,18 @@ class FxConverter:
         kernel. The kernel writes its outputs in place; the owning backend reports
         which call args it writes."""
         kernel_idx, backend = self.compiled_kernels[line.kernel_name]
+        # _lookup_args returns a bare sympy.Expr for a SymbolicCallArg; lift those
+        # to real graph edges, as the Triton call path does for its call kwargs.
+        args = tuple(
+            self._generate_sym_node(arg) if isinstance(arg, sympy.Expr) else arg
+            for arg in self._lookup_args(line.call_args, line.raw_args)
+        )
         self.gm.graph.call_function(
             compiled_kernel_wrapper_mutation,
             kwargs={
                 "kernel_idx": kernel_idx,
                 "mutated_arg_indices": tuple(backend.mutated_arg_indices(line)),
-                "args": tuple(self._lookup_args(line.call_args)),
+                "args": args,
             },
         )
 

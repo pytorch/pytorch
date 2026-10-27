@@ -1685,7 +1685,7 @@ class FxirCpuCompiledKernelTestCase(InductorTestCase):
     """The FX backend embeds non-Triton CPU cpp_fused_* kernels as
     compiled_kernel_wrapper_mutation HOP nodes instead of raising on them."""
 
-    def _compile_and_capture(self, func, args):
+    def _compile_and_capture(self, func, args, **compile_kwargs):
         gms = []
         orig_generate = FxConverter.generate
 
@@ -1695,28 +1695,25 @@ class FxirCpuCompiledKernelTestCase(InductorTestCase):
             return gm
 
         with unittest.mock.patch.object(FxConverter, "generate", generate):
-            result = torch.compile(func)(*args)
+            result = torch.compile(func, **compile_kwargs)(*args)
 
-        num_hop = sum(
-            len(
-                gm.graph.find_nodes(
-                    op="call_function", target=compiled_kernel_wrapper_mutation
-                )
-            )
+        hop_nodes = [
+            node
             for gm in gms
-        )
-        return result, num_hop
+            for node in gm.graph.find_nodes(
+                op="call_function", target=compiled_kernel_wrapper_mutation
+            )
+        ]
+        return result, hop_nodes
 
     def test_cpp_fused_kernel(self):
-        # x + y fuses with relu and the * 2 into a single cpp_fused_* kernel,
-        # which becomes a compiled_kernel_wrapper_mutation HOP node.
         def foo(x, y):
             return (x + y).relu() * 2.0
 
         args = [torch.randn(8, 8) for _ in range(2)]  # cpu
-        result, num_hop = self._compile_and_capture(foo, args)
+        result, hop_nodes = self._compile_and_capture(foo, args)
         self.assertTrue(same(foo(*args), result))
-        self.assertGreater(num_hop, 0)
+        self.assertGreater(len(hop_nodes), 0)
 
     def test_cpp_fused_kernel_with_extern(self):
         # a @ b stays an aten extern; the pointwise tail fuses into a cpp kernel.
@@ -1724,9 +1721,34 @@ class FxirCpuCompiledKernelTestCase(InductorTestCase):
             return torch.relu(a @ b + a) * 2.0
 
         args = [torch.randn(16, 16) for _ in range(2)]  # cpu
-        result, num_hop = self._compile_and_capture(foo, args)
+        result, hop_nodes = self._compile_and_capture(foo, args)
         self.assertTrue(same(foo(*args), result))
-        self.assertGreater(num_hop, 0)
+        self.assertGreater(len(hop_nodes), 0)
+
+    def test_cpp_fused_kernel_dynamic_shapes(self):
+        # Dynamic shapes add sizevar args, which must reach the HOP as graph nodes.
+        def foo(x, y):
+            return (x + y).relu() * 2.0
+
+        args = [torch.randn(8, 8) for _ in range(2)]  # cpu
+        result, hop_nodes = self._compile_and_capture(foo, args, dynamic=True)
+        self.assertTrue(same(foo(*args), result))
+        self.assertGreater(len(hop_nodes), 0)
+
+        hop_args = [arg for node in hop_nodes for arg in node.kwargs["args"]]
+        self.assertEqual(
+            [arg for arg in hop_args if isinstance(arg, sympy.Expr)],
+            [],
+            "symbolic kernel args must be lifted to fx nodes, not embedded as exprs",
+        )
+        # Not vacuous: a sizevar really did reach the kernel.
+        self.assertTrue(
+            any(
+                isinstance(arg, torch.fx.Node)
+                and isinstance(arg.meta.get("val"), torch.SymInt)
+                for arg in hop_args
+            )
+        )
 
 
 if __name__ == "__main__":
