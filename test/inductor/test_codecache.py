@@ -5982,30 +5982,48 @@ class TestCppCodeCacheKey(TestCase):
         from torch.compiler._runtime_cache import _freeze_cpp_kernels, capture_scope
         from torch.utils import cpp_extension
 
-        # The capture and the replay hosts install the same torch at different roots.
-        capture_root, replay_root = tempfile.mkdtemp(), tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, capture_root)
-        self.addCleanup(shutil.rmtree, replay_root)
-        for root in (capture_root, replay_root):
-            os.symlink(cpp_extension._TORCH_PATH, os.path.join(root, "torch"))
-        with fresh_cache(), self._torch_root(capture_root), capture_scope():
-            CppCodeCache.load_async(self.CODE)()
-            payload = _freeze_cpp_kernels(
-                {
-                    key: path
-                    for key, (path, _) in _runtime_cache._capture.cpp_kernels.items()
-                }
-            )
-        # The replay host's Inductor cache is elsewhere too.
-        with (
-            fresh_cache(),
-            self._torch_root(replay_root),
-            mock.patch.dict(_runtime_cache._frozen_cpp_kernels, pickle.loads(payload)),
-            mock.patch.object(
-                CppBuilder, "build", side_effect=AssertionError("rebuilt")
-            ),
-        ):
-            self.assertEqual(CppCodeCache.cache[self._key()]().f(), 0)
+        class TorchCppCodeCache(CppCodeCache):
+            cache = {}
+            cpp_compile_command_flags = {"include_pytorch": True}
+
+        # A kernel that includes no torch header, and one that links libc10.
+        torch_code = """
+            #include <c10/core/CPUAllocator.h>
+            extern "C" int f() { return c10::GetCPUAllocator() == nullptr; }
+        """
+        for cache, code in ((CppCodeCache, self.CODE), (TorchCppCodeCache, torch_code)):
+            with self.subTest(cache=cache.__name__):
+                # The capture and the replay hosts install the same torch at
+                # different roots, and the capture host's is gone by the replay.
+                capture_root, replay_root = tempfile.mkdtemp(), tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, replay_root)
+                for root in (capture_root, replay_root):
+                    os.symlink(cpp_extension._TORCH_PATH, os.path.join(root, "torch"))
+                cache.cache.clear()
+                with fresh_cache(), self._torch_root(capture_root), capture_scope():
+                    cache.load_async(code)()
+                    payload = _freeze_cpp_kernels(
+                        {
+                            key: path
+                            for key, (path, _) in (
+                                _runtime_cache._capture.cpp_kernels.items()
+                            )
+                        }
+                    )
+                shutil.rmtree(capture_root)
+                cache.cache.clear()
+                # The replay host's Inductor cache is elsewhere too.
+                with (
+                    fresh_cache(),
+                    self._torch_root(replay_root),
+                    mock.patch.dict(
+                        _runtime_cache._frozen_cpp_kernels, pickle.loads(payload)
+                    ),
+                    mock.patch.object(
+                        CppBuilder, "build", side_effect=AssertionError("rebuilt")
+                    ),
+                ):
+                    self.assertEqual(cache.load_async(code)().f(), 0)
 
 
 class TestVecISACheckBuild(TestCase):

@@ -1798,7 +1798,11 @@ class TestFX(JitTestCase):
         self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
 
     def test_autowrap_reapplies_patches_when_a_lazy_import_fails(self):
-        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+        from torch.fx._symbolic_trace import (
+            _autowrap_check,
+            _maybe_revert_all_patches,
+            _Patcher,
+        )
 
         lazy = object()
 
@@ -1826,6 +1830,10 @@ class TestFX(JitTestCase):
                 with self.assertRaisesRegex(ImportError, "lazy import failed"):
                     _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
                 self.assertIs(dict.__getitem__(frame_dict, "leaf"), wrapper)
+                # The failed window closed, so the next one reverts again.
+                self.assertEqual(patcher.revert_depth, 0)
+                with _maybe_revert_all_patches(patcher):
+                    self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
         self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
 
     def test_trace_resolves_lazy_imports_with_patches_reverted(self):
@@ -1918,20 +1926,30 @@ class TestFX(JitTestCase):
         self.assertIs(dict.__getitem__(wrap_globals, "wrapped"), wrapped)
 
     def test_lazy_import_resolution_survives_a_nested_revert(self):
+        from torch.fx import _symbolic_trace
         from torch.fx._symbolic_trace import (
             _maybe_revert_all_patches,
             _orig_module_call,
+            _PatchedFnDel,
         )
 
         unresolved = object()
         reverted = []
+        # A torch.fx.wrap("len") registration: reverting its patch deletes the name,
+        # so reverting it twice raises KeyError.
+        wraps_len = {}
 
         class Globals(dict):
             def __getitem__(self, name):
                 value = dict.__getitem__(self, name)
                 if value is unresolved:
+                    patches = _symbolic_trace.CURRENT_PATCHER.patches_made
+                    self.builtin_patched = any(
+                        isinstance(p, _PatchedFnDel) and p.frame_dict is wraps_len
+                        for p in patches
+                    )
                     # A module body that compiles something: Dynamo reverts the
-                    # patches too, while this file's wrap("len") is among them.
+                    # patches too.
                     with _maybe_revert_all_patches():
                         reverted.append(torch.nn.Module.__call__ is _orig_module_call)
                     reverted.append(torch.nn.Module.__call__ is _orig_module_call)
@@ -1942,24 +1960,29 @@ class TestFX(JitTestCase):
         def m_forward(self, x):
             return self.sub(x)
 
+        frame_dict = Globals(__builtins__=builtins, helper=unresolved)
+
         class M(torch.nn.Module):
-            forward = types.FunctionType(
-                m_forward.__code__,
-                Globals(__builtins__=builtins, helper=unresolved),
-                "forward",
-            )
+            forward = types.FunctionType(m_forward.__code__, frame_dict, "forward")
 
             def __init__(self):
                 super().__init__()
                 self.sub = torch.nn.ReLU()
 
-        with unittest.mock.patch.object(
-            importlib,
-            "is_lazy_import",
-            lambda d, name: dict.__getitem__(d, name) is unresolved,
-            create=True,
+        with (
+            unittest.mock.patch.dict(
+                _symbolic_trace._wrapped_fns_to_patch,
+                {(id(wraps_len), "len"): wraps_len},
+            ),
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is unresolved,
+                create=True,
+            ),
         ):
             graph = torch.fx.Tracer().trace(M())
+        self.assertTrue(frame_dict.builtin_patched)
         self.assertEqual(reverted, [True, True])
         # Reapplied after the outer window, so the submodule call is still traced.
         self.assertEqual(
@@ -2010,6 +2033,52 @@ class TestFX(JitTestCase):
             leaf, [n.target for n in graph.nodes if n.op == "call_function"]
         )
         self.assertIs(helper.leaf, leaf)
+
+    def test_lazy_import_runs_outside_make_fx_modes(self):
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        unresolved = object()
+        made = []
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # A module body that builds a module-level tensor.
+                    made.append(torch.ones(1))
+                    value = object()
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def sub_forward(self, x):
+            return x + 1
+
+        # make_fx scans a submodule's scope mid-trace, under its fake and proxy modes.
+        class Sub(torch.nn.Module):
+            forward = types.FunctionType(
+                sub_forward.__code__,
+                Globals(__builtins__=builtins, helper=unresolved),
+                "forward",
+            )
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+
+            def forward(self, x):
+                return self.sub(x)
+
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is unresolved,
+            create=True,
+        ):
+            make_fx(Root(), tracing_mode="fake")(torch.ones(2))
+        [tensor] = made
+        self.assertNotIsInstance(tensor, FakeTensor)
 
     def test_lazy_import_can_run_a_compiled_function(self):
         compiled = torch.compile(lambda t: t + 1, backend="eager")
