@@ -2500,7 +2500,9 @@ class TestPoolingNNMpsOnly(NNTestCase):
         self.assertEqual(out, expected)
 
 
-instantiate_device_type_tests(TestAvgPoolDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestAvgPoolDevice, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(
     TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
