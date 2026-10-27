@@ -1122,6 +1122,27 @@ from user code:
             expected,
         )
 
+    def test_cat_mismatched_shapes_reports_user_error(self):
+        def fn(a, b, c):
+            return torch.cat([a, b, c], dim=1)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(1, 1),
+                torch.randn(4, 16),
+                torch.randn(4, 32),
+            )
+
+        msg = str(cm.exception)
+        self.assertIn(
+            "Sizes of tensors must match except in dimension",
+            msg,
+        )
+        self.assertNotIn(
+            "Dynamo failed to run FX node with fake tensors",
+            msg,
+        )
+
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
             if x.sum() > 0:
