@@ -209,6 +209,7 @@ _SYM_OPS = {
     torch.sym_max,
     torch.sym_min,
     torch.sym_sqrt,
+    torch._sym_isnan,  # type: ignore[attr-defined]
     operator.truediv,
     operator.and_,
     operator.or_,
@@ -2974,6 +2975,10 @@ class GraphModuleDeserializer(metaclass=Final):
                 "RoundToInt": torch.utils._sympy.functions.RoundToInt,
                 "RoundDecimal": torch.utils._sympy.functions.RoundDecimal,
                 "ToFloat": torch.utils._sympy.functions.ToFloat,
+                "IsNaN": torch.utils._sympy.functions.IsNaN,
+                "IsNotNaN": torch.utils._sympy.functions.IsNotNaN,
+                "FloatAdd": torch.utils._sympy.functions.FloatAdd,
+                "FloatMul": torch.utils._sympy.functions.FloatMul,
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}

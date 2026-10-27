@@ -232,6 +232,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
+                torch._sym_isnan,  # type: ignore[attr-defined]
                 torch.sym_sum,
                 torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch,
                 # TODO (tmanlaibaatar)

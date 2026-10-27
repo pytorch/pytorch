@@ -859,6 +859,13 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
+    # A Not around something that is not a comparison, e.g. Not(IsNaN(x)),
+    # is already in its simplest form, so return it as is. (Not around a
+    # comparison never gets here: to_cnf already turned e.g. Not(a < b) into
+    # a >= b.)
+    if isinstance(expr, sympy.Not) and not isinstance(expr.args[0], Relational):
+        return expr
+
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):

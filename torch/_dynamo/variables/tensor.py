@@ -3039,7 +3039,10 @@ class SymNodeVariable(VariableTracker):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
         if "example_value" in proxy.node.meta:
-            if proxy.node.meta["example_value"] != sym_num:
+            # `is` first: for a float SymNode, x != x is IsNaN(x), which is
+            # data-dependent for unbacked floats.
+            example_value = proxy.node.meta["example_value"]
+            if example_value is not sym_num and example_value != sym_num:
                 raise AssertionError(
                     f"proxy example_value {proxy.node.meta['example_value']} != {sym_num}"
                 )
