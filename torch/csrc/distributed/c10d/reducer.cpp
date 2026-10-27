@@ -204,7 +204,7 @@ Reducer::Reducer(
                 this->autograd_hook(variable_index);
                 return outputs;
               },
-              [this](torch::autograd::CompiledNodeArgs& args) {
+              [this](torch::autograd::CompiledNodeArgs& /*args*/) {
                 TORCH_CHECK(
                     this->use_python_reducer_,
                     "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
