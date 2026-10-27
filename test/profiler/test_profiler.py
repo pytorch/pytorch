@@ -1045,6 +1045,17 @@ class TestProfiler(TestCase):
             self.assertEqual(copied.custom_profiler_config, "custom_config")
             self.assertTrue(copied.trace_only)
 
+    def test_experimental_config_rejects_old_pickle_state(self):
+        # Pickles from before PyTorch 2.16 use a different layout. Recent ones
+        # have more values than the current state.
+        state = _ExperimentalConfig().__getstate__() + (False,)
+        # Unpickling calls __setstate__ on an object made by __new__. pybind
+        # ignores __setstate__ on an already initialized object, so this test
+        # can't use _ExperimentalConfig().
+        config = _ExperimentalConfig.__new__(_ExperimentalConfig)
+        with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
+            config.__setstate__(state)
+
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
         # way out: passing it must warn with FutureWarning and not error.
