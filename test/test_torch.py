@@ -1889,6 +1889,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(indices[:, -1].max().item(), row_size - 1)
 
     @onlyCUDA
+    @skipIfTorchInductor("https://github.com/triton-lang/triton/issues/12384")
     @largeTensorTest('20GB')
     @parametrize(
         "shape",
@@ -1918,6 +1919,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x.amax(dim=(0, 2)), expected)
 
     @onlyCUDA
+    @skipIfTorchInductor("https://github.com/triton-lang/triton/issues/12384")
     @largeTensorTest('20GB')
     @parametrize("num_rows,row_size", [(2**32 - 1, 1), (2**32 - 16, 2)])
     def test_cumsum_inner_dim_large_rows(self, device, num_rows, row_size):
