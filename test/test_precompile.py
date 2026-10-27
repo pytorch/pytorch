@@ -9597,7 +9597,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
         lib.define("f(Tensor x) -> Tensor")
         names = [(qualname, ""), (f"{ns}::f", ""), (recorded._qualname, "")]
-        names.append(("aten::add", "Tensor"))
+        importlib.import_module("torch.export.custom_ops")
+
+        # Torch's own ops, registered from C++ and from Python inside torch.
+        names += [("aten::add", "Tensor"), ("export::access_subclass_inner_tensor", "")]
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             self.assertEqual(_custom_op_modules(names), (module.__name__,))
         (message,) = logs.output
@@ -9605,6 +9608,31 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(f"{ns}::f", message)
         self.assertNotIn(recorded._qualname, message)
         self.assertNotIn("aten::add", message)
+        self.assertNotIn("export::", message)
+
+    def test_no_op_torch_registers_is_reported(self):
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _registered_by_torch
+            reported = set()
+            for name in torch._C._dispatch_get_all_op_names():
+                op_name, _, overload = name.partition(".")
+                ns = op_name.split("::")[0]
+                debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+                if ".py:" not in debug:
+                    if ns not in _TORCH_OP_NAMESPACES:
+                        reported.add(ns)
+                elif _custom_op_module(op_name, overload) is None and not _registered_by_torch(op_name, overload):
+                    reported.add(ns)
+            print(*reported)
+            """
+        )
+        # Only a source build records C++ schemas under torch/, so they are checked
+        # against the list itself.
+        out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        # "_test" holds TorchScript's own test ops.
+        self.assertEqual(set(out.split()) - {"_test"}, set())
 
     def test_a_capture_records_the_ops_of_each_backend_graph(self):
         from torch._dynamo.precompile_package import _CapturePackage

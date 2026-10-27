@@ -1957,43 +1957,68 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
-# Torch's own operator namespaces. An op in them that maps to no module is torch's
-# to register, so a capture does not report it.
+# Torch's namespaces whose schemas record no torch module of their own: those defined
+# from C++, which record a build-time path, and those torch defines through
+# torch.library's helpers, which record the helper.
 _TORCH_OP_NAMESPACES = frozenset(
     {
         "aten",
-        "prims",
         "prim",
-        "higher_order",
-        "rngprims",
+        "coor",
         "debugprims",
+        "pippy",
+        "onnx",
         "inductor",
+        "inductor_prims",
         "profiler",
         "quantized",
         "_quantized",
-        "quantized_decomposed",
+        "quantization",
+        "sparse",
         "c10d",
         "c10d_functional",
         "_c10d_functional",
         "_c10d_functional_autograd",
         "_dtensor",
         "symm_mem",
-        "mkldnn",
-        "onednn",
+        "fsdp",
         "mkl",
+        "mkldnn",
+        "mkldnn_prepacked",
+        "onednn",
+        "static_runtime",
+        "xnnpack",
+        "prepacked",
+        "vulkan",
+        "vulkan_prepack",
+        "metal",
+        "metal_prepack",
     }
 )
 
 
+def _registered_by_torch(op_name: str, overload: str) -> bool:
+    if op_name.split("::")[0] in _TORCH_OP_NAMESPACES:
+        return True
+    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    path = debug.removeprefix("registered at ").rpartition(":")[0]
+    torch_dir = os.path.dirname(torch.__file__)
+    helpers = (
+        os.path.join(torch_dir, "library.py"),
+        os.path.join(torch_dir, "_library"),
+    )
+    return path.startswith(torch_dir + os.sep) and not path.startswith(helpers)
+
+
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     """The modules registering the ops among ``op_names``, warning once about the
-    ops outside torch's namespaces no importable module is known to register."""
+    ops torch does not register and no importable module is known to register."""
     modules: set[str] = set()
     unrecorded: set[str] = set()
     for op_name, overload in op_names:
         if (module := _custom_op_module(op_name, overload)) is not None:
             modules.add(module)
-        elif op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
+        elif not _registered_by_torch(op_name, overload):
             unrecorded.add(op_name)
     if unrecorded:
         log.warning(
