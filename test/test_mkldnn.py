@@ -1830,6 +1830,15 @@ class TestMkldnn(TestCase):
         self.assertEqual(diff_out_cow, diff_out_copy)
         self.assertEqual(diff_hy_cow, diff_hy_copy)
         self.assertEqual(diff_cy_cow, diff_cy_copy)
+        self.assertTrue(torch._C._is_cow_tensor(xc))
+        self.assertTrue(torch._C._is_cow_tensor(h0c))
+        self.assertTrue(torch._C._is_cow_tensor(c0c))
+        self.assertEqual(xc, xc_copy)
+        self.assertEqual(h0c, h0c_copy)
+        self.assertEqual(c0c, c0c_copy)
+        for w_cow, w_copy in zip(weight_cows, weight_copies):
+            self.assertTrue(torch._C._is_cow_tensor(w_cow))
+            self.assertEqual(w_cow, w_copy)
 
         # _linear_pointwise
         x_lin = torch.randn(8, 16)
@@ -1860,8 +1869,8 @@ class TestMkldnn(TestCase):
         self.assertEqual(blc, blc_copy)
 
         # _convolution_pointwise
-        x_conv = torch.randn(2, 3, 7, 7)
-        w_conv = torch.randn(4, 3, 3, 3)
+        x_conv = torch.randn(2, 3, 7, 7).to(memory_format=torch.channels_last)
+        w_conv = torch.randn(4, 3, 3, 3).to(memory_format=torch.channels_last)
         b_conv = torch.randn(4)
         xcc, wcc, bcc = torch._lazy_clone(x_conv), torch._lazy_clone(w_conv), torch._lazy_clone(b_conv)
         xcc_copy, wcc_copy, bcc_copy = xcc.clone(), wcc.clone(), bcc.clone()
@@ -1876,7 +1885,7 @@ class TestMkldnn(TestCase):
         self.assertEqual(bcc, bcc_copy)
 
         # _convolution_pointwise.binary
-        other_conv = torch.randn_like(res_conv)
+        other_conv = torch.randn_like(res_conv).to(memory_format=torch.channels_last)
         other_convc = torch._lazy_clone(other_conv)
         other_convc_copy = other_convc.clone()
         torch.ops.mkldnn._convolution_pointwise.binary(
@@ -1891,35 +1900,153 @@ class TestMkldnn(TestCase):
         self.assertEqual(wcc, wcc_copy)
         self.assertEqual(bcc, bcc_copy)
 
-        # _scaled_mm (requires AMX to reach mkldnn_scaled_mm)
-        if torch.cpu.get_capabilities().get("amx_int8", False):
-            a_s = torch.randn(16, 16).to(torch.float8_e4m3fn)
-            b_s = torch.randn(16, 16).to(torch.float8_e4m3fn).t()
-            scale_a = torch.tensor(1.0)
-            scale_b = torch.tensor(1.0)
-            bias_s = torch.randn(16, dtype=torch.bfloat16)
-            asc = torch._lazy_clone(a_s)
-            bsc = torch._lazy_clone(b_s)
-            scale_ac = torch._lazy_clone(scale_a)
-            scale_bc = torch._lazy_clone(scale_b)
-            bias_sc = torch._lazy_clone(bias_s)
-            asc_copy, bsc_copy = asc.clone(), bsc.clone()
-            scale_ac_copy, scale_bc_copy, bias_sc_copy = (
-                scale_ac.clone(), scale_bc.clone(), bias_sc.clone()
-            )
-            torch._scaled_mm(
-                asc, bsc, scale_a=scale_ac, scale_b=scale_bc, bias=bias_sc, out_dtype=torch.bfloat16
-            )
-            self.assertTrue(torch._C._is_cow_tensor(asc))
-            self.assertTrue(torch._C._is_cow_tensor(bsc))
-            self.assertTrue(torch._C._is_cow_tensor(scale_ac))
-            self.assertTrue(torch._C._is_cow_tensor(scale_bc))
-            self.assertTrue(torch._C._is_cow_tensor(bias_sc))
-            self.assertEqual(asc, asc_copy)
-            self.assertEqual(bsc, bsc_copy)
-            self.assertEqual(scale_ac, scale_ac_copy)
-            self.assertEqual(scale_bc, scale_bc_copy)
-            self.assertEqual(bias_sc, bias_sc_copy)
+        # _reorder_linear_weight
+        w_reorder = torch.randn(32, 16)
+        wrc = torch._lazy_clone(w_reorder)
+        wrc_copy = wrc.clone()
+        torch.ops.mkldnn._reorder_linear_weight(wrc, 8)
+        self.assertTrue(torch._C._is_cow_tensor(wrc))
+        self.assertEqual(wrc, wrc_copy)
+
+        # mkldnn_linear with dense weight and bias
+        x_lin_dense = torch.randn(8, 16)
+        w_lin_dense = torch.randn(32, 16)
+        b_lin_dense = torch.randn(32)
+        wldc, bldc = torch._lazy_clone(w_lin_dense), torch._lazy_clone(b_lin_dense)
+        wldc_copy, bldc_copy = wldc.clone(), bldc.clone()
+        torch.ops.aten.mkldnn_linear(x_lin_dense.to_mkldnn(), wldc, bldc)
+        self.assertTrue(torch._C._is_cow_tensor(wldc))
+        self.assertTrue(torch._C._is_cow_tensor(bldc))
+        self.assertEqual(wldc, wldc_copy)
+        self.assertEqual(bldc, bldc_copy)
+
+        # mkldnn_linear_backward_input with dense weight
+        grad_out_lin = torch.randn(8, 32)
+        torch.ops.aten.mkldnn_linear_backward_input(
+            [8, 16], grad_out_lin.to_mkldnn(), wldc
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wldc))
+        self.assertEqual(wldc, wldc_copy)
+
+        # mkldnn_prelu with dense weight
+        x_prelu = torch.randn(2, 3, 4, 4)
+        w_prelu = torch.randn(3)
+        wpc = torch._lazy_clone(w_prelu)
+        wpc_copy = wpc.clone()
+        torch.ops.aten._prelu_kernel(x_prelu.to_mkldnn(), wpc)
+        self.assertTrue(torch._C._is_cow_tensor(wpc))
+        self.assertEqual(wpc, wpc_copy)
+
+        # mkldnn_prelu_backward with dense weight
+        grad_out_prelu = torch.randn(2, 3, 4, 4)
+        torch.ops.aten._prelu_kernel_backward(
+            grad_out_prelu.to_mkldnn(), x_prelu.to_mkldnn(), wpc
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wpc))
+        self.assertEqual(wpc, wpc_copy)
+
+        # mkldnn_batch_norm with dense weight, bias, running_mean, running_var
+        x_bn = torch.randn(2, 4, 8, 8)
+        w_bn = torch.randn(4)
+        b_bn = torch.randn(4)
+        rm_bn = torch.randn(4)
+        rv_bn = torch.rand(4) + 0.1
+        wbn_c, bbn_c, rmbn_c, rvbn_c = (
+            torch._lazy_clone(w_bn),
+            torch._lazy_clone(b_bn),
+            torch._lazy_clone(rm_bn),
+            torch._lazy_clone(rv_bn),
+        )
+        wbn_copy, bbn_copy, rmbn_copy, rvbn_copy = (
+            wbn_c.clone(),
+            bbn_c.clone(),
+            rmbn_c.clone(),
+            rvbn_c.clone(),
+        )
+        torch.ops.aten.native_batch_norm(
+            x_bn.to_mkldnn(), wbn_c, bbn_c, rmbn_c, rvbn_c, False, 0.1, 1e-5
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wbn_c))
+        self.assertTrue(torch._C._is_cow_tensor(bbn_c))
+        self.assertTrue(torch._C._is_cow_tensor(rmbn_c))
+        self.assertTrue(torch._C._is_cow_tensor(rvbn_c))
+        self.assertEqual(wbn_c, wbn_copy)
+        self.assertEqual(bbn_c, bbn_copy)
+        self.assertEqual(rmbn_c, rmbn_copy)
+        self.assertEqual(rvbn_c, rvbn_copy)
+
+        # mkldnn_batch_norm_backward with dense weight
+        out_bn, sm_bn, sinv_bn = torch.ops.aten.native_batch_norm(
+            x_bn.to_mkldnn(), w_bn, b_bn, None, None, True, 0.1, 1e-5
+        )
+        grad_out_bn = torch.randn(2, 4, 8, 8)
+        torch.ops.aten.native_batch_norm_backward(
+            grad_out_bn.to_mkldnn(),
+            x_bn.to_mkldnn(),
+            wbn_c,
+            None,
+            None,
+            sm_bn,
+            sinv_bn,
+            True,
+            1e-5,
+            [True, True, True],
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wbn_c))
+        self.assertEqual(wbn_c, wbn_copy)
+
+    def test_mkldnn_scaled_mm_cow_input(self):
+        if not torch.cpu.get_capabilities().get("amx_int8", False):
+            self.skipTest("AMX is not supported on this machine")
+        a_s = torch.randn(16, 16).to(torch.float8_e4m3fn)
+        b_s = torch.randn(16, 16).to(torch.float8_e4m3fn)
+        scale_a = torch.tensor(1.0)
+        scale_b = torch.tensor(1.0)
+        bias_s = torch.randn(16, dtype=torch.bfloat16)
+        asc = torch._lazy_clone(a_s)
+        bsc = torch._lazy_clone(b_s)
+        bias_sc = torch._lazy_clone(bias_s)
+        asc_copy, bsc_copy, bias_sc_copy = (
+            asc.clone(),
+            bsc.clone(),
+            bias_sc.clone(),
+        )
+        torch._scaled_mm(
+            asc, bsc, scale_a=scale_a, scale_b=scale_b, bias=bias_sc, out_dtype=torch.bfloat16
+        )
+        self.assertTrue(torch._C._is_cow_tensor(asc))
+        self.assertTrue(torch._C._is_cow_tensor(bsc))
+        self.assertTrue(torch._C._is_cow_tensor(bias_sc))
+        self.assertEqual(asc, asc_copy)
+        self.assertEqual(bsc, bsc_copy)
+        self.assertEqual(bias_sc, bias_sc_copy)
+
+    def test_mkldnn_int_mm_cow_input(self):
+        if not (
+            torch.cpu.get_capabilities().get("avx512_vnni", False)
+            or torch.cpu.get_capabilities().get("architecture") == "aarch64"
+        ):
+            self.skipTest("VNNI is not supported on this machine")
+        a_int = torch.randint(-128, 127, (16, 16), dtype=torch.int8)
+        b_int = torch.randint(-128, 127, (16, 16), dtype=torch.int8)
+        ac, bc = torch._lazy_clone(a_int), torch._lazy_clone(b_int)
+        ac_copy, bc_copy = ac.clone(), bc.clone()
+        torch._int_mm(ac, bc)
+        self.assertTrue(torch._C._is_cow_tensor(ac))
+        self.assertTrue(torch._C._is_cow_tensor(bc))
+        self.assertEqual(ac, ac_copy)
+        self.assertEqual(bc, bc_copy)
+
+        # Force _with_primitive path on x86 by using non-contiguous inputs in both dims
+        a_nc = torch.randint(-128, 127, (32, 32), dtype=torch.int8)[::2, ::2]
+        b_nc = torch.randint(-128, 127, (32, 32), dtype=torch.int8)[::2, ::2]
+        anc_c, bnc_c = torch._lazy_clone(a_nc), torch._lazy_clone(b_nc)
+        anc_copy, bnc_copy = anc_c.clone(), bnc_c.clone()
+        torch._int_mm(anc_c, bnc_c)
+        self.assertTrue(torch._C._is_cow_tensor(anc_c))
+        self.assertTrue(torch._C._is_cow_tensor(bnc_c))
+        self.assertEqual(anc_c, anc_copy)
+        self.assertEqual(bnc_c, bnc_copy)
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
