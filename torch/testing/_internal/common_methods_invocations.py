@@ -6104,6 +6104,10 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
             continue
         yield SampleInput(make_arg(shape), rep_dim)
 
+    # Transposed, sliced, and a size-1 dim whose stride exceeds int32.
+    for arg in (make_arg((3, 4)).t(), make_arg((7, 9))[1::2, 2::2], make_arg((1, 4)).as_strided((1, 4), (2**32, 1))):
+        yield SampleInput(arg.detach().requires_grad_(requires_grad), (2, 3))
+
 
 def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
     shapes_and_args = (
