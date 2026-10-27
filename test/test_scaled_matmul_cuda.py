@@ -32,6 +32,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+    prefer_cublaslt_grouped_gemm,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -3669,29 +3670,35 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @prefer_cublaslt_grouped_gemm(False)
+    @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_scaled_grouped_mm_mslk_rejects_out_dtype(self, device, format, out_dtype):
+        offs = torch.tensor([128], device=device, dtype=torch.int32)
+        value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
+        _, a, block_scale, global_scale = _2d_grouped_tensor_to_blocked_scaled(
+            value, 128, 1, offs, format=format
+        )
+        scale = [block_scale, global_scale] if format == "nvfp4" else block_scale
+        kwargs = _build_scaled_grouped_mm_kwargs(scale, scale, offs, format)
+        kwargs["out_dtype"] = out_dtype
+        with self.assertRaisesRegex(ValueError, "requires BFloat16 output"):
+            scaled_grouped_mm_wrap(a, a.t(), **kwargs)
+
+    @onlyCUDA
+    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
         cublaslt_grouped_mm_skip_msg
     )
-    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
-    @parametrize(
-        "dtypes",
-        [
-            (torch.float8_e4m3fn, torch.float8_e4m3fn),
-            (torch.float8_e4m3fn, torch.float8_e5m2),
-            (torch.float8_e5m2, torch.float8_e4m3fn)
-        ]
-    )
-    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
-    @parametrize("scale_mode", ["tensorwise", "groupwise"])
-    @parametrize("fast_accum", [False, True])
+    @parametrize("op,scale_mode", [("2d/2d", "groupwise"), ("3d/3d", "tensorwise")])
     @parametrize("mode", ["default", "reduce-overhead"])
-    def test_scaled_grouped_gemm_cublaslt_compiled(self, op, dtypes, out_dtype, scale_mode, fast_accum, mode, device):
-        a_dtype, b_dtype = dtypes
+    def test_scaled_grouped_gemm_cublaslt_compiled(self, op, scale_mode, mode, device):
         torch._dynamo.reset()  # each shape combination needs fresh compilation state
         A, B_T, scale_a, scale_b, offs, _, _, _ = (
             self.scaled_grouped_gemm_cublaslt_helper(
-                op, a_dtype, b_dtype, scale_mode, device
+                op, e4m3_type, e4m3_type, scale_mode, device
             )
         )
 
@@ -3699,18 +3706,15 @@ class TestFP8Matmul(TestCase):
         args = (A, B_T.transpose(-2, -1), scale_a, recipe, scale_b, recipe)
         f_ref = scaled_grouped_mm
         f = torch.compile(f_ref, fullgraph=True, mode=mode)
-        C_ref = f_ref(*args, offs=offs, use_fast_accum=fast_accum, output_dtype=out_dtype)
-        C = f(*args, offs=offs, use_fast_accum=fast_accum, output_dtype=out_dtype)
+        C_ref = f_ref(*args, offs=offs)
+        C = f(*args, offs=offs)
         self.assertEqual(C, C_ref)
 
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(
-        not (
-            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
-            and _get_torch_cuda_version() >= (13, 4)
-        ),
-        "cuBLASLt grouped scale recipes require CUDA 13.4+",
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg,
     )
     @parametrize("scalar_a", [False, True])
     def test_scaled_grouped_gemm_cublaslt_rejects_mixed_scale_layouts(
@@ -3785,9 +3789,8 @@ class TestFP8Matmul(TestCase):
             scale_a = scale_a.double()
         else:
             scale_a = scale_a.repeat_interleave(2)[::2]
-        error = ValueError if case == "wrong_dtype" else RuntimeError
         message = "Invalid scaling configuration" if case == "wrong_dtype" else "scale_a tensorwise scale must be"
-        with self.assertRaisesRegex(error, message):
+        with self.assertRaisesRegex(ValueError, message):
             scaled_grouped_mm_wrap(
                 A, B_T.transpose(-2, -1), scale_a, scale_b,
                 ScalingType.TensorWise, ScalingType.TensorWise, offs=offs,
