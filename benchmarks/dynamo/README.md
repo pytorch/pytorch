@@ -82,8 +82,8 @@ A complete list of options can be seen by running each of the runners with the `
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
 by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
-`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
-unpadded prompts:
+`google/gemma-2-2b`, `google/gemma-3-1b-it`, `Qwen/Qwen2.5-0.5B-Instruct`,
+`Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed, unpadded prompts:
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -108,8 +108,8 @@ CSV `abs_latency` and `eager_latency` are milliseconds for all
 elements. Default output and profiler trace names get a `_prefill` suffix; use
 separate files for different input dimensions.
 
-Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`:
+Decode is opt-in and supports `meta-llama/Llama-3.2-1B`,
+`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`:
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -122,7 +122,7 @@ Each decode request prefills the prompt eagerly into the static cache outside
 the timed region, then times `--decode-length` (default 128, at most 1999)
 single-token compiled forwards. Decode feeds fixed random tokens rather than
 sampled ones and returns the last step's logits. It shares prefill's cache
-capacity and flag restrictions. `gemma-2-2b` is excluded because its
+capacity and flag restrictions. The Gemma models are excluded because their
 sliding-window cache recompiles on every step.
 
 CSV `abs_latency` and `eager_latency` are milliseconds for all
@@ -137,8 +137,8 @@ step across batch elements. Default output and profiler trace names get a
 the eager baseline and the compiled forward run tensor-parallel, so `speedup`
 compares eager TP with compiled TP at the same topology. Compare against a
 single-GPU run separately to measure TP scaling.
-Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`.
+Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`,
+`Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`.
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \

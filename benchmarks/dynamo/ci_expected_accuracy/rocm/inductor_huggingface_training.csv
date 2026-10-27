@@ -131,3 +131,11 @@ Qwen/Qwen3-0.6B,eager_fail_to_run,0
 
 
 Qwen/Qwen3.5-0.8B,eager_fail_to_run,0
+
+
+
+Qwen/Qwen2.5-0.5B-Instruct,eager_fail_to_run,0
+
+
+
+google/gemma-3-1b-it,eager_fail_to_run,0
