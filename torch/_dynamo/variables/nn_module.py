@@ -78,6 +78,7 @@ from ..utils import (
 )
 from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
+from .hashable import HashableTracker
 from .lazy import LazyVariableTracker
 from .user_defined import UserDefinedObjectVariable
 
@@ -1600,6 +1601,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             "_backward_pre_hooks",
             "_forward_hooks_with_kwargs",
             "_forward_hooks",
+            "_forward_hooks_always_called",
             "_forward_pre_hooks_with_kwargs",
             "_forward_pre_hooks",
         ):
@@ -1622,13 +1624,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
+                    if (
+                        self.source
+                        and isinstance(hooks_dict, collections.OrderedDict)
+                        and name.startswith("_forward_")
+                    ):
+                        hooks_vt_cls = variables.NNModuleHooksDictVariable
                     return hooks_vt_cls({}, source=hooks_source)
 
-        # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
-        # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
-        # different nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
-        # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
-        # NNModuleHooksDictVariable (a subclass of ConstDictVariable) to avoid any guard on the keys.
+        # Hook IDs differ across equivalent module instances (RemovableHandle;
+        # https://github.com/pytorch/pytorch/issues/125836). Track them lazily so
+        # dispatch can reuse graphs while code observing IDs reads or guards them.
         if (
             self.source
             and name
@@ -1637,6 +1643,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 "_forward_pre_hooks",
                 "_forward_hooks_with_kwargs",
                 "_forward_hooks",
+                "_forward_hooks_always_called",
             )
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
@@ -1647,13 +1654,19 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             def build_key_value(
                 i: int, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
-                # Make key sourceless to avoid any guard on it
-                key = VariableTracker.build(tx, k)
-
-                # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
-                # value. This removes the reliance on the actual key value.
+            ) -> tuple[HashableTracker, VariableTracker]:
+                # Read IDs from their storage position when returned; specialize
+                # only when the traced code observes their value (e.g. repr(id)).
                 source_key = ConstDictKeySource(hooks_dict_source, i)
+                # Hash existing keys without specializing their sourced values;
+                # hashing a key in user code must still realize and guard it.
+                key = HashableTracker(
+                    LazyVariableTracker.create(k, source_key, tx=tx),
+                    precomputed_hash=hash(k) if type(k) is int else None,
+                )
+
+                # Access values by storage position too, so equivalent modules
+                # can share a graph despite having different hook IDs.
                 source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value

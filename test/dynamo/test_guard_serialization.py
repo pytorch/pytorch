@@ -4882,6 +4882,46 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
+    @parametrize("flag_name", ["with_kwargs", "always_call"])
+    def test_nn_module_hook_membership(self, flag_name):
+        def hook(module, args, *rest):
+            return rest[-1] + 1
+
+        def make_module(flags):
+            module = torch.nn.Identity()
+            for flag in flags:
+                module.register_forward_hook(hook, **{flag_name: flag})
+            return module
+
+        def fn(x, module):
+            flags = getattr(
+                module,
+                "_forward_hooks_with_kwargs"
+                if flag_name == "with_kwargs"
+                else "_forward_hooks_always_called",
+            )
+            return x + sum(
+                index + 1
+                for index, (key, _) in enumerate(module._forward_hooks.items())
+                if key in flags
+            )
+
+        x = torch.ones(2)
+        module = make_module((False, True))
+        ref, loaded = self._test_serialization(
+            ("NN_MODULE_HOOKS_DICT_CONTAINS", "ORDERED_DICT_ORDER_MATCH"), fn, x, module
+        )
+        for flags in ((False, True), (True, False)):
+            self._test_check_fn(
+                ref,
+                loaded,
+                {"x": x, "module": make_module(flags)},
+                flags == (False, True),
+            )
+
+        module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
+        self._test_check_fn(ref, loaded, {"x": x, "module": module}, False)
+
     @parametrize("reordered", [False, True])
     def test_ordered_dict_iteration_order(self, reordered):
         def fn(x, mapping):

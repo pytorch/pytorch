@@ -47,6 +47,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstDictKeySource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
@@ -598,6 +599,12 @@ class ConstDictVariable(VariableTracker):
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        if not self.items and isinstance(item, variables.LazyConstantVariable):
+            # These primitive types hash without side effects. Empty global hook
+            # flag dictionaries must not specialize a module's current hook ID.
+            item.python_type()
+            self.install_dict_keys_match_guard()
+            return ConstantVariable.create(False)
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
@@ -1369,8 +1376,12 @@ class MappingProxyVariable(VariableTracker):
 
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
-    # Avoid specializing hook IDs during normal module dispatch.
+    # Defer hook-ID guards so equivalent modules can reuse normal hook dispatch.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
+    def is_python_constant(self) -> bool:
+        # Empty hook dictionaries contain no IDs to specialize.
+        return not self.items
+
     def install_dict_keys_match_guard(self) -> None:
         pass
 
@@ -1394,14 +1405,41 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
             )
             install_guard(self.make_guard(guard))
 
-    def install_dict_contains_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: HashableTracker,
-        *,
-        key_present: bool | None = None,
-    ) -> None:
-        pass
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        if not self.items and isinstance(item, variables.LazyConstantVariable):
+            item.python_type()
+            if self.source:
+                install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return ConstantVariable.create(False)
+        source = item.source
+        if (
+            isinstance(source, ConstDictKeySource)
+            and isinstance(source.base, AttrSource)
+            and isinstance(self.source, AttrSource)
+            and source.base.base == self.source.base
+            and not tx.output.side_effects.is_modified(self)
+        ):
+            key = _get_literal_key(item)
+            keys = [_get_literal_key(k.vt) for k in self.items]
+            if type(key) is int and all(type(k) is int for k in keys):
+                item.python_type()
+                for stored_key in self.items:
+                    stored_key.vt.python_type()
+                # Normal hook dispatch tests an ID against the same module's
+                # kwargs/always-call flags. Guard that relationship, not the ID.
+                install_guard(
+                    self.source.base.make_guard(
+                        functools.partial(
+                            GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                            hooks_name=source.base.member,
+                            flags_name=self.source.member,
+                        )
+                    )
+                )
+                return ConstantVariable.create(key in keys)
+        return super().sq_contains_impl(tx, item)
 
 
 class DictViewVariable(VariableTracker):
