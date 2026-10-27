@@ -780,6 +780,12 @@ class _TestTunableOpJob:
         self.filename = ""
         self.settings: dict[str, Any] = {}
 
+    @property
+    def bmreq(self) -> Any:
+        # submit() inspects the job's request to pick the device; the wrapper
+        # has to look like the job it stands in for.
+        return self.job.bmreq
+
     def __call__(self) -> float:
         import json
         from unittest import mock
