@@ -2757,8 +2757,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: frac_out
-    MPS: frac_out_mps
+    CPU, CUDA, MPS, XPU: frac_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: frac_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: frac_sparse_csr_out
   tags: pointwise
@@ -5366,20 +5365,18 @@
 - func: logit(Tensor self, float? eps=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, MTIA, XPU: logit
-    MPS: logit_mps
+    CPU, CUDA, MPS, MTIA, XPU: logit
   tags: pointwise
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: logit_
+    CPU, CUDA, MPS, XPU: logit_
   tags: pointwise
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: logit_out
-    MPS: logit_out_mps
+    CPU, CUDA, MPS, XPU: logit_out
   tags: pointwise
 
 - func: sin(Tensor self) -> Tensor
@@ -9724,8 +9721,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: signbit_out
-    MPS: signbit_out_mps
+    CPU, CUDA, MPS, XPU: signbit_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: signbit_sparse_csr_out
   tags: pointwise
@@ -15831,7 +15827,7 @@
 - func: special_legendre_polynomial_p.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA, XPU: special_legendre_polynomial_p_out
+    CPU, CUDA, MPS, XPU: special_legendre_polynomial_p_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
