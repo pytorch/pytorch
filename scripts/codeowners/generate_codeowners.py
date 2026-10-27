@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "pyyaml==6.0.2",
+# ]
+# ///
 """Generate CODEOWNERS from OWNERSHIP.yaml.
 
 usage: generate_codeowners.py [--check | --lintrunner]
@@ -16,6 +22,8 @@ import yaml
 
 SECTION_MARKER = "# Grouped review-surface definitions:"
 LINTER_CODE = "CODEOWNERS_GENERATED"
+TOP_LEVEL_KEYS = {"oncall_queues", "planned_labels", "sections", "section_notes", "ownership"}
+GROUP_KEYS = {"name", "labels", "owners", "section", "paths"}
 
 
 @dataclass(frozen=True)
@@ -47,37 +55,129 @@ class OwnershipFile:
     groups: tuple[LabelGroup, ...]
 
 
-def parse_path_rule(entry) -> PathRule:
+def string_list(value, *, where: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise ValueError(f"{where} must be a list of non-empty strings, got {value!r}")
+    return tuple(value)
+
+
+def mapping(value, *, where: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{where} must be a mapping, got {value!r}")
+    return value
+
+
+def parse_path_rule(entry, *, where: str) -> PathRule:
     if isinstance(entry, str):
-        return PathRule(entry, ())
-    ((path, notify),) = entry.items()
-    return PathRule(path, tuple(notify))
+        path, notify = entry, ()
+    elif isinstance(entry, dict) and len(entry) == 1:
+        ((path, handles),) = entry.items()
+        notify = string_list(handles, where=f"{where} {path}")
+        if not notify:
+            raise ValueError(f"{where} {path}: write a quiet path as a bare string")
+    else:
+        raise ValueError(f"{where}: expected '/path' or '/path: [handles]', got {entry!r}")
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise ValueError(f"{where}: path must start with '/', got {path!r}")
+    return PathRule(path, notify)
 
 
-def load_ownership(path: Path) -> OwnershipFile:
-    document = yaml.safe_load(path.read_text())
-    names = [entry.get("name") for entry in document["ownership"]]
-    if None in names:
-        raise ValueError("every OWNERSHIP.yaml entry needs a `name`")
+def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
+    entry = mapping(entry, where="ownership entry")
+    name = entry.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"every ownership entry needs a `name`, got {entry!r}")
+    where = f"ownership entry {name!r}"
+    unknown = set(entry) - GROUP_KEYS
+    if unknown:
+        raise ValueError(f"{where}: unknown keys {sorted(unknown)}")
+    missing = {"owners", "section", "paths"} - set(entry)
+    if missing:
+        raise ValueError(f"{where}: missing keys {sorted(missing)}")
+    labels = string_list(entry.get("labels", []), where=f"{where} labels")
+    owners = string_list(entry["owners"], where=f"{where} owners")
+    if owners and not labels:
+        raise ValueError(f"{where}: a group without labels can't have owners")
+    if entry["section"] not in sections:
+        raise ValueError(f"{where}: section {entry['section']!r} is not in `sections`")
+    if not isinstance(entry["paths"], list) or not entry["paths"]:
+        raise ValueError(f"{where}: paths must be a non-empty list")
+    return LabelGroup(
+        name=name,
+        labels=labels,
+        owners=owners,
+        section=entry["section"],
+        paths=tuple(parse_path_rule(rule, where=where) for rule in entry["paths"]),
+    )
+
+
+def check_consistency(ownership: OwnershipFile) -> None:
+    """Cross-entry rules: unique names and label sets, and a consistent oncall table."""
+    names = [group.name for group in ownership.groups]
     duplicates = sorted({name for name in names if names.count(name) > 1})
     if duplicates:
         raise ValueError(f"duplicate OWNERSHIP.yaml names: {', '.join(duplicates)}")
-    return OwnershipFile(
-        oncall_queues={k: tuple(v) for k, v in document["oncall_queues"].items()},
-        planned_labels=tuple(document["planned_labels"]),
-        sections=tuple(document["sections"]),
-        section_notes={k: tuple(v) for k, v in document["section_notes"].items()},
-        groups=tuple(
-            LabelGroup(
-                name=entry["name"],
-                labels=tuple(entry.get("labels", ())),
-                owners=tuple(entry.get("owners", ())),
-                section=entry["section"],
-                paths=tuple(map(parse_path_rule, entry["paths"])),
+    label_sets = {}
+    for group in ownership.groups:
+        if group.labels:
+            key = frozenset(group.labels)
+            if key in label_sets:
+                raise ValueError(
+                    f"entries {label_sets[key]!r} and {group.name!r} have the same labels"
+                )
+            label_sets[key] = group.name
+
+    oncall_of = {}
+    for oncall, modules in ownership.oncall_queues.items():
+        for module in modules:
+            if module in oncall_of:
+                raise ValueError(f"{module!r} is listed under two oncall queues")
+            oncall_of[module] = oncall
+    used_labels = {label for group in ownership.groups for label in group.labels}
+    stale = sorted(set(oncall_of) - used_labels)
+    if stale:
+        raise ValueError(f"oncall_queues lists labels no entry uses: {', '.join(stale)}")
+    for group in ownership.groups:
+        implied = {oncall_of[label] for label in group.labels if label in oncall_of}
+        redundant = sorted(implied & set(group.labels))
+        if redundant:
+            raise ValueError(
+                f"ownership entry {group.name!r}: {', '.join(redundant)} is implied by "
+                "its module labels; drop it (see oncall_queues)"
             )
-            for entry in document["ownership"]
-        ),
+
+
+def load_ownership(path: Path) -> OwnershipFile:
+    """Load and validate OWNERSHIP.yaml; every problem is a ValueError."""
+    try:
+        document = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as error:
+        raise ValueError(f"not valid YAML: {error}") from error
+    document = mapping(document, where="OWNERSHIP.yaml")
+    if set(document) != TOP_LEVEL_KEYS:
+        raise ValueError(f"top-level keys must be {sorted(TOP_LEVEL_KEYS)}, got {sorted(document)}")
+    sections = string_list(document["sections"], where="sections")
+    section_notes = {
+        section: string_list(notes, where=f"section_notes {section}")
+        for section, notes in mapping(document["section_notes"], where="section_notes").items()
+    }
+    unknown_notes = sorted(set(section_notes) - set(sections))
+    if unknown_notes:
+        raise ValueError(f"section_notes for sections not in `sections`: {unknown_notes}")
+    if not isinstance(document["ownership"], list):
+        raise ValueError("ownership must be a list")
+    ownership = OwnershipFile(
+        oncall_queues={
+            oncall: string_list(modules, where=f"oncall_queues {oncall}")
+            for oncall, modules in mapping(document["oncall_queues"], where="oncall_queues").items()
+        },
+        planned_labels=string_list(document["planned_labels"], where="planned_labels"),
+        sections=sections,
+        section_notes=section_notes,
+        groups=tuple(parse_group(entry, sections=sections) for entry in document["ownership"]),
     )
+    check_consistency(ownership)
+    return ownership
 
 
 def handle(name: str) -> str:
@@ -96,6 +196,14 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         f"#     {oncall}: {', '.join(m.removeprefix('module: ') for m in modules)}"
         for oncall, modules in ownership.oncall_queues.items()
     ]
+    planned = (
+        [
+            "# - Labels planned but not yet created on GitHub (issues can't be routed to",
+            f"#   them until they exist): {', '.join(ownership.planned_labels)}",
+        ]
+        if ownership.planned_labels
+        else []
+    )
     return [
         "# This file is generated from OWNERSHIP.yaml by",
         "# scripts/codeowners/generate_codeowners.py. Edit OWNERSHIP.yaml and rerun",
@@ -111,20 +219,23 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         "# - Active rules name who gets review requests. A commented rule adds no",
         "#   notification of its own; the path follows the last matching active rule,",
         "#   if there is one. Commenting a rule says nothing about ownership.",
-        '# - An "# owner:" line records the group meant to own the paths below it, up',
-        '#   to the next "# owner:" or "# label:" line or the end of the section. These',
-        "#   lines are informational: nothing consumes them yet, and they don't change",
-        '#   who is notified. "none" means no owning group is recorded yet.',
+        '# - The "# owner:" line directly below a "# label:" line records the group',
+        "#   meant to own every path in that label block. These lines are",
+        "#   informational: nothing consumes them yet, and they don't change who is",
+        '#   notified. "none" means no owning group is recorded yet. Everyone an active',
+        "#   rule in the block notifies must also be on that owner line.",
         "# - Sections are ordered from broad defaults to narrower overrides.",
         '# - A "# label:" line names the GitHub issue/PR labels for the paths below',
         '#   it, up to the next "# label:" line or the end of the section. Paths',
         '#   before the first "# label:" line in a section have no single label.',
+        "# - A label list identifies one ownership area, so each label list (compared",
+        '#   as a set) appears on exactly one "# label:" line. When a list extends a',
+        "#   sibling's, the shared labels come first and the distinguishing label last.",
         "# - Oncall queues are implied by module labels and are not repeated on label",
         "#   lines; a label line keeps an oncall only when none of its modules implies",
         "#   it:",
         *oncall_map,
-        "# - Labels planned but not yet created on GitHub (issues can't be routed to",
-        f"#   them until they exist): {', '.join(ownership.planned_labels)}",
+        *planned,
         "#",
         "# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.",
         "",
@@ -133,9 +244,9 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         "# Every tracked path resolves to one review surface. Every listed pattern must",
         "# match at least one committed path. The fast lintrunner set enforces these",
         "# rules, declared sections, valid owners, source order, no duplicate or",
-        '# ineffective patterns, and the "# owner:" rules: every "# label:" line is',
-        '# directly followed by one "# owner:" line, a label list has one owner list,',
-        "# and an active rule's handles appear on its block's owner line.",
+        '# ineffective patterns, and the "# label:" and "# owner:" rules: each label',
+        '# list appears on one "# label:" line, which is directly followed by one',
+        "# \"# owner:\" line, and an active rule's handles appear on its block's owner line.",
         "#",
         "# Sections are kept temporarily so scripts/codeowners/owners.py keeps its",
         "# section-name fallback; ownership is recorded per label block, not per section.",
@@ -148,13 +259,17 @@ def render_header(ownership: OwnershipFile) -> list[str]:
 
 
 def contains(broad: str, narrow: str) -> bool:
-    """True if every path matching `narrow` also matches the directory pattern `broad`."""
-    return (
-        broad.endswith("/")
-        and "*" not in broad
-        and narrow != broad
-        and narrow.startswith(broad)
-    )
+    """True if every path matching `narrow` also matches `broad`.
+
+    Only literal patterns are compared: a directory (`/a/`) or a path without
+    wildcards (`/a/b`, which also covers `/a/b/...`). Patterns with `*` are
+    left to the taxonomy lint, which checks the generated order against the
+    committed tree.
+    """
+    if "*" in broad or narrow == broad:
+        return False
+    prefix = broad if broad.endswith("/") else broad + "/"
+    return narrow.startswith(prefix)
 
 
 def order_blocks(groups: list[LabelGroup]) -> list[LabelGroup]:
@@ -187,12 +302,30 @@ def order_blocks(groups: list[LabelGroup]) -> list[LabelGroup]:
     return ordered
 
 
+def check_unlabeled_order(groups: list[LabelGroup]) -> None:
+    """Paths without labels are written first in a section, so none may sit inside a labeled pattern."""
+    labeled = [group for group in groups if group.labels]
+    for group in groups:
+        if group.labels:
+            continue
+        for rule in group.paths:
+            for other in labeled:
+                broader = next((r for r in other.paths if contains(r.path, rule.path)), None)
+                if broader:
+                    raise ValueError(
+                        f"{rule.path} in {group.name!r} sits inside {broader.path} in "
+                        f"{other.name!r}, but paths without labels are written first in "
+                        "their section; give it a label group or another section"
+                    )
+
+
 def render_codeowners(ownership: OwnershipFile) -> str:
     lines = render_header(ownership)
     for section in ownership.sections:
         lines.append(f"# [{section}]")
         lines.extend(ownership.section_notes.get(section, ()))
         groups = [group for group in ownership.groups if group.section == section]
+        check_unlabeled_order(groups)
         for group in groups:
             if not group.labels:
                 lines.extend(map(render_rule, group.paths))
@@ -204,15 +337,17 @@ def render_codeowners(ownership: OwnershipFile) -> str:
     return "\n".join(lines) + "\n"
 
 
-def emit_lint_error(*, description: str, original: str | None, replacement: str | None) -> None:
+def emit_lint_error(
+    *, path: str, description: str, original: str | None, replacement: str | None
+) -> None:
     """Emit a lintrunner message; with a replacement, `lintrunner -a` applies it."""
     lint_message = {
-        "path": "CODEOWNERS",
+        "path": path,
         "line": None,
         "char": None,
         "code": LINTER_CODE,
         "severity": "error",
-        "name": "stale-codeowners",
+        "name": "stale-codeowners" if replacement is not None else "invalid-ownership",
         "original": original,
         "replacement": replacement,
         "description": description,
@@ -239,18 +374,20 @@ def main() -> int:
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(
+                path="OWNERSHIP.yaml",
                 description=f"OWNERSHIP.yaml is invalid: {error}",
                 original=None,
                 replacement=None,
             )
             return 0
-        print(f"error: {error}", file=sys.stderr)
+        print(f"error: OWNERSHIP.yaml is invalid: {error}", file=sys.stderr)
         return 1
     codeowners = repo / "CODEOWNERS"
     current = codeowners.read_text()
     if args.lintrunner:
         if current != generated:
             emit_lint_error(
+                path="CODEOWNERS",
                 description=(
                     "CODEOWNERS is generated from OWNERSHIP.yaml. Run "
                     "`python scripts/codeowners/generate_codeowners.py` or "

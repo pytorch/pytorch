@@ -408,8 +408,8 @@ ownership:
     section: python_nn_api
     paths:
       - /torch/nn/: [albanD, jbschlosser]
-  - name: dsl_native_ops_nn
-    labels: ["module: nn", "module: dsl-native-ops"]
+  - name: nn_dsl_native_ops
+    labels: ["module: dsl-native-ops", "module: nn"]
     owners: [drisspg, pearu, slayton58]
     section: python_nn_api
     paths:
@@ -640,8 +640,8 @@ ownership:
       - /ubsan.supp
       - /ufunc_defs.bzl
       - /version.txt
-  - name: third_party_build
-    labels: ["module: build", "module: third_party"]
+  - name: build_third_party
+    labels: ["module: third_party", "module: build"]
     owners: []
     section: third_party_core_build_deps
     paths:
@@ -678,15 +678,20 @@ ownership:
     section: third_party_backend_deps
     paths:
       - /third_party/xpu.txt: [EikanWang, gujinghui]
-  - name: third_party_serialization
-    labels: ["module: serialization", "module: third_party"]
+  - name: serialization_third_party
+    labels: ["module: third_party", "module: serialization"]
     owners: []
     section: third_party_serialization_schema
     paths:
       - /third_party/flatbuffers
       - /third_party/miniz-3.0.2/
-      - /third_party/onnx
       - /third_party/protobuf
+  - name: onnx_third_party
+    labels: ["module: third_party", "module: onnx"]
+    owners: []
+    section: third_party_serialization_schema
+    paths:
+      - /third_party/onnx
   - name: benchmark
     labels: ["module: benchmark"]
     owners: []
@@ -749,8 +754,8 @@ ownership:
       - /torch/distributed/tensor/placement_types.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
-  - name: rocm_build
-    labels: ["module: build", "module: rocm"]
+  - name: build_rocm
+    labels: ["module: rocm", "module: build"]
     owners: [jeffdaily, jithunnair-amd]
     section: infra_developer_tools
     paths:
@@ -824,8 +829,8 @@ ownership:
       - /benchmarks/sparse/
       - /benchmarks/static_runtime/
       - /test/test_functional_autograd_benchmark.py
-  - name: benchmark_models
-    labels: ["module: models", "module: benchmark"]
+  - name: models_benchmark
+    labels: ["module: benchmark", "module: models"]
     owners: []
     section: benchmark_models
     paths:

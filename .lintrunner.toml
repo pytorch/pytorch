@@ -1092,7 +1092,11 @@ include_patterns = [
     'scripts/codeowners/generate_codeowners.py',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
     'scripts/codeowners/generate_codeowners.py',
     '--lintrunner',
 ]

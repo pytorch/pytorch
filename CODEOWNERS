@@ -12,14 +12,18 @@
 # - Active rules name who gets review requests. A commented rule adds no
 #   notification of its own; the path follows the last matching active rule,
 #   if there is one. Commenting a rule says nothing about ownership.
-# - An "# owner:" line records the group meant to own the paths below it, up
-#   to the next "# owner:" or "# label:" line or the end of the section. These
-#   lines are informational: nothing consumes them yet, and they don't change
-#   who is notified. "none" means no owning group is recorded yet.
+# - The "# owner:" line directly below a "# label:" line records the group
+#   meant to own every path in that label block. These lines are
+#   informational: nothing consumes them yet, and they don't change who is
+#   notified. "none" means no owning group is recorded yet. Everyone an active
+#   rule in the block notifies must also be on that owner line.
 # - Sections are ordered from broad defaults to narrower overrides.
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
 #   before the first "# label:" line in a section have no single label.
+# - A label list identifies one ownership area, so each label list (compared
+#   as a set) appears on exactly one "# label:" line. When a list extends a
+#   sibling's, the shared labels come first and the distinguishing label last.
 # - Oncall queues are implied by module labels and are not repeated on label
 #   lines; a label line keeps an oncall only when none of its modules implies
 #   it:
@@ -36,9 +40,9 @@
 # Every tracked path resolves to one review surface. Every listed pattern must
 # match at least one committed path. The fast lintrunner set enforces these
 # rules, declared sections, valid owners, source order, no duplicate or
-# ineffective patterns, and the "# owner:" rules: every "# label:" line is
-# directly followed by one "# owner:" line, a label list has one owner list,
-# and an active rule's handles appear on its block's owner line.
+# ineffective patterns, and the "# label:" and "# owner:" rules: each label
+# list appears on one "# label:" line, which is directly followed by one
+# "# owner:" line, and an active rule's handles appear on its block's owner line.
 #
 # Sections are kept temporarily so scripts/codeowners/owners.py keeps its
 # section-name fallback; ownership is recorded per label block, not per section.
@@ -824,7 +828,7 @@
 # label: module: nn
 # owner: @albanD @jbschlosser
 /torch/nn/ @albanD @jbschlosser
-# label: module: nn, module: dsl-native-ops
+# label: module: dsl-native-ops, module: nn
 # owner: @drisspg @pearu @slayton58
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 # label: module: nn, module: nn.utils.parametrize
@@ -1070,7 +1074,7 @@
 # /version.txt
 #
 # [third_party_core_build_deps]
-# label: module: build, module: third_party
+# label: module: third_party, module: build
 # owner: none
 # /.gitmodules
 # /requirements-build.txt
@@ -1103,12 +1107,14 @@
 /third_party/xpu.txt @EikanWang @gujinghui
 #
 # [third_party_serialization_schema]
-# label: module: serialization, module: third_party
+# label: module: third_party, module: serialization
 # owner: none
 # /third_party/flatbuffers
 # /third_party/miniz-3.0.2/
-# /third_party/onnx
 # /third_party/protobuf
+# label: module: third_party, module: onnx
+# owner: none
+# /third_party/onnx
 #
 # [benchmark_compiler]
 # label: module: benchmark
@@ -1161,7 +1167,7 @@
 # /binaries/
 # /scripts/
 # /tools/
-# label: module: build, module: rocm
+# label: module: rocm, module: build
 # owner: @jeffdaily @jithunnair-amd
 /tools/amd_build/ @jeffdaily @jithunnair-amd
 #
@@ -1242,7 +1248,7 @@
 # /test/test_functional_autograd_benchmark.py
 #
 # [benchmark_models]
-# label: module: models, module: benchmark
+# label: module: benchmark, module: models
 # owner: none
 # /benchmarks/compare-fastrnn-results.py
 # /benchmarks/data/
