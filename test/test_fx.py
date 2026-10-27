@@ -8,6 +8,7 @@ import contextlib
 import copy
 import gc
 import functools
+import importlib
 import inspect
 import io
 import math
@@ -15,11 +16,13 @@ import numbers
 import operator
 import os
 import pickle
+import subprocess
 import sys
 import traceback
 import types
 import typing
 import unittest
+import unittest.mock
 import weakref
 import warnings
 from math import sqrt
@@ -84,6 +87,7 @@ from torch.testing._internal.common_utils import (
     IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
+    TestCase,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -5032,6 +5036,562 @@ def run_getitem_target():
         TestFX().getitem_inner()
     finally:
         _wrapped_methods_to_patch.pop()
+
+
+class TestFXLazyImports(TestCase):
+    """FX on a PEP 690-style lazy-import runtime, faked unless the runtime has it."""
+
+    def _fake_lazy_globals(self, lazy, on_resolve, **values):
+        """Globals whose names bound to ``lazy`` resolve, PEP 690-style, on first
+        read, calling ``on_resolve(globals, name)`` to bind them."""
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                if name in self and dict.__getitem__(self, name) is lazy:
+                    on_resolve(self, name)
+                return super().__getitem__(name)
+
+        return Globals(__builtins__=builtins, **values)
+
+    def _patch_is_lazy_import(self, lazy):
+        return unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: name in d and dict.__getitem__(d, name) is lazy,
+            create=True,
+        )
+
+    def _resolve_to_sqrt(self, record):
+        def on_resolve(frame_dict, name):
+            record(frame_dict)
+            dict.__setitem__(frame_dict, name, math.sqrt)
+
+        return on_resolve
+
+    def _record_leaf(self, seen):
+        return lambda frame_dict: seen.append(dict.get(frame_dict, "leaf"))
+
+    @contextlib.contextmanager
+    def _fake_wraps(self):
+        """Yields ``register(globals, name)``, which records a ``torch.fx.wrap(name)``
+        as a module body with those globals would; the records go on exit."""
+        from torch.fx._symbolic_trace import _wrapped_fns_to_patch
+
+        keys = []
+
+        def register(frame_dict, name):
+            keys.append((id(frame_dict), name))
+            _wrapped_fns_to_patch[keys[-1]] = frame_dict
+
+        try:
+            yield register
+        finally:
+            for key in keys:
+                _wrapped_fns_to_patch.pop(key, None)
+
+    def _resolve_registering_wrap(self, register, name, wrap_globals=None):
+        """A resolution whose module body runs ``torch.fx.wrap(name)`` (on a name of
+        ``wrap_globals``, by default its own globals) and binds the lazy name to 1."""
+
+        def on_resolve(frame_dict, lazy_name):
+            register(frame_dict if wrap_globals is None else wrap_globals, name)
+            dict.__setitem__(frame_dict, lazy_name, 1)
+
+        return on_resolve
+
+    def test_autowrap_resolves_lazy_imports_with_patches_reverted(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        lazy, seen = object(), []
+
+        def leaf(x):
+            return x
+
+        frame_dict = self._fake_lazy_globals(
+            lazy, self._resolve_to_sqrt(self._record_leaf(seen)), sqrt=lazy, leaf=leaf
+        )
+        with self._patch_is_lazy_import(lazy):
+            with _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", lambda x: x)
+                _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
+                self.assertEqual(seen, [leaf])
+                self.assertIsNot(dict.__getitem__(frame_dict, "leaf"), leaf)
+                self.assertIsNot(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
+    def test_autowrap_restores_patches_when_resolving_a_lazy_import_fails(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        lazy = object()
+
+        def leaf(x):
+            return x
+
+        def fail(frame_dict, name):
+            raise ImportError("module body failed")
+
+        frame_dict = self._fake_lazy_globals(lazy, fail, broken=lazy, leaf=leaf)
+
+        def patched(x):
+            return x
+
+        with self._patch_is_lazy_import(lazy):
+            with _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", patched)
+                with self.assertRaisesRegex(ImportError, "module body failed"):
+                    _autowrap_check(patcher, frame_dict, set())
+                self.assertIs(dict.__getitem__(frame_dict, "leaf"), patched)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
+    def test_wrap_resolves_a_lazily_imported_name_with_patches_reverted(self):
+        from torch.fx._symbolic_trace import _Patcher, _patch_wrapped_functions
+
+        lazy, seen = object(), []
+
+        def leaf(x):
+            return x
+
+        frame_dict = self._fake_lazy_globals(
+            lazy, self._resolve_to_sqrt(self._record_leaf(seen)), bar=lazy, leaf=leaf
+        )
+        with self._fake_wraps() as register, self._patch_is_lazy_import(lazy):
+            register(frame_dict, "bar")
+            with _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", lambda x: x)
+                _patch_wrapped_functions(patcher)
+                self.assertEqual(seen, [leaf])
+                self.assertIsNot(dict.__getitem__(frame_dict, "bar"), math.sqrt)
+            self.assertIs(dict.__getitem__(frame_dict, "bar"), math.sqrt)
+
+    def test_lazy_import_resolution_leaves_a_suspended_outer_patcher_alone(self):
+        from torch.fx._symbolic_trace import (
+            _autowrap_check,
+            _maybe_revert_all_patches,
+            _new_patcher,
+        )
+
+        lazy, seen = object(), []
+
+        def leaf(x):
+            return x
+
+        def patched(x):
+            return x
+
+        outer_dict = {"leaf": leaf}
+        frame_dict = self._fake_lazy_globals(
+            lazy, self._resolve_to_sqrt(lambda frame_dict: seen.append(True)), sqrt=lazy
+        )
+        with self._patch_is_lazy_import(lazy):
+            with _new_patcher() as outer:
+                outer.patch(outer_dict, "leaf", patched)
+                with _maybe_revert_all_patches():
+                    with _new_patcher() as inner:
+                        _autowrap_check(inner, frame_dict, set())
+                    self.assertIs(outer_dict["leaf"], leaf)
+                self.assertIs(outer_dict["leaf"], patched)
+        self.assertEqual(len(seen), 1)
+
+    def test_symbolic_trace_registers_wraps_that_resolving_a_lazy_global_runs(self):
+        lazy = object()
+
+        def leaf_fn(x):
+            return x * 3
+
+        with self._fake_wraps() as register, self._patch_is_lazy_import(lazy):
+            frame_dict = self._fake_lazy_globals(
+                lazy,
+                self._resolve_registering_wrap(register, "leaf_fn"),
+                helper=lazy,
+                leaf_fn=leaf_fn,
+            )
+            exec("def f(x):\n    return leaf_fn(x) + helper\n", frame_dict)
+            gm = torch.fx.symbolic_trace(dict.__getitem__(frame_dict, "f"))
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(leaf_fn, targets)
+
+    def test_nested_symbolic_trace_resolves_lazy_globals_with_every_patch_reverted(
+        self,
+    ):
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        lazy, seen = object(), []
+
+        def f(x):
+            return x * 2
+
+        inner_fn = types.FunctionType(
+            f.__code__,
+            self._fake_lazy_globals(
+                lazy,
+                self._resolve_to_sqrt(
+                    lambda frame_dict: seen.append(
+                        torch.nn.Module.__call__ is _orig_module_call
+                    )
+                ),
+                helper=lazy,
+            ),
+        )
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.symbolic_trace(inner_fn)
+                return x + 1
+
+        with self._patch_is_lazy_import(lazy):
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+
+    def _root_with_submodule_forward(self, frame_dict, source):
+        exec(source, frame_dict)
+
+        class Sub(torch.nn.Module):
+            forward = dict.__getitem__(frame_dict, "forward")
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+
+            def forward(self, x):
+                return self.sub(x)
+
+        return Root()
+
+    def test_submodule_lazy_globals_resolve_with_trace_patches_reverted(self):
+        from torch.fx._symbolic_trace import _orig_module_call, _orig_module_getattr
+
+        lazy, seen = object(), []
+
+        def on_resolve(frame_dict, name):
+            seen.append(
+                (
+                    torch.nn.Module.__call__ is _orig_module_call,
+                    torch.nn.Module.__getattr__ is _orig_module_getattr,
+                )
+            )
+            dict.__setitem__(frame_dict, name, 1)
+
+        root = self._root_with_submodule_forward(
+            self._fake_lazy_globals(lazy, on_resolve, helper=lazy),
+            "def forward(self, x):\n    return x + helper\n",
+        )
+        with self._patch_is_lazy_import(lazy):
+            gm = torch.fx.symbolic_trace(root)
+        self.assertEqual(seen, [(True, True)])
+        x = torch.randn(3)
+        torch.testing.assert_close(gm(x), x + 1)
+        self.assertIs(torch.nn.Module.__call__, _orig_module_call)
+        self.assertIs(torch.nn.Module.__getattr__, _orig_module_getattr)
+
+    def test_submodule_lazy_global_registers_its_wraps_for_the_trace(self):
+        lazy = object()
+
+        def leaf_fn(x):
+            return x * 3
+
+        with self._fake_wraps() as register, self._patch_is_lazy_import(lazy):
+            frame_dict = self._fake_lazy_globals(
+                lazy,
+                self._resolve_registering_wrap(register, "leaf_fn"),
+                helper=lazy,
+                leaf_fn=leaf_fn,
+            )
+            root = self._root_with_submodule_forward(
+                frame_dict, "def forward(self, x):\n    return leaf_fn(x) + helper\n"
+            )
+            gm = torch.fx.symbolic_trace(root)
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(leaf_fn, targets)
+
+    def test_symbolic_trace_with_lazy_imports_enabled(self):
+        # Only PEP 690-style lazy-import builds run this (Meta's internal Python,
+        # where FX traces torchrec); every OSS CI Python skips it.
+        if getattr(importlib, "set_lazy_imports", None) is None:
+            self.skipTest("this Python has no PEP 690-style lazy imports")
+        script = """\
+import importlib
+import os
+import sys
+import tempfile
+
+import torch
+
+
+class TorchStaysEager:
+    def __contains__(self, name):
+        return name == "torch" or name.startswith("torch.")
+
+
+importlib.set_lazy_imports(True, excluding=TorchStaysEager())
+sources = {
+    # Postponed annotations name a type only this module defines, as torchrec's do.
+    "fx_lazy_leaf": (
+        "from __future__ import annotations\\nimport torch\\n"
+        "LeafTensor = torch.Tensor\\n"
+        "def leaf(x: LeafTensor) -> LeafTensor:\\n    return x + 1\\n"
+        "torch.fx.wrap('leaf')\\n"
+    ),
+    # Scripted at import: run mid-trace, it would compile FX's wrapper of leaf.
+    "fx_lazy_scripted": (
+        "import torch\\nimport fx_lazy_leaf\\n"
+        "def uses_leaf(x: torch.Tensor) -> torch.Tensor:\\n"
+        "    return fx_lazy_leaf.leaf(x)\\n"
+        "scripted = torch.jit.script(uses_leaf)\\n"
+    ),
+    "fx_lazy_model": (
+        "import torch\\nimport fx_lazy_leaf\\nimport fx_lazy_scripted\\n"
+        "class M(torch.nn.Module):\\n"
+        "    def forward(self, x):\\n"
+        "        return fx_lazy_leaf.leaf(x) * 2\\n"
+    ),
+}
+with tempfile.TemporaryDirectory() as directory:
+    for name, source in sources.items():
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(source)
+    sys.path.insert(0, directory)
+    import fx_lazy_leaf
+    fx_lazy_leaf.leaf  # registers the wrap before tracing
+    import fx_lazy_model
+    model = fx_lazy_model.M
+    assert importlib.is_lazy_import(fx_lazy_model.__dict__, "fx_lazy_scripted")
+    gm = torch.fx.symbolic_trace(model())
+    assert any(n.target is fx_lazy_leaf.leaf for n in gm.graph.nodes), gm.graph
+    x = torch.randn(3)
+    assert torch.equal(sys.modules["fx_lazy_scripted"].scripted(x), x + 1)
+print("lazy trace ok")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("lazy trace ok", result.stdout)
+
+    def test_dynamo_style_revert_during_lazy_resolution_keeps_patches_suspended(self):
+        from torch.fx._symbolic_trace import (
+            _autowrap_check,
+            _maybe_revert_all_patches,
+            _new_patcher,
+        )
+
+        lazy, seen = object(), []
+
+        def leaf(x):
+            return x
+
+        def patched(x):
+            return x
+
+        patched_dict = {"leaf": leaf}
+
+        def compile_during_import(frame_dict, name):
+            # A module body that Dynamo compiles in as it is imported.
+            with _maybe_revert_all_patches():
+                pass
+            seen.append(patched_dict["leaf"])
+            dict.__setitem__(frame_dict, name, math.sqrt)
+
+        frame_dict = self._fake_lazy_globals(lazy, compile_during_import, sqrt=lazy)
+        with self._patch_is_lazy_import(lazy):
+            with _new_patcher() as patcher:
+                patcher.patch(patched_dict, "leaf", patched)
+                _autowrap_check(patcher, frame_dict, set())
+                self.assertEqual(seen, [leaf])
+                self.assertIs(patched_dict["leaf"], patched)
+        self.assertIs(patched_dict["leaf"], leaf)
+
+    def test_a_wrap_registered_inside_a_nested_trace_applies_to_the_outer_trace(self):
+        lazy = object()
+
+        def leaf_fn(x):
+            return x * 3
+
+        with self._fake_wraps() as register, self._patch_is_lazy_import(lazy):
+            frame_dict = self._fake_lazy_globals(
+                lazy,
+                self._resolve_registering_wrap(register, "leaf_fn"),
+                helper=lazy,
+                leaf_fn=leaf_fn,
+            )
+            exec("def inner(x):\n    return x + helper\n", frame_dict)
+            exec("def call_leaf(x):\n    return leaf_fn(x)\n", frame_dict)
+            inner_fn = dict.__getitem__(frame_dict, "inner")
+            call_leaf = dict.__getitem__(frame_dict, "call_leaf")
+
+            class Outer(torch.nn.Module):
+                def forward(self, x):
+                    torch.fx.symbolic_trace(inner_fn)
+                    return call_leaf(x)
+
+            gm = torch.fx.symbolic_trace(Outer())
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(leaf_fn, targets)
+
+    def test_a_nested_trace_resolves_a_lazy_wrap_target_through_its_own_patchers(
+        self,
+    ):
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        lazy, seen, inner_graphs = object(), [], []
+
+        def bar_fn(x):
+            return x * 3
+
+        def resolve_bar(frame_dict, name):
+            seen.append(torch.nn.Module.__call__ is _orig_module_call)
+            dict.__setitem__(frame_dict, name, bar_fn)
+
+        # Another module's globals, where bar is still lazy.
+        bar_globals = self._fake_lazy_globals(lazy, resolve_bar, bar=lazy)
+        exec("def call_bar(x):\n    return bar(x)\n", bar_globals)
+        call_bar = dict.__getitem__(bar_globals, "call_bar")
+
+        with self._fake_wraps() as register, self._patch_is_lazy_import(lazy):
+            # A module body running torch.fx.wrap("bar") on that still-lazy bar.
+            frame_dict = self._fake_lazy_globals(
+                lazy,
+                self._resolve_registering_wrap(register, "bar", bar_globals),
+                helper=lazy,
+            )
+            exec(
+                "def forward(self, x):\n    return self.relu(x + helper)\n", frame_dict
+            )
+
+            class Inner(torch.nn.Module):
+                forward = dict.__getitem__(frame_dict, "forward")
+
+                def __init__(self):
+                    super().__init__()
+                    self.relu = torch.nn.ReLU()
+
+            class Outer(torch.nn.Module):
+                def forward(self, x):
+                    inner_graphs.append(torch.fx.symbolic_trace(Inner()).graph)
+                    return call_bar(x)
+
+            gm = torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+        inner_modules = [
+            n.target for n in inner_graphs[0].nodes if n.op == "call_module"
+        ]
+        self.assertEqual(inner_modules, ["relu"])
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(bar_fn, targets)
+
+    def test_maybe_revert_all_patches_suspends_every_enclosing_trace(self):
+        from torch.fx._symbolic_trace import _maybe_revert_all_patches, _new_patcher
+
+        def leaf(x):
+            return x
+
+        def outer_patched(x):
+            return x
+
+        def inner_patched(x):
+            return x
+
+        outer_dict, inner_dict = {"leaf": leaf}, {"leaf": leaf}
+        with _new_patcher() as outer:
+            outer.patch(outer_dict, "leaf", outer_patched)
+            with _new_patcher() as inner:
+                inner.patch(inner_dict, "leaf", inner_patched)
+                with _maybe_revert_all_patches():
+                    self.assertIs(outer_dict["leaf"], leaf)
+                    self.assertIs(inner_dict["leaf"], leaf)
+                self.assertIs(outer_dict["leaf"], outer_patched)
+                self.assertIs(inner_dict["leaf"], inner_patched)
+        self.assertIs(outer_dict["leaf"], leaf)
+
+    def test_maybe_revert_all_patches_rejects_a_changed_current_patcher(self):
+        import torch.fx._symbolic_trace as symbolic_trace
+
+        with symbolic_trace._new_patcher() as patcher:
+            with self.assertRaisesRegex(AssertionError, "CURRENT_PATCHER was changed"):
+                with symbolic_trace._maybe_revert_all_patches():
+                    symbolic_trace.CURRENT_PATCHER = symbolic_trace._Patcher()
+            symbolic_trace.CURRENT_PATCHER = patcher
+
+    def test_lazy_module_bodies_run_without_the_fx_tracing_flag(self):
+        from torch.fx._symbolic_trace import _get_is_fx_tracing
+
+        lazy, seen = object(), []
+
+        def f(x):
+            return x * 2
+
+        traced_fn = types.FunctionType(
+            f.__code__,
+            self._fake_lazy_globals(
+                lazy,
+                self._resolve_to_sqrt(
+                    lambda frame_dict: seen.append(_get_is_fx_tracing())
+                ),
+                helper=lazy,
+            ),
+        )
+        with self._patch_is_lazy_import(lazy):
+            torch.fx.symbolic_trace(traced_fn)
+        self.assertEqual(seen, [False])
+        self.assertFalse(_get_is_fx_tracing())
+
+    def test_suspend_patches_reapplies_what_it_reverted_when_a_revert_fails(self):
+        from torch.fx._symbolic_trace import _Patcher, _suspend_patches
+
+        def leaf(x):
+            return x
+
+        def patched(x):
+            return x
+
+        frame_dict = {"leaf": leaf}
+        good, bad = _Patcher(), _Patcher()
+        good.patch(frame_dict, "leaf", patched)
+        with unittest.mock.patch.object(
+            bad, "revert_all_patches", side_effect=KeyError("gone")
+        ):
+            with self.assertRaises(KeyError):
+                with _suspend_patches([good, bad]):
+                    pass
+        self.assertIs(frame_dict["leaf"], patched)
+        self.assertTrue(good.applied)
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_dynamo_compiling_inside_nested_traces_sees_no_fx_patches(self):
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        seen = []
+
+        def backend(gm, example_inputs):
+            seen.append(torch.nn.Module.__call__ is _orig_module_call)
+            # Not gm itself: calling a module mid-trace goes to the tracer.
+            return gm.forward
+
+        compiled = torch.compile(lambda x: x.sin() + 1, backend=backend, fullgraph=True)
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(2)
+                torch.testing.assert_close(compiled(y), y.sin() + 1)
+                return x + 1
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.symbolic_trace(Inner())
+                return x * 2
+
+        gm = torch.fx.symbolic_trace(Outer())
+        # Dynamo compiled with neither trace's Module.__call__ patch in place.
+        self.assertEqual(seen, [True])
+        self.assertEqual(
+            [n.op for n in gm.graph.nodes], ["placeholder", "call_function", "output"]
+        )
 
 
 class TestFXCUDA(JitTestCase):
