@@ -1427,10 +1427,14 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x1_cow = torch._lazy_clone(x1)
         w1_cow = torch._lazy_clone(w1)
         b1_cow = torch._lazy_clone(b1)
+        x1_copy, w1_copy, b1_copy = x1_cow.clone(), w1_cow.clone(), b1_cow.clone()
         F.conv1d(x1_cow, w1_cow, b1_cow)
         self.assertTrue(torch._C._is_cow_tensor(x1_cow))
         self.assertTrue(torch._C._is_cow_tensor(w1_cow))
         self.assertTrue(torch._C._is_cow_tensor(b1_cow))
+        self.assertEqual(x1_cow, x1_copy)
+        self.assertEqual(w1_cow, w1_copy)
+        self.assertEqual(b1_cow, b1_copy)
 
         # 2D
         x2 = torch.randn(2, 4, 8, 8, device=device, dtype=dtype)
@@ -1439,10 +1443,14 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x2_cow = torch._lazy_clone(x2)
         w2_cow = torch._lazy_clone(w2)
         b2_cow = torch._lazy_clone(b2)
+        x2_copy, w2_copy, b2_copy = x2_cow.clone(), w2_cow.clone(), b2_cow.clone()
         F.conv2d(x2_cow, w2_cow, b2_cow)
         self.assertTrue(torch._C._is_cow_tensor(x2_cow))
         self.assertTrue(torch._C._is_cow_tensor(w2_cow))
         self.assertTrue(torch._C._is_cow_tensor(b2_cow))
+        self.assertEqual(x2_cow, x2_copy)
+        self.assertEqual(w2_cow, w2_copy)
+        self.assertEqual(b2_cow, b2_copy)
 
         # 3D
         x3 = torch.randn(2, 4, 4, 8, 8, device=device, dtype=dtype)
@@ -1451,17 +1459,53 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x3_cow = torch._lazy_clone(x3)
         w3_cow = torch._lazy_clone(w3)
         b3_cow = torch._lazy_clone(b3)
+        x3_copy, w3_copy, b3_copy = x3_cow.clone(), w3_cow.clone(), b3_cow.clone()
         F.conv3d(x3_cow, w3_cow, b3_cow)
         self.assertTrue(torch._C._is_cow_tensor(x3_cow))
         self.assertTrue(torch._C._is_cow_tensor(w3_cow))
         self.assertTrue(torch._C._is_cow_tensor(b3_cow))
+        self.assertEqual(x3_cow, x3_copy)
+        self.assertEqual(w3_cow, w3_copy)
+        self.assertEqual(b3_cow, b3_copy)
 
         # Without bias
         x2_nobias = torch._lazy_clone(x2)
         w2_nobias = torch._lazy_clone(w2)
+        x2_nobias_copy, w2_nobias_copy = x2_nobias.clone(), w2_nobias.clone()
         F.conv2d(x2_nobias, w2_nobias, None)
         self.assertTrue(torch._C._is_cow_tensor(x2_nobias))
         self.assertTrue(torch._C._is_cow_tensor(w2_nobias))
+        self.assertEqual(x2_nobias, x2_nobias_copy)
+        self.assertEqual(w2_nobias, w2_nobias_copy)
+
+    @dtypes(torch.float)
+    def test_conv_backward_cow_input(self, device, dtype):
+        grad = torch.randn(2, 8, 6, 6, device=device, dtype=dtype)
+        x = torch.randn(2, 4, 8, 8, device=device, dtype=dtype)
+        w = torch.randn(8, 4, 3, 3, device=device, dtype=dtype)
+        grad_cow = torch._lazy_clone(grad)
+        x_cow = torch._lazy_clone(x)
+        w_cow = torch._lazy_clone(w)
+        grad_copy, x_copy, w_copy = grad_cow.clone(), x_cow.clone(), w_cow.clone()
+        dx, dw, db = torch.ops.aten.convolution_backward(
+            grad_cow,
+            x_cow,
+            w_cow,
+            [8],
+            [1, 1],
+            [0, 0],
+            [1, 1],
+            False,
+            [0, 0],
+            1,
+            [True, True, True],
+        )
+        self.assertTrue(torch._C._is_cow_tensor(grad_cow))
+        self.assertTrue(torch._C._is_cow_tensor(x_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_cow))
+        self.assertEqual(grad_cow, grad_copy)
+        self.assertEqual(x_cow, x_copy)
+        self.assertEqual(w_cow, w_copy)
 
     @dtypes(torch.float)
     def test_deconv_cow_input(self, device, dtype):
@@ -1472,10 +1516,14 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x1_cow = torch._lazy_clone(x1)
         w1_cow = torch._lazy_clone(w1)
         b1_cow = torch._lazy_clone(b1)
+        x1_copy, w1_copy, b1_copy = x1_cow.clone(), w1_cow.clone(), b1_cow.clone()
         F.conv_transpose1d(x1_cow, w1_cow, b1_cow)
         self.assertTrue(torch._C._is_cow_tensor(x1_cow))
         self.assertTrue(torch._C._is_cow_tensor(w1_cow))
         self.assertTrue(torch._C._is_cow_tensor(b1_cow))
+        self.assertEqual(x1_cow, x1_copy)
+        self.assertEqual(w1_cow, w1_copy)
+        self.assertEqual(b1_cow, b1_copy)
 
         # 2D
         x2 = torch.randn(2, 8, 8, 8, device=device, dtype=dtype)
@@ -1484,10 +1532,14 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x2_cow = torch._lazy_clone(x2)
         w2_cow = torch._lazy_clone(w2)
         b2_cow = torch._lazy_clone(b2)
+        x2_copy, w2_copy, b2_copy = x2_cow.clone(), w2_cow.clone(), b2_cow.clone()
         F.conv_transpose2d(x2_cow, w2_cow, b2_cow)
         self.assertTrue(torch._C._is_cow_tensor(x2_cow))
         self.assertTrue(torch._C._is_cow_tensor(w2_cow))
         self.assertTrue(torch._C._is_cow_tensor(b2_cow))
+        self.assertEqual(x2_cow, x2_copy)
+        self.assertEqual(w2_cow, w2_copy)
+        self.assertEqual(b2_cow, b2_copy)
 
         # 3D
         x3 = torch.randn(2, 8, 4, 8, 8, device=device, dtype=dtype)
@@ -1496,17 +1548,53 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x3_cow = torch._lazy_clone(x3)
         w3_cow = torch._lazy_clone(w3)
         b3_cow = torch._lazy_clone(b3)
+        x3_copy, w3_copy, b3_copy = x3_cow.clone(), w3_cow.clone(), b3_cow.clone()
         F.conv_transpose3d(x3_cow, w3_cow, b3_cow)
         self.assertTrue(torch._C._is_cow_tensor(x3_cow))
         self.assertTrue(torch._C._is_cow_tensor(w3_cow))
         self.assertTrue(torch._C._is_cow_tensor(b3_cow))
+        self.assertEqual(x3_cow, x3_copy)
+        self.assertEqual(w3_cow, w3_copy)
+        self.assertEqual(b3_cow, b3_copy)
 
         # Without bias
         x2_nobias = torch._lazy_clone(x2)
         w2_nobias = torch._lazy_clone(w2)
+        x2_nobias_copy, w2_nobias_copy = x2_nobias.clone(), w2_nobias.clone()
         F.conv_transpose2d(x2_nobias, w2_nobias, None)
         self.assertTrue(torch._C._is_cow_tensor(x2_nobias))
         self.assertTrue(torch._C._is_cow_tensor(w2_nobias))
+        self.assertEqual(x2_nobias, x2_nobias_copy)
+        self.assertEqual(w2_nobias, w2_nobias_copy)
+
+    @dtypes(torch.float)
+    def test_deconv_backward_cow_input(self, device, dtype):
+        grad = torch.randn(2, 4, 10, 10, device=device, dtype=dtype)
+        x = torch.randn(2, 8, 8, 8, device=device, dtype=dtype)
+        w = torch.randn(8, 4, 3, 3, device=device, dtype=dtype)
+        grad_cow = torch._lazy_clone(grad)
+        x_cow = torch._lazy_clone(x)
+        w_cow = torch._lazy_clone(w)
+        grad_copy, x_copy, w_copy = grad_cow.clone(), x_cow.clone(), w_cow.clone()
+        dx, dw, db = torch.ops.aten.convolution_backward(
+            grad_cow,
+            x_cow,
+            w_cow,
+            [4],
+            [1, 1],
+            [0, 0],
+            [1, 1],
+            True,
+            [0, 0],
+            1,
+            [True, True, True],
+        )
+        self.assertTrue(torch._C._is_cow_tensor(grad_cow))
+        self.assertTrue(torch._C._is_cow_tensor(x_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_cow))
+        self.assertEqual(grad_cow, grad_copy)
+        self.assertEqual(x_cow, x_copy)
+        self.assertEqual(w_cow, w_copy)
 
 
 instantiate_device_type_tests(
