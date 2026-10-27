@@ -30,6 +30,7 @@ torch.utils.data <utils/data>
 torch.utils.deterministic <utils/deterministic>
 torch.utils.jit <utils/jit>
 torch.utils.dlpack <utils/dlpack>
+torch.utils.pytree <utils/pytree>
 torch.utils.mobile_optimizer <utils/mobile_optimizer>
 torch.utils.model_zoo <utils/model_zoo>
 torch.utils.tensorboard <utils/tensorboard>
