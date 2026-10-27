@@ -11,6 +11,7 @@
 #include <c10/util/FileSystem.h>
 
 #include <exception>
+#include <utility>
 
 #include <fcntl.h>
 #ifdef _WIN32
@@ -353,7 +354,8 @@ std::vector<at::Tensor> AOTIModelContainerRunner::call_run_func(
   std::vector<AtenTensorHandle> output_handles(num_outputs);
 
   torch::aot_inductor::set_last_error(nullptr);
-  if (run_func(output_handles.data(), output_handles.size()) !=
+  if (std::forward<RunFunc>(run_func)(
+          output_handles.data(), output_handles.size()) !=
       AOTI_RUNTIME_SUCCESS) {
     if (const char* error = get_aoti_runtime_error()) {
       TORCH_CHECK(false, error);
