@@ -649,11 +649,11 @@ def rocm_mx_swizzle(mat_dtype):
     return False
 
 
-def mx_scale_swizzle(scale, mat_dtype):
-    """Flatten MX scales into the layout this device's scaled_mm expects.
+def mx_scale_swizzle(scale, mat_dtype, block_size=32):
+    """Flatten block scales into the layout this device's scaled_mm expects.
 
-    gfx950 uses a 32x8 tile. gfx1250 uses its own order.
-    Other ROCm archs and XPU are returned unchanged.
+    gfx950 uses a 32x8 tile. gfx1250 uses its own order. block_size is 32 for
+    MX and 16 for NVFP4. Other ROCm archs and XPU are returned unchanged.
     """
     from torch.testing._internal.common_quantized import to_blocked, to_mx_swizzled_gfx1250
 
@@ -661,7 +661,7 @@ def mx_scale_swizzle(scale, mat_dtype):
         if not rocm_mx_swizzle(mat_dtype):
             return scale
         if evaluate_gfx_arch_within(["gfx1250"]):
-            return to_mx_swizzled_gfx1250(scale)
+            return to_mx_swizzled_gfx1250(scale, block_size)
         return to_blocked(scale, swizzle_32_8=True)
     if scale.device.type == "xpu":
         return scale

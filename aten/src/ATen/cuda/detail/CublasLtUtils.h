@@ -208,8 +208,13 @@ inline int cublasLtMatmulScaleMode(
 #endif
     case at::blas::ScalingType::BlockWise1x16:
       TORCH_CHECK(scale_dtype == kFloat8_e4m3fn);
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+#elif defined(USE_ROCM)
+      TORCH_CHECK(
+          false,
+          "scaled_gemm with float8_e4m3fn scales of 1x16 blocks "
+          "requires ROCm 10.0 or above");
 #else
       TORCH_CHECK(
           false,
