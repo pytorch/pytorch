@@ -11,6 +11,10 @@ set(CMAKE_CXX_STANDARD 20)
 # This can be removed once PTI (part of oneAPI) version is updated to 1.2.1
 if(KINETO_BACKEND STREQUAL "xpu" AND LINUX AND
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  message(WARNING
+    "Kineto tests: force-linking libstdc++ ahead of PTI (${PTI_LIBRARY}), "
+    "which exports its own copy of std::filesystem. This workaround can be "
+    "removed once PTI 1.2.1 or newer is required.")
   add_link_options("LINKER:--push-state,--no-as-needed" -lstdc++ "LINKER:--pop-state")
 endif()
 
