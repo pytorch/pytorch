@@ -3506,7 +3506,11 @@ emulate_precision_casts: bool = (
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by
 # later forward math, this inserts a downcast-upcast at the saved value so
-# forward and backward consume the same precision.
+# forward and backward consume the same precision.  It also gates the
+# downcast-upcast that lowerings emit when they split one user-visible
+# low-precision op into several nodes (e.g. peeling the bias off a
+# convolution), so a fused consumer sees the op's declared output precision
+# whether or not the output is saved.
 emulate_precision_casts_on_saved_tensors: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
