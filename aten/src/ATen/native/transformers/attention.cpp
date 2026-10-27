@@ -645,6 +645,27 @@ at::Tensor pad_last_dim(const at::Tensor& attn_bias, int alignment_size) {
   return at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
 }
 
+// Flash and cuDNN attention kernels issue 16-byte vectorized global memory
+// accesses at every row. Copy misaligned inputs (e.g. views at odd storage
+// offsets) instead of falling back to a slower backend.
+at::Tensor align_for_fused_attention(const at::Tensor& tensor, bool check_strides = true) {
+  if (tensor.is_nested() || sdp::is_aligned_for_sdpa(tensor, 16, check_strides)) {
+    return tensor;
+  }
+  // Copy only the distinct elements of expanded dims, keeping the input's dim
+  // order so the output layout matches the aligned case. Tensors that require
+  // grad are copied in full so each element keeps its own gradient.
+  auto compact = tensor;
+  for (const auto dim : c10::irange(tensor.dim())) {
+    if (!tensor.requires_grad() && TORCH_GUARD_OR_FALSE(tensor.sym_stride(dim).sym_eq(0)) &&
+        TORCH_GUARD_OR_FALSE(tensor.sym_size(dim).sym_gt(1))) {
+      compact = compact.narrow_symint(dim, 0, 1);
+    }
+  }
+  auto copy = compact.clone(at::MemoryFormat::Preserve);
+  return compact.is_same(tensor) ? copy : copy.expand_symint(tensor.sym_sizes());
+}
+
 at::Tensor post_process_flash_output(
     at::Tensor out,
     c10::SymInt const& og_size) {
@@ -824,8 +845,12 @@ Tensor scaled_dot_product_attention(
     case SDPBackend::cudnn_attention: {
       // cuDNN SDPA backward does not support an attn_bias gradient.
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
+      if (attn_mask.has_value()) {
+        attn_mask = align_for_fused_attention(*attn_mask, /*check_strides=*/false);
+      }
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          align_for_fused_attention(query_), align_for_fused_attention(key), align_for_fused_attention(value),
+          attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::flash_attention: {
@@ -836,6 +861,11 @@ Tensor scaled_dot_product_attention(
         Tensor query_padded = pad_last_dim(query_, alignment_size);
         Tensor key_padded = pad_last_dim(key, alignment_size);
         Tensor value_padded = pad_last_dim(value, alignment_size);
+        if (query_device_type == DeviceType::CUDA) {
+          query_padded = align_for_fused_attention(query_padded);
+          key_padded = align_for_fused_attention(key_padded);
+          value_padded = align_for_fused_attention(value_padded);
+        }
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
