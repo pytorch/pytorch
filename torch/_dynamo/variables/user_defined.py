@@ -3193,6 +3193,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            if (
+                isinstance(method, types.MethodDescriptorType)
+                and not is_torch_class(method.__objclass__)
+                and name not in self._slotdefs
+                and not trace_rules.is_polyfilled_callable(method)
+            ):
+                # An alias such as `copy = dict.copy` keeps its defining descriptor.
+                # Slots and registered polyfills retain their dispatch below.
+                return variables.MethodDescriptorVariable(
+                    method, owner=VariableTracker.build(tx, method.__objclass__)
+                ).call_function(tx, [self, *args], kwargs)
+
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -5264,8 +5276,10 @@ class DefaultDictVariable(ConstDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        if key in self:
-            return self.getitem_const(tx, key)
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is not None:
+            return value
         return self.call_method(tx, "__missing__", [key], {})
 
     def nb_or_impl(
@@ -5972,6 +5986,8 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
+
+    _cpython_type = types.SimpleNamespace
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:

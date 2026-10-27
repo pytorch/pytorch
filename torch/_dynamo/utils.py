@@ -3207,7 +3207,9 @@ def check_numpy_ndarray_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
 dict_items: type[ItemsView[Any, Any]] = type({}.items())
+odict_keys: type[KeysView[Any]] = type(OrderedDict().keys())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
+odict_items: type[ItemsView[Any, Any]] = type(OrderedDict().items())
 # pyrefly: ignore [bad-assignment]
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]
@@ -3280,7 +3282,7 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
@@ -3298,7 +3300,8 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
+    dict_type: type[dict[K, V]] = type(obj)
+    if issubclass(dict_type, OrderedDict):
         key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
         return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
