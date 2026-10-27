@@ -25,7 +25,8 @@ void kai_pack_rhs_groupwise_int4(
   const size_t sr = ukernel.get_sr();
   auto weight_packed_data =
       reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto weight_contig = weight.contiguous();
+  const auto weight_data = weight_contig.const_data_ptr<uint8_t>();
   const auto scales_contig = scales.contiguous();
   const auto scales_data = scales_contig.const_data_ptr();
 
@@ -40,8 +41,8 @@ void kai_pack_rhs_groupwise_int4(
   const Tensor bias_float =
       bias.has_value() ? bias->to(kFloat).contiguous() : Tensor();
 
-  float* bias_ptr =
-      bias_float.defined() ? bias_float.data_ptr<float>() : nullptr;
+  const float* bias_ptr =
+      bias_float.defined() ? bias_float.const_data_ptr<float>() : nullptr;
 
   auto& params = kernel.rhs_pack_params;
 
@@ -78,7 +79,8 @@ void kai_pack_rhs_channelwise_int4(
   const size_t sr = ukernel.get_sr();
   auto weight_packed_data =
       reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto weight_contig = weight.contiguous();
+  const auto weight_data = weight_contig.const_data_ptr<uint8_t>();
 
   const auto scales_float = scales.to(kFloat).contiguous();
   const auto scales_data = scales_float.const_data_ptr<float>();
@@ -94,8 +96,8 @@ void kai_pack_rhs_channelwise_int4(
   const Tensor bias_float =
       bias.has_value() ? bias->to(kFloat).contiguous() : Tensor();
 
-  float* bias_ptr =
-      bias_float.defined() ? bias_float.data_ptr<float>() : nullptr;
+  const float* bias_ptr =
+      bias_float.defined() ? bias_float.const_data_ptr<float>() : nullptr;
 
   auto& params = kernel.rhs_pack_params;
 
@@ -107,7 +109,7 @@ void kai_pack_rhs_channelwise_int4(
       kr,
       sr,
       (const uint8_t*)(weight_data),
-      (const float*)(bias_ptr),
+      bias_ptr,
       (const float*)(scales_data),
       weight_packed_data,
       0,
