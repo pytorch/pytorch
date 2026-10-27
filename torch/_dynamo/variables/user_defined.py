@@ -3886,7 +3886,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
-            fn_vt = variables.WrapperUserFunctionVariable(
+            fn_vt = variables.LruCacheWrapperVariable(
                 type_attr, "__wrapped__", source=source
             )
             return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
@@ -3894,7 +3894,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
                 if can_use_mro_source:
                     source = self.get_source_by_walking_mro(tx, name)
-                fn_vt = variables.WrapperUserFunctionVariable(
+                fn_vt = variables.FunctionWrapperVariable(
                     type_attr, "_torchdynamo_inline", source=source
                 )
                 return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
@@ -3912,11 +3912,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
-            return variables.UserMethodVariable(
-                variables.UserFunctionVariable(type_attr, source=fn_source),
-                self,
-                source=source,
-            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
+            else:
+                fn_vt = variables.UserFunctionVariable(type_attr, source=fn_source)
+                if fn_source:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):

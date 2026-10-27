@@ -590,7 +590,18 @@ def getset_load_or_build(
 def getset_set(name: str) -> Callable[..., None]:
     """Setter for a GetSet/Member whose value is an already-built VT."""
 
-    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
+    def setter(
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        value: VariableTracker | None,
+    ) -> None:
+        if value is None:
+            from .constant import ConstantVariable
+
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, vt, name, value)
+
+    return setter
 
 
 def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:

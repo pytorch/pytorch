@@ -5827,6 +5827,7 @@ class GraphModule(torch.nn.Module):
 
         from torch._dynamo.variables.functions import (
             BaseUserFunctionVariable,
+            FunctionWrapperVariable,
             WrapperUserFunctionVariable,
             WrapperUserMethodVariable,
         )
@@ -5839,7 +5840,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertTrue(issubclass(WrapperUserMethodVariable, BaseUserFunctionVariable))
         self.assertIs(WrapperUserMethodVariable._cpython_type, types.MethodType)
-        self.assertIs(WrapperUserFunctionVariable._cpython_type, types.FunctionType)
+        self.assertIs(FunctionWrapperVariable._cpython_type, types.FunctionType)
 
     def test_wrapper_user_method_torchdynamo_inline(self):
         # Dynamo traces the _torchdynamo_inline target instead of meth, so the
@@ -7322,6 +7323,233 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             ],
         )
 
+    @parametrize(
+        "attr",
+        [
+            "__defaults__",
+            "__kwdefaults__",
+            "__closure__",
+            "__annotations__",
+            "__type_params__",
+            "__globals__",
+            "__code__",
+            "__dict__",
+            "__doc__",
+        ],
+    )
+    def test_bound_method_getattr_forwards_to_func(self, attr):
+        # method_getattro reads anything the method type lacks off __func__.
+        class A:
+            def m(self, a: int = 3, *, k=1):
+                "doc"
+                return a
+
+        def fn(x, a):
+            return x + 1 if getattr(a.m, attr) == getattr(A.m, attr) else x - 1
+
+        x = torch.ones(2)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A())
+        self.assertEqual(res, fn(x, A()))
+
+    def test_more_defaults_than_params(self):
+        # CPython binds parameter i to __defaults__[i - (argcount - ndefaults)].
+        def g(a, b):
+            return a * 10 + b
+
+        g.__defaults__ = (1, 2, 3)
+
+        def fn(x):
+            def h(a):
+                return a
+
+            h.__defaults__ = (4, 5, 6)
+            return x + g(), x + g(7), x + h()
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    def test_nested_defaults_set_to_none(self):
+        def fn(x):
+            def h(a, b=1, *, k=1):
+                return a + b + k
+
+            h.__defaults__ = None
+            h.__kwdefaults__ = None
+            out = [h(x, 2, k=3), h.__defaults__, h.__kwdefaults__]
+            del h.__defaults__
+            del h.__kwdefaults__
+            out += [h(x, 4, k=5), h.__defaults__, h.__kwdefaults__]
+            return out, h
+
+        x = torch.zeros(1)
+        ref_out, ref_h = fn(x)
+        res_out, res_h = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res_out, ref_out)
+        self.assertEqual(res_h.__defaults__, ref_h.__defaults__)
+        self.assertEqual(res_h.__kwdefaults__, ref_h.__kwdefaults__)
+
+    def test_del_doc_and_module_read_none(self):
+        # __doc__/__module__ are T_OBJECT members: after del they read as None.
+        def fn(x):
+            def h():
+                "hdoc"
+
+            del h.__doc__
+            delattr(h, "__module__")
+            return x + 1, h.__doc__, h.__module__, h
+
+        x = torch.zeros(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res[:3], ref[:3])
+        self.assertEqual((res[3].__doc__, res[3].__module__), (None, None))
+
+    def test_type_params_invalid_write(self):
+        def fn(x):
+            def h(a):
+                return a
+
+            out = []
+            try:
+                h.__type_params__ = [1]
+            except TypeError as e:
+                out.append(str(e))
+            try:
+                del h.__type_params__
+            except TypeError as e:
+                out.append(str(e))
+            return x + 1, out, h.__type_params__
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    @parametrize("attr", ["__name__", "__qualname__", "__doc__", "__module__"])
+    def test_live_function_slot_read(self, attr):
+        def g():
+            pass
+
+        @functools.wraps(g)
+        def w():
+            pass
+
+        class A:
+            def m(self):
+                pass
+
+        a = A()
+        for f in (g, w, A.m):
+            setattr(f, attr, "new")
+
+        def fn(x):
+            out = []
+            for f in (g, w, a.m):
+                out.append(x + 1 if getattr(f, attr) == "new" else x - 1)
+            return out
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        setattr(g, attr, "newer")
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("read_first", [False, True])
+    def test_bound_method_sees_class_function_write(self, read_first):
+        class A:
+            def m(self, x=1):
+                return x
+
+        def fn(t, a):
+            bm = a.m if read_first else None
+            A.m.__defaults__ = (5,)
+            return t + (bm or a.m)()
+
+        a = A()
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t, a)
+        A.m.__defaults__ = (1,)
+        self.assertEqual(res, fn(t, a))
+
+    @parametrize("wrap", [staticmethod, classmethod])
+    def test_descriptor_on_new_instance_sees_func_write(self, wrap):
+        def m(*args):
+            pass
+
+        class A:
+            pass
+
+        A.m = wrap(m)
+
+        def fn(t):
+            m.k = 5
+            f = A().m
+            return t + (f.k if wrap is staticmethod else f.__func__.k)
+
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        m.k = 0
+        self.assertEqual(res, fn(t))
+
+    @parametrize(
+        "attr", ["__annotations__", "__type_params__", "__code__", "__defaults__"]
+    )
+    def test_lru_cache_wrapper_attr(self, attr):
+        def g(x: int = 1) -> int:
+            return x
+
+        w = functools.lru_cache(g)
+
+        def fn(t):
+            try:
+                return t + 1, getattr(w, attr), hasattr(w, attr)
+            except AttributeError:
+                return t - 1, None, hasattr(w, attr)
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_lru_cache_wrapper_type(self):
+        w = functools.lru_cache(lambda x: x)
+
+        def fn(t):
+            return t + 1, isinstance(w, types.FunctionType), type(w) is type(w)
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_lru_cache_wrapper_name_write(self):
+        # __name__ lives in the wrapper's instance __dict__, so any value is
+        # accepted (a function's __name__ setter would raise TypeError).
+        def fn(t, w):
+            try:
+                w.__name__ = 5
+                return t + 1, w.__name__
+            except TypeError:
+                return t - 1, None
+
+        t = torch.zeros(1)
+        w = functools.lru_cache(lambda: None)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t, w)
+        self.assertEqual(res, fn(t, functools.lru_cache(lambda: None)))
+
+    def test_function_wrapper_name_write_type_check(self):
+        # A torch.compile wrapper is a function: its __name__ setter rejects
+        # non-str values.
+        def fn(t, w):
+            try:
+                w.__name__ = 5
+                return t + 1
+            except TypeError:
+                return t - 1
+
+        t = torch.zeros(1)
+        w = torch.compile(lambda: None, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(t, w), fn(t, w))
+
     def test_str_handler_for_user_defined_object(self):
         """
         Confirms handler behaviour for `str` is the same between eager and dynamo.
@@ -7912,6 +8140,50 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         result = func_compiled(x)
 
         self.assertEqual(result, expected)
+
+    @parametrize("attr", ["__name__", "__qualname__"])
+    def test_bound_method_name_readonly(self, attr):
+        class A:
+            def m(self):
+                pass
+
+        def fn(x, a, bm):
+            out = []
+            # a.m is built during tracing; bm is a bound method graph input.
+            for m in (a.m, bm):
+                try:
+                    setattr(m, attr, "new")
+                except AttributeError:
+                    out.append(getattr(m, attr))
+            return x + 1, out
+
+        x = torch.ones(2)
+        ref = fn(x, A(), A().m)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A(), A().m)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref[1]), 2)
+
+    def test_bound_method_setattr_delattr(self):
+        class A:
+            def m(self):
+                pass
+
+        def fn(x, a):
+            out = []
+            for name in ("__doc__", "__name__", "__defaults__", "__func__", "foo"):
+                try:
+                    setattr(a.m, name, 1)
+                except AttributeError as e:
+                    out.append(str(e))
+                try:
+                    delattr(a.m, name)
+                except AttributeError as e:
+                    out.append(str(e))
+            return x + 1, out
+
+        x = torch.ones(2)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A())
+        self.assertEqual(res, fn(x, A()))
 
 
 instantiate_parametrized_tests(FunctionTests)
