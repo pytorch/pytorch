@@ -1840,29 +1840,32 @@ class TestFX(JitTestCase):
         self.assertEqual(seen, [True])
 
     def test_lazy_import_body_can_open_its_own_revert_window(self):
-        # A module body that calls a torch.compile'd function at import makes Dynamo
-        # revert the trace's patches again, inside FX's own window.
+        # A module body that calls a torch.compile'd function at import sees no FX
+        # trace, so Dynamo compiles it and reverts the patches inside FX's window.
         from torch.fx._symbolic_trace import (
             _autowrap_check,
+            _is_fx_tracing_context,
             _maybe_revert_all_patches,
             _new_patcher,
+            is_fx_symbolic_tracing,
         )
 
-        reverted = []
-        with _new_patcher() as patcher:
+        seen = []
+        with _new_patcher() as patcher, _is_fx_tracing_context(True):
             frame_dict = self._builtin_patch(patcher)
 
             def resolve(d):
                 with _maybe_revert_all_patches():
                     pass
                 # Dynamo's window closing must not reapply FX's patches.
-                reverted.append("len" not in frame_dict)
+                seen.append((is_fx_symbolic_tracing(), "len" not in frame_dict))
                 return math.sqrt
 
             with self._patch_is_lazy_import():
                 _autowrap_check(patcher, self._lazy_globals("helper", resolve), set())
-            self.assertEqual(reverted, [True])
+            self.assertEqual(seen, [(False, True)])
             self.assertIn("len", frame_dict)
+            self.assertTrue(is_fx_symbolic_tracing())
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
