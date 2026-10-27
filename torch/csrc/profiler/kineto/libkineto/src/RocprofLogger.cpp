@@ -461,9 +461,6 @@ int RocprofLogger::toolInit(
 
     ROCPROF_CALL_THROW(
         rocprofiler_context_is_valid(globalContext.context, &isValid));
-    if (isValid == 0) {
-      KINETO_THROW(std::runtime_error, "main context failed validation");
-    }
 
     // set the finalize functor once we are certain that we have fully
     // initialized.
@@ -976,9 +973,8 @@ void RocprofLogger::stopLogging() {
   auto& globalContext = getGlobalContext();
 
   // A null context here is an expected state: CPU-only profiling in a ROCm
-  // build, or teardown after SDK finalization (both RocprofActivityApi and
-  // RocprofLogger call stopLogging() from destructors). Silent no-op; the
-  // actionable diagnostic for a null context is in startLogging().
+  // build, or after SDK finalization. Silent no-op; the actionable diagnostic
+  // for a null context is in startLogging().
   if (globalContext.context == null_context_id) {
     return;
   }
@@ -991,11 +987,12 @@ void RocprofLogger::stopLogging() {
       status != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND) {
     LOG(WARNING) << fmt::format(
         "rocprofiler_stop_context failed: {} ({})",
-        rocprofiler_get_status_string(status),
-        (int)status);
+        rocprofStatusString(status),
+        static_cast<int>(status));
   }
-  // Flush after stopping so records finalized by the stop are captured;
-  // flushing a drained buffer is a no-op.
+  // Stopping does not wait for in-flight records: a kernel dispatch is bound
+  // to the contexts active at enqueue, and its record is still written to
+  // this buffer when the kernel completes after the stop.
   ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
 }
 

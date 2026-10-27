@@ -96,34 +96,37 @@
 // and hands the status back to the caller for cases where some failures are
 // expected (e.g. stopping an already-stopped context); ROCPROF_CALL_THROW is
 // for paths where any failure must abort, such as tool initialization.
-#define ROCPROF_CALL(call)                                            \
-  [&]() -> rocprofiler_status_t {                                     \
-    rocprofiler_status_t _status_ = call;                             \
-    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {                     \
-      const char* _errstr_ = rocprofiler_get_status_string(_status_); \
-      LOG(WARNING) << fmt::format(                                    \
-          "function {} failed with error {} ({})",                    \
-          #call,                                                      \
-          _errstr_,                                                   \
-          static_cast<int>(_status_));                                \
-    }                                                                 \
-    return _status_;                                                  \
+inline const char* rocprofStatusString(rocprofiler_status_t status) {
+  const char* str = rocprofiler_get_status_string(status);
+  return str != nullptr ? str : "unknown rocprofiler-sdk error";
+}
+
+#define ROCPROF_CALL(call)                         \
+  [&]() -> rocprofiler_status_t {                  \
+    rocprofiler_status_t _status_ = call;          \
+    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {  \
+      LOG(WARNING) << fmt::format(                 \
+          "function {} failed with error {} ({})", \
+          #call,                                   \
+          rocprofStatusString(_status_),           \
+          static_cast<int>(_status_));             \
+    }                                              \
+    return _status_;                               \
   }()
 
 // clang-format off
-#define ROCPROF_CALL_THROW(call)                                      \
-  do {                                                                \
-    rocprofiler_status_t _status_ = (call);                           \
-    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {                     \
-      const char* _errstr_ = rocprofiler_get_status_string(_status_); \
-      KINETO_THROW(                                                   \
-          std::runtime_error,                                         \
-          fmt::format(                                                \
-              "{} failed: {} ({})",                                   \
-              #call,                                                  \
-              _errstr_,                                               \
-              static_cast<int>(_status_)));                           \
-    }                                                                 \
+#define ROCPROF_CALL_THROW(call)                     \
+  do {                                               \
+    rocprofiler_status_t _status_ = (call);          \
+    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {    \
+      KINETO_THROW(                                  \
+          std::runtime_error,                        \
+          fmt::format(                               \
+              "{} failed: {} ({})",                  \
+              #call,                                 \
+              rocprofStatusString(_status_),         \
+              static_cast<int>(_status_)));          \
+    }                                                \
   } while (false)
 // clang-format on
 
