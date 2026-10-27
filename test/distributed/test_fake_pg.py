@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import Shard
@@ -29,7 +28,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
-from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -83,6 +82,36 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=42))
+
+    def test_c10d_alias(self):
+        self.assertIs(torch._C._distributed_c10d.FakeProcessGroup, FakeProcessGroup)
+
+    def test_split_group_uses_explicit_fake_options(self):
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=FakeStore())
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+        opts.error_on_collective = True
+
+        parent = dist.distributed_c10d._get_default_group()
+        cpu = torch.device("cpu")
+        pg = parent.split_group([0, 1], opts=opts, device_types=[cpu])
+
+        options = pg._get_backend(cpu).options
+        self.assertIsInstance(options, FakeProcessGroup.Options)
+        self.assertIsNot(options, opts)
+        self.assertEqual(options.fake_option, 42)
+        self.assertTrue(options.error_on_collective)
+
+    def test_rejects_foreign_options(self):
+        class OtherOptions(dist.BackendBase.Options):
+            pass
+
+        other = OtherOptions("other")
+        with self.assertRaisesRegex(TypeError, "must be FakeProcessGroup.Options"):
+            FakeProcessGroup._create_internal(0, 2, other)
+        pg = FakeProcessGroup._create_internal(0, 2)
+        with self.assertRaisesRegex(TypeError, "must be FakeProcessGroup.Options"):
+            pg.split(FakeStore(), [0, 1], other)
 
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -683,8 +712,6 @@ class TestFakePG(TestCase):
         dist.destroy_process_group()
 
         # Test with error_on_collective=True
-        from torch._C._distributed_c10d import FakeProcessGroup
-
         options = FakeProcessGroup.Options()
         options.error_on_collective = True
 
@@ -723,7 +750,9 @@ class TestFakePG(TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        with self.assertRaisesRegex(TypeError, r"No constructor defined"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"FakeProcessGroup cannot be constructed directly"
+        ):
             fake_pg = FakeProcessGroup(rank=0, world_size=3)
 
             with SimpleTensorMode():

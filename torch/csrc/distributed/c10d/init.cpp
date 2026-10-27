@@ -314,6 +314,34 @@ auto init_nogil() {
       });
 }
 
+// Implements Backend.Options.__copy__ (memo is None) and __deepcopy__. C++
+// options are copied via clone(). For a Python subclass, this creates the same
+// type without calling its __init__ and (deep) copies the instance __dict__.
+// Unlike copy.copy, __slots__ and __getstate__/__setstate__ are not used.
+py::object copyBackendOptions(const py::object& self, const py::object& memo) {
+  auto opts = self.cast<c10::intrusive_ptr<::c10d::Backend::Options>>();
+  if (dynamic_cast<::c10d::PyBackendOptions*>(opts.get()) == nullptr) {
+    // Raises for C++ subclasses without a clone() override and for Python
+    // subclasses of C++ subclasses, which clone() would slice.
+    auto copy = py::cast(opts->clone());
+    ::c10d::PyBackendOptions::checkCopy(self, copy);
+    return copy;
+  }
+  auto cls = py::type::of(self);
+  auto copy = cls.attr("__new__")(cls);
+  py::type::of<::c10d::Backend::Options>().attr("__init__")(copy, self);
+  if (!py::hasattr(self, "__dict__")) {
+    return copy;
+  }
+  py::object dict = self.attr("__dict__");
+  if (!memo.is_none()) {
+    memo[py::int_(reinterpret_cast<uintptr_t>(self.ptr()))] = copy;
+    dict = py::module_::import("copy").attr("deepcopy")(dict, memo);
+  }
+  copy.attr("__dict__").attr("update")(dict);
+  return copy;
+}
+
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
 class PythonStore : public ::c10d::Store {
@@ -1047,6 +1075,10 @@ This class does not support ``__members__`` property.)");
             TORCH_CHECK(
                 self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
                 "Only PREMUL_SUM supports accessing factor");
+            // `op` is writable, so a PREMUL_SUM may have no supplement.
+            TORCH_CHECK(
+                self.supplement_.defined(),
+                "PREMUL_SUM ReduceOp has no factor");
             const auto* preMulSupplement =
                 reinterpret_cast<::c10d::PreMulSumSupplement*>(
                     self.supplement_.get());
@@ -4054,25 +4086,58 @@ Args:
   // TODO: Maybe we can consider how to merge this with
   // `DistributedBackendOptions`.
   auto backendOptions =
-      intrusive_ptr_class_<::c10d::Backend::Options>(
+      py::class_<
+          ::c10d::Backend::Options,
+          c10::intrusive_ptr<::c10d::Backend::Options>,
+          ::c10d::PyBackendOptions>(
           backend,
           "Options",
           R"(
 Base class for all backend options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
+
+Python subclasses of this class are supported. Copies made by ``copy.copy``
+and by ``split_group``/``merge_remote_group`` keep the subclass and a shallow
+copy of its instance ``__dict__`` (``__slots__`` are not copied);
+``copy.deepcopy`` deep copies the ``__dict__``. To customize copies made by
+``copy.copy``, ``split_group`` and ``merge_remote_group``, override
+``__copy__`` and start from ``super().__copy__()`` so the base fields are kept;
+``copy.deepcopy`` does not call ``__copy__``. Python subclasses of other
+backends' options classes are not supported.
 )")
           .def(
-              py::init([](const std::string& backend,
-                          const std::chrono::milliseconds& timeout) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                return c10::make_intrusive<::c10d::Backend::Options>(
-                    backend, timeout);
-              }),
+              init_nogil<
+                  ::c10d::Backend::Options,
+                  ::c10d::PyBackendOptions,
+                  const std::string&,
+                  const std::chrono::milliseconds&>(),
               py::arg("backend"),
               py::arg("timeout") = kProcessGroupDefaultTimeout)
+          // On GIL builds, holding the GIL serializes with Python writes to
+          // the source.
+          .def(
+              py::init(
+                  [](const ::c10d::Backend::Options& other) {
+                    return c10::make_intrusive<::c10d::Backend::Options>(other);
+                  },
+                  [](const ::c10d::Backend::Options& other)
+                      -> c10::intrusive_ptr<::c10d::Backend::Options> {
+                    return c10::make_intrusive<::c10d::PyBackendOptions>(other);
+                  }),
+              py::arg("other"),
+              py::pos_only(),
+              "Copy constructor; copies only the base Options fields.")
+          .def(
+              "__copy__",
+              [](const py::object& self) {
+                return copyBackendOptions(self, py::none());
+              })
+          .def(
+              "__deepcopy__",
+              [](const py::object& self, const py::dict& memo) {
+                return copyBackendOptions(self, memo);
+              },
+              py::arg("memo"))
           .def_readonly("backend", &::c10d::Backend::Options::backend)
           .def_readwrite("_timeout", &::c10d::Backend::Options::timeout)
           .def_readwrite(
@@ -5079,56 +5144,35 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             return ivalue.toCustomClass<::c10d::Work>();
           });
 
-  auto fakeProcessGroup =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
-          module, "FakeProcessGroup", backend);
-  intrusive_ptr_class_<::c10d::FakeProcessGroup::Options>(
-      fakeProcessGroup, "Options", backendOptions)
+  intrusive_ptr_class_<::c10d::FakeProcessGroupOptions>(
+      module, "_FakeProcessGroupOptions", backendOptions)
       .def(py::init())
       .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
+          "fake_option", &::c10d::FakeProcessGroupOptions::fake_option)
       .def_readwrite(
           "error_on_collective",
-          &::c10d::FakeProcessGroup::Options::error_on_collective)
+          &::c10d::FakeProcessGroupOptions::error_on_collective)
       .def_readwrite(
           "simulate_uniform_ranks",
-          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
+          &::c10d::FakeProcessGroupOptions::simulate_uniform_ranks)
       .def(
           "__copy__",
-          [](const ::c10d::FakeProcessGroup::Options& self) {
-            return ::c10d::FakeProcessGroup::Options(self);
+          [](const ::c10d::FakeProcessGroupOptions& self) {
+            return ::c10d::FakeProcessGroupOptions(self);
           })
       .def(
           "__deepcopy__",
-          [](const ::c10d::FakeProcessGroup::Options& self,
+          [](const ::c10d::FakeProcessGroupOptions& self,
              const py::dict& memo) {
-            return ::c10d::FakeProcessGroup::Options(self);
+            return ::c10d::FakeProcessGroupOptions(self);
           },
           py::arg("memo"));
-  fakeProcessGroup
-      .def_static(
-          "_create_internal",
-          [](int rank, int size) {
-            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
-          },
-          py::arg("rank"),
-          py::arg("world_size"))
-      .def_static(
-          "_create_internal",
-          [](int rank,
-             int size,
-             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
-            return ::c10d::FakeProcessGroup::_create_internal(
-                rank, size, std::move(options));
-          },
-          py::arg("rank"),
-          py::arg("world_size"),
-          py::arg("options"))
-      .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
-          .def(py::init<>())
+          .def(
+              py::init<std::vector<at::Tensor>>(),
+              py::arg("result") = std::vector<at::Tensor>())
           .def_readwrite("seq_id", &::c10d::FakeWork::seq_id) // Expose seq_id
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
