@@ -9,7 +9,7 @@ at::Tensor& mps_copy_(
     at::Tensor& dst,
     const at::Tensor& src,
     bool non_blocking);
-void copy_blit_mps(void* dst, const void* src, size_t size);
+void copy_bytes_mps(void* dst, const void* src, size_t size);
 
 // General MPS->MPS copy: handles arbitrary strides, a dtype cast and conj/neg
 // bit flips on either operand in a single dispatch. `dst` is written in place,

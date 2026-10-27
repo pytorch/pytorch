@@ -2,6 +2,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
 
+#include <numeric>
+
 TEST(NumBits, CubTest) {
   using at::cuda::cub::get_num_bits;
   ASSERT_EQ(get_num_bits(0b0000000000000000000000000000000000000000000000000000000000000000UL), 1);
@@ -134,7 +136,14 @@ TEST(NumBits, CubTest) {
   ASSERT_EQ(get_num_bits(0b1111111111111111111111111111111111111111111111111111111111111111UL), 64);
 }
 
-__managed__ int input[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+// cudaMallocManaged rather than a __managed__ global: on ROCm GPUs without SVM
+// (e.g. SR-IOV VFs), kernels see the unmapped host address of a __managed__ global.
+static int* managed_input() {
+  int *input;
+  cudaMallocManaged(&input, sizeof(int) * 10);
+  std::iota(input, input + 10, 1);
+  return input;
+}
 
 TEST(InclusiveScanSplit, CubTest) {
   if (!at::cuda::is_available()) return;
@@ -142,6 +151,7 @@ TEST(InclusiveScanSplit, CubTest) {
       c10::DeviceType::CUDA); // This is required to use PyTorch's caching
                               // allocator.
 
+  int *input = managed_input();
   int *output1;
   cudaMallocManaged(&output1, sizeof(int) * 10);
 
@@ -168,6 +178,7 @@ TEST(ExclusiveScanSplit, CubTest) {
       c10::DeviceType::CUDA); // This is required to use PyTorch's caching
                               // allocator.
 
+  int *input = managed_input();
   int *output2;
   cudaMallocManaged(&output2, sizeof(int) * 10);
 
