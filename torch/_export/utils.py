@@ -1474,15 +1474,15 @@ def _get_decomp_for_cia(op: "OperatorBase") -> Callable[..., object]:
 
 @contextmanager
 def _compiling_state_context() -> Generator[None, None, None]:
-    old_compiling_flag = torch.compiler._is_compiling_flag
-    old_exporting_flag = torch.compiler._is_exporting_flag
-    try:
-        torch.compiler._is_compiling_flag = True
-        torch.compiler._is_exporting_flag = True
-        yield
-    finally:
-        torch.compiler._is_compiling_flag = old_compiling_flag
-        torch.compiler._is_exporting_flag = old_exporting_flag
+    # Reads/writes the per-thread flags: export sessions running in different
+    # threads must not clobber each other's save/restore state.
+    with torch.compiler._compile_session_context():
+        old_exporting_flag = torch.compiler._flags.is_exporting
+        try:
+            torch.compiler._flags.is_exporting = True
+            yield
+        finally:
+            torch.compiler._flags.is_exporting = old_exporting_flag
 
 
 def _fakify_params_buffers(

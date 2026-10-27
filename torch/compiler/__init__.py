@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
+import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -575,9 +576,23 @@ def wrap_numpy(fn):
     return wrap(fn)
 
 
-_is_compiling_flag: bool = False
-_is_exporting_flag: bool = False
-_is_non_strict_tracing_flag: bool = False
+class _TracingFlags(threading.local):
+    """Per-thread compile/export tracing flags.
+
+    Threads run torch.compile/export sessions concurrently, so the flags must
+    not leak across threads (see #202042): other threads observe False while
+    this thread compiles, and per-thread save/restore keeps one session's
+    exit from clobbering another thread's in-flight session. threading.local
+    lazily runs __init__ once per thread, seeding fresh threads with False.
+    """
+
+    def __init__(self) -> None:
+        self.is_compiling = False
+        self.is_exporting = False
+        self.is_non_strict_tracing = False
+
+
+_flags = _TracingFlags()
 
 
 def is_compiling() -> bool:
@@ -599,40 +614,37 @@ def is_compiling() -> bool:
     if torch.jit.is_scripting():
         return False
     else:
-        return _is_compiling_flag
+        return _flags.is_compiling
 
 
 def _is_non_strict_tracing() -> bool:
     """
     Indicates whether we are inside a non-strict make_fx-based tracing session.
     """
-    return _is_non_strict_tracing_flag
+    return _flags.is_non_strict_tracing
 
 
 @contextlib.contextmanager
 def _non_strict_tracing_context():
     """Context manager that sets the non-strict tracing flag."""
-    global _is_non_strict_tracing_flag
-    old = _is_non_strict_tracing_flag
+    old = _flags.is_non_strict_tracing
     try:
-        _is_non_strict_tracing_flag = True
+        _flags.is_non_strict_tracing = True
         yield
     finally:
-        _is_non_strict_tracing_flag = old
+        _flags.is_non_strict_tracing = old
 
 
 @contextlib.contextmanager
 def _compile_session_context():
-    """Context manager that sets _is_compiling_flag for the duration of a
-    torch.compile session.
-    """
-    global _is_compiling_flag
-    old = _is_compiling_flag
+    """Context manager that sets the compiling flag for the duration of a
+    torch.compile session in the current thread (per-thread, see #202042)."""
+    old = _flags.is_compiling
     try:
-        _is_compiling_flag = True
+        _flags.is_compiling = True
         yield
     finally:
-        _is_compiling_flag = old
+        _flags.is_compiling = old
 
 
 @contextlib.contextmanager
@@ -748,7 +760,7 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    return _is_exporting_flag
+    return _flags.is_exporting
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
