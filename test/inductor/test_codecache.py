@@ -5887,9 +5887,9 @@ class TestCppCodeCacheKey(TestCase):
             f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so"
         )
         self.assertIn("-I<torch>/include", cmd)
-        self.assertIn("-L'<torch>/lib'", cmd)
-        self.assertIn('/I "<torch>/msvc"', cmd)
-        self.assertIn('/LIBPATH:"<torch>/lib"', cmd)
+        self.assertIn("-L<torch>/lib", cmd)
+        self.assertIn("/I <torch>/msvc", cmd)
+        self.assertIn("/LIBPATH:<torch>/lib", cmd)
         self.assertIn(f"-I{torch_dir}-ext/inc", cmd)
         self.assertIn(f"-I/x{torch_dir}/include", cmd)
         # A package installed next to torch (an SDK wheel, say) keeps its path.
@@ -5898,6 +5898,24 @@ class TestCppCodeCacheKey(TestCase):
         # absolute path in the binary.
         self.assertIn(f"-I{cache}/include", cmd)
         self.assertIn(f" {cache}/halide/libStandaloneHalideRuntime.so", cmd)
+
+    def test_relocation_ignores_whether_the_torch_path_needs_quoting(self):
+        import shlex
+
+        from torch._inductor import cpp_builder
+        from torch.utils import cpp_extension
+
+        cmds = []
+        # The builder quotes the first root's paths and not the second's.
+        for root in ("/srv/job~1/torch", "/srv/job_2/torch"):
+            with (
+                mock.patch.object(cpp_builder, "_TORCH_PATH", root),
+                mock.patch.object(cpp_extension, "_TORCH_PATH", root),
+            ):
+                include = shlex.quote(f"{root}/include")
+                lib = shlex.quote(f"{root}/lib")
+                cmds.append(_relocatable_command_line(f"cc -I{include} -L{lib}"))
+        self.assertEqual(cmds[0], cmds[1])
 
     def test_relocation_replaces_both_torch_trees(self):
         from torch._inductor import cpp_builder
