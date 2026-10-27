@@ -99,10 +99,19 @@ class HashableTracker:
     does not take into account aliasing.
     """
 
-    vt: VariableTracker
     _MISSING = object()
 
-    def __init__(self, vt: VariableTracker) -> None:
+    def __init__(
+        self, vt: VariableTracker, *, precomputed_hash: int | None = None
+    ) -> None:
+        if precomputed_hash is not None:
+            # Existing hook storage already hashed these keys. Keep their IDs
+            # lazy; subsequent hashing by user code must still specialize them.
+            self.vt = vt
+            self._hash = precomputed_hash
+            self._hash_is_identity = False
+            return
+
         # We specialize SymNodes
         vt = specialize_symnode(vt)
 
