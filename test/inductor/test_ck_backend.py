@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +48,52 @@ _test_env = {}
 
 def _dtype_test_name(dtype):
     return {torch.float16: "float16", torch.bfloat16: "bfloat16"}[dtype]
+
+
+def _addmm_mismatch_report(fn, x, a, b, Y_compiled, Y_eager):
+    # TEMPORARY triage aid for the mi350 amd-dpx failure on #200195; revert before landing.
+    def nbad(y, ref):
+        return int((~torch.isclose(y.float(), ref.float(), rtol=1.6e-2, atol=1e-5)).sum())
+
+    ref = torch.addmm(x.float(), a.float(), b.float())
+    Y_compiled2, Y_eager2 = fn(x, a, b, 1.0, 1.0), torch.addmm(x, a, b)
+    bad = (~torch.isclose(Y_compiled.float(), Y_eager.float(), rtol=1.6e-2, atol=1e-5)).nonzero()
+    tiles = sorted({(r // 128, c // 128) for r, c in bad.tolist()})
+    p = torch.cuda.get_device_properties(0)
+    sysfs = {}
+    for f in ("current_compute_partition", "current_memory_partition"):
+        vals = set()
+        for card in sorted(os.listdir("/sys/class/drm")):
+            try:
+                with open(f"/sys/class/drm/{card}/device/{f}") as fh:
+                    vals.add(fh.read().strip())
+            except OSError:
+                pass
+        sysfs[f] = sorted(vals)
+    try:
+        with open("/sys/module/amdgpu/parameters/mtype_local") as fh:
+            sysfs["mtype_local"] = fh.read().strip()
+    except OSError:
+        sysfs["mtype_local"] = "n/a"
+    stale = 0
+    probe_x = torch.zeros(1, device="cuda")
+    zeros = torch.zeros(1 << 20, device="cuda")
+    out = torch.empty_like(zeros)
+    for i in range(1, 101):
+        probe_x.fill_(float(i))
+        torch.add(zeros, probe_x, out=out)
+        stale += bool((out != float(i)).any())
+    return "\n".join(
+        [
+            "=== addmm mismatch triage ===",
+            f"device {p.name} {p.gcnArchName} CUs={p.multi_processor_count} mem={p.total_memory / 2**30:.1f}GiB pci={p.pci_domain_id:04x}:{p.pci_bus_id:02x}:{p.pci_device_id:02x} sysfs={sysfs}",  # noqa: B950
+            f"host boot epoch {time.time() - time.monotonic():.0f}",
+            f"vs fp32 reference: compiled bad={nbad(Y_compiled, ref)} eager bad={nbad(Y_eager, ref)}",
+            f"repeat: compiled identical={torch.equal(Y_compiled, Y_compiled2)} eager identical={torch.equal(Y_eager, Y_eager2)}",  # noqa: B950
+            f"compiled-vs-eager mismatches={len(bad)} first={bad[:8].tolist()} 128x128 tiles={tiles[:16]}",
+            f"cross-XCC coherence probe: {stale}/100 iterations stale",
+        ]
+    )
 
 
 _parametrize_dtype = parametrize(
@@ -378,7 +425,11 @@ class TestCKBackend(TestCase):
             Y_compiled = addmm(x, a, b, alpha, beta)
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
-            torch.testing.assert_close(Y_compiled, Y_eager)
+            try:
+                torch.testing.assert_close(Y_compiled, Y_eager)
+            except AssertionError as e:
+                report = _addmm_mismatch_report(addmm, x, a, b, Y_compiled, Y_eager)
+                raise AssertionError(f"{e}\n{report}") from None
 
     @unittest.skip(
         "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
