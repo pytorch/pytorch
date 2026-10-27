@@ -2173,13 +2173,19 @@ class TestFX(JitTestCase):
                         ),
                         Mode() as mode,
                     ):
+                        # The default device's context at the bottom, then the
+                        # modes above it (crossref testing adds one).
+                        before = _get_current_function_mode_stack()
                         torch.fx.Tracer().trace(M())
                         [(device, modes)] = seen
                         self.assertEqual(device, torch.device("meta"))
                         self.assertNotIn(mode, modes)
                         stack = _get_current_function_mode_stack()
-                        self.assertIs(stack[-1], mode)
-                        self.assertEqual(len(stack), 1 if new_device is None else 2)
+                        if new_device is None:
+                            self.assertEqual(stack, before[1:])
+                        else:
+                            self.assertEqual(stack[1:], before[1:])
+                            self.assertEqual(stack[0].device, torch.device("cpu"))
                         self.assertEqual(torch.empty(1).device, torch.get_default_device())
                 finally:
                     torch.set_default_device(None)
