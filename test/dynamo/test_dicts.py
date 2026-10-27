@@ -552,7 +552,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("mapping_type", [dict, OrderedDict])
-    def test_dict_update_ordered_input_order(self, mapping_type):
+    @parametrize("keys", [("a", "b"), (1, 2)])
+    def test_dict_update_ordered_input_order(self, mapping_type, keys):
         def fn(x, source):
             result = mapping_type(c=x)
             result.update(source, c=x + 2)
@@ -560,9 +561,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        source = OrderedDict(a=x, b=x + 1)
+        source = OrderedDict(zip(keys, (x, x + 1)))
         self.assertEqual(compiled(x, source), fn(x, source))
-        source.move_to_end("a")
+        source.move_to_end(keys[0])
         self.assertEqual(compiled(x, source), fn(x, source))
 
     @parametrize("view_name", ["keys", "values", "items"])
@@ -678,6 +679,32 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(type(actual[0]), Mapping)
         self.assertEqual(actual[1:], (["init", ("set", "a")], ["init", ("get", "a")]))
         self.assertEqual(actual, expected)
+
+    @parametrize("method", ["__getitem__", "__setitem__"])
+    def test_ordered_dict_subclass_copy_mutates_source(self, method):
+        state = types.SimpleNamespace(source=None)
+
+        class Mapping(OrderedDict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                if method == "__getitem__":
+                    state.source.pop("b")
+                return value
+
+            def __setitem__(self, key, value):
+                if method == "__setitem__":
+                    state.source.pop("b")
+                super().__setitem__(key, value)
+
+        def fn(x):
+            source = Mapping()
+            OrderedDict.__setitem__(source, "a", x)
+            OrderedDict.__setitem__(source, "b", x + 1)
+            state.source = source
+            return source.copy()
+
+        with self.assertRaisesRegex(Unsupported, "Dictionary mutated during iteration"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
     @parametrize("method", ["keys", "items"])
     @parametrize("update", [False, True])
@@ -3132,6 +3159,62 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], torch.zeros_like(x))
         self.assertTrue(actual[2])
+
+    @parametrize("override_iter", [False, True])
+    def test_defaultdict_union_probes_keys(self, override_iter):
+        class Mapping(dict):
+            @property
+            def keys(self):
+                self.reads += 1
+                return lambda: dict.keys(self)
+
+            if override_iter:
+
+                def __iter__(self):
+                    return dict.__iter__(self)
+
+        def fn(x):
+            source = Mapping(b=x + 1)
+            source.reads = 0
+            result = defaultdict(int, a=x) | source
+            return result, source.reads
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1], int(override_iter))
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    @parametrize("factory_kind", ["callable", "noncallable", "list"])
+    @parametrize("reverse", [False, True])
+    def test_defaultdict_union_constructed_factory(self, factory_kind, reverse):
+        class Factory:
+            if factory_kind == "callable":
+
+                def __call__(self):
+                    return 7
+
+        def fn(x):
+            factory = [x] if factory_kind == "list" else Factory()
+            mapping = defaultdict(None, a=x)
+            mapping.default_factory = factory
+            try:
+                result = {"b": x + 1} | mapping if reverse else mapping | {"b": x + 1}
+            except TypeError as error:
+                return x + 1, str(error)
+            return x + result["missing"], result.default_factory is factory
+
+        x = torch.ones(1)
+        expected = (
+            (x + 7, True)
+            if factory_kind == "callable"
+            else (x + 1, "first argument must be callable or None")
+        )
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
 
     @parametrize("reverse", [False, True])
     def test_defaultdict_union_noncallable_factory(self, reverse):
