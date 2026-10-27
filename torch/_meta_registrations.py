@@ -9446,6 +9446,7 @@ cpp_meta_supports_symint_ops = {
     aten.le.Tensor,
     aten.le.Scalar,
     aten.eq.Tensor,
+    aten.ne.Scalar,
 }
 
 
