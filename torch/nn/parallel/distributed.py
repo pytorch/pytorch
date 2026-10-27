@@ -1496,12 +1496,27 @@ class DistributedDataParallel(Module, Joinable):
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
 
-    def __getstate__(self):
-        self._check_default_group()
+    # The process group and the C++ reducer and logger, which do not pickle.
+    _unpicklable_attrs = ("process_group", "reducer", "logger")
+
+    def _picklable_state(self):
         attrs = copy.copy(self.__dict__)
-        del attrs["process_group"]
-        del attrs["reducer"]
-        del attrs["logger"]
+        # A DDP that delays every parameter's all-reduce never builds a reducer
+        # or logger.
+        for name in self._unpicklable_attrs:
+            attrs.pop(name, None)
+        return attrs
+
+    def __getstate__(self):
+        # __setstate__ would build the reducer this DDP never had. Checked first
+        # so a sub-group DDP is refused for this cause, not for its group.
+        if self._delay_all_reduce_all_params:
+            raise RuntimeError(
+                "DDP Pickling/Unpickling is not supported when the all-reduce of "
+                "every parameter is delayed"
+            )
+        self._check_default_group()
+        attrs = self._picklable_state()
         # broadcast_buffers is a property; include it for backward compat.
         attrs["broadcast_buffers"] = self.forward_sync_buffers
         return attrs

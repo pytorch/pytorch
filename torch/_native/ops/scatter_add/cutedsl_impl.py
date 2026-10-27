@@ -42,6 +42,12 @@ from ...registry import _OpCondFn, _OpImplFn
 
 _SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
 
+# Minimum slice size (bytes) for either fast path. Below this the per-entry
+# launch overhead dominates and aten's elementwise kernel is faster, so both
+# conds decline and the call falls through to aten. Mirrors aten's
+# kFastScatterMinSliceBytes (IndexKernelUtils.h).
+_MIN_SLICE_BYTES = 256
+
 # 16B alignment for `src.data_ptr()` and `src.stride(0) * elem`: required
 # for the LDG.128 / tile-mode TMA load of `src` and the row-start 16B
 # boundary that LDG.128 reads from. Applies to both paths.
@@ -155,6 +161,8 @@ def _scatter_add_eligibility(
     if it.ndim != 2:
         return None
     elem = self.element_size()
+    if it.shape[0] * elem < _MIN_SLICE_BYTES:
+        return None
     idx_elem = index.element_size()
     s_self, s_src, s_idx = it.strides(0), it.strides(1), it.strides(2)
     if (
