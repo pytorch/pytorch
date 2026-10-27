@@ -2,6 +2,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
@@ -239,13 +240,10 @@ inline Tensor applySelect(
     const std::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
-    auto maybe_index = index.maybe_as_int();
-    if (maybe_index.has_value()) {
-      TORCH_CHECK_INDEX(
-          !(maybe_index.value() == 0 && dim == 0 && self_sizes->empty()),
-          "invalid index of a 0-dim tensor. ",
-          "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
-    }
+    TORCH_CHECK_INDEX(
+        !(dim == 0 && self_sizes->empty()),
+        "invalid index of a 0-dim tensor. ",
+        "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
     auto size = (*self_sizes)[dim];
     // Note: `size >= -index` is not equivalent to `size > -1 - index` if index
@@ -359,13 +357,15 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
         for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = num_ind + j;
           TORCH_CHECK_INDEX(
-              index.size(j) == self.size(srcIdx),
+              index.sym_size(j)
+                  .sym_eq(self.sym_size(srcIdx))
+                  .expect_true(__FILE__, __LINE__),
               "The shape of the mask ",
-              index.sizes(),
+              index.sym_sizes(),
               " at index ",
               j,
               " does not match the shape of the indexed tensor ",
-              self.sizes(),
+              self.sym_sizes(),
               " at index ",
               srcIdx);
         }
