@@ -722,7 +722,10 @@ test_xpu_sycl_tla_backend() {
   # shellcheck disable=SC1091
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
-  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  # sycl-tla pin is the v0.8 tag commit
+  rm -rf "${sycl_tla_dir}" && git init -q "${sycl_tla_dir}"
+  git -C "${sycl_tla_dir}" fetch -q --depth 1 https://github.com/intel/sycl-tla.git "$(get_pinned_commit sycl-tla)"
+  git -C "${sycl_tla_dir}" checkout -q FETCH_HEAD
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
@@ -884,9 +887,7 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  # test_aoti_inference is not run: it loads libaoti_custom_class.so and its model
-  # and data files from its build directory, which the build artifacts don't include.
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_aoti_fallback_shard() {
@@ -1332,8 +1333,10 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch main \
-    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  # better-benchmark pin is a main commit (untagged); bump by hand, its consumer is schedule-only
+  git -C "${benchmark_dir}" init -q
+  git -C "${benchmark_dir}" fetch -q --depth 1 https://github.com/eellison/better-benchmark.git "$(get_pinned_commit better-benchmark)"
+  git -C "${benchmark_dir}" checkout -q FETCH_HEAD
   pushd "${benchmark_dir}"
 
   local gpu_indices
@@ -2606,7 +2609,8 @@ test_attention_microbenchmark() {
 
   # Install attention-gym dependency
   echo "Installing attention-gym..."
-  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+  # attention-gym pin is a main commit (untagged); bump by hand, its consumer is schedule-only
+  python -m pip install "git+https://github.com/meta-pytorch/attention-gym.git@$(get_pinned_commit attention-gym)"
   pip show triton
 
   cd "${TEST_DIR}"/benchmarks/transformer
