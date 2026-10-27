@@ -90,11 +90,16 @@ AllocationRef::~AllocationRef() {
   }
 #endif
   C10_CUDA_DRIVER_CHECK_WARN(
+      driver_api->cuMemAddressFree_(
+          reinterpret_cast<CUdeviceptr>(ptr), block_size),
+      "SymmetricMemory: failed to free virtual address range during teardown");
+  C10_CUDA_DRIVER_CHECK_WARN(
       driver_api->cuMemRelease_(handle),
       "SymmetricMemory: failed to release allocation during teardown");
 #elif defined(USE_ROCM)
   C10_CUDA_CHECK_WARN(
       hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_CUDA_CHECK_WARN(hipMemAddressFree(ptr, block_size));
   C10_CUDA_CHECK_WARN(hipMemRelease(handle));
 #else
   TORCH_CHECK(
@@ -785,6 +790,11 @@ class MulticastSetup {
           driver_api_->cuMemUnmap_(
               reinterpret_cast<CUdeviceptr>(addr_), block_->block_size),
           "SymmetricMemory[CLEANUP]: failed to unmap multicast address");
+      C10_CUDA_DRIVER_CHECK_WARN(
+          driver_api_->cuMemAddressFree_(
+              reinterpret_cast<CUdeviceptr>(addr_), block_->block_size),
+          "SymmetricMemory[CLEANUP]: failed to free multicast virtual address "
+          "range");
       addr_ = nullptr;
     }
     if (imported_handle_ != 0) {
