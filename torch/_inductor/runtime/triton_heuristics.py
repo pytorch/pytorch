@@ -867,6 +867,20 @@ class CachingAutotuner(KernelInterface):
                     self.fn = reload_kernel_from_src().fn
                 self.compile_results = [self._precompile_config(best_config)]
 
+    def _skips_for_spilling(self, launcher: Any) -> bool:
+        """Whether autotuning skips ``launcher`` for spilling registers."""
+        # we don't skip configs with spilled registers when auto-tuning custom
+        # (user-written) Triton kernels, as (i) we don't have any knowledge or
+        # control over the kernel code; (ii) there is empirical evidence that
+        # for some (complicated) custom Triton kernels, a register-spilling
+        # config may yield the best latency.
+        return (
+            not self.custom_kernel
+            and launcher.n_spills is not None
+            and launcher.n_spills
+            > self.inductor_meta.get("spill_threshold", 32 if torch.version.hip else 16)
+        )
+
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self._forward_use = self._forward_use or not is_backward
         self.compile_id = compile_id
@@ -1586,17 +1600,7 @@ class CachingAutotuner(KernelInterface):
         from torch.compiler._no_compile import check_compilation_allowed
 
         check_compilation_allowed("Triton kernel benchmarking")
-        # we don't skip configs with spilled registers when auto-tuning custom
-        # (user-written) Triton kernels, as (i) we don't have any knowledge or
-        # control over the kernel code; (ii) there is empirical evidence that
-        # for some (complicated) custom Triton kernels, a register-spilling
-        # config may yield the best latency.
-        if (
-            not self.custom_kernel
-            and launcher.n_spills is not None
-            and launcher.n_spills
-            > self.inductor_meta.get("spill_threshold", 32 if torch.version.hip else 16)
-        ):
+        if self._skips_for_spilling(launcher):
             log.debug(
                 "Skip config %s because of register spilling: %d",
                 launcher.config,

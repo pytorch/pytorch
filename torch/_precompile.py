@@ -426,7 +426,9 @@ class DynamoTracer:
     descent or combo tuning not done yet. (One with a single config and nothing
     left to tune is frozen either way.) By default it is refused like any other
     kernel that cannot be frozen. With ``require_tuned_backward=False`` it is
-    frozen with its first config, tuning off, and reported with a warning and a
+    frozen with its first config that autotuning would not skip for spilling
+    registers (the first, if all spill), tuning off, and reported with a warning
+    and a
     ``precompile_triton_untuned_kernels`` artifact. Every serving process then
     runs it with that config, without ``no_compilation()`` too, which can cost
     performance. The opt-in still refuses such a kernel if its source also

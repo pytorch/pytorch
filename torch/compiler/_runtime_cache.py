@@ -488,9 +488,10 @@ def _freeze_untuned_backward(
     instances: list[CachingAutotuner],
     reject: Callable[[CachingAutotuner, dict[str, object]], None],
 ) -> tuple[bytes, dict[str, object]] | None:
-    """The frozen record of a backward source no instance ran, with the first
-    static config one loaded and tuning turned off, and its untuned report; None
-    if no instance has one whose cubin it can carry."""
+    """The frozen record of a backward source no instance ran, with tuning turned
+    off and the first static config one loaded that autotuning would not skip for
+    spilling registers (the first, if all spill), and its untuned report; None if
+    no instance has one whose cubin it can carry."""
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
     for kernel in instances:
@@ -499,7 +500,7 @@ def _freeze_untuned_backward(
             # so replay cannot fail to load the one frozen here. A launcher Triton
             # built itself, not statically, has no _compile_result.
             static = [
-                result
+                (launcher, result)
                 for launcher in kernel.launchers
                 if isinstance(
                     result := getattr(launcher, "_compile_result", None),
@@ -508,7 +509,15 @@ def _freeze_untuned_backward(
             ]
             if not static:
                 continue
-            saved, saved_result = _detached_for_freeze(kernel, static[0])
+            chosen = next(
+                (
+                    result
+                    for launcher, result in static
+                    if not kernel._skips_for_spilling(launcher)
+                ),
+                static[0][1],
+            )
+            saved, saved_result = _detached_for_freeze(kernel, chosen)
             kernel_name = kernel.inductor_meta.get("kernel_name")
             compile_id = getattr(kernel, "compile_id", None)
         saved.inductor_meta = {
@@ -785,7 +794,8 @@ def _report_untuned_triton_kernels(untuned: list[dict[str, object]]) -> None:
     names = [str(report["kernel_name"]) for report in untuned]
     log.warning(
         "precompile: no captured step ran %d backward Triton kernel(s), so they are "
-        "frozen untuned, each with the first of its static configs: %s. The "
+        "frozen untuned, each with the first of its static configs that does not "
+        "spill registers past the autotuning threshold: %s. The "
         "precompile_triton_untuned_kernels artifact lists them all.",
         len(names),
         ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
@@ -823,7 +833,8 @@ def freeze_runtime_cache(
     kernel that cannot be frozen raises, since precompile.load could not serve
     it without compiling. The exception, unless ``require_tuned_backward``, is a
     backward kernel no instance ever launched: it is frozen untuned, with its
-    first loaded static config, and reported. The caller must stop compiling
+    first loaded static config that does not spill past the autotuning threshold,
+    and reported. The caller must stop compiling
     before calling this: a kernel compiled on another thread meanwhile is neither
     waited on nor frozen.
     """
