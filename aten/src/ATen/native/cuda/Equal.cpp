@@ -31,7 +31,10 @@ bool cuda_equal(const Tensor& self, const Tensor &src) {
       && self.layout() == src.layout()
       && self.is_neg() == src.is_neg()
       && self.is_conj() == src.is_conj()) {
-    return true;
+
+    if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+      return true;
+    }
   }
 
   return at::cuda::eq(self, src).all().item().to<bool>();
