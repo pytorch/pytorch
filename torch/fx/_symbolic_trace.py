@@ -1312,11 +1312,11 @@ def _patch_wrapped_functions(patcher: _Patcher) -> None:
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
+    _resolve_lazy_imports(patcher)
     for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:
-            _resolve_lazy_imports(patcher, frame_dict, (name,))
             orig_fn = frame_dict[name]
         patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
 
@@ -1343,12 +1343,12 @@ def _no_torch_function_modes() -> Iterator[None]:
 
 
 def _resolve_lazy_imports(
-    patcher: _Patcher, frame_dict: dict[str, Any], names: tuple[str, ...] | None = None
+    patcher: _Patcher, frame_dict: dict[str, Any] | None = None
 ) -> None:
-    """Resolve the unresolved lazy imports among ``names`` (default: all) of
-    ``frame_dict`` with the patches of ``patcher`` and of any trace its trace runs
-    inside reverted, FX's tracing flag off and no dispatch or torch function mode
-    active but the default device.
+    """Resolve the unresolved lazy imports of ``frame_dict``, if given, and of the
+    ``torch.fx.wrap`` targets, with the patches of ``patcher`` and of any trace its
+    trace runs inside reverted, FX's tracing flag off and no dispatch or torch
+    function mode active but the default device.
 
     Reading an unresolved lazy import runs its module body, which must not see the
     globals and ``torch.nn.Module`` methods FX patched for the trace, nor take
@@ -1364,19 +1364,19 @@ def _resolve_lazy_imports(
     if is_lazy_import is None:
         return
 
+    scope: dict[str, Any] = frame_dict if frame_dict is not None else {}
+
     def unresolved(
-        is_lazy: Callable[[dict[str, Any], str], bool], first_target: int
+        is_lazy: Callable[[dict[str, Any], str], bool],
     ) -> list[tuple[dict[str, Any], str]]:
-        scope = list(frame_dict) if names is None else names
-        entries = [(frame_dict, name) for name in scope]
-        # Plus the torch.fx.wrap targets registered since, which patching reads
-        # once the window has closed.
-        new_targets = list(_wrapped_fns_to_patch.items())[first_target:]
-        entries += [(target_dict, name) for (_, name), target_dict in new_targets]
+        entries = [(scope, name) for name in list(scope)]
+        # Plus the torch.fx.wrap targets, which patching reads.
+        targets = list(_wrapped_fns_to_patch.items())
+        entries += [(target_dict, name) for (_, name), target_dict in targets]
         return [(d, name) for d, name in entries if name in d and is_lazy(d, name)]
 
     registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
-    lazy = unresolved(is_lazy_import, registered[0])
+    lazy = unresolved(is_lazy_import)
     if lazy:
         from torch.utils._python_dispatch import _disable_current_modes
 
@@ -1392,13 +1392,19 @@ def _resolve_lazy_imports(
             while lazy:
                 for d, name in lazy:
                     _ = d[name]
-                lazy = unresolved(is_lazy_import, registered[0])
+                lazy = unresolved(is_lazy_import)
         # A module body it ran can register torch.fx.wrap targets the traces have
         # not patched yet; patching is idempotent for the rest. Outermost first, so
         # an inner trace leaves the name to the patch that outlives it.
         if (len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)) != registered:
             for trace_patcher in reversed(_trace_patchers(patcher)):
+                made = len(trace_patcher.patches_made)
                 _patch_wrapped_functions(trace_patcher)
+                # Still inside a revert window, e.g. Dynamo's, whose reapply
+                # installs them.
+                if trace_patcher.revert_depth > 0:
+                    for new_patch in reversed(trace_patcher.patches_made[made:]):
+                        new_patch.revert()
 
 
 def _autowrap_check(
