@@ -3751,6 +3751,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 bn.float()
                 ref_bn.float()
 
+            # channels_last and contiguous kernels reduce grads in different orders
+            if precision is None and bn.weight.dtype == torch.float:
+                precision = 1e-4
+
             out = bn(input)
             out.backward(grad)
             ref_out = ref_bn(ref_input)
