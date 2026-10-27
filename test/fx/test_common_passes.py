@@ -78,6 +78,8 @@ Factory_Test_Cases = [FactoryFunctionCall, MutationFactory]
 Devices = ["cpu"]
 if torch.cuda.is_available():
     Devices.append("cuda")
+if torch.xpu.is_available():
+    Devices.append("xpu")
 
 
 def name_fn(common_pass, f, device):
