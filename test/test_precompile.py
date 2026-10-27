@@ -7839,6 +7839,7 @@ class TestPrecompileRuntimeCache(TestCase):
         source = failure.exception.sources[0]
         self.assertEqual([r["reason"] for r in source["instances"]], ["frozen_untuned"])
         self.assertTrue(source["untuned_backward_eligible"])
+        self.assertIn("capture in a fresh process", str(failure.exception))
         # A fresh instance of the same source that never ran is not frozen instead.
         fresh = _never_run(_static_runtime_kernel(64))
         fresh.inductor_meta["coordinate_descent_tuning"] = True
