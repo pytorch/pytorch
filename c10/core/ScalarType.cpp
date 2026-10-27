@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <array>
 
 namespace c10 {
@@ -27,10 +28,11 @@ constexpr auto index2dtype = std::to_array<c10::ScalarType>(
 constexpr std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)>
 calculate_dtype2index() {
   std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)> inverse = {};
-  for (int64_t i = 0; i < static_cast<int64_t>(ScalarType::NumOptions); i++) {
+  for (const auto i :
+       c10::irange(static_cast<int64_t>(ScalarType::NumOptions))) {
     inverse[i] = -1;
   }
-  for (int64_t i = 0; i < static_cast<int64_t>(index2dtype.size()); i++) {
+  for (const auto i : c10::irange(static_cast<int64_t>(index2dtype.size()))) {
     inverse[static_cast<int64_t>(index2dtype[i])] = i;
   }
   return inverse;

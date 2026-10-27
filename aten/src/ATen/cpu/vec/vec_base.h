@@ -1500,8 +1500,8 @@ inline void transpose_mxn(
     int64_t ld_dst,
     int M,
     int N) {
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       dst[j * ld_dst + i] = src[i * ld_src + j];
     }
   }
