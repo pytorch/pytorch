@@ -4859,6 +4859,8 @@ def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
     descriptor: DescriptorTypes,
     obj: "VariableTracker",
+    *,
+    is_wrapper_call: bool = False,
 ) -> None:
     """Check that obj's type is compatible with descriptor.__objclass__.
 
@@ -4870,11 +4872,19 @@ def _check_descriptor_obj_type(
     """
     obj_type = obj.python_type()
     if not issubclass(obj_type, descriptor.__objclass__):
+        if is_wrapper_call:
+            # wrapperdescr_call checks the receiver before wrapperdescr_raw_call.
+            raise_type_error(
+                tx,
+                f"descriptor '{descriptor.__name__}' requires a "
+                f"'{get_type_tp_name(descriptor.__objclass__)}' object "
+                f"but received a '{get_type_tp_name(obj_type)}'",
+            )
         raise_type_error(
             tx,
             f"descriptor '{descriptor.__name__}' for "
-            f"'{descriptor.__objclass__.__name__}' objects "
-            f"doesn't apply to a '{obj_type.__name__}' object",
+            f"'{get_type_tp_name(descriptor.__objclass__)}' objects "
+            f"doesn't apply to a '{get_type_tp_name(obj_type)}' object",
         )
 
 
@@ -4989,7 +4999,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        _check_descriptor_obj_type(tx, self.descriptor, obj, is_wrapper_call=True)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
