@@ -3,6 +3,7 @@
 # flake8: noqa
 
 import itertools
+import os
 import subprocess
 import sys
 import unittest
@@ -148,6 +149,13 @@ selected_ops = {
 selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
+def _get_env_by_device():
+    env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
+    env.pop("HIP_VISIBLE_DEVICES", None)
+    env.pop("ROCR_VISIBLE_DEVICES", None)
+    return env
+
+
 class TestExportOnFakeCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -217,7 +225,7 @@ for op in ops:
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env=_get_env_by_device(),
                 )
             )
             .decode("ascii")
@@ -284,7 +292,7 @@ cuda_calls_behavior_unchanged()
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env=_get_env_by_device(),
                 )
             )
             .decode("ascii")
