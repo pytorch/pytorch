@@ -269,27 +269,54 @@ REGISTER_BINARY_OP(prelu, float, float);
 REGISTER_BINARY_OP(prelu, half, half);
 REGISTER_BINARY_OP(prelu, bfloat, bfloat);
 
-struct prelu_backward_functor {
-  template <typename T>
-  inline T operator()(const T x, const T weight, const T grad) {
-    return float(x) > 0 ? grad : static_cast<T>(float(weight) * float(grad));
-  }
-};
+template <typename T>
+kernel void prelu_backward(
+    device void* grad_input [[buffer(0)]],
+    device void* grad_weight [[buffer(1)]],
+    device const char* input [[buffer(2)]],
+    device const char* weight [[buffer(3)]],
+    device const char* grad_output [[buffer(4)]],
+    constant long* sizes [[buffer(5)]],
+    constant long* output_strides [[buffer(6)]],
+    constant long* input_strides [[buffer(7)]],
+    constant long* weight_strides [[buffer(8)]],
+    constant long* grad_strides [[buffer(9)]],
+    constant uint& ndim [[buffer(10)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  const auto offsets = ternary_offsets(
+      pos,
+      sizes,
+      ndim,
+      output_strides,
+      input_strides,
+      weight_strides,
+      grad_strides);
+  const float x = float(val_at_offs<T>(input, offsets.y));
+  const float w = float(val_at_offs<T>(weight, offsets.z));
+  const float g = float(val_at_offs<T>(grad_output, offsets.w));
+  // TensorIterator allocates both outputs with identical strides.
+  ref_at_offs<T>(grad_input, offsets.x) = T(x > 0 ? g : w * g);
+  ref_at_offs<T>(grad_weight, offsets.x) = T(x > 0 ? 0 : x * g);
+}
 
-struct prelu_backward_weight_functor {
-  template <typename T>
-  inline T operator()(const T x, const T grad) {
-    return float(x) > 0 ? T(0) : static_cast<T>(float(x) * float(grad));
-  }
-};
+#define REGISTER_PRELU_BACKWARD_OP(T)                                         \
+  template [[host_name("prelu_backward_" #T)]] kernel void prelu_backward<T>( \
+      device void*,                                                           \
+      device void*,                                                           \
+      device const char*,                                                     \
+      device const char*,                                                     \
+      device const char*,                                                     \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant uint&,                                                         \
+      uint3)
 
-REGISTER_TERNARY_OP(prelu_backward, float, float);
-REGISTER_TERNARY_OP(prelu_backward, half, half);
-REGISTER_TERNARY_OP(prelu_backward, bfloat, bfloat);
-
-REGISTER_BINARY_OP(prelu_backward_weight, float, float);
-REGISTER_BINARY_OP(prelu_backward_weight, half, half);
-REGISTER_BINARY_OP(prelu_backward_weight, bfloat, bfloat);
+REGISTER_PRELU_BACKWARD_OP(float);
+REGISTER_PRELU_BACKWARD_OP(half);
+REGISTER_PRELU_BACKWARD_OP(bfloat);
 
 struct silu_functor {
   template <typename T>

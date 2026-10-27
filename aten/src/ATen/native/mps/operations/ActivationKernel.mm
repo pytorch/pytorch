@@ -121,15 +121,51 @@ static void prelu_kernel(TensorIterator& iter) {
 }
 
 static void prelu_backward_kernel(TensorIterator& iter) {
-  auto input_iter = TensorIteratorConfig()
-                        .add_output(iter.output(0))
-                        .add_const_input(iter.input(0))
-                        .add_const_input(iter.input(1))
-                        .add_const_input(iter.input(2))
-                        .build();
-  auto weight_iter = TensorIterator::borrowing_binary_op(iter.output(1), iter.input(0), iter.input(2));
-  lib.exec_ternary_kernel(input_iter, "prelu_backward");
-  lib.exec_binary_kernel(weight_iter, "prelu_backward_weight");
+  using namespace mps;
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "prelu_backward not implemented for ", iter.dtype());
+  if (iter.numel() == 0) {
+    return;
+  }
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      prelu_backward_kernel(sub_iter);
+    }
+    return;
+  }
+  // The kernel addresses grad_weight with grad_input's strides.
+  TORCH_INTERNAL_ASSERT(iter.strides(0) == iter.strides(1));
+  const auto name = "prelu_backward_" + scalarToMetalTypeString(iter.dtype());
+  auto pso = lib.getPipelineStateForFunc(name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pso, name, {iter.input(0), iter.input(1), iter.input(2)}, stream);
+      [encoder setComputePipelineState:pso];
+      bind_iter_tensors(encoder, iter);
+      // A 0-dim iterator has no shape or strides to bind; give the kernel one unit dim.
+      const std::array<int64_t, 1> unit_dim{1};
+      const auto shape = iter.ndim() ? iter.shape() : IntArrayRef(unit_dim);
+      auto strides = [&](int i) { return iter.ndim() ? iter.strides(i) : IntArrayRef(unit_dim); };
+      mtl_setArgs<5>(encoder, shape, strides(0), strides(2), strides(3), strides(4), std::max(iter.ndim(), 1));
+      const auto dim0 = static_cast<NSUInteger>(shape[0]);
+      const auto dim1 = static_cast<NSUInteger>(iter.ndim() > 1 ? shape[1] : 1);
+      const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
+      // Operands 2 and 4 are input and grad_output.
+      const bool inner_strides_differ = iter.ndim() > 1 && iter.strides(2)[0] != iter.strides(4)[0];
+      if (inner_strides_differ) {
+        // One operand is transposed relative to the other: a simdgroup-wide row
+        // coalesces one, 8 rows per threadgroup keep the other cache-local.
+        constexpr NSUInteger tile_width = c10::metal::simdgroup_size;
+        constexpr NSUInteger tile_height = 8;
+        const auto tile = MTLSizeMake(std::min(dim0, tile_width), std::min(dim1, tile_height), 1);
+        [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:tile];
+      } else {
+        mtl_dispatch3DJob(encoder, pso, dim0, dim1, dim2);
+      }
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
 }
 
 static void silu_kernel(TensorIteratorBase& iter) {
