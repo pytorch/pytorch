@@ -226,17 +226,14 @@ class FakeTensorTLS(threading.local):
 fake_tensor_tls = FakeTensorTLS()
 
 
-def tracking_fake_tensors_for_export() -> bool:
-    return (
+# Called from FakeTensor.__init__ and, since C++ fake tensors have no Python
+# __init__, from set_proxy_slot for every tensor registered with a tracer.
+def track_fake_tensor_for_export(t: object) -> None:
+    if (
         torch.compiler.is_exporting()
         and torch._export.config.detect_non_strict_fake_tensor_leaks
-    )
-
-
-# C++ fake tensors have no Python __init__, and constructor-only tracking misses
-# memoized tensors reused during non-strict export.
-def track_fake_tensor_for_export(t: object) -> None:
-    if tracking_fake_tensors_for_export() and is_fake_tensor(t):
+        and is_fake_tensor(t)
+    ):
         fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
@@ -822,7 +819,6 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
                 maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
-            track_fake_tensor_for_export(maybe_memo)
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -996,7 +992,6 @@ class FakeTensorConverter:
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
-        track_fake_tensor_for_export(out)
         return out
 
     # If you specify the device, it MUST be a meta tensor.
