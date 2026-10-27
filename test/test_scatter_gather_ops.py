@@ -1395,10 +1395,12 @@ class TestScatterAddOverrideCorrectness(TestCase):
             return mode.from_tensor(t, symbolic_context=ctx)
 
         self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
-        cached = dict(cutedsl_impl._ELIGIBILITY_CACHE)
+        fake_self, fake_idx, fake_src = fake(self_t), fake(idx), fake(src)
+        self.assertIsInstance(fake_self.shape[0], torch.SymInt)
+        cutedsl_impl._ELIGIBILITY_CACHE.clear()
         with mode:
-            cutedsl_impl._scatter_add_eligibility(fake(self_t), 0, fake(idx), fake(src))
-        self.assertEqual(cutedsl_impl._ELIGIBILITY_CACHE, cached)
+            cutedsl_impl._scatter_add_eligibility(fake_self, 0, fake_idx, fake_src)
+        self.assertEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 0)
 
 
 
