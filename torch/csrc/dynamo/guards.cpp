@@ -5,6 +5,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
@@ -668,6 +669,9 @@ struct AutocastState {
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
+  // Excluded autocast dispatch keys, equivalent to `enabled` but checkable in
+  // one mask compare.
+  c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -675,22 +679,26 @@ struct AutocastState {
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
     cache_enabled = at::autocast::is_autocast_cache_enabled();
+    disabled_keys = c10::impl::tls_local_dispatch_key_set().excluded_ &
+        c10::autocast_dispatch_keyset;
   }
 
-  bool operator==(const AutocastState& o) const {
-    for (size_t i = 0; i < DEVICES.size(); i++) {
-      // If disabled audocast, autocast_dtype comparison not occur
-      if (enabled[i] == false && o.enabled[i] == false) {
-        continue;
-      }
-      if (enabled[i] != o.enabled[i] || dtype[i] != o.dtype[i]) {
+  // Compares all enabled flags at once via the TLS excluded set, and only
+  // fetches dtypes for enabled devices.
+  bool matches_current() const {
+    const auto& excluded{c10::impl::tls_local_dispatch_key_set().excluded_};
+    if ((excluded & c10::autocast_dispatch_keyset) != disabled_keys) {
+      return false;
+    }
+
+    for (size_t i{0}; i < DEVICES.size(); ++i) {
+      if (enabled[i] &&
+          dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
       }
     }
-    if (cache_enabled != o.cache_enabled) {
-      return false;
-    }
-    return true;
+
+    return cache_enabled == at::autocast::is_autocast_cache_enabled();
   }
 
   std::string reason(const AutocastState& o) const {
@@ -724,6 +732,16 @@ struct AutocastState {
     json_t.enabled = json_j.at("enabled");
     json_t.dtype = json_j.at("dtype");
     json_t.cache_enabled = json_j.at("cached_enabled");
+
+    // Rebuild disabled_keys from enabled
+    json_t.disabled_keys = c10::DispatchKeySet();
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (!json_t.enabled[i]) {
+        json_t.disabled_keys = json_t.disabled_keys.add(
+            at::autocast::get_autocast_dispatch_key_from_device_type(
+                DEVICES[i]));
+      }
+    }
   }
 };
 
@@ -767,7 +785,7 @@ struct GlobalStateGuard {
   bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
-            _autocast_state == AutocastState() &&
+            _autocast_state.matches_current() &&
             _torch_function == torch::torch_function_enabled() &&
             _torch_function_all_disabled ==
                 at::impl::torch_function_all_disabled() &&
@@ -786,9 +804,8 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    AutocastState current_autocast;
-    if (!(_autocast_state == current_autocast))
-      os << _autocast_state.reason(current_autocast);
+    if (!_autocast_state.matches_current())
+      os << _autocast_state.reason(AutocastState{});
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())
@@ -4532,13 +4549,18 @@ class RootGuardManager : public GuardManager {
     // Dynamo should only be adding guards on values without
     // torch function at this point, because if there
     // was a torch function, we should've traced through it
+    // Restored by scope exit so a C++ throw out of an accessor (a TORCH_CHECK
+    // in TENSOR_MATCH on a nested tensor, say) cannot leave the calling thread
+    // ALL_DISABLED.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -4546,13 +4568,11 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
 
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -4596,16 +4616,19 @@ class RootGuardManager : public GuardManager {
       return debug_info_leaf;
     }
 
+    // Same scope-exit restore as check_nopybind_template above.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
     const GuardDebugInfo& debug_info_accessors =
         GuardManager::check_accessors_verbose_nopybind(
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return debug_info_accessors;
     }
@@ -4616,7 +4639,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
@@ -4625,7 +4647,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
