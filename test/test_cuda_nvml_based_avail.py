@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+from torch.utils._triton import has_triton_package
 
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
@@ -54,6 +55,21 @@ class TestExtendedCUDAIsAvail(TestCase):
         _ = torch.cuda.is_available()
         return torch.cuda._is_in_bad_fork()
 
+    @unittest.skipIf(IS_WINDOWS or torch.version.hip is not None, "NVIDIA fork test")
+    def test_triton_driver_probe_does_not_poison_fork(self):
+        if not has_triton_package():
+            self.skipTest("Triton not installed")
+        if torch.cuda._device_count_nvml() < 0:
+            self.skipTest("NVML unavailable")
+
+        from triton.backends import backends
+
+        with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
+            self.assertFalse(torch.cuda.is_initialized())
+            self.assertTrue(backends["nvidia"].driver.is_active())
+            with multiprocessing.get_context("fork").Pool(1) as pool:
+                pool.apply_async(torch.cuda.init).get(timeout=60)
+
     # These tests validate the behavior and activation of the weaker, NVML-based, user-requested
     # `torch.cuda.is_available()` assessment. The NVML-based assessment should be attempted when
     # `PYTORCH_NVML_BASED_CUDA_CHECK` is set to 1, reverting to the default CUDA Runtime API check otherwise.
@@ -69,7 +85,11 @@ class TestExtendedCUDAIsAvail(TestCase):
             if nvml_avail:
                 _ = torch.cuda.is_available()
             else:
-                with patch.object(torch.cuda, "_device_count_nvml", return_value=-1):
+                # ROCm counts devices with amdsmi; CUDA uses NVML.
+                with (
+                    patch.object(torch.cuda, "_device_count_nvml", return_value=-1),
+                    patch.object(torch.cuda, "_device_count_amdsmi", return_value=-1),
+                ):
                     _ = torch.cuda.is_available()
             with multiprocessing.get_context("fork").Pool(1) as pool:
                 in_bad_fork = pool.apply(TestExtendedCUDAIsAvail.in_bad_fork_test)
@@ -123,6 +143,10 @@ class TestVisibleDeviceParses(TestCase):
             "GPU-e56257c4-947f-6a5b-7ec9-0f45567ccf4e",
             "GPU-1c20e77d-1c1a-d9ed-fe37-18b8466a78ad",
         ]
+        # amdsmi asic serials have no NVML "GPU-" prefix. Candidates below stay
+        # GPU-prefixed; the matcher strips that prefix on ROCm.
+        if torch.version.hip is not None:
+            uuids = [uuid.removeprefix("GPU-") for uuid in uuids]
         self.assertEqual(_transform_uuid_to_ordinals(["GPU-9e8d35e3"], uuids), [1])
         self.assertEqual(
             _transform_uuid_to_ordinals(["GPU-e4", "GPU-9e8d35e3"], uuids), [2, 1]
