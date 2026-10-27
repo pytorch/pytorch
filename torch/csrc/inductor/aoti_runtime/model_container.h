@@ -241,51 +241,10 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
-
-    auto& const_folded = active().fold_state;
-    if (const_folded == ConstantState::INITIALIZED) {
-      // Do NOT call get_available_model() before upgrading to exclusive lock.
-      // Holding a model across the upgrade causes a deadlock when another
-      // thread holds a shared lock and waits for the model.
-      model_lk.unlock();
-      std::unique_lock constants_folding_lk(model_exec_mutex_);
-      // Double locking to make sure constant folding is only ran once.
-      if (const_folded == ConstantState::INITIALIZED) {
-        auto* model = pool_.get_available_model();
-        try {
-          auto folded_const_map = model->run_const_fold(
-              stream, proxy_executor, /* initialization = */ true);
-          update_constant_buffer(
-              std::move(folded_const_map),
-              /* use_inactive = */ false,
-              /* validate_full_update = */ false);
-          const_folded = ConstantState::FOLDED;
-        } catch (...) {
-          pool_.return_model_to_available(model);
-          throw;
-        }
-        pool_.return_model_to_pending(model);
-      }
-      constants_folding_lk.unlock();
-      model_lk.lock();
-    } else {
-      AOTI_RUNTIME_CHECK(
-          const_folded == ConstantState::FOLDED,
-          "Unknown constant state: " + toStringConstantState(const_folded));
-    }
-
-    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-    auto* model = pool_.get_available_model(stream);
-
-    try {
-      model->run(input_handles, output_handles, stream, proxy_executor);
-    } catch (...) {
-      pool_.return_model_to_available(model);
-      throw;
-    }
-
-    pool_.return_model_to_pending(model);
+    run_on_available_model(
+        stream, proxy_executor, [&](AOTInductorModel* model) {
+          model->run(input_handles, output_handles, stream, proxy_executor);
+        });
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -939,6 +898,61 @@ class AOTInductorModelContainer {
   }
   const ConstantBufferSet& inactive() const {
     return buffers_[1 - active_idx_];
+  }
+
+  // Folds the constants on the first call, then runs fn on a model instance
+  // checked out of the pool and leaves the instance pending until its work
+  // finishes.
+  template <typename Fn>
+  void run_on_available_model(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      Fn&& fn) {
+    std::shared_lock model_lk(model_exec_mutex_);
+
+    auto& const_folded = active().fold_state;
+    if (const_folded == ConstantState::INITIALIZED) {
+      // Do NOT call get_available_model() before upgrading to exclusive lock.
+      // Holding a model across the upgrade causes a deadlock when another
+      // thread holds a shared lock and waits for the model.
+      model_lk.unlock();
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Double locking to make sure constant folding is only ran once.
+      if (const_folded == ConstantState::INITIALIZED) {
+        auto* model = pool_.get_available_model();
+        try {
+          auto folded_const_map = model->run_const_fold(
+              stream, proxy_executor, /* initialization = */ true);
+          update_constant_buffer(
+              std::move(folded_const_map),
+              /* use_inactive = */ false,
+              /* validate_full_update = */ false);
+          const_folded = ConstantState::FOLDED;
+        } catch (...) {
+          pool_.return_model_to_available(model);
+          throw;
+        }
+        pool_.return_model_to_pending(model);
+      }
+      constants_folding_lk.unlock();
+      model_lk.lock();
+    } else {
+      AOTI_RUNTIME_CHECK(
+          const_folded == ConstantState::FOLDED,
+          "Unknown constant state: " + toStringConstantState(const_folded));
+    }
+
+    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
+    auto* model = pool_.get_available_model(stream);
+
+    try {
+      fn(model);
+    } catch (...) {
+      pool_.return_model_to_available(model);
+      throw;
+    }
+
+    pool_.return_model_to_pending(model);
   }
 
   // This mutex is used to protect execution of model.
