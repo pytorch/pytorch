@@ -5203,6 +5203,30 @@ class BoundBuiltinMethodVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        # meth_get__qualname__: the receiver if it is a type, else its type.
+        try:
+            owner = self.obj.python_type()
+            if issubclass(owner, type):
+                owner = self.obj.as_python_constant()
+        except NotImplementedError:
+            return None
+        name = self.descriptor.__name__
+        return ConstantVariable.create(f"{owner.__qualname__}.{name}")
+
+    # meth_getsets: https://github.com/python/cpython/blob/v3.13.0/Objects/methodobject.c#L249-L256
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__name__),
+            readonly_setter,
+        ),
+        "__qualname__": GetSet(_get_qualname, readonly_setter),
+        "__doc__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__doc__),
+            readonly_setter,
+        ),
+    }
+
 
 class ClassMethodDescriptorVariable(DescriptorVariable):
     """C-level classmethod descriptor (classmethod_descriptor on a type).
