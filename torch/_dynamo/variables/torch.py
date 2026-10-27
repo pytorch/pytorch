@@ -2195,12 +2195,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 or example_value.dim() != 0
                 or example_value.device.type != "cpu"
                 or example_value.dtype != torch.int64
+                or (item_memo := maybe_get_item_memo(example_value)) is None
             ):
                 return None
-
-            if (item_memo := maybe_get_item_memo(example_value)) is None:
-                return None
-            item_memo = cast(int | torch.SymInt, item_memo)
 
             sections = torch.fx.experimental.symbolic_shapes.guard_scalar(item_memo)
             if not isinstance(sections, int):

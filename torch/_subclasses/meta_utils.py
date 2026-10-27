@@ -2261,7 +2261,6 @@ class MetaConverter(Generic[_TensorT]):
                             )
                             from torch._subclasses.fake_tensor import (
                                 in_kernel_invocation_manager,
-                                maybe_get_fake_mode,
                             )
 
                             mb_fake_mode = maybe_get_fake_mode(r)
