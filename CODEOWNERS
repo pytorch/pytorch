@@ -40,22 +40,10 @@
 # directly followed by one "# owner:" line, a label list has one owner list,
 # and an active rule's handles appear on its block's owner line.
 #
+# Sections are kept temporarily so scripts/codeowners/owners.py keeps its
+# section-name fallback; ownership is recorded per label block, not per section.
 # Review-surface hierarchy:
-# - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
-# - Core operators and runtime: core_aten_native_ops, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests
-# - Backends and devices: backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan
-# - Public APIs and extensions: python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_api_custom_ops, cpp_runtime_tests, nativert
-# - Distributed: distributed
-# - Serialization and export: jit_torchscript, onnx_export, serialization_package
-# - Quantization: quantization
-# - Profiling: profiler
-# - Mobile: mobile_runtime, mobile_android, mobile_delegates
-# - Build and developer infrastructure: infra_ci, infra_github_automation, infra_build_packaging, infra_linting, infra_codegen, infra_developer_tools, infra_test
-# - Third-party dependencies: third_party_backend_deps, third_party_core_build_deps, third_party_serialization_schema
-# - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
-# - Legacy: caffe2
-# - Repository-wide material: ai_agent_tooling, docs_general
-# - Protected ownership: protected_codeownership
+# - Sections: core_aten_native_ops, functorch, compiler_autograd, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests, backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan, python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_runtime_tests, jit_torchscript, cpp_api_custom_ops, onnx_export, quantization, profiler, mobile_runtime, mobile_android, mobile_delegates, infra_ci, infra_github_automation, infra_build_packaging, third_party_core_build_deps, third_party_backend_deps, third_party_serialization_schema, benchmark_compiler, distributed, infra_developer_tools, infra_linting, infra_codegen, infra_test, benchmark_operator_runtime, benchmark_models, caffe2, serialization_package, compiler_export_fx, compiler_dynamo, compiler_inductor, nativert, ai_agent_tooling, docs_general, protected_codeownership
 #
 # Grouped review-surface definitions:
 #
@@ -806,6 +794,13 @@
 # /torch/types.py
 # /torch/utils/
 /torch/_vendor/quack/ @slayton58 @drisspg
+# label: module: abi
+# owner: @janeyx99
+/torch/header_only_apis.txt @janeyx99
+/torch/headeronly/ @janeyx99
+# label: module: rocm
+# owner: @jeffdaily @jithunnair-amd
+/torch/utils/hipify/ @jeffdaily @jithunnair-amd
 # label: module: dsl-native-ops
 # owner: @drisspg @pearu @slayton58
 /torch/_native/ @slayton58 @drisspg
@@ -820,13 +815,6 @@
 # owner: @aorenste
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
-# label: module: abi
-# owner: @janeyx99
-/torch/header_only_apis.txt @janeyx99
-/torch/headeronly/ @janeyx99
-# label: module: rocm
-# owner: @jeffdaily @jithunnair-amd
-/torch/utils/hipify/ @jeffdaily @jithunnair-amd
 # label: module: pytree
 # owner: @XuehaiPan
 /torch/utils/_pytree.py @XuehaiPan

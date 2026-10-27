@@ -15,28 +15,40 @@ OWNERSHIP = """\
 oncall_queues:
   "oncall: pt2": ["module: dynamo"]
 planned_labels: ["module: tvm"]
-categories:
-  - name: "Compiler"
-    sections: [compiler_dynamo]
-  - name: "Protected ownership"
-    sections: [protected_codeownership]
 sections:
-  - name: compiler_dynamo
+  - compiler_dynamo
+  - python_nn_api
+  - protected_codeownership
+section_notes:
+  protected_codeownership:
+    - "# Keep these rules last."
+ownership:
+  - labels: ["module: linear cross entropy"]
+    owners: [pearu]
+    section: python_nn_api
+    paths:
+      - /torch/nn/modules/linear_cross_entropy.py: [pearu]
+  - labels: ["module: dynamo"]
+    owners: [alice, pytorch/dev-infra]
+    section: compiler_dynamo
+    paths:
+      - /torch/_dynamo/
+      - /torch/_dynamo/eval_frame.py: [alice, someone@example.com]
+      - /torch/nn/dynamo_hooks.py: {section: python_nn_api}
+  - labels: ["module: dynamo", "module: tvm"]
+    owners: []
+    section: compiler_dynamo
+    paths:
+      - /torch/_dynamo/backends/tvm.py
+  - labels: ["module: nn"]
+    owners: [bob]
+    section: python_nn_api
+    paths:
+      - /torch/nn/: [bob]
+  - section: compiler_dynamo
     paths:
       - /torch/_dynamo/unlabeled.py
-    areas:
-      - labels: ["module: dynamo"]
-        owners: [alice, pytorch/dev-infra]
-        paths:
-          - /torch/_dynamo/
-          - /torch/_dynamo/eval_frame.py: [alice, someone@example.com]
-      - labels: ["module: dynamo", "module: tvm"]
-        owners: []
-        paths:
-          - /torch/_dynamo/backends/tvm.py
-  - name: protected_codeownership
-    note:
-      - "# Keep these rules last."
+  - section: protected_codeownership
     paths:
       - /CODEOWNERS: [albanD]
 """
@@ -51,7 +63,14 @@ class TestGenerateCodeowners(TestCase):
         header, sections = text.split(SECTION_MARKER + "\n")
         self.assertIn("#     oncall: pt2: dynamo\n", header)
         self.assertIn("#   them until they exist): module: tvm\n", header)
-        self.assertIn("# - Compiler: compiler_dynamo\n", header)
+        self.assertIn(
+            "# - Sections: compiler_dynamo, python_nn_api, protected_codeownership\n",
+            header,
+        )
+        # Paths without a label group come first in their section, and a group's
+        # path can override its section. In python_nn_api the nn block (/torch/nn/)
+        # comes before the two blocks with paths inside it, even though
+        # OWNERSHIP.yaml lists it last; those two keep their OWNERSHIP.yaml order.
         self.assertEqual(
             sections,
             """\
@@ -65,6 +84,17 @@ class TestGenerateCodeowners(TestCase):
 # label: module: dynamo, module: tvm
 # owner: none
 # /torch/_dynamo/backends/tvm.py
+#
+# [python_nn_api]
+# label: module: nn
+# owner: @bob
+/torch/nn/ @bob
+# label: module: linear cross entropy
+# owner: @pearu
+/torch/nn/modules/linear_cross_entropy.py @pearu
+# label: module: dynamo
+# owner: @alice @pytorch/dev-infra
+# /torch/nn/dynamo_hooks.py
 #
 # [protected_codeownership]
 # Keep these rules last.

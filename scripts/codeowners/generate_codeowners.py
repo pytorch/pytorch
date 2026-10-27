@@ -23,78 +23,60 @@ class PathRule:
     path: str
     # Handles GitHub asks for review; empty for a commented (quiet) rule.
     notify: tuple[str, ...]
+    # CODEOWNERS section the rule is written under (kept for owners.py).
+    section: str
 
 
 @dataclass(frozen=True)
-class Area:
+class LabelGroup:
+    """Paths owned together, identified by their label set (empty: not owned yet)."""
+
     labels: tuple[str, ...]
     owners: tuple[str, ...]
     paths: tuple[PathRule, ...]
 
 
 @dataclass(frozen=True)
-class Section:
-    name: str
-    note: tuple[str, ...]
-    # Paths before the section's first label block.
-    paths: tuple[PathRule, ...]
-    areas: tuple[Area, ...]
-
-
-@dataclass(frozen=True)
-class Category:
-    name: str
-    sections: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class Ownership:
+class OwnershipFile:
     oncall_queues: dict[str, tuple[str, ...]]
     planned_labels: tuple[str, ...]
-    categories: tuple[Category, ...]
-    sections: tuple[Section, ...]
+    sections: tuple[str, ...]
+    section_notes: dict[str, tuple[str, ...]]
+    groups: tuple[LabelGroup, ...]
 
 
-def parse_path_rule(entry) -> PathRule:
+def parse_path_rule(entry, *, section: str) -> PathRule:
     if isinstance(entry, str):
-        return PathRule(entry, ())
-    ((path, notify),) = entry.items()
-    return PathRule(path, tuple(notify))
+        return PathRule(entry, (), section)
+    ((path, value),) = entry.items()
+    if isinstance(value, list):
+        return PathRule(path, tuple(value), section)
+    return PathRule(path, tuple(value.get("notify", ())), value["section"])
 
 
-def load_ownership(path: Path) -> Ownership:
+def load_ownership(path: Path) -> OwnershipFile:
     document = yaml.safe_load(path.read_text())
-    return Ownership(
-        oncall_queues={
-            oncall: tuple(modules)
-            for oncall, modules in document["oncall_queues"].items()
-        },
+    return OwnershipFile(
+        oncall_queues={k: tuple(v) for k, v in document["oncall_queues"].items()},
         planned_labels=tuple(document["planned_labels"]),
-        categories=tuple(
-            Category(entry["name"], tuple(entry["sections"]))
-            for entry in document["categories"]
-        ),
-        sections=tuple(
-            Section(
-                name=entry["name"],
-                note=tuple(entry.get("note", ())),
-                paths=tuple(map(parse_path_rule, entry.get("paths", ()))),
-                areas=tuple(
-                    Area(
-                        labels=tuple(area["labels"]),
-                        owners=tuple(area["owners"]),
-                        paths=tuple(map(parse_path_rule, area["paths"])),
-                    )
-                    for area in entry.get("areas", ())
+        sections=tuple(document["sections"]),
+        section_notes={k: tuple(v) for k, v in document["section_notes"].items()},
+        groups=tuple(
+            LabelGroup(
+                labels=tuple(entry.get("labels", ())),
+                owners=tuple(entry.get("owners", ())),
+                paths=tuple(
+                    parse_path_rule(rule, section=entry["section"])
+                    for rule in entry["paths"]
                 ),
             )
-            for entry in document["sections"]
+            for entry in document["ownership"]
         ),
     )
 
 
 def handle(name: str) -> str:
-    """Store handles without "@" (as merge_rules.yaml does); emails keep theirs."""
+    """Handles are stored without "@" (as in merge_rules.yaml); emails keep theirs."""
     return name if "@" in name else f"@{name}"
 
 
@@ -104,14 +86,10 @@ def render_rule(rule: PathRule) -> str:
     return " ".join([rule.path, *map(handle, rule.notify)])
 
 
-def render_header(ownership: Ownership) -> list[str]:
+def render_header(ownership: OwnershipFile) -> list[str]:
     oncall_map = [
         f"#     {oncall}: {', '.join(m.removeprefix('module: ') for m in modules)}"
         for oncall, modules in ownership.oncall_queues.items()
-    ]
-    hierarchy = [
-        f"# - {category.name}: {', '.join(category.sections)}"
-        for category in ownership.categories
     ]
     return [
         "# This file is generated from OWNERSHIP.yaml by",
@@ -154,24 +132,78 @@ def render_header(ownership: Ownership) -> list[str]:
         '# directly followed by one "# owner:" line, a label list has one owner list,',
         "# and an active rule's handles appear on its block's owner line.",
         "#",
+        "# Sections are kept temporarily so scripts/codeowners/owners.py keeps its",
+        "# section-name fallback; ownership is recorded per label block, not per section.",
         "# Review-surface hierarchy:",
-        *hierarchy,
+        f"# - Sections: {', '.join(ownership.sections)}",
         "#",
         SECTION_MARKER,
         "#",
     ]
 
 
-def render_codeowners(ownership: Ownership) -> str:
+def contains(broad: str, narrow: str) -> bool:
+    """True if every path matching `narrow` also matches the directory pattern `broad`."""
+    return (
+        broad.endswith("/")
+        and "*" not in broad
+        and narrow != broad
+        and narrow.startswith(broad)
+    )
+
+
+Block = tuple[LabelGroup, list[PathRule]]
+
+
+def order_blocks(blocks: list[Block]) -> list[Block]:
+    """Order a section's label blocks so broader patterns come before narrower ones.
+
+    GitHub applies the last matching rule, so a block containing a directory that
+    another block's patterns sit inside must come first. Otherwise blocks keep
+    their OWNERSHIP.yaml order.
+    """
+
+    def precedes(first: Block, second: Block) -> bool:
+        return any(contains(a.path, b.path) for a in first[1] for b in second[1])
+
+    remaining = list(blocks)
+    ordered = []
+    while remaining:
+        ready = next(
+            (
+                block
+                for block in remaining
+                if not any(precedes(other, block) for other in remaining if other is not block)
+            ),
+            None,
+        )
+        if ready is None:
+            groups = "; ".join(", ".join(group.labels) for group, _ in remaining)
+            raise ValueError(f"label groups nest inside each other both ways: {groups}")
+        ordered.append(ready)
+        remaining.remove(ready)
+    return ordered
+
+
+def render_codeowners(ownership: OwnershipFile) -> str:
     lines = render_header(ownership)
     for section in ownership.sections:
-        lines.append(f"# [{section.name}]")
-        lines.extend(section.note)
-        lines.extend(map(render_rule, section.paths))
-        for area in section.areas:
-            lines.append(f"# label: {', '.join(area.labels)}")
-            lines.append(f"# owner: {' '.join(map(handle, area.owners)) or 'none'}")
-            lines.extend(map(render_rule, area.paths))
+        lines.append(f"# [{section}]")
+        lines.extend(ownership.section_notes.get(section, ()))
+        for group in ownership.groups:
+            if not group.labels:
+                lines.extend(
+                    render_rule(rule) for rule in group.paths if rule.section == section
+                )
+        blocks = [
+            (group, [rule for rule in group.paths if rule.section == section])
+            for group in ownership.groups
+            if group.labels
+        ]
+        for group, rules in order_blocks([block for block in blocks if block[1]]):
+            lines.append(f"# label: {', '.join(group.labels)}")
+            lines.append(f"# owner: {' '.join(map(handle, group.owners)) or 'none'}")
+            lines.extend(map(render_rule, rules))
         lines.append("#")
     return "\n".join(lines) + "\n"
 
