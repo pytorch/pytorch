@@ -12290,6 +12290,22 @@ class TestNNDeviceType(NNTestCase):
                              msg=f"nearest grid gradient must be zero (W={width})")
 
     @onlyCUDA
+    def test_grid_sample_2d_backward_rejects_wrong_rank(self, device):
+        # Direct backward calls must reach the grid_sampler() shape checks,
+        # not fail earlier while the ROCm gradient allocation inspects sizes.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        cases = (
+            (torch.randn(1, 1, 4, device=device), torch.randn(4, device=device),
+             torch.zeros(1, 1, 4, 2, device=device)),
+            (torch.randn(1, 1, 4, device=device),
+             torch.randn(1, 8, 4, 4, device=device).contiguous(memory_format=torch.channels_last),
+             torch.zeros(1, 4, device=device)),
+        )
+        for grad_output, inp, grid in cases:
+            with self.assertRaisesRegex(RuntimeError, r"grid_sampler\(\): expected"):
+                bw(grad_output, inp, grid, 0, 0, False, [True, True])
+
+    @onlyCUDA
     @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
     @dtypes(torch.half, torch.bfloat16)
     def test_grid_sample_2d_backward_rocm_low_precision_grid_grad(self, device, dtype):

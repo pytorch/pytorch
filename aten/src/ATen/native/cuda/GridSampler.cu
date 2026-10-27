@@ -1419,6 +1419,11 @@ bool rocm_grid_sampler_2d_backward_use_channels_last_scratch(
   // parallelism gains on gfx1250 (4x2x16x16 input, 512 points: +8.6% versus
   // the generic kernel), so the scratch path starts at C=3, except for
   // reduced precision, which needs the channel-lane grid-gradient reduction.
+  // This runs before the launcher validates shapes; leave malformed inputs to
+  // its checks.
+  if (input.dim() != 4 || grid.dim() != 4) {
+    return false;
+  }
   const auto C = input.size(1);
   const int64_t min_channels =
       rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type()) ? 2 : 3;
