@@ -996,6 +996,16 @@ class TestViewOps(TestCase):
         self.assertEqual(t[2, 2], 0)
 
     @skipLazy
+    @dtypes(torch.half, torch.float, torch.long, torch.bool)
+    def test_resize_view_preserves_storage(self, device, dtype):
+        base = make_tensor((20,), device=device, dtype=dtype)
+        expected = base.clone()
+        view = base[5:15]
+        view.resize_(30)
+        self.assertEqual(view[:10], expected[5:15])
+        self.assertEqual(base, expected)
+
+    @skipLazy
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
