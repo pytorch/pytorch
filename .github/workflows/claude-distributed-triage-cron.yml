@@ -31,7 +31,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 1
 
@@ -50,7 +50,7 @@ jobs:
 
           # Load primary distributed module labels from the skill's label manifest.
           # module: performance is a secondary tag, not a primary module classifier.
-          LABELS_FILE=".claude/skills/distributed-triage/distributed-labels.json"
+          LABELS_FILE=".agents/skills/distributed-triage/distributed-labels.json"
           mapfile -t MODULE_LABELS < <(
             jq -r '.labels[].name
                    | select(startswith("module: "))

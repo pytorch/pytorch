@@ -163,7 +163,7 @@ static Tensor moveDimToFrontAndUnsqueeze(Tensor tensor, std::optional<int64_t> d
     tensor = tensor.unsqueeze(0);
   }
   auto ndim = tensor.dim() - 1;
-  for (int64_t i = 0; i < example_ndim - ndim; i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(example_ndim - ndim)) {
     tensor = tensor.unsqueeze(1);
   }
   return tensor;
