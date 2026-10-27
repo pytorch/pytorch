@@ -19,6 +19,33 @@ if TYPE_CHECKING:
 _compiled_cache_lock = threading.Lock()
 
 
+class LazyFlyDSLLauncher:
+    """Build generated FlyDSL JIT launchers once per process and device."""
+
+    def __init__(self, factory: Callable[[], Any]) -> None:
+        self._factory = factory
+        self._launchers: dict[tuple[int, str | None, int | None], Any] = {}
+        self._lock = threading.Lock()
+
+    def get(self, device: Any = None) -> Any:
+        device = getattr(device, "device", device)
+        device_type = getattr(device, "type", None)
+        device_index = getattr(device, "index", None)
+        if device_type == "cuda" and device_index is None:
+            import torch
+
+            device_index = torch.cuda.current_device()
+        key = (os.getpid(), device_type, device_index)
+        launcher = self._launchers.get(key)
+        if launcher is None:
+            with self._lock:
+                launcher = self._launchers.get(key)
+                if launcher is None:
+                    launcher = self._factory()
+                    self._launchers[key] = launcher
+        return launcher
+
+
 @contextlib.contextmanager
 def temporary_env(updates: dict[str, str | None]):
     """Temporarily override process environment variables."""
@@ -135,6 +162,90 @@ def configure_flydsl_cache_dir() -> str:
     resolved = str(_cache_dir())
     os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = resolved
     return resolved
+
+
+def run_flydsl_template(
+    jit_func: Any,
+    dispatch_args: tuple[Any, ...],
+    *,
+    compiler: Callable[..., Any],
+    tensor_converter: Callable[[Any], Any],
+) -> Any:
+    """Compile or dispatch a generated FlyDSL template through Inductor's cache."""
+    if len(dispatch_args) < 2:
+        raise ValueError("FlyDSL template dispatch requires tensors and a stream")
+
+    configure_flydsl_cache_dir()
+    tensor_args = dispatch_args[:-1]
+    stream = dispatch_args[-1]
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+
+    constexpr_param = tensor_converter(tensor_args[0])
+
+    def make_compile_args() -> tuple[Any, ...]:
+        return (
+            constexpr_param,
+            *(tensor_converter(tensor) for tensor in tensor_args[1:]),
+            stream,
+        )
+
+    if flydsl_compile_only:
+        return compiler(jit_func, *make_compile_args())
+    return run_cached_flydsl(
+        jit_func,
+        constexpr_param=constexpr_param,
+        compiler=compiler,
+        dispatch_args=dispatch_args,
+        compile_args_factory=make_compile_args,
+    )
+
+
+def precompile_flydsl_template(
+    kernel: Callable[..., Any],
+    tensor_names: Sequence[str],
+    shapes: Mapping[str, Sequence[int]],
+    strides: Mapping[str, Sequence[int]],
+    dtypes: Mapping[str, str],
+    flydsl_gpu_arch: str | None = None,
+) -> None:
+    """Warm a generated FlyDSL template from its ordered tensor argument names."""
+    import torch
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    updates: dict[str, str | None] = {
+        "COMPILE_ONLY": "1",
+        "FLYDSL_COMPILE_ONLY": "1",
+    }
+    if flydsl_gpu_arch is not None:
+        updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    names = tuple(dict.fromkeys((*tensor_names, "output")))
+    with _compiled_cache_lock, temporary_env(updates), FakeTensorMode():
+        tensors = {
+            name: torch.empty_strided(
+                tuple(shapes[name]),
+                tuple(strides[name]),
+                dtype=getattr(torch, dtypes[name]),
+                device="cpu",
+            )
+            for name in names
+        }
+        kernel(
+            *(tensors[name] for name in tensor_names),
+            tensors["output"],
+            stream=0,
+        )
 
 
 def flydsl_tensor_arg(tensor: Any) -> Any:
