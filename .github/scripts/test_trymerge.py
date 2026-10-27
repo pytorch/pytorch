@@ -4286,6 +4286,42 @@ class TestMainStatusTags(NoNetworkTestCase):
             "successfully started a revert job", self.post.call_args_list[0].args[3]
         )
 
+    def test_refused_revert_is_tagged_failure(self) -> None:
+        self.args.revert = True
+        self.patch(
+            "trymerge.validate_revert", side_effect=PostCommentError("not merged")
+        )
+        trymerge_main()
+        tags = [parse_tag(call.args[3]) for call in self.post.call_args_list]
+        self.assertEqual(tags, [Tag(REVERT_SUCCESS, 12345), Tag(REVERT_FAILURE, 12345)])
+        self.assertTrue(self.post.call_args.args[3].startswith("not merged"))
+
+    def test_cross_repo_ghstack_merge_is_tagged_failure(self) -> None:
+        self.patch("trymerge.GitHubPR.is_cross_repo", return_value=True)
+        self.patch("trymerge.GitHubPR.is_ghstack_pr", return_value=True)
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "Cross-repo ghstack merges are not supported"
+            )
+        )
+        self.merge.assert_not_called()
+
+    def test_submodule_update_refusal_is_tagged_failure(self) -> None:
+        self.patch("trymerge.GitHubPR.has_invalid_submodule_updates", return_value=True)
+        self.patch(
+            "trymerge.GitHubPR.get_changed_submodules", return_value=["third_party/x"]
+        )
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "This PR updates submodules third_party/x"
+            )
+        )
+        self.merge.assert_not_called()
+
 
 if __name__ == "__main__":
     main()

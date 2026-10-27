@@ -16,9 +16,10 @@ the second command. A revert dispatched without a comment has no ``comment=``.
 
 ``success`` means the command was accepted and is running or done ("Merge
 started", "successfully started a revert job", "has been successfully
-reverted"). A merge that lands closes the PR and posts no reply of its own, so
-the PR closing, not a tag, is the sign that it landed. ``failure`` means the
-command was refused or failed before the merge or revert landed. An error after
+reverted", and "was merged ... but it is still open", posted when a merge landed
+but GitHub left the PR open). Otherwise a merge that lands posts no reply of its
+own, so the PR closing, not a tag, is the sign that it landed. ``failure`` means
+the command was refused or failed before the merge or revert landed. An error after
 it landed, in a follow-up step such as labeling, is reported in an untagged
 reply, so the newest tag stays ``success``. The exception is a job canceled or
 timed out after the merge or revert landed: its reply can't tell and says
