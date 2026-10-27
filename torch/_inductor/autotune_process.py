@@ -771,27 +771,34 @@ class _TestTunableOpJob:
     only ever crosses the pipe on ROCm.
     """
 
-    def __init__(self, job: Any) -> None:
+    def __init__(self, job: Any, record_path: str | None = None) -> None:
         self.job = job
-        # submit() stamps these onto the object it is handed, then reads them
-        # back, so the wrapper has to carry them itself; __call__ copies them
-        # onto the wrapped job, which is what reads them in the child.
+        self.record_path = record_path
+        # submit() stamps these onto the object it is handed and reads them back,
+        # so the wrapper carries them and __call__ copies them onto the job.
         self.device = 0
         self.filename = ""
         self.settings: dict[str, Any] = {}
 
     def __call__(self) -> float:
+        import json
         from unittest import mock
 
         self.job.device = self.device
         self.job.filename = self.filename
         self.job.settings = self.settings
+        tunable = mock.MagicMock()
         with (
             mock.patch("torch.cuda.set_device"),
-            mock.patch("torch.cuda.tunable", mock.MagicMock()),
+            mock.patch("torch.cuda.tunable", tunable),
             mock.patch("torch.cuda.empty_cache"),
         ):
-            return self.job()
+            result = self.job()
+        if self.record_path is not None:
+            calls = [[n, list(a), k] for n, a, k in tunable.mock_calls]
+            with open(self.record_path, "w") as f:
+                json.dump(calls, f, default=repr)
+        return result
 
 
 class _TestBenchmarkRequest(BenchmarkRequest):

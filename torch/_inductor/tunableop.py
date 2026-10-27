@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Compile-time TunableOp support for GEMMs.
 
 Covers both backends TunableOp supports -- hipBLASLt on ROCm and cuBLASLt on
@@ -20,7 +19,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 
 import sympy
 
@@ -32,11 +31,13 @@ from . import config, ir
 from .virtualized import V
 
 
+if TYPE_CHECKING:
+    from .autotune_process import TuningProcess
+
+
 log = logging.getLogger(__name__)
 
 
-# Outcome of a worker submission: "ok", "timeout" (worker hung and was killed),
-# "crash" (worker died, typically a GPU fault) or "error" (the job raised).
 WorkerStatus = Literal["ok", "timeout", "crash", "error"]
 
 _valid_modes = ("off", "tune", "reuse")
@@ -172,7 +173,7 @@ class Outcome(NamedTuple):
     status: WorkerStatus
 
 
-_worker: Any = None
+_worker: TuningProcess | None = None
 _worker_key: tuple[int, str] | None = None
 _atexit_registered = False
 # How long a graceful shutdown waits for the child before resorting to SIGKILL.
@@ -185,32 +186,21 @@ _SHUTDOWN_TIMEOUT_S = 10.0
 _worker_lock = threading.Lock()
 
 
-def _get_worker_locked(key: tuple[int, str]) -> Any:
+def _get_worker_locked(key: tuple[int, str]) -> TuningProcess:
     """The long-lived process that runs every TunableOp benchmark for this compile.
 
-    Assumes _worker_lock is held, like _shutdown_locked, which this calls on a
-    key change. Without the lock a concurrent caller could send the shutdown
-    sentinel into a pipe that submit() is using mid-job.
+    Assumes _worker_lock is held.
 
-    Deliberately dedicated rather than Inductor's shared TuningProcessPool:
-    TunableOp's flags are process-global, so a worker that also benchmarks triton
-    candidates would tune unrelated GEMMs and append them to the results file. One
-    worker reused across GEMMs rather than one per GEMM, since startup dominates
-    otherwise.
+    Dedicated rather than Inductor's shared TuningProcessPool because TunableOp's
+    flags are process-global: a worker that also benchmarked triton candidates
+    would tune unrelated GEMMs into the results file. Reused across GEMMs because
+    startup dominates otherwise, and torn down only on a key change or at exit --
+    nothing marks the end of a compile -- so an idle child holds its CUDA/HIP
+    context until then.
 
-    Lifetime: module-global, torn down on a key change or at interpreter exit --
-    not when a compile finishes, because nothing marks that boundary yet. So an
-    idle child keeps its CUDA/HIP context, and whatever the caching allocator
-    held for benchmarking, for the rest of the process. Callers that know where
-    autotuning ends should call shutdown_worker() there.
-
-    Keyed on (device, resolved results filename). The results file is per
-    device ordinal, so a worker left pinned to an earlier device would
-    benchmark the wrong GPU; and it reads that file once at startup, so a
-    second compile that points PYTORCH_TUNABLEOP_FILENAME somewhere else would
-    otherwise keep reading and appending to the first compile's file. The
-    filename comes from submit() via resolve_filename() -- never "" -- because
-    get_filename() is empty until the manager initializes.
+    Keyed on (device, resolved results filename) because the file is per device
+    ordinal and is read once at startup, so a stale key would benchmark the wrong
+    GPU or keep appending to a previous compile's file.
     """
     global _worker, _worker_key, _atexit_registered
     from .autotune_process import TuningProcess
@@ -219,14 +209,11 @@ def _get_worker_locked(key: tuple[int, str]) -> Any:
         _shutdown_locked()
     if _worker is None:
         # device=None on purpose. TuningProcess.start() *replaces* the inherited
-        # CUDA_VISIBLE_DEVICES with str(device), so handing it a logical ordinal
-        # points the worker at a different physical GPU -- with
-        # CUDA_VISIBLE_DEVICES=4,7 and logical device 1, the parent uses physical
-        # 7 and the worker would take physical 1, outside the job's allocation.
-        # Inductor's own pool avoids this by passing the visibility tokens
-        # themselves (autotune_process.get_device_list). Leaving the mask alone is
-        # simpler and keeps UUID/MIG tokens intact, since the subprocess inherits
-        # os.environ; BenchmarkJob then selects the logical device on arrival.
+        # CUDA_VISIBLE_DEVICES with str(device), so a logical ordinal would point
+        # the worker at a different physical GPU: with CUDA_VISIBLE_DEVICES=4,7
+        # and logical 1, the parent uses physical 7 and the worker takes physical
+        # 1. Leaving the mask alone keeps UUID/MIG tokens intact; BenchmarkJob
+        # selects the logical device on arrival.
         _worker = TuningProcess(device=None)
         _worker_key = key
         if not _atexit_registered:
@@ -241,7 +228,7 @@ def shutdown_worker() -> None:
         _shutdown_locked()
 
 
-def _reap(worker: Any) -> None:
+def _reap(worker: TuningProcess) -> None:
     """Wait briefly on an already-signalled child so it does not linger.
 
     TuningProcess.kill() sends SIGKILL and closes the pipes but never calls
@@ -309,20 +296,10 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 
 
 # Tuning knobs propagated to the worker: (parent getter, worker setter) pairs.
-#
-# Not propagated, and not an exhaustive-by-accident list:
-#   * numerical-check tolerances -- set_numerical_check_tolerances has no
-#     getter, so there is nothing to snapshot;
-#   * wildcard_fallback_enable, record_untuned_enable and
-#     _record_borrowed_enable -- these do have getters, but they govern lookup
-#     and recording rather than how a GEMM is tuned. The worker runs them at
-#     its own defaults, or at whatever the env sets, since all three are
-#     env-settable; nothing stamps them per job. The only recording-relevant
-#     flag the job carries is nearest_match;
-#   * the thread-local dynamic-dims mask. It is per call rather than per
-#     process, so a snapshot is the wrong mechanism for it -- the job carries
-#     it explicitly instead (dyn_dims_mask, re-entered in __call__).
-# Anything read from the environment reaches the worker by inheritance.
+# Only programmatically set process-global C++ state needs stamping; anything
+# read from the environment reaches the worker by inheritance. Numerical-check
+# tolerances have no getter. The dynamic-dims mask is per call rather than per
+# process, so the job carries it (dyn_dims_mask) instead of snapshotting it.
 _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
     ("get_max_tuning_duration", "set_max_tuning_duration"),
     ("get_max_tuning_iterations", "set_max_tuning_iterations"),
@@ -331,12 +308,9 @@ _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
 )
 
 # Getters whose units differ from the matching setter's.
-# get_rotating_buffer_size returns bytes (rotating_buffer_size_, or the L2 size
-# when unset), while set_rotating_buffer_size takes MB and multiplies by
-# 1024*1024 into a signed int. Stamping the raw value would square the scale:
-# a 4 MiB L2 becomes 2**42, which truncates to 0 and silently tunes with the
-# rotating buffer disabled. Only visible when the env var is unset, since that
-# takes precedence inside the getter.
+# get_rotating_buffer_size reports bytes (the L2 size when unset) while the
+# setter takes MB, so stamping the raw value squares the scale: a 4 MiB L2
+# becomes 2**42, truncates to 0, and silently tunes with no rotating buffer.
 _SETTING_CONVERSIONS: dict[str, Any] = {
     "set_rotating_buffer_size": lambda v: v // (1024 * 1024),
 }
@@ -425,20 +399,14 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                 worker.put(job)
                 return Outcome(worker.get(timeout=timeout), "ok")
             except (TimeoutError, EOFError) as e:
-                # Only a real pipe fault, not the job raising one of these.
-                # TuningProcess.get kills on its own timeout and closes on a
-                # genuine EOF, both of which clear running; a child-reported
-                # exception is re-raised with the worker untouched. Without the
-                # check, a job raising a TimeoutError subclass would be filed as
-                # "timeout" and skip the sticky-fault restart below.
-                if not getattr(worker, "running", False):
+                # running is cleared only by a real pipe fault; a job that
+                # itself raises TimeoutError leaves it set and must be filed as
+                # an error so it still gets the sticky-fault restart.
+                if not worker.running:
                     status: WorkerStatus = (
                         "timeout" if isinstance(e, TimeoutError) else "crash"
                     )
-                    # get() has already killed or closed the worker, but kill()
-                    # never waits, so reap it here rather than leaving the child
-                    # a zombie until the next start() drops the old Popen. Same
-                    # teardown the "error" path below gets.
+                    # get() killed or closed it but never waited; reap it.
                     _shutdown_locked(graceful=False)
                     return Outcome(None, status)
                 log.debug("TunableOp job raised %r; treating as an error", e)
@@ -446,14 +414,10 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                 return Outcome(None, "error")
             except Exception as e:  # a failed benchmark must not fail the compile
                 log.debug("TunableOp benchmark failed: %s", e)
-                # A catchable exception can leave a sticky fault behind (e.g. an
-                # illegal address corrupting the GPU context): the worker stays
-                # alive, so every later GEMM would fail the same way. Restart it
-                # here, inside the lock, so no other thread observes the dead
-                # worker or interleaves on the pipe; recorded solutions survive
-                # via the results file. Kill rather than ask: a child wedged in
-                # device teardown would never act on the sentinel, and would
-                # hold the GPU for the rest of the job.
+                # A caught exception can leave a sticky GPU fault behind, so
+                # every later GEMM would fail the same way. Kill rather than
+                # ask: a child wedged in device teardown never acts on the
+                # sentinel. Recorded solutions survive via the results file.
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
     except Exception as e:  # lock/restart machinery itself failed
