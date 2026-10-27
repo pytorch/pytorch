@@ -16,7 +16,7 @@ oncall_queues:
   "oncall: distributed": ["module: c10d", "module: ddp", "module: dtensor", "module: fsdp", "module: tensorpipe"]
   "oncall: mobile": ["module: android", "module: vulkan"]
   "oncall: pt2": ["module: ProxyTensor", "module: aotdispatch", "module: compiled autograd", "module: dynamic shapes", "module: dynamo", "module: fakeTensor", "module: higher order operators", "module: inductor"]
-planned_labels: ["module: tvm"]
+planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates"]
 # CODEOWNERS section order (temporary, see above).
 sections:
   - core_aten_native_ops
@@ -49,15 +49,20 @@ sections:
   - profiler
   - mobile_runtime
   - mobile_android
+  - mobile_delegates
   - infra_ci
   - infra_build_packaging
+  - third_party_core_build_deps
   - third_party_backend_deps
+  - third_party_serialization_schema
   - benchmark_compiler
   - distributed
   - infra_developer_tools
   - infra_linting
   - infra_codegen
   - infra_test
+  - benchmark_operator_runtime
+  - benchmark_models
   - caffe2
   - serialization_package
   - compiler_export_fx
@@ -317,6 +322,14 @@ ownership:
       - /torch/backends/mps/
       - /torch/csrc/mps/
       - /torch/mps/
+  - name: ios_mobile
+    labels: ["oncall: mobile", "module: ios"]
+    owners: []
+    section: backend_mps
+    paths:
+      - /aten/src/ATen/metal/
+      - /test/metal/
+      - /test/test_metal.py
   - name: xpu
     labels: ["module: xpu"]
     owners: [EikanWang, gujinghui]
@@ -368,11 +381,11 @@ ownership:
     owners: [drisspg, pearu, slayton58]
     section: python_nn_api
     paths:
+      - /torch/nn/modules/linear_cross_entropy*.py: [slayton58, pearu]
       - /torch/_native/: [slayton58, drisspg]
       - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
       - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
       - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
-      - /torch/nn/modules/linear_cross_entropy*.py: [slayton58, pearu]
   - name: nn_utils_parametrize
     labels: ["module: nn", "module: nn.utils.parametrize"]
     owners: [lezcano]
@@ -507,20 +520,11 @@ ownership:
     owners: []
     section: mobile_runtime
     paths:
-      - /aten/src/ATen/metal/
-      - /test/metal/
-      - /test/test_metal.py
       - /test/cpp/jit/test_mobile_type_parser.cpp
       - /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
       - /test/mobile/
       - /test/test_mobile_optimizer.py
       - /torch/csrc/jit/mobile/
-      - /test/test_vulkan.py
-      - /test/test_xnnpack_integration.py
-      - /torch/backends/_coreml/
-      - /torch/backends/_nnapi/
-      - /torch/backends/xnnpack/
-      - /torch/csrc/jit/backends/
   - name: android
     labels: ["module: android"]
     owners: []
@@ -528,6 +532,17 @@ ownership:
     paths:
       - /android/
       - /test/mobile/custom_build/
+  - name: mobile_delegates
+    labels: ["oncall: mobile", "module: mobile delegates"]
+    owners: []
+    section: mobile_delegates
+    paths:
+      - /test/test_vulkan.py
+      - /test/test_xnnpack_integration.py
+      - /torch/backends/_coreml/
+      - /torch/backends/_nnapi/
+      - /torch/backends/xnnpack/
+      - /torch/csrc/jit/backends/
   - name: ci
     labels: ["module: ci"]
     owners: [pytorch/pytorch-dev-infra]
@@ -592,15 +607,20 @@ ownership:
       - /ubsan.supp
       - /ufunc_defs.bzl
       - /version.txt
-  - name: third_party
-    labels: ["module: third_party"]
+  - name: third_party_build
+    labels: ["module: build", "module: third_party"]
     owners: []
-    section: third_party_backend_deps
+    section: third_party_core_build_deps
     paths:
       - /.gitmodules
       - /requirements-build.txt
       - /requirements.txt
       - /third_party/
+  - name: third_party
+    labels: ["module: third_party"]
+    owners: []
+    section: third_party_backend_deps
+    paths:
       - /third_party/NNPACK
       - /third_party/VulkanMemoryAllocator
       - /third_party/XNNPACK
@@ -619,40 +639,27 @@ ownership:
       - /third_party/xnnpack_buck_shim.bzl
       - /third_party/xnnpack_src_defs.bzl
       - /third_party/xnnpack_wrapper_defs.bzl
-      - /third_party/flatbuffers
-      - /third_party/miniz-3.0.2/
-      - /third_party/onnx
-      - /third_party/protobuf
   - name: xpu_third_party
     labels: ["module: third_party", "module: xpu"]
     owners: [EikanWang, gujinghui]
     section: third_party_backend_deps
     paths:
       - /third_party/xpu.txt: [EikanWang, gujinghui]
+  - name: third_party_serialization
+    labels: ["module: serialization", "module: third_party"]
+    owners: []
+    section: third_party_serialization_schema
+    paths:
+      - /third_party/flatbuffers
+      - /third_party/miniz-3.0.2/
+      - /third_party/onnx
+      - /third_party/protobuf
   - name: benchmark
     labels: ["module: benchmark"]
     owners: []
     section: benchmark_compiler
     paths:
       - /benchmarks/
-      - /benchmarks/framework_overhead_benchmark/
-      - /benchmarks/functional_autograd_benchmark/
-      - /benchmarks/instruction_counts/
-      - /benchmarks/operator_benchmark/
-      - /benchmarks/overrides_benchmark/
-      - /benchmarks/profiler_benchmark/
-      - /benchmarks/record_function_benchmark/
-      - /benchmarks/sparse/
-      - /benchmarks/static_runtime/
-      - /test/test_functional_autograd_benchmark.py
-      - /benchmarks/compare-fastrnn-results.py
-      - /benchmarks/data/
-      - /benchmarks/diffusion/
-      - /benchmarks/fastrnns/
-      - /benchmarks/gpt_fast/
-      - /benchmarks/inference/
-      - /benchmarks/nested/
-      - /benchmarks/transformer/
   - name: distributed
     labels: ["oncall: distributed"]
     owners: []
@@ -714,13 +721,13 @@ ownership:
     owners: [jeffdaily, jithunnair-amd]
     section: infra_developer_tools
     paths:
+      - /tools/amd_build/: [jeffdaily, jithunnair-amd]
       - /aten/src/ATen/hip/: [jeffdaily, jithunnair-amd]
       - /torch/backends/miopen/
       - /c10/hip/: [jeffdaily, jithunnair-amd]
       - /aten/src/ATen/native/miopen/: [jeffdaily, jithunnair-amd]
       - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
       - /torch/utils/hipify/: [jeffdaily, jithunnair-amd]
-      - /tools/amd_build/: [jeffdaily, jithunnair-amd]
   - name: lint
     labels: ["module: lint"]
     owners: []
@@ -775,6 +782,34 @@ ownership:
     section: infra_test
     paths:
       - /torch/testing/_internal/hop_db.py: [tugsbayasgalan, ydwu4, aorenste, bohnstingl]
+  - name: operator_benchmarks
+    labels: ["module: benchmark", "module: operator benchmarks"]
+    owners: []
+    section: benchmark_operator_runtime
+    paths:
+      - /benchmarks/framework_overhead_benchmark/
+      - /benchmarks/functional_autograd_benchmark/
+      - /benchmarks/instruction_counts/
+      - /benchmarks/operator_benchmark/
+      - /benchmarks/overrides_benchmark/
+      - /benchmarks/profiler_benchmark/
+      - /benchmarks/record_function_benchmark/
+      - /benchmarks/sparse/
+      - /benchmarks/static_runtime/
+      - /test/test_functional_autograd_benchmark.py
+  - name: benchmark_models
+    labels: ["module: models", "module: benchmark"]
+    owners: []
+    section: benchmark_models
+    paths:
+      - /benchmarks/compare-fastrnn-results.py
+      - /benchmarks/data/
+      - /benchmarks/diffusion/
+      - /benchmarks/fastrnns/
+      - /benchmarks/gpt_fast/
+      - /benchmarks/inference/
+      - /benchmarks/nested/
+      - /benchmarks/transformer/
   - name: serialization
     labels: ["module: serialization"]
     owners: []
