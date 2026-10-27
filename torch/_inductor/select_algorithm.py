@@ -3793,8 +3793,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             store_output_fusion_allowed_inputs=(
                 self.store_output_fusion_allowed_inputs
             ),
+            runtime_float_values=self.runtime_float_values,
         )
-        buffer.runtime_float_values = self.runtime_float_values
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]

@@ -6124,6 +6124,7 @@ class TemplateBuffer(OperationBuffer):
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
@@ -6150,7 +6151,7 @@ class TemplateBuffer(OperationBuffer):
         self.mutated_inputs = mutated_inputs
         # Symbolic RuntimeFloat template kwargs. The wrapper computes them from
         # size symbols, so those symbols count as uses of this buffer.
-        self.runtime_float_values: list[sympy.Expr] = []
+        self.runtime_float_values = list(runtime_float_values)
         self.mutation_outputs: list[MutationOutput] = []
         if mutated_inputs is not None:
             first_input = self.inputs[0]
@@ -6370,6 +6371,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         mutated_inputs: Iterable[IRNode] | None = None,
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6387,6 +6389,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             mutated_inputs=mutated_inputs,
             load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
             store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
+            runtime_float_values=runtime_float_values,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6551,23 +6554,24 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         load_input_fusion_allowed_inputs: OrderedSet[str],
         store_output_fusion_allowed_inputs: OrderedSet[str],
     ) -> None:
+        # Any choice may be selected, so track every choice's RuntimeFloat symbols.
+        runtime_float_values = [
+            value
+            for choice in unfiltered_choices
+            for value in choice.runtime_float_values
+        ]
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
             load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
             store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
+            runtime_float_values=runtime_float_values,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
         self._choices: list[ChoiceCaller] = unfiltered_choices
         self.original_inputs = inputs
-        # Any choice may be selected, so track every choice's RuntimeFloat symbols.
-        self.runtime_float_values = [
-            value
-            for choice in unfiltered_choices
-            for value in choice.runtime_float_values
-        ]
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
             or _is_output_plannable_nvgemm_choice(choice)
@@ -6756,8 +6760,14 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T],
         template: Any,
         mutated_inputs: Iterable[IRNode] | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
-        super().__init__(layout, inputs, make_kernel_render)
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            runtime_float_values=runtime_float_values,
+        )
         self.template = template
         self.mutated_inputs = mutated_inputs
         self.outputs: list[Buffer] = [self]

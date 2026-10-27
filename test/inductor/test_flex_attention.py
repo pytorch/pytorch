@@ -6593,12 +6593,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         compiled = torch.compile(
             attention, backend=counter, fullgraph=True, dynamic=True
         )
-        # CPU and MPS flex attention are inference-only.
+        # CPU and MPS flex attention are inference-only, and MPS has no float64.
         requires_grad = device not in ("cpu", "mps")
+        gold_device = "cpu" if device == "mps" else device
         for tokens, head_dim in cases:
             x = torch.randn(1, tokens, 384, device=device, requires_grad=requires_grad)
             x_ref = x.detach().clone().requires_grad_(requires_grad)
-            x_gold = x.detach().double().requires_grad_(requires_grad)
+            x_gold = x.detach().to(gold_device, torch.float64)
+            x_gold.requires_grad_(requires_grad)
             with torch.set_grad_enabled(requires_grad):
                 out = compiled(x, head_dim)
                 out_ref = attention(x_ref, head_dim)
@@ -6626,23 +6628,27 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self._check_symbolic_scale(device, attention, cases, expected_frames=2)
 
     @supported_platform
-    @skip_on_cpu  # the CPU template specializes the scale
-    @expected_not_implemented_on_mps  # no backward
     @temp_float32_matmul_precision("highest")
     @common_utils.parametrize("cpp_wrapper", [False, True])
     def test_dynamic_shapes_symbolic_scale_is_runtime(self, device, cpp_wrapper):
+        if cpp_wrapper and device in ("cpu", "mps"):
+            self.skipTest("covers the GPU launcher's host-computed float arg")
+
         def attention(x, head_dim):
             q = x.view(1, x.shape[1], -1, head_dim).transpose(1, 2)
             return flex_attention(q, q, q, scale=8.0 / x.shape[1])
 
-        # The wrapper computes the scale on the host and passes it as a float arg.
+        # GPU templates get the scale as a host-computed float arg, so one graph
+        # serves every length. CPU and MPS bake it in behind a value guard, so each
+        # length recompiles and must still match eager.
         cases = ((128, 64), (256, 64), (384, 64))
+        frames = len(cases) if device in ("cpu", "mps") else 1
         with config.patch(cpp_wrapper=cpp_wrapper):
-            self._check_symbolic_scale(device, attention, cases, expected_frames=1)
+            self._check_symbolic_scale(device, attention, cases, expected_frames=frames)
 
     @supported_platform
     @skip_on_cpu  # the CPU template does not support PRESCALE_QK
-    @expected_not_implemented_on_mps  # no backward
+    @skip_on_mps
     @common_utils.parametrize("dynamic", [False, True])
     def test_prescale_qk_scale(self, device, dynamic):
         # With static shapes the default scale is a constexpr; with dynamic shapes

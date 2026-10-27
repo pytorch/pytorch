@@ -2753,6 +2753,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             (out_flash, out_triton, out_ref),
             (dx_flash, dx_triton, dx_ref),
         ):
+            # Same criterion as flash_vs_triton: FLASH error is at most 2x Triton's,
+            # plus twice the rounding noise of ref's magnitude (the +0.3-0.3 round trip).
             atol = 2 * (ref + 0.3 - 0.3 - ref).abs().max().item()
             triton_error = (triton.float() - ref).abs().max().item()
             flash_error = (flash.float() - ref).abs().max().item()

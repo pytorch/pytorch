@@ -240,8 +240,8 @@ class CuteDSLTemplateCaller(ChoiceCaller):
             make_kernel_render=self.make_kernel_render,
             template=self.template,
             mutated_inputs=self.mutated_inputs,
+            runtime_float_values=self.runtime_float_values,
         )
-        buffer.runtime_float_values = self.runtime_float_values
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
