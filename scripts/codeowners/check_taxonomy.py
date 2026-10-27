@@ -14,6 +14,8 @@ from pathlib import Path
 
 LINTER_CODE = "CODEOWNERS_TAXONOMY"
 HIERARCHY_MARKER = "# Review-surface hierarchy:"
+LABEL_PREFIX = "# label:"
+OWNER_PREFIX = "# owner:"
 SECTION_MARKER = "# Grouped review-surface definitions:"
 GROUP_PREFIX = "# ["
 
@@ -50,6 +52,21 @@ FAILURE_GUIDANCE = {
         "Add the section name to the review-surface hierarchy near the top of "
         "CODEOWNERS, or rename or remove the section."
     ),
+    "Label lines without an owner line": (
+        "Directly below the reported `# label:` line, add `# owner: @handle ...` "
+        "or `# owner: none`."
+    ),
+    "Misplaced owner lines": (
+        "Move the reported `# owner:` line directly below its `# label:` line."
+    ),
+    "Invalid owner handles": (
+        "On the reported `# owner:` line, use GitHub users, teams, or emails, or "
+        "`none` on its own."
+    ),
+    "Label lists with several owner lists": (
+        "Use the same `# owner:` list on every `# label:` line with these labels, "
+        "or give one of the blocks its own label list."
+    ),
 }
 
 
@@ -61,6 +78,8 @@ class TaxonomyPattern:
     path: str
     line_number: int
     labels: tuple[str, ...] = ()
+    # Handles on the block's `# owner:` line; None when the block has no owner line.
+    owners: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -131,17 +150,23 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     section_groups = []
     group = None
     labels: tuple[str, ...] = ()
+    block_owners: tuple[str, ...] | None = None
     for line_number, raw_line in enumerate(lines[start:], start=start + 1):
         line = raw_line.strip()
         if line.startswith(GROUP_PREFIX) and line.endswith("]"):
             group = line[len(GROUP_PREFIX) : -1]
             labels = ()
+            block_owners = None
             if group in section_groups:
                 raise ValueError(f"{codeowners}:{line_number}: repeated group: {group}")
             section_groups.append(group)
-        elif line.startswith("# label:"):
-            label_names = line.removeprefix("# label:").split(",")
+        elif line.startswith(LABEL_PREFIX):
+            label_names = line.removeprefix(LABEL_PREFIX).split(",")
             labels = tuple(label.strip() for label in label_names)
+            block_owners = None
+        elif line.startswith(OWNER_PREFIX):
+            handles = tuple(line.removeprefix(OWNER_PREFIX).split())
+            block_owners = () if handles == ("none",) else handles
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -166,13 +191,60 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
                     )
             if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
-            patterns.append(TaxonomyPattern(group, pattern[1:], line_number, labels))
+            patterns.append(
+                TaxonomyPattern(group, pattern[1:], line_number, labels, block_owners)
+            )
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
     if not patterns:
         raise ValueError("taxonomy section contains no patterns")
     return patterns, section_groups
+
+
+def find_ownership_errors(
+    codeowners: Path, patterns: list[TaxonomyPattern]
+) -> dict[str, list[str]]:
+    """Check that every label block names exactly one owner list."""
+    lines = codeowners.read_text().splitlines()
+    start = lines.index(SECTION_MARKER) + 1
+    missing_owner_lines = []
+    misplaced_owner_lines = []
+    invalid_handles = []
+    for index in range(start, len(lines)):
+        line = lines[index].strip()
+        location = f"CODEOWNERS:{index + 1}"
+        if line.startswith(LABEL_PREFIX):
+            following = lines[index + 1].strip() if index + 1 < len(lines) else ""
+            if not following.startswith(OWNER_PREFIX):
+                missing_owner_lines.append(f"{location} {line}")
+        elif line.startswith(OWNER_PREFIX):
+            if not lines[index - 1].strip().startswith(LABEL_PREFIX):
+                misplaced_owner_lines.append(f"{location} {line}")
+            handles = line.removeprefix(OWNER_PREFIX).split()
+            if handles != ["none"] and (
+                not handles or not all(is_valid_owner(handle) for handle in handles)
+            ):
+                invalid_handles.append(f"{location} {line}")
+
+    # GitHub handles are case-insensitive and owner order carries no meaning.
+    owner_lists = defaultdict(set)
+    for pattern in patterns:
+        if pattern.labels and pattern.owners is not None:
+            owners = frozenset(owner.casefold() for owner in pattern.owners)
+            owner_lists[pattern.labels].add(owners)
+    conflicting_lists = [
+        f"{', '.join(labels)}: "
+        + " | ".join(" ".join(owners) or "none" for owners in sorted(map(sorted, lists)))
+        for labels, lists in owner_lists.items()
+        if len(lists) > 1
+    ]
+    return {
+        "Label lines without an owner line": missing_owner_lines,
+        "Misplaced owner lines": misplaced_owner_lines,
+        "Invalid owner handles": invalid_handles,
+        "Label lists with several owner lists": conflicting_lists,
+    }
 
 
 def tracked_paths(repo: Path) -> list[str]:
@@ -403,6 +475,7 @@ def main() -> int:
         declared_groups = parse_declared_groups(codeowners)
         patterns, section_groups = parse_patterns(codeowners)
         report = analyze(tracked_paths(repo), patterns)
+        ownership_errors = find_ownership_errors(codeowners, patterns)
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(
@@ -420,6 +493,8 @@ def main() -> int:
     missing_sections = sorted(declared_group_set - section_group_set)
     undeclared_sections = sorted(section_group_set - declared_group_set)
     has_errors = bool(missing_groups or missing_sections or undeclared_sections) or any(
+        ownership_errors.values()
+    ) or any(
         (
             report.uncovered,
             report.duplicates,
@@ -430,6 +505,8 @@ def main() -> int:
     )
     if not args.lintrunner:
         print_report(report)
+        for title, entries in ownership_errors.items():
+            print_failure_entries(title, entries)
         print_failure_entries("Missing effective surfaces", missing_groups)
         print_failure_entries("Missing grouped sections", missing_sections)
         print_failure_entries("Undeclared grouped sections", undeclared_sections)
@@ -444,6 +521,7 @@ def main() -> int:
             (len(missing_groups), "missing effective surfaces"),
             (len(missing_sections), "missing grouped sections"),
             (len(undeclared_sections), "undeclared grouped sections"),
+            *((len(entries), title.lower()) for title, entries in ownership_errors.items()),
         ]
         failures = [f"{count} {name}" for count, name in failure_counts if count]
         emit_lint_error(
