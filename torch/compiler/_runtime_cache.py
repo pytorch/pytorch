@@ -483,6 +483,53 @@ def _pickle_frozen_triton_kernel(
     )
 
 
+def _freeze_untuned_backward(
+    key: str,
+    instances: list[CachingAutotuner],
+    reject: Callable[[CachingAutotuner, dict[str, object]], None],
+) -> tuple[bytes, dict[str, object]] | None:
+    """The frozen record of a backward source no instance ran, with the first
+    static config one loaded and tuning turned off, and its untuned report; None
+    if no instance has one whose cubin it can carry."""
+    from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+
+    for kernel in instances:
+        with kernel.lock:
+            # Only launchers: each loaded its binary, unlike a bare compile result,
+            # so replay cannot fail to load the one frozen here. A launcher Triton
+            # built itself, not statically, has no _compile_result.
+            static = [
+                result
+                for launcher in kernel.launchers
+                if isinstance(
+                    result := getattr(launcher, "_compile_result", None),
+                    StaticTritonCompileResult,
+                )
+            ]
+            if not static:
+                continue
+            saved, saved_result = _detached_for_freeze(kernel, static[0])
+            kernel_name = kernel.inductor_meta.get("kernel_name")
+            compile_id = getattr(kernel, "compile_id", None)
+        saved.inductor_meta = {
+            **saved.inductor_meta,
+            "coordinate_descent_tuning": False,
+            "combo_tuning_groups": None,
+        }
+        payload = _pickle_frozen_triton_kernel(key, kernel, saved, saved_result)
+        if not isinstance(payload, bytes):
+            reject(kernel, payload)
+            continue
+        return payload, {
+            "source_key": key,
+            "kernel_name": kernel_name,
+            "compile_id": str(compile_id) if compile_id is not None else None,
+            "direction": "backward",
+            "static_config_count": len(static),
+        }
+    return None
+
+
 def _freeze_triton_kernel(
     key: str,
     instances: list[CachingAutotuner],
@@ -526,78 +573,21 @@ def _freeze_triton_kernel(
     # captured step reached. No instance of such a source ever launched, so none
     # finished autotuning, and serving under no_compilation() cannot finish it
     # either. Its configs compute the same values up to floating-point reduction
-    # order, so unless the caller requires tuned backward kernels, freeze the first
-    # static one that loaded, with tuning turned off, and report it as untuned. A
-    # source a forward instance shares is still refused: a forward no call ran
-    # means the capture missed a path serving may need.
-    def static_results(kernel: CachingAutotuner) -> list[StaticTritonCompileResult]:
-        # Only launchers: each loaded its binary, unlike a bare compile result, so
-        # replay cannot fail to load the one frozen here. A launcher Triton built
-        # itself, not statically, has no _compile_result.
-        return [
-            result
-            for launcher in kernel.launchers
-            if isinstance(
-                result := getattr(launcher, "_compile_result", None),
-                StaticTritonCompileResult,
-            )
-        ]
-
-    never_run_backward = (
-        bool(instances)
+    # order, so unless the caller requires tuned backward kernels, it is frozen
+    # untuned. A source a forward instance shares is still refused: a forward no
+    # call ran means the capture missed a path serving may need.
+    untuned = None
+    if (
+        instances
         and not any(kernel._forward_use for kernel in instances)
         and not any(kernel._launched for kernel in instances)
-    )
-    static_by_instance = []
-    for kernel in instances:
-        with kernel.lock:
-            static_by_instance.append(static_results(kernel))
-    if never_run_backward and not require_tuned_backward:
-        for kernel, static in zip(instances, static_by_instance):
-            if not static:
-                continue
-            with kernel.lock:
-                saved, saved_result = _detached_for_freeze(kernel, static[0])
-                kernel_name = kernel.inductor_meta.get("kernel_name")
-                compile_id = getattr(kernel, "compile_id", None)
-                compile_id = str(compile_id) if compile_id is not None else None
-            saved.inductor_meta = {
-                **saved.inductor_meta,
-                "coordinate_descent_tuning": False,
-                "combo_tuning_groups": None,
-            }
-            payload = _pickle_frozen_triton_kernel(key, kernel, saved, saved_result)
-            if not isinstance(payload, bytes):
-                reject(kernel, payload)
-                continue
-            return payload, {
-                "source_key": key,
-                "kernel_name": kernel_name,
-                "compile_id": compile_id,
-                "direction": "backward",
-                "static_config_count": len(static),
-            }
-
-    def cubin_retained(
-        kernel: CachingAutotuner, result: StaticTritonCompileResult
-    ) -> bool:
-        with kernel.lock:
-            _, saved_result = _detached_for_freeze(kernel, result)
-        try:
-            _retain_cubin(saved_result)
-        except (OSError, RuntimeError):
-            return False
-        return True
-
-    # Whether DynamoTracer(require_tuned_backward=False) would freeze it.
-    eligible = (
-        require_tuned_backward
-        and never_run_backward
-        and any(
-            static and cubin_retained(kernel, static[0])
-            for kernel, static in zip(instances, static_by_instance)
+    ):
+        # Under the strict policy, only to tell whether the opt-in would freeze it.
+        untuned = _freeze_untuned_backward(
+            key, instances, reject if not require_tuned_backward else lambda *_: None
         )
-    )
+        if untuned is not None and not require_tuned_backward:
+            return untuned
     kernel_name = instances[0].inductor_meta.get("kernel_name") if instances else None
     raise _UnresolvedTritonExport(
         [
@@ -606,7 +596,9 @@ def _freeze_triton_kernel(
                 "kernel_name": kernel_name,
                 "instance_count": len(instances),
                 "instances": rejected,
-                "untuned_backward_eligible": eligible,
+                # Whether DynamoTracer(require_tuned_backward=False) would freeze it.
+                "untuned_backward_eligible": require_tuned_backward
+                and untuned is not None,
             }
         ]
     )
