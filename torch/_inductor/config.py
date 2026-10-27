@@ -2701,7 +2701,8 @@ class aot_inductor:
     # Require that the whole graph can be captured into a CUDA graph, and fail
     # the compile otherwise: the model must run on CUDA only, without host
     # syncs, control flow, data-dependent shapes, mutated inputs, or ops marked
-    # cudagraph-unsafe.
+    # cudagraph-unsafe. The compiled model can then run as CUDA graphs through
+    # AOTInductorModelContainerRunCudaGraph.
     cudagraphs: bool = False
 
     # flag to force weight to be appended to the shared library and mapped by the runtime
