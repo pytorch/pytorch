@@ -36,6 +36,12 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<at::Tensor>&& inputs,
       void* stream_handle = nullptr);
 
+  // Runs the model as CUDA graphs; see AOTInductorModelContainerRunCudaGraph.
+  std::vector<at::Tensor> run_cuda_graph(
+      const std::vector<at::Tensor>& inputs,
+      int64_t max_graphs,
+      void* stream_handle = nullptr);
+
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
   std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
@@ -140,12 +146,20 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<AtenTensorHandle>& input_handles,
       void* stream_handle);
 
+  virtual std::vector<at::Tensor> run_cuda_graph_impl(
+      std::vector<AtenTensorHandle>& input_handles,
+      void* stream_handle,
+      int64_t max_graphs);
+
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
+  // Null for models built before AOTInductorModelContainerRunCudaGraph.
+  decltype(&AOTInductorModelContainerRunCudaGraph) run_cuda_graph_func_{
+      nullptr};
   decltype(&AOTInductorModelContainerGetNumConstants) get_num_constants_func_{
       nullptr};
   decltype(&AOTInductorModelContainerGetConstantName) get_constant_name_func_{
