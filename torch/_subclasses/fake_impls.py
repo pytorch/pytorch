@@ -803,9 +803,8 @@ def _unique(
         # pyrefly: ignore[no-matching-overload]
         ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    return_if_dim_and_cpu = dim is not None and maybe_get_fake_device(
-        arg
-    ) == torch.device("cpu")
+    arg_device = maybe_get_fake_device(arg)
+    return_if_dim_and_cpu = dim is not None and arg_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
         inverse = arg.new_empty(
             arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
@@ -2133,9 +2132,9 @@ def index_put_impl(
     )
     values = new_kwargs["values"]
     self_device = maybe_get_fake_device(new_kwargs["input"])
+    values_device = maybe_get_fake_device(values)
     torch._check(
-        self_device == maybe_get_fake_device(values)
-        or (values.ndim == 0 and values.numel() == 1),
+        self_device == values_device or (values.ndim == 0 and values.numel() == 1),
         lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
     )
 
