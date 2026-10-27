@@ -281,9 +281,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         if not self.fake_mode:
             raise AssertionError("fake_mode must be set")
         for arg in args:
-            if isinstance(arg, torch.Tensor) and not isinstance(
-                arg, torch._subclasses.FakeTensor
-            ):
+            if isinstance(arg, torch.Tensor) and not is_fake_tensor(arg):
                 new_args.append(torch._dynamo.utils.to_fake_tensor(arg, self.fake_mode))
             else:
                 new_args.append(arg)
