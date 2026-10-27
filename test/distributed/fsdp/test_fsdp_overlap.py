@@ -10,7 +10,10 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist, Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
@@ -19,6 +22,7 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 
 
 if not dist.is_available():
@@ -248,6 +252,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
     @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
+    @skipXPUIf(not Xe2_Or_Later, "torch.xpu._sleep is not supported before Xe2")
     @skip_if_lt_x_gpu(2)
     def test_forward_overlap(self):
         self._dist_train()
