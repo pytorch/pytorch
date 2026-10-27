@@ -1,10 +1,16 @@
 """Machine-readable status of mergebot's replies to merge and revert commands.
 
 A reply that reports how a merge or revert command went ends with a hidden tag,
-for example ``<!-- mergebot-status: merge failure -->``. GitHub renders it as
-nothing and leaves it out of GraphQL ``bodyText``, so the visible text and the
-text-matching consumers stay as they were. Tools such as ShipIt's DiffTrain
-merge job read the newest tagged reply instead of guessing from prose.
+for example ``<!-- mergebot-status: merge failure comment=123 -->``. GitHub
+renders it as nothing and leaves it out of GraphQL ``bodyText``, so the visible
+text and the text-matching consumers stay as they were. Tools such as ShipIt's
+DiffTrain merge job read the newest tagged reply to their own command instead of
+guessing from prose.
+
+``comment=`` is the id of the comment that issued the command, so a reader can
+tell the reply to its command from the reply to an earlier one: a second merge
+command cancels the first command's run, whose "canceled" reply then lands after
+the second command. A revert dispatched without a comment has no ``comment=``.
 
 ``success`` means the command was accepted and is running or done ("Merge
 started", "successfully started a revert job", "has been successfully
@@ -14,8 +20,10 @@ command was refused or failed. A later reply supersedes an earlier one: a merge
 that started and then failed carries a ``success`` reply followed by a
 ``failure`` one.
 
-Replies that report neither (notices such as the auto-added label, waiting
-messages, rebase results) carry no tag.
+Only replies on the PR the command was issued on are tagged. PRs merged or
+reverted along with it, as part of its stack, get untagged notices; the outcome
+is reported on the PR that was asked. Replies that report no outcome (notices
+such as the auto-added label, waiting messages, rebase results) carry no tag.
 """
 
 from __future__ import annotations
@@ -39,8 +47,21 @@ class Status(NamedTuple):
     command: Command
     result: Result
 
-    def tag(self) -> str:
-        return f"<!-- mergebot-status: {self.command.value} {self.result.value} -->"
+    def tag(self, comment_id: int | None = None) -> str:
+        # An id that isn't one is left out rather than raising, which would lose
+        # the reply itself
+        valid = comment_id is not None and 0 < comment_id <= MAX_COMMENT_ID
+        command = f" comment={comment_id}" if valid else ""
+        return (
+            f"<!-- mergebot-status: {self.command.value} {self.result.value}"
+            f"{command} -->"
+        )
+
+
+class Tag(NamedTuple):
+    status: Status
+    # The id of the comment that issued the command, if it was issued by one
+    comment_id: int | None
 
 
 MERGE_SUCCESS = Status(Command.MERGE, Result.SUCCESS)
@@ -48,15 +69,29 @@ MERGE_FAILURE = Status(Command.MERGE, Result.FAILURE)
 REVERT_SUCCESS = Status(Command.REVERT, Result.SUCCESS)
 REVERT_FAILURE = Status(Command.REVERT, Result.FAILURE)
 
+# GitHub comment ids are positive 64-bit integers. The bound also keeps int()
+# clear of Python's limit on converting very long digit strings
+MAX_COMMENT_ID = 2**63 - 1
+COMMENT_ID_RE = r"[1-9][0-9]{0,18}"
+
 TAG_PREFIX = "<!-- mergebot-status:"
 STATUS_TAG_RE = re.compile(
-    r"\n<!-- mergebot-status: (?P<command>merge|revert) (?P<result>success|failure) -->"
-    r"\s*\Z"
+    r"\n<!-- mergebot-status: (?P<command>merge|revert) (?P<result>success|failure)"
+    rf"(?: comment=(?P<comment_id>{COMMENT_ID_RE}))? -->\s*\Z"
 )
 
 
-def with_status(body: str, status: Status | None) -> str:
+def parse_comment_id(value: str | None) -> int | None:
+    """``value`` as a comment id, or None if it isn't one."""
+    if value is None or not re.fullmatch(COMMENT_ID_RE, value):
+        return None
+    comment_id = int(value)
+    return comment_id if comment_id <= MAX_COMMENT_ID else None
+
+
+def with_status(body: str, status: Status | None, comment_id: int | None = None) -> str:
     """Return ``body`` with the tag for ``status`` appended; None appends nothing.
+    ``comment_id`` is the comment that issued the command the reply answers.
 
     The tag goes last, so a reader that checks how a reply starts
     ("## Merge failed", "### Merge started") still matches it. Text in ``body``
@@ -71,7 +106,7 @@ def with_status(body: str, status: Status | None) -> str:
     fence = open_fence(body)
     if fence:
         body += f"\n{fence}"
-    return f"{body}\n\n{status.tag()}\n"
+    return f"{body}\n\n{status.tag(comment_id)}\n"
 
 
 FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
@@ -99,10 +134,21 @@ def open_fence(body: str) -> str | None:
     return opened
 
 
-def parse_status(body: str) -> Status | None:
-    """The status a reply reports, or None for a reply without a tag. Only a tag
-    on the reply's last line counts."""
+def parse_tag(body: str) -> Tag | None:
+    """The tag a reply carries, or None for a reply without one. Only a tag on the
+    reply's last line counts."""
     match = STATUS_TAG_RE.search(body)
     if match is None:
         return None
-    return Status(Command(match["command"]), Result(match["result"]))
+    comment_id = None
+    if match["comment_id"] is not None:
+        comment_id = parse_comment_id(match["comment_id"])
+        if comment_id is None:
+            return None
+    return Tag(Status(Command(match["command"]), Result(match["result"])), comment_id)
+
+
+def parse_status(body: str) -> Status | None:
+    """The status a reply reports, or None for a reply without a tag."""
+    tag = parse_tag(body)
+    return tag.status if tag is not None else None

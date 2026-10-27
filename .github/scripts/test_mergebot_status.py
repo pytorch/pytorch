@@ -15,9 +15,12 @@ import yaml
 from mergebot_status import (
     MERGE_FAILURE,
     MERGE_SUCCESS,
+    parse_comment_id,
     parse_status,
+    parse_tag,
     REVERT_FAILURE,
     REVERT_SUCCESS,
+    Tag,
     with_status,
 )
 
@@ -37,6 +40,52 @@ class TestStatusTag(TestCase):
             with_status("## Merge failed\n**Reason**: boom\n", MERGE_FAILURE),
             "## Merge failed\n**Reason**: boom\n\n<!-- mergebot-status: merge failure -->\n",
         )
+
+    def test_comment_id_round_trip(self) -> None:
+        body = with_status("body", REVERT_SUCCESS, 4567)
+        self.assertTrue(
+            body.endswith("<!-- mergebot-status: revert success comment=4567 -->\n")
+        )
+        self.assertEqual(parse_tag(body), Tag(REVERT_SUCCESS, 4567))
+        self.assertEqual(parse_status(body), REVERT_SUCCESS)
+        self.assertEqual(
+            parse_tag(with_status("body", MERGE_FAILURE)), Tag(MERGE_FAILURE, None)
+        )
+
+    def test_an_invalid_comment_id_is_left_out(self) -> None:
+        # Losing the id is better than losing the reply
+        for comment_id in (0, -5):
+            with self.subTest(comment_id=comment_id):
+                self.assertEqual(
+                    with_status("body", MERGE_FAILURE, comment_id),
+                    with_status("body", MERGE_FAILURE),
+                )
+
+    def test_an_oversized_comment_id_is_left_out(self) -> None:
+        # int() refuses digit strings over 4300 long, and str() such ints
+        for comment_id in (2**63, 10**5000):
+            with self.subTest(bits=comment_id.bit_length()):
+                self.assertEqual(
+                    with_status("body", MERGE_FAILURE, comment_id),
+                    with_status("body", MERGE_FAILURE),
+                )
+        self.assertIsNone(parse_comment_id("1" * 5000))
+        self.assertIsNone(parse_comment_id(str(2**63)))
+        self.assertEqual(parse_comment_id(str(2**63 - 1)), 2**63 - 1)
+
+    def test_malformed_comment_ids_do_not_parse(self) -> None:
+        for suffix in (
+            "comment=",
+            "comment=0",
+            "comment=-1",
+            "comment=12a",
+            "comment=1 x=2",
+            f"comment={2**63}",
+            "comment=" + "1" * 5000,
+        ):
+            with self.subTest(suffix=suffix):
+                body = f"body\n\n<!-- mergebot-status: merge failure {suffix} -->\n"
+                self.assertIsNone(parse_tag(body))
 
     def test_none_leaves_the_body_unchanged(self) -> None:
         self.assertEqual(with_status("notice", None), "notice")
@@ -111,8 +160,8 @@ class TestMergeWorkflowSteps(TestCase):
     that holds, update the hash. Action version bumps don't change it."""
 
     PINNED = {
-        "trymerge.yml": "96bba1bae75b2e777d5f8157812a4d78cf1740b8630af3465507c10dbd06d5d5",
-        "revert.yml": "da57f188be35faf092bcc5870ef25910e56aee1d46403857e91e289f5ca39766",
+        "trymerge.yml": "c2c010959270dfb408a5dcde0183e57fb2d633d215ec5e3bc8f75f668647fb8f",
+        "revert.yml": "c62cca424cdf4081d6723ec3d7362a6698f5e0e9edac2e87a90f506fdbdd8068",
     }
 
     def test_jobs_are_reviewed(self) -> None:
@@ -268,7 +317,7 @@ class TestWorkflowScriptsPostThroughTheTaggingPath(TestCase):
 
     REVIEWED = [
         ("comment_on_pr", "main", "msg"),
-        ("trymerge", "post_pr_comment", "with_status(comment, status)"),
+        ("trymerge", "post_pr_comment", "with_status(comment, status, comment_id)"),
         ("tryrebase", "<module>", "import gh_post_pr_comment as gh_post_comment"),
         ("tryrebase", "main", 'f"PR #{args.pr_num} is closed, won\'t rebase"'),
         ("tryrebase", "main", "msg"),
@@ -344,6 +393,19 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
                     ast.unparse(status[0]),
                 )
 
+    def test_every_tagged_comment_names_its_command(self) -> None:
+        """A tagged reply passes the id of the comment it answers (None when there
+        is none), so a reader can tell it from the reply to an earlier command."""
+        for name, call, function in self.posts:
+            status = [k.value for k in call.keywords if k.arg == "status"]
+            if status and self.is_none(status[0]):
+                continue
+            with self.subTest(module=name, function=function, line=call.lineno):
+                passed = [
+                    ast.unparse(k.value) for k in call.keywords if k.arg == "comment_id"
+                ]
+                self.assertIn(passed, (["comment_id"], ["args.comment_id"]))
+
     # Every comment posted without a status, with the module and function that
     # post it. Only notices that report no merge or revert outcome belong here.
     # If you add or reword one, check it still reports none: a reply saying a
@@ -365,6 +427,15 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
             "post_starting_merge_comment",
             "f'Starting merge as part of PR stack under #{pr.pr_num}'",
         ),
+        (
+            "trymerge",
+            "manually_close_merged_pr",
+            "f'This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} "
+            "in the stack under {merge_commit_sha} but it is still open, likely due to "
+            "a Github bug, so mergebot is closing it manually. If you think this is a "
+            "mistake, please feel free to reopen and contact Dev Infra.'",
+        ),
+        ("trymerge", "reopen_reverted_prs", "revert_message"),
         ("trymerge", "refresh_reverted_branches", "msg"),
         (
             "trymerge",
@@ -385,7 +456,8 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
 
 
 class TestCanceledJobComment(TestCase):
-    def post(self, action: str) -> str:
+    def post(self, action: str, comment_id: str | None = None) -> str:
+        env = {} if comment_id is None else {"COMMENT_ID": comment_id}
         args = mock.MagicMock(pr_num=123, action=action)
         repo = mock.MagicMock()
         repo.gh_owner_and_name.return_value = ("pytorch", "pytorch")
@@ -395,7 +467,10 @@ class TestCanceledJobComment(TestCase):
             mock.patch.object(comment_on_pr, "get_git_repo_dir"),
             mock.patch.object(comment_on_pr, "get_git_remote_name"),
             mock.patch.object(comment_on_pr, "gh_post_pr_comment") as post,
+            mock.patch.dict(comment_on_pr.os.environ, env),
         ):
+            if comment_id is None:
+                comment_on_pr.os.environ.pop("COMMENT_ID", None)
             comment_on_pr.main()
         post.assert_called_once()
         body: Any = post.call_args.args[3]
@@ -405,6 +480,19 @@ class TestCanceledJobComment(TestCase):
     def test_merge_and_revert_are_tagged_failure(self) -> None:
         self.assertEqual(parse_status(self.post("merge")), MERGE_FAILURE)
         self.assertEqual(parse_status(self.post("revert")), REVERT_FAILURE)
+
+    def test_the_tag_names_the_command_the_job_ran_for(self) -> None:
+        # A second merge command cancels the first one's job, so this reply can
+        # land after the second command
+        self.assertEqual(parse_tag(self.post("merge", "777")), Tag(MERGE_FAILURE, 777))
+        self.assertEqual(parse_tag(self.post("merge")), Tag(MERGE_FAILURE, None))
+        # An empty value is what the workflow passes for a revert dispatched
+        # without a comment
+        self.assertEqual(parse_tag(self.post("revert", "")), Tag(REVERT_FAILURE, None))
+        # A value that isn't a comment id never costs the reply
+        self.assertEqual(
+            parse_tag(self.post("merge", "1" * 5000)), Tag(MERGE_FAILURE, None)
+        )
 
     def test_rebase_is_not_tagged(self) -> None:
         self.assertIsNone(parse_status(self.post("rebase")))

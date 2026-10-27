@@ -35,9 +35,11 @@ from mergebot_status import (
     MERGE_FAILURE,
     MERGE_SUCCESS,
     parse_status,
+    parse_tag,
     REVERT_FAILURE,
     REVERT_SUCCESS,
     Status,
+    Tag,
     with_status,
 )
 from native_stack import (
@@ -91,6 +93,7 @@ from trymerge import (
     JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
+    manually_close_merged_pr,
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
@@ -3345,6 +3348,7 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             pr=self.top,
             additional_merged_prs=[self.lower, self.top],
             merge_commit_sha="merged-sha",
+            comment_id=1,
             dry_run=False,
         )
         self.assertEqual(self.record.call_args.kwargs["merge_commit_sha"], "merged-sha")
@@ -3402,7 +3406,7 @@ class TestStartingMergeComment(NoNetworkTestCase):
         post = self.patch("trymerge.gh_post_pr_comment")
         explainer = mock.MagicMock()
         explainer.get_merge_message.return_value = "Merge started"
-        post_starting_merge_comment(top, [lower, top], explainer, True)
+        post_starting_merge_comment(top, [lower, top], explainer, 7, True)
         self.assertEqual(
             post.call_args_list,
             [
@@ -3410,7 +3414,7 @@ class TestStartingMergeComment(NoNetworkTestCase):
                     "pytorch",
                     "pytorch",
                     1002,
-                    with_status("Merge started", MERGE_SUCCESS),
+                    with_status("Merge started", MERGE_SUCCESS, 7),
                     dry_run=True,
                 ),
                 mock.call(
@@ -3422,6 +3426,38 @@ class TestStartingMergeComment(NoNetworkTestCase):
                 ),
             ],
         )
+
+
+class TestManuallyCloseMergedPr(NoNetworkTestCase):
+    def test_only_the_pr_asked_to_merge_gets_a_tag(self) -> None:
+        lower, top = stacked_pr(1001), stacked_pr(1002)
+        prs = {1001: lower, 1002: top}
+        self.patch("trymerge.GitHubPR", side_effect=lambda _o, _p, n: prs[n])
+        post = self.patch("trymerge.gh_post_pr_comment")
+        close = self.patch("trymerge.gh_close_pr")
+        # A native stack passes every PR it merged, the asked one included
+        manually_close_merged_pr(top, [lower, top], "sha", 7, True)
+        self.assertEqual(
+            [(c.args[2], parse_tag(c.args[3])) for c in post.call_args_list],
+            [(1002, Tag(MERGE_SUCCESS, 7)), (1001, None)],
+        )
+        self.assertEqual(
+            close.call_args_list,
+            [
+                mock.call("pytorch", "pytorch", 1002, True),
+                mock.call("pytorch", "pytorch", 1001, True),
+            ],
+        )
+
+    def test_closed_prs_get_nothing(self) -> None:
+        top = stacked_pr(1002)
+        top.is_closed.return_value = True
+        self.patch("trymerge.GitHubPR", return_value=top)
+        post = self.patch("trymerge.gh_post_pr_comment")
+        close = self.patch("trymerge.gh_close_pr")
+        manually_close_merged_pr(top, [], "sha", 7, True)
+        post.assert_not_called()
+        close.assert_not_called()
 
 
 class TestNativeStackMergePlumbing(NoNetworkTestCase):
@@ -3504,7 +3540,7 @@ class TestNativeStackMain(NoNetworkTestCase):
                     "pytorch",
                     "pytorch",
                     1002,
-                    with_status(refusal, MERGE_FAILURE),
+                    with_status(refusal, MERGE_FAILURE, self.args.comment_id),
                     dry_run=True,
                 )
             ],
@@ -3669,8 +3705,9 @@ class TestNativeStackRevert(NoNetworkTestCase):
                         REVERT_SUCCESS,
                     ),
                 ),
-                (1001, with_status(f"@author1001 {stacked}", REVERT_SUCCESS)),
-                (1002, with_status(f"@author1002 {stacked}", REVERT_SUCCESS)),
+                # Reverted along with #1000: the outcome is reported there
+                (1001, f"@author1001 {stacked}"),
+                (1002, f"@author1002 {stacked}"),
             ],
         )
         # Every reverted commit gets the revert line of the PR reverted last
@@ -3912,6 +3949,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             pr=self.prs[103],
             additional_merged_prs=list(self.prs.values()),
             merge_commit_sha=landed[-1],
+            comment_id=1,
             dry_run=False,
         )
 

@@ -843,6 +843,7 @@ def post_pr_comment(
     comment: str,
     *,
     status: Status | None,
+    comment_id: int | None = None,
     dry_run: bool = False,
 ) -> None:
     """Post a mergebot comment on a PR. Every comment trymerge posts goes through here.
@@ -850,9 +851,14 @@ def post_pr_comment(
     `status` is required: a reply that reports how a merge or revert command went
     passes its outcome, which is appended as a hidden machine-readable tag (see
     mergebot_status.py); any other comment (a notice, a waiting message) passes None.
+    A tagged reply also passes `comment_id`, the comment that issued the command.
     """
     gh_post_pr_comment(
-        org, project, pr_num, with_status(comment, status), dry_run=dry_run
+        org,
+        project,
+        pr_num,
+        with_status(comment, status, comment_id),
+        dry_run=dry_run,
     )
 
 
@@ -1738,6 +1744,7 @@ class GitHubPR:
             pr=self,
             additional_merged_prs=additional_merged_prs,
             merge_commit_sha=merge_commit_sha,
+            comment_id=comment_id,
             dry_run=dry_run,
         )
 
@@ -2433,6 +2440,7 @@ def post_starting_merge_comment(
     pr: GitHubPR,
     stacked_prs: list[GitHubPR],
     explainer: TryMergeExplainer,
+    comment_id: int | None,
     dry_run: bool,
     ignore_current_checks_info: list[tuple[str, str | None, int | None]] | None = None,
 ) -> None:
@@ -2444,6 +2452,7 @@ def post_starting_merge_comment(
         pr.pr_num,
         explainer.get_merge_message(ignore_current_checks_info),
         status=MERGE_SUCCESS,
+        comment_id=comment_id,
         dry_run=dry_run,
     )
     for additional_pr in stacked_prs:
@@ -2464,34 +2473,44 @@ def manually_close_merged_pr(
     pr: GitHubPR,
     additional_merged_prs: list[GitHubPR],
     merge_commit_sha: str,
+    comment_id: int | None,
     dry_run: bool,
 ) -> None:
-    def _comment_and_close(pr: GitHubPR, comment: str) -> None:
+    def _still_open(pr: GitHubPR) -> GitHubPR | None:
         pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
-        if not pr.is_closed():
-            # The merge landed; this reply is its only report of that
+        return None if pr.is_closed() else pr
+
+    if (open_pr := _still_open(pr)) is not None:
+        # The merge landed; this reply is its only report of that
+        post_pr_comment(
+            open_pr.org,
+            open_pr.project,
+            open_pr.pr_num,
+            f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+            "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra.",
+            status=MERGE_SUCCESS,
+            comment_id=comment_id,
+            dry_run=dry_run,
+        )
+        gh_close_pr(open_pr.org, open_pr.project, open_pr.pr_num, dry_run)
+    for additional_pr in additional_merged_prs:
+        # A native stack's list includes the PR asked to merge, handled above
+        if additional_pr.pr_num == pr.pr_num:
+            continue
+        if (open_pr := _still_open(additional_pr)) is not None:
+            # Not a reply to a command on this PR: its merge outcome is reported
+            # on the PR that was asked to merge
             post_pr_comment(
-                pr.org,
-                pr.project,
-                pr.pr_num,
-                comment,
-                status=MERGE_SUCCESS,
+                open_pr.org,
+                open_pr.project,
+                open_pr.pr_num,
+                f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+                "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+                "If you think this is a mistake, please feel free to reopen and contact Dev Infra.",
+                status=None,
                 dry_run=dry_run,
             )
-            gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
-
-    message = (
-        f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
-        "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
-    )
-    _comment_and_close(pr, message)
-    for additional_pr in additional_merged_prs:
-        message = (
-            f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
-            "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
-            "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
-        )
-        _comment_and_close(additional_pr, message)
+            gh_close_pr(open_pr.org, open_pr.project, open_pr.pr_num, dry_run)
 
     print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
 
@@ -3003,6 +3022,7 @@ def reopen_reverted_prs(
     shas_and_prs: list[tuple[str, GitHubPR]],
     revert_msg: str,
     *,
+    comment_id: int | None,
     skip_internal_checks: bool,
     dry_run: bool,
 ) -> None:
@@ -3010,7 +3030,8 @@ def reopen_reverted_prs(
     reverts of their commits landed, and comment `revert_msg` on those commits."""
     for commit_sha, pr in shas_and_prs:
         revert_message = ""
-        if pr.pr_num == original_pr.pr_num:
+        asked = pr.pr_num == original_pr.pr_num
+        if asked:
             revert_message += (
                 f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
             )
@@ -3026,14 +3047,27 @@ def reopen_reverted_prs(
         ):
             revert_message += "\n:warning: This PR might contain internal changes"
             revert_message += "\ncc: @pytorch/pytorch-dev-infra"
-        post_pr_comment(
-            pr.org,
-            pr.project,
-            pr.pr_num,
-            revert_message,
-            status=REVERT_SUCCESS,
-            dry_run=dry_run,
-        )
+        if asked:
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                revert_message,
+                status=REVERT_SUCCESS,
+                comment_id=comment_id,
+                dry_run=dry_run,
+            )
+        else:
+            # Not a reply to a command on this PR: its revert is reported on the
+            # PR that was asked to revert
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                revert_message,
+                status=None,
+                dry_run=dry_run,
+            )
 
         pr.add_numbered_label("reverted", dry_run)
         pr.add_label("ci-no-td", dry_run)
@@ -3049,6 +3083,7 @@ def do_revert_prs(
     *,
     author_login: str,
     extra_msg: str = "",
+    comment_id: int | None = None,
     skip_internal_checks: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -3060,6 +3095,7 @@ def do_revert_prs(
         original_pr,
         shas_and_prs,
         revert_msg,
+        comment_id=comment_id,
         skip_internal_checks=skip_internal_checks,
         dry_run=dry_run,
     )
@@ -3072,6 +3108,7 @@ def revert_with_dependents(
     *,
     author_login: str,
     extra_msg: str,
+    comment_id: int | None = None,
     skip_internal_checks: bool,
     dry_run: bool,
 ) -> None:
@@ -3105,6 +3142,7 @@ def revert_with_dependents(
         pr,
         shas_and_prs[::-1],
         revert_msg,
+        comment_id=comment_id,
         skip_internal_checks=skip_internal_checks,
         dry_run=dry_run,
     )
@@ -3188,6 +3226,7 @@ def try_revert(
             pr.pr_num,
             str(e),
             status=REVERT_FAILURE,
+            comment_id=comment_id,
             dry_run=dry_run,
         )
         return
@@ -3205,6 +3244,7 @@ def try_revert(
             commit_sha,
             author_login=author_login,
             extra_msg=extra_msg,
+            comment_id=comment_id,
             skip_internal_checks=can_skip_internal_checks(pr, comment_id),
             dry_run=dry_run,
         )
@@ -3230,6 +3270,7 @@ def try_revert(
         shas_and_prs,
         author_login=author_login,
         extra_msg=extra_msg,
+        comment_id=comment_id,
         dry_run=dry_run,
         skip_internal_checks=can_skip_internal_checks(pr, comment_id),
     )
@@ -3433,7 +3474,7 @@ def merge(
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks:
-        post_starting_merge_comment(pr, stacked_prs, explainer, dry_run)
+        post_starting_merge_comment(pr, stacked_prs, explainer, comment_id, dry_run)
         # This return is outside the retry loop below, so there is no iteration for
         # the greenlight check to wait in: it has to decide now or refuse.
         return pr.merge_into(
@@ -3466,6 +3507,7 @@ def merge(
         pr,
         stacked_prs,
         explainer,
+        comment_id,
         dry_run,
         ignore_current_checks_info=ignore_current_checks_info,
     )
@@ -3601,6 +3643,7 @@ def main() -> None:
             args.pr_num,
             msg,
             status=REVERT_FAILURE if args.revert else MERGE_FAILURE,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
         traceback.print_exc()
@@ -3620,6 +3663,7 @@ def main() -> None:
                 args.pr_num,
                 get_revert_message(org, project, pr.pr_num),
                 status=REVERT_SUCCESS,
+                comment_id=args.comment_id,
                 dry_run=args.dry_run,
             )
             try_revert(
@@ -3640,6 +3684,7 @@ def main() -> None:
             args.pr_num,
             f"Can't merge closed PR #{args.pr_num}",
             status=MERGE_FAILURE,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
         return
@@ -3651,6 +3696,7 @@ def main() -> None:
             args.pr_num,
             "Cross-repo ghstack merges are not supported",
             status=MERGE_FAILURE,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
         return
@@ -3678,6 +3724,7 @@ def main() -> None:
                 args.pr_num,
                 refusal,
                 status=MERGE_FAILURE,
+                comment_id=args.comment_id,
                 dry_run=args.dry_run,
             )
             return
@@ -3703,6 +3750,7 @@ def main() -> None:
             args.pr_num,
             message,
             status=MERGE_FAILURE,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
         return
