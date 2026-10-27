@@ -910,11 +910,11 @@ class ConstDictVariable(VariableTracker):
 
         # value=None signals delete (CPython NULL sentinel).
         self.install_dict_keys_match_guard()
-        hkey = (
-            HashableTracker(key)
-            if isinstance(self, OrderedDictVariable)
-            else self._lookup_key(tx, key)
-        )
+        if isinstance(self, OrderedDictVariable):
+            _guard_nan_key(key)
+            hkey = HashableTracker(key)
+        else:
+            hkey = self._lookup_key(tx, key)
         tx.output.side_effects.mutation(self)
         if value is None:
             if hkey not in self.items:
