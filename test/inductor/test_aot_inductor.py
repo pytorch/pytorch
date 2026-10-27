@@ -10431,6 +10431,44 @@ class AOTInductorTestsTemplate:
                     inductor_configs={"aot_inductor.cudagraphs": True},
                 )
 
+    def test_aot_cudagraphs_run_captures_and_replays(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        model = torch.nn.Sequential(torch.nn.Linear(16, 32), torch.nn.ReLU())
+        model = model.to(self.device)
+        batch = torch.export.Dim("batch", min=1, max=64)
+        so_path = AOTIRunnerUtil.legacy_compile(
+            model,
+            (torch.randn(4, 16, device=self.device),),
+            options={"aot_inductor.cudagraphs": True},
+            dynamic_shapes=({0: batch},),
+        )
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+
+        def launches_graph(batch_size, max_graphs):
+            x = torch.randn(batch_size, 16, device=self.device)
+            activities = [torch.profiler.ProfilerActivity.CUDA]
+            with torch.profiler.profile(activities=activities) as prof:
+                (out,) = runner.run_cuda_graph([x], max_graphs)
+            self.assertEqual(out, model(x))
+            return any("cudaGraphLaunch" in e.name for e in prof.events())
+
+        # A new shape warms up, is captured on its next call, then replays.
+        self.assertEqual([launches_graph(4, 1) for _ in range(3)], [False, True, True])
+        # With max_graphs reached, another shape runs eagerly.
+        self.assertEqual([launches_graph(8, 1) for _ in range(2)], [False, False])
+        self.assertTrue(launches_graph(4, 1))
+
+    def test_aot_cudagraphs_run_requires_flag(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        model = torch.nn.Linear(4, 4).to(self.device)
+        x = torch.randn(2, 4, device=self.device)
+        so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        with self.assertRaisesRegex(RuntimeError, "aot_inductor.cudagraphs=True"):
+            runner.run_cuda_graph([x], 8)
+
     def test_custom_op_in_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
