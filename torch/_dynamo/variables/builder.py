@@ -17,7 +17,6 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
-import _collections  # type: ignore[import-not-found]
 import abc
 import builtins
 import collections
@@ -253,7 +252,6 @@ from .functions import (
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
-    TupleGetterVariable,
     UserFunctionVariable,
     WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
@@ -945,24 +943,6 @@ class VariableBuilder:
         if not isinstance(value, BaseHOP):
             raise AssertionError(f"Expected BaseHOP, got {type(value)}")
         return BaseHOPVariable(value, source, **kwargs)
-
-    @staticmethod
-    def create_internal_descriptor(
-        descriptor: object,
-        source: Source | None = None,
-    ) -> VariableTracker:
-        """Classify a raw descriptor whose source may denote its bound result."""
-        if isinstance(descriptor, types.ClassMethodDescriptorType):
-            return ClassMethodDescriptorVariable(descriptor, source=source)
-        if isinstance(descriptor, _collections._tuplegetter):
-            return TupleGetterVariable(descriptor, source=source)
-        if isinstance(descriptor, types.GetSetDescriptorType):
-            return GetSetDescriptorVariable(descriptor, source=source)
-        if isinstance(descriptor, types.MemberDescriptorType):
-            return MemberDescriptorVariable(descriptor, source=source)
-        if isinstance(descriptor, property):
-            return PropertyVariable(descriptor, source=source)
-        raise AssertionError(f"Expected supported descriptor, got {type(descriptor)}")
 
     @staticmethod
     def create_internal_method_descriptor(

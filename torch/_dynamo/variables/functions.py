@@ -5496,6 +5496,13 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: types.ClassMethodDescriptorType,
+        source: Source | None = None,
+    ) -> "ClassMethodDescriptorVariable":
+        return ClassMethodDescriptorVariable(descriptor, source=source)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
         return descr_repr(tx, self.descriptor, "method")
@@ -5837,6 +5844,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: types.MemberDescriptorType,
+        source: Source | None = None,
+    ) -> "MemberDescriptorVariable":
+        return MemberDescriptorVariable(descriptor, source=source)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # member_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L57-L62
         return descr_repr(tx, self.descriptor, "member")
@@ -5936,6 +5950,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: types.GetSetDescriptorType,
+        source: Source | None = None,
+    ) -> "GetSetDescriptorVariable":
+        return GetSetDescriptorVariable(descriptor, source=source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
@@ -6146,6 +6167,12 @@ class PropertyVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: property, source: Source | None = None
+    ) -> "PropertyVariable":
+        return PropertyVariable(descriptor, source=source)
+
     def __repr__(self) -> str:
         fget_name = getattr(self.descriptor.fget, "__name__", "?")
         return f"PropertyVariable({fget_name})"
@@ -6235,6 +6262,13 @@ class TupleGetterVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: "_collections._tuplegetter",
+        source: Source | None = None,
+    ) -> "TupleGetterVariable":
+        return TupleGetterVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         _, (idx, doc) = self.descriptor.__reduce__()
