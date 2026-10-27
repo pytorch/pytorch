@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+import unittest.mock
 from datetime import timedelta
 
 import torch
@@ -60,6 +61,195 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3) * dist.get_rank()
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_compile_sync_pg_stays_fake(self):
+        # One real rank under a fake default group sized to a larger world must not
+        # attempt a gloo rendezvous with ranks that do not exist.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            # A fake world needs no gloo, even where the build has none.
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+        ):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+            self.assertEqual(pg.size(), 16)
+
+    def test_compile_sync_pg_stays_fake_for_a_device_qualified_backend(self):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(
+            backend="cpu:fake", rank=0, world_size=16, store=FakeStore()
+        )
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+        ):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+
+    def test_compile_sync_backend_needs_every_device_backend_fake(self):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        fake, gloo = dist.Backend.FAKE, dist.Backend.GLOO
+        # The backend with gloo available, then without it.
+        cases = {
+            "cuda:fake": (fake, fake),
+            "cpu:fake,cuda:fake": (fake, fake),
+            # One real device backend means real peers: sync over gloo.
+            "cpu:gloo,cuda:fake": (gloo, None),
+            "cpu:fake,cuda:nccl": (gloo, None),
+            # An MPI default group has no store for a gloo group to use; one whose
+            # devices have different backends does.
+            "mpi": (None, None),
+            "cpu:mpi,cuda:nccl": (gloo, None),
+        }
+        for config, expected in cases.items():
+            for gloo_available, backend in zip((True, False), expected):
+                with (
+                    self.subTest(config=config, gloo=gloo_available),
+                    unittest.mock.patch.object(
+                        dist, "get_backend_config", return_value=config
+                    ),
+                    unittest.mock.patch.object(
+                        dist, "get_backend", return_value=config
+                    ),
+                    unittest.mock.patch.object(
+                        dist, "is_gloo_available", return_value=gloo_available
+                    ),
+                ):
+                    backends = dynamo_distributed._default_device_backends()
+                    self.assertEqual(
+                        dynamo_distributed._compile_sync_backend(backends), backend
+                    )
+
+    @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
+    @parametrize("fake_options", [False, True])
+    def test_compile_sync_pg_over_a_fake_cpu_backend(self, fake_options):
+        # The CPU backend is fake and does not keep the configured timeout, even
+        # when given options of its own; the cuda backend keeps it.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        timeout = timedelta(minutes=5)
+        dist.init_process_group(
+            backend="cpu:fake,cuda:gloo",
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            timeout=timeout,
+            pg_options=FakeProcessGroup.Options() if fake_options else None,
+        )
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.GLOO)
+            backend = pg._get_backend(torch.device("cpu"))
+            self.assertEqual(backend.options._timeout, timeout)
+
+    @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
+    @parametrize("cuda_options", [True, False])
+    def test_compile_sync_pg_timeout_skips_a_backend_without_options(
+        self, cuda_options
+    ):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        class NoOptions:
+            @property
+            def options(self):
+                raise RuntimeError("Backend ucc does not implement getBackendOptions.")
+
+        get_backend = dist.ProcessGroup._get_backend
+
+        def without_options(pg, device):
+            if pg is default_pg and (device.type == "cpu" or not cuda_options):
+                return NoOptions()
+            return get_backend(pg, device)
+
+        timeout = timedelta(minutes=5)
+        # The CPU backend, which object collectives use and so is read first, has
+        # no options to read; the cuda one keeps the configured timeout, unless it
+        # has none either.
+        dist.init_process_group(
+            backend="cuda:gloo,cpu:gloo",
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            timeout=timeout,
+        )
+        default_pg = dist.distributed_c10d._get_default_group()
+        log = dynamo_distributed.log
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(
+                dist.ProcessGroup, "_get_backend", without_options
+            ),
+        ):
+            if cuda_options:
+                with self.assertNoLogs(log, "WARNING"):
+                    pg = dynamo_distributed.get_compile_sync_pg()
+            else:
+                # Not dropped silently.
+                with self.assertLogs(log, "WARNING") as logs:
+                    pg = dynamo_distributed.get_compile_sync_pg()
+                self.assertIn("reports its timeout", logs.output[0])
+                timeout = dist.constants.default_pg_timeout
+        self.assertEqual(pg._get_backend(torch.device("cpu")).options._timeout, timeout)
+
+    def test_cache_sync_primes_the_fake_group_without_gloo(self):
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch import config as functorch_config
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+            functorch_config.patch(
+                _sync_cache_decision_cross_ranks=False, _sync_decision_cross_ranks=True
+            ),
+        ):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            pg = dynamo_distributed._COMPILE_SYNC_PG
+            self.assertIsNotNone(pg)
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+            # Once the group exists, later syncs do not look at the backends again.
+            with unittest.mock.patch.object(
+                dynamo_distributed, "_compile_sync_backend"
+            ) as backend:
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            backend.assert_not_called()
+
+    def test_compile_sync_decisions_stay_local(self):
+        # Over a fake world, the compile time syncs return this rank's own
+        # decisions instead of waiting on ranks that do not exist.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch import config as functorch_config
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            with functorch_config.patch(_sync_cache_decision_cross_ranks=True):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+                self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.empty(4)
+            reduced = graph.call_function(
+                torch.ops._c10d_functional.all_reduce.default, (x, "sum", "0")
+            )
+            reduced.meta["val"] = torch.empty(4)
+            graph.output(reduced)
+            self.assertEqual(_sync_decision_cross_ranks(graph, [x]), [x])
+            self.assertEqual(
+                _sync_decision_cross_ranks(graph, [x, reduced]), [x, reduced]
+            )
 
     def test_set_timeout(self):
         # FakeProcessGroup used to inherit Backend's default set_timeout, which
