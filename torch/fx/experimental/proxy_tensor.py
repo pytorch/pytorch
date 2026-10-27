@@ -2782,7 +2782,10 @@ class _ModuleStackTracer(PythonKeyTracer):
         # In non-strict export, we don't have dynamo's side effect
         # tracking logic which makes some cases hard to detect.
         # In general, our detecting strategy is:
-        #  (1) We instrument fake tensor creation to log all the fake tensors created during export.
+        #  (1) We log the fake tensors created during export: FakeTensor.__init__ records
+        #      Python fakes, and set_proxy_slot records every fake registered with the tracer,
+        #      which also covers C++ fakes (no Python __init__) and fakes created before
+        #      export started (parameters of nn.Module inputs).
         #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT))
         #  (3) Filter out fake tensors that are logged during (1):
         #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)
