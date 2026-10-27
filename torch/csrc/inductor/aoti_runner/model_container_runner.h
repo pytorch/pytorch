@@ -192,6 +192,13 @@ class TORCH_API AOTIModelContainerRunner {
 
  private:
   const char* get_aoti_runtime_error() const;
+  // Calls a model run function, which steals the input handles, as
+  // run_func(output_handles, num_outputs), and returns the outputs it writes.
+  template <typename RunFunc>
+  std::vector<at::Tensor> call_run_func(
+      std::vector<AtenTensorHandle>& input_handles,
+      const char* name,
+      RunFunc&& run_func);
   void load_aoti_symbols(
       const std::string& model_so_path,
       const std::string& device_str,
