@@ -11975,9 +11975,10 @@ _GROUPED_MM_CK_TILE_CASES = [
 
 # Every ck_tile config of each arch as "A/B layout, tile, waves, warp tile, padded dims, 1-element C stores", which
 # test_grouped_gemm_ck_tile_config_coverage requires the cases above to launch. RC is forward, RR dX and CR dW; each
-# layout also has the unaligned config (C1). Update this table when the configs in ck_tile_group_gemm.hip change.
+# layout also has the unaligned config (C1). Keyed by (arch, CU count): load_cost divides tiles by the CU count, so
+# which configs the cases reach depends on it. Update this table when the configs in ck_tile_group_gemm.hip change.
 _GROUPED_MM_CK_TILE_CONFIGS = {
-    "gfx950": {
+    ("gfx950", 256): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -11985,7 +11986,7 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    "gfx942": {
+    ("gfx942", 304): {
         "RC 128x192x64 4w 32x32x16 -N-", "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-",
         "RC 256x192x64 4w 16x16x32 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x64x64 4w 16x16x32 ---", "RR 256x256x32 8w 32x32x16 ---", "RR 128x128x64 4w 16x16x32 ---",
@@ -12103,9 +12104,11 @@ class TestGroupedMM(TestCase):
     def test_grouped_gemm_ck_tile_config_coverage(self, device):
         from torch.profiler import profile, ProfilerActivity
 
-        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
-        if arch not in _GROUPED_MM_CK_TILE_CONFIGS:
-            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        props = torch.cuda.get_device_properties(device)
+        key = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        if key not in _GROUPED_MM_CK_TILE_CONFIGS:
+            self.skipTest(f"ck_tile config coverage is only checked for (arch, CUs) in {sorted(_GROUPED_MM_CK_TILE_CONFIGS)}, "
+                          f"this device is {key}")
         dtype = torch.bfloat16
         alignment = 16 // dtype.itemsize
         names = set()
@@ -12130,7 +12133,7 @@ class TestGroupedMM(TestCase):
             pads = "".join(d if p == "true" else "-" for d, p in zip("MNK", (pad_m, pad_n, pad_k)))
             c1 = " C1" if "NoSplitKEpilogue" in name else ""
             configs.add(f"{a_layout}{b_layout} {m}x{n}x{k} {int(waves_m) * int(waves_n)}w {wm}x{wn}x{wk} {pads}{c1}")
-        self.assertEqual(configs, _GROUPED_MM_CK_TILE_CONFIGS[arch])
+        self.assertEqual(configs, _GROUPED_MM_CK_TILE_CONFIGS[key])
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
