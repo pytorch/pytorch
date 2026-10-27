@@ -139,7 +139,11 @@ class TestFakePG(TestCase):
             backend = pg._get_backend(torch.device("cpu"))
             self.assertEqual(backend.options._timeout, timeout)
 
-    def test_compile_sync_pg_timeout_skips_a_backend_without_options(self):
+    @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
+    @parametrize("cuda_options", [True, False])
+    def test_compile_sync_pg_timeout_skips_a_backend_without_options(
+        self, cuda_options
+    ):
         from torch._dynamo import distributed as dynamo_distributed
 
         class NoOptions:
@@ -149,14 +153,15 @@ class TestFakePG(TestCase):
 
         get_backend = dist.ProcessGroup._get_backend
 
-        def cpu_without_options(pg, device):
-            if pg is default_pg and device.type == "cpu":
+        def without_options(pg, device):
+            if pg is default_pg and (device.type == "cpu" or not cuda_options):
                 return NoOptions()
             return get_backend(pg, device)
 
         timeout = timedelta(minutes=5)
         # The CPU backend, which object collectives use and so is read first, has
-        # no options to read; the cuda one keeps the configured timeout.
+        # no options to read; the cuda one keeps the configured timeout, unless it
+        # has none either.
         dist.init_process_group(
             backend="cuda:gloo,cpu:gloo",
             rank=0,
@@ -165,13 +170,22 @@ class TestFakePG(TestCase):
             timeout=timeout,
         )
         default_pg = dist.distributed_c10d._get_default_group()
+        log = dynamo_distributed.log
         with (
             unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
             unittest.mock.patch.object(
-                dist.ProcessGroup, "_get_backend", cpu_without_options
+                dist.ProcessGroup, "_get_backend", without_options
             ),
         ):
-            pg = dynamo_distributed.get_compile_sync_pg()
+            if cuda_options:
+                with self.assertNoLogs(log, "WARNING"):
+                    pg = dynamo_distributed.get_compile_sync_pg()
+            else:
+                # Not dropped silently.
+                with self.assertLogs(log, "WARNING") as logs:
+                    pg = dynamo_distributed.get_compile_sync_pg()
+                self.assertIn("reports its timeout", logs.output[0])
+                timeout = dist.constants.default_pg_timeout
         self.assertEqual(pg._get_backend(torch.device("cpu")).options._timeout, timeout)
 
     def test_cache_sync_primes_the_fake_group_without_gloo(self):
