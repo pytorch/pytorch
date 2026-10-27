@@ -410,6 +410,7 @@ def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     """
     if not torch.cuda.is_available() and not torch.xpu.is_available():
         return None
+
     try:
         _, total_gpu = torch.accelerator.get_memory_info()
     except Exception as e:
