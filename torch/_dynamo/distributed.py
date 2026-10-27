@@ -123,15 +123,23 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             # default_pg_timeout constant rather than the timeout
             # init_process_group was configured with.
             default_pg = dist.distributed_c10d._get_default_group()
+            coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
             # A fake backend does not keep the configured timeout, so read it from
-            # a real one (cuda's in cpu:fake,cuda:nccl); a fake world has none.
+            # a real one, the object-collective device's first (cuda's in
+            # cpu:fake,cuda:nccl); a fake world has none.
             backends = dist.BackendConfig(
                 dist.get_backend_config()
             ).get_device_backend_map()
             timeout = None
-            for device, name in backends.items():
-                options = default_pg._get_backend(torch.device(device)).options
-                if name != dist.Backend.FAKE and options is not None:
+            for device in sorted(backends, key=lambda d: d != coll_device):
+                if backends[device] == dist.Backend.FAKE:
+                    continue
+                try:
+                    options = default_pg._get_backend(torch.device(device)).options
+                except RuntimeError:
+                    # A backend that does not implement getBackendOptions (ucc).
+                    continue
+                if options is not None:
                     timeout = options._timeout
                     break
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
