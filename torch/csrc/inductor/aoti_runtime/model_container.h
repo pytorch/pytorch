@@ -6,6 +6,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
+#include <utility>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -946,7 +947,7 @@ class AOTInductorModelContainer {
     auto* model = pool_.get_available_model(stream);
 
     try {
-      fn(model);
+      std::forward<Fn>(fn)(model);
     } catch (...) {
       pool_.return_model_to_available(model);
       throw;
