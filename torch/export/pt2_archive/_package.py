@@ -737,12 +737,23 @@ class AOTICompiledModel:
         self.loader = loader
 
     def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return self._run(self.loader.boxed_run, args, kwargs)
+
+    def run_cuda_graph(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        """
+        Like calling the model, but runs it as CUDA graphs that the runtime
+        captures and replays. Requires a CUDA model compiled with
+        ``aot_inductor.cudagraphs=True``.
+        """
+        return self._run(self.loader.run_cuda_graph, args, kwargs)
+
+    def _run(self, run_fn, args, kwargs):  # type: ignore[no-untyped-def]
         call_spec = self.loader.get_call_spec()
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = self.loader.boxed_run(flat_inputs)
+        flat_outputs = run_fn(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     def get_metadata(self) -> dict[str, str]:

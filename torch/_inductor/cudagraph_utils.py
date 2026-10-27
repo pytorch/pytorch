@@ -423,7 +423,9 @@ def _with_fx_subgraphs(module: torch.nn.Module) -> Iterator[torch.fx.GraphModule
 def check_aot_cudagraphs(graph: GraphLowering) -> None:
     """Fails an AOTInductor compile with aot_inductor.cudagraphs=True unless
     the whole graph, including the subgraphs of higher-order ops, can be
-    captured into a CUDA graph. Runs after lowering, before codegen."""
+    captured into a CUDA graph. Runs after lowering, before codegen. AOT mode
+    lowers with graph_partition off, so lowering's partition-gated reasons
+    (e.g. for while_loop) apply, and CPU nodes aren't exempted."""
 
     def with_stack_trace(msg: str, stack_trace: str | None) -> str:
         return f"{msg}. Found from:\n{stack_trace}" if stack_trace else msg
@@ -432,10 +434,10 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
         if node := get_first_incompatible_cudagraph_node(gm):
             stack_trace = node.meta.get("stack_trace") or _get_use_stack_trace(node)
             return with_stack_trace(f"incompatible op {node.target}", stack_trace)
-        for node in gm.graph.nodes:
-            if str(node.target) == "streams.synchronize_event.default":
-                msg = "it waits on the host for a CUDA event (Event.synchronize)"
-                return with_stack_trace(msg, node.meta.get("stack_trace"))
+        sync_event = torch.ops.streams.synchronize_event.default
+        for node in gm.graph.find_nodes(op="call_function", target=sync_event):
+            msg = "it waits on the host for a CUDA event (Event.synchronize)"
+            return with_stack_trace(msg, node.meta.get("stack_trace"))
         return None
 
     def find_reason() -> str | None:

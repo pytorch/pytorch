@@ -387,8 +387,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run_cuda_graph_impl(
     std::vector<AtenTensorHandle>& input_handles,
-    void* stream_handle,
-    int64_t max_graphs) {
+    void* stream_handle) {
   return call_run_func(
       input_handles,
       "run_cuda_graph_func_(...)",
@@ -405,8 +404,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_cuda_graph_impl(
             output_handles,
             num_outputs,
             reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
-            proxy_executor_handle_,
-            max_graphs);
+            proxy_executor_handle_);
       });
 }
 
@@ -435,14 +433,13 @@ std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run_cuda_graph(
     const std::vector<at::Tensor>& inputs,
-    int64_t max_graphs,
     void* stream_handle) {
   RECORD_USER_SCOPE("AOTIModelContainerRunner::run_cuda_graph");
   ScopedObserverEvent observer_event(
       observer(), AOTIContainerEvent::kInference, {});
   std::vector<AtenTensorHandle> input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  return run_cuda_graph_impl(input_handles, stream_handle, max_graphs);
+  return run_cuda_graph_impl(input_handles, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::

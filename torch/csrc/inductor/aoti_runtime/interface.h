@@ -174,9 +174,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
 // graphs. The first call with a new set of input shapes and strides runs
 // eagerly, so that lazy initialization happens outside a capture, and the
 // next one captures a CUDA graph, which later calls with those shapes replay.
-// Once max_graphs graphs exist, calls with new shapes run eagerly; max_graphs
-// applies from this call on. Each model instance captures its own graphs.
-// Requires a CUDA model compiled with aot_inductor.cudagraphs=True.
+// Each model instance captures its own graphs; once it holds
+// aot_inductor.cudagraphs_max_graphs of them (or
+// AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, if set), calls with new shapes run
+// eagerly. Requires a CUDA model compiled with aot_inductor.cudagraphs=True.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerRunCudaGraph(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
@@ -188,8 +189,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunCudaGraph(
                         // borrowed
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTIProxyExecutorHandle proxy_executor_handle,
-    int64_t max_graphs);
+    AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Retrieves the number of constants for the model.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumConstants(

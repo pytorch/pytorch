@@ -38,8 +38,7 @@ class TORCH_CUDA_CPP_API AOTIModelContainerRunnerCuda
 
   std::vector<at::Tensor> run_cuda_graph_impl(
       std::vector<AtenTensorHandle>& input_handles,
-      void* stream_handle,
-      int64_t max_graphs) override;
+      void* stream_handle) override;
 
   std::vector<at::Tensor> run_with_cuda_stream(
       const std::vector<at::Tensor>& inputs,

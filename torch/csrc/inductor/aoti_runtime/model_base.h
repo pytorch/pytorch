@@ -1442,9 +1442,8 @@ class AOTInductorModelBase {
 
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs through this instance's
-  // CudaGraphManager. Its graphs and memory pool rely on run_finished_: the
-  // container hands the instance out again only once the previous call's
-  // replay has finished.
+  // CudaGraphManager. The graphs are dropped first if the container's active
+  // constants changed since they were captured (constants_version).
   void run_cuda_graph(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -1455,7 +1454,7 @@ class AOTInductorModelBase {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
-      const CudaGraphOptions& options) {
+      uint64_t constants_version) {
     AOTI_RUNTIME_CHECK(
         cudagraphs_,
         "Running as CUDA graphs requires compiling the model with "
@@ -1465,12 +1464,18 @@ class AOTInductorModelBase {
       AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
-    if (cudagraph_manager_) {
-      cudagraph_manager_->set_options(options);
-    } else {
+    if (!cudagraph_manager_) {
+      CudaGraphOptions options;
+      options.max_graphs = cudagraphs_max_graphs_;
+      if (const char* env = std::getenv("AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS")) {
+        options.max_graphs = std::stoll(env);
+      }
       cudagraph_manager_ =
           std::make_unique<CudaGraphManager>(device_idx_, options);
+    } else if (constants_version != cudagraph_constants_version_) {
+      cudagraph_manager_->reset();
     }
+    cudagraph_constants_version_ = constants_version;
 
     auto inputs =
         steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
@@ -1482,24 +1487,26 @@ class AOTInductorModelBase {
     auto* model = static_cast<Model*>(this);
     // The manager lends its inputs, while run_impl steals them, so the model
     // gets new handles to the same tensors.
+    // run_impl nulls each handle it steals, so the rest are freed on error.
     auto region = [&](AtenTensorHandle* region_inputs,
                       AtenTensorHandle* region_outputs,
                       cudaStream_t region_stream) {
-      std::vector<RAIIAtenTensorHandle> owned_inputs;
-      owned_inputs.reserve(borrowed_inputs.size());
-      for (size_t i = 0; i < borrowed_inputs.size(); ++i) {
-        AtenTensorHandle handle = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK(
-            aoti_torch_new_tensor_handle(region_inputs[i], &handle));
-        owned_inputs.emplace_back(handle);
+      std::vector<AtenTensorHandle> raw_inputs(borrowed_inputs.size(), nullptr);
+      try {
+        for (size_t i = 0; i < raw_inputs.size(); ++i) {
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_new_tensor_handle(region_inputs[i], &raw_inputs[i]));
+        }
+        model->run_impl(
+            raw_inputs.data(), region_outputs, region_stream, proxy_executor);
+      } catch (...) {
+        for (auto handle : raw_inputs) {
+          if (handle != nullptr) {
+            aoti_torch_delete_tensor_object(handle);
+          }
+        }
+        throw;
       }
-      std::vector<AtenTensorHandle> raw_inputs;
-      raw_inputs.reserve(owned_inputs.size());
-      for (auto& input : owned_inputs) {
-        raw_inputs.push_back(input.release());
-      }
-      model->run_impl(
-          raw_inputs.data(), region_outputs, region_stream, proxy_executor);
     };
     cudagraph_manager_->run(
         region,
@@ -1511,17 +1518,6 @@ class AOTInductorModelBase {
     AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
   }
 
-  // Drops this instance's CUDA graphs, which keep reading the constants they
-  // were captured with, once its last call has finished.
-  void reset_cuda_graphs() {
-    if (!cudagraph_manager_) {
-      return;
-    }
-    if (run_finished_) {
-      AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
-    }
-    cudagraph_manager_->reset();
-  }
 #endif // USE_CUDA
 
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
@@ -2199,8 +2195,10 @@ class AOTInductorModelBase {
   // Set by generated code when compiled with aot_inductor.cudagraphs=True,
   // which checks at compile time that the model can be captured.
   bool cudagraphs_{false};
+  int64_t cudagraphs_max_graphs_{0};
 #ifdef USE_CUDA
   std::unique_ptr<CudaGraphManager> cudagraph_manager_;
+  uint64_t cudagraph_constants_version_ = 0;
 #endif // USE_CUDA
 };
 

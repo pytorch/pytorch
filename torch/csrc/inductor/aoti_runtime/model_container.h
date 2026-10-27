@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -232,20 +233,9 @@ class AOTInductorModelContainer {
     return pool_.get_stream_affinity_model_index(stream);
   }
 
-  // Callers can't capture this into a CUDA graph, e.g. with torch.cuda.graph:
-  // checking out an instance may query the run_finished_ events of earlier
-  // calls, which a capturing thread may not do, and the call records its own
-  // run_finished_ into the capture. A caller can capture run_single_threaded()
-  // instead, but models are meant to be captured and replayed by the runtime
-  // through run_cuda_graph(). Caller captures here could be supported later by
-  // sending a call on a capturing stream down a separate path that requires
-  // the constants to be folded already, checks out an instance in relaxed
-  // capture mode (which allows querying events recorded before the capture),
-  // runs it with run_single_threaded() so no run_finished_ is recorded, and
-  // makes the instance available again right away, since the captured work
-  // only runs on replay. Constant updates would then have to be rejected,
-  // because the caller's graph keeps reading the constants it was captured
-  // with.
+  // Callers can't capture this into a CUDA graph, e.g. with torch.cuda.graph,
+  // since checking out an instance may query events of earlier calls. Use
+  // run_cuda_graph(), or capture run_single_threaded().
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -264,8 +254,8 @@ class AOTInductorModelContainer {
 
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs: each model instance captures
-  // and replays its own graphs through its CudaGraphManager, configured by
-  // `options`. See AOTInductorModelContainerRunCudaGraph.
+  // and replays its own graphs through its CudaGraphManager. See
+  // AOTInductorModelContainerRunCudaGraph.
   void run_cuda_graph(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -275,12 +265,15 @@ class AOTInductorModelContainer {
                           // will be stolen by the caller; the array itself is
                           // borrowed
       DeviceStreamType stream,
-      AOTIProxyExecutorHandle proxy_executor,
-      const CudaGraphOptions& options) {
+      AOTIProxyExecutorHandle proxy_executor) {
     run_on_available_model(
         stream, proxy_executor, [&](AOTInductorModel* model) {
           model->run_cuda_graph(
-              input_handles, output_handles, stream, proxy_executor, options);
+              input_handles,
+              output_handles,
+              stream,
+              proxy_executor,
+              constants_version_.load());
         });
   }
 #endif // USE_CUDA
@@ -413,7 +406,8 @@ class AOTInductorModelContainer {
   }
 
   void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
-    return pool_.primary_model().update_constants_from_blob(weight_blob_ptr);
+    ConstantsChange change(*this, true);
+    pool_.primary_model().update_constants_from_blob(weight_blob_ptr);
   }
 
   void run_const_fold(
@@ -546,9 +540,7 @@ class AOTInductorModelContainer {
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
-    if (!use_inactive) {
-      reset_cuda_graphs();
-    }
+    ConstantsChange change(*this, !use_inactive);
 
     auto& target = use_inactive ? inactive() : active();
     auto& source = use_inactive ? active() : inactive();
@@ -620,9 +612,7 @@ class AOTInductorModelContainer {
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
-    if (!use_inactive) {
-      reset_cuda_graphs();
-    }
+    ConstantsChange change(*this, !use_inactive);
     AOTI_RUNTIME_CHECK(
         !(allow_h2d_copy && user_managed),
         "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
@@ -870,8 +860,7 @@ class AOTInductorModelContainer {
 
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
-
-    reset_cuda_graphs();
+    ConstantsChange change(*this, true);
     active_idx_ = 1 - active_idx_;
 
     pool_.for_each_model([this](AOTInductorModel& model) {
@@ -946,13 +935,26 @@ class AOTInductorModelContainer {
   }
 
   // Captured CUDA graphs keep reading the constants they were captured with,
-  // so they are dropped whenever the active constants change.
-  void reset_cuda_graphs() {
-#ifdef USE_CUDA
-    pool_.for_each_model(
-        [](AOTInductorModel& model) { model.reset_cuda_graphs(); });
-#endif // USE_CUDA
-  }
+  // so a model instance drops its graphs on its next run_cuda_graph() once the
+  // active constants changed. Bumped when the change is done, even partly.
+  struct ConstantsChange {
+    ConstantsChange(AOTInductorModelContainer& container, bool active)
+        : container_(container), active_(active) {}
+    ~ConstantsChange() {
+      if (active_) {
+        container_.constants_version_++;
+      }
+    }
+    ConstantsChange(const ConstantsChange&) = delete;
+    ConstantsChange& operator=(const ConstantsChange&) = delete;
+    ConstantsChange(ConstantsChange&&) = delete;
+    ConstantsChange& operator=(ConstantsChange&&) = delete;
+
+   private:
+    AOTInductorModelContainer& container_;
+    bool active_;
+  };
+  std::atomic<uint64_t> constants_version_{0};
 
   // Folds the constants on the first call, then runs fn on a model instance
   // checked out of the pool and leaves the instance pending until its work

@@ -39,7 +39,6 @@ class TORCH_API AOTIModelContainerRunner {
   // Runs the model as CUDA graphs; see AOTInductorModelContainerRunCudaGraph.
   std::vector<at::Tensor> run_cuda_graph(
       const std::vector<at::Tensor>& inputs,
-      int64_t max_graphs,
       void* stream_handle = nullptr);
 
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
@@ -148,8 +147,7 @@ class TORCH_API AOTIModelContainerRunner {
 
   virtual std::vector<at::Tensor> run_cuda_graph_impl(
       std::vector<AtenTensorHandle>& input_handles,
-      void* stream_handle,
-      int64_t max_graphs);
+      void* stream_handle);
 
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};

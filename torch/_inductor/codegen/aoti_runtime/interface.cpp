@@ -297,23 +297,18 @@ AOTIRuntimeError AOTInductorModelContainerRunCudaGraph(
                         // borrowed
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTIProxyExecutorHandle proxy_executor_handle,
-    int64_t max_graphs) AOTI_RUNTIME_TRY({
+    AOTIProxyExecutorHandle proxy_executor_handle) AOTI_RUNTIME_TRY({
 #ifdef USE_CUDA
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
   AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
   AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
-  AOTI_RUNTIME_CHECK(max_graphs >= 0, "max_graphs must be non-negative");
-
-  torch::aot_inductor::CudaGraphOptions options;
-  options.max_graphs = max_graphs;
   auto stream =
       reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   AOTINoGradGuard guard;
   container->run_cuda_graph(
-      input_handles, output_handles, stream, proxy_executor_handle, options);
+      input_handles, output_handles, stream, proxy_executor_handle);
   return AOTI_RUNTIME_SUCCESS;
 #else
   AOTI_RUNTIME_CHECK(false, "Running as CUDA graphs requires a CUDA model");
