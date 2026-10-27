@@ -229,6 +229,18 @@ Follow these rules for all code changes in this repository:
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for
   comments you are adding or rewriting.
+- New or substantially rewritten comments in C++/CUDA headers (`.h`, `.cuh`,
+  `.hpp`) should be short: at most a one-line description per declaration,
+  plus a pointer like `// See Note [Foo] in ATen/native/Foo.cpp`. Put long
+  explanations, including `Note [...]` blocks, in the source file (`.cpp`,
+  `.cu`, `.mm`, ...) that implements the op or uses the code, even when the
+  code itself (a template, an inline function) lives in the header. Any edit to
+  a header, even to a comment, recompiles every file that includes it.
+  Exceptions: Doxygen docs in headers covered by `docs/cpp/source/Doxyfile`'s
+  `INPUT` (including all of `torch/csrc/api/include`), and header-only code
+  with no natural source file (e.g. `torch/headeronly`,
+  `ATen/native/cuda/Loops.cuh`). Existing long comments in headers can stay
+  and take small edits.
 
 If uncertain, choose the simpler, more concise implementation.
 
