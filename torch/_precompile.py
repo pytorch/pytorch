@@ -2723,8 +2723,9 @@ class PrecompiledModule(PrecompiledRunnable):
         # reads gets no assert and stays layout-flexible, but a read input is asserted on
         # the example layout even for layout-agnostic ops (matmul/addmm), since precompile
         # cannot recompile to specialize a new layout the way torch.compile would.
-        # scalar_asserts keeps a dynamic (unbacked) capture's make_fx ShapeEnv range
-        # asserts in the artifact; a static capture has none to emit.
+        # scalar_asserts keeps the unbacked-symbol range asserts in the artifact. A
+        # static capture can have them too: compile_to_python re-traces under a fresh
+        # ShapeEnv, so a data-dependent op (nonzero, masked_select) becomes unbacked.
         #
         # These are inductor config keys, so they ride in as ``options`` (aot_autograd.
         # compile_to_python merges them into the inductor config.patch it wraps the
@@ -3508,8 +3509,8 @@ def capture(
     ``triton.cudagraphs``, since its standalone module runs outside Inductor's
     CUDA graph wrapper (it ignores the ambient flag, as before), and options
     that module pins: ``size_asserts`` or ``scalar_asserts`` off,
-    ``cpp_wrapper``, ``benchmark_harness`` or ``freezing`` on (freezing's
-    compiler would rewrite the graph the module is built from), and
+    ``cpp_wrapper``, ``fx_wrapper``, ``benchmark_harness`` or ``freezing`` on
+    (freezing's compiler would rewrite the graph the module is built from), and
     ``triton.autotune_at_compile_time`` off. Other options pass through
     unchecked, as under :func:`torch.compile`.
 

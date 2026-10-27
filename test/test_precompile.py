@@ -4978,6 +4978,7 @@ class TestPrecompileDynamoCapture(TestCase):
             "size_asserts": False,
             "scalar_asserts": False,
             "cpp_wrapper": True,
+            "fx_wrapper": True,
             "benchmark-harness": True,
             "freezing": True,
             "triton.autotune_at_compile_time": False,
@@ -5799,6 +5800,8 @@ class TestPrecompileDynamoCapture(TestCase):
             "    sys.argv[2], sys.argv[3], allow_serve_time_compiles=True\n"
             ")\n"
             "with torch.no_grad():\n"
+            "    f(mod.Model(), torch.randn(2, 4))\n"
+            "    assert not patches, patches\n"
             "    f(mod.Model(), torch.randn(3, 4))\n"
             "options = ast.literal_eval(sys.argv[5])\n"
             "assert any(p.items() >= options.items() for p in patches), patches\n"
