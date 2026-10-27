@@ -12,7 +12,10 @@ import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -124,17 +127,12 @@ class TestCppExtensionAOT(common.TestCase):
 class TestCppExtensionAOTDevice(common.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipXPUIf(
+        os.getenv("USE_NINJA", "0") == "0",
+        "sycl extension requires ninja to build",
+    )
     def test_sigmoid_add_extension(self, device):
-        device_type = self.device_type
-        try:
-            module_name = _SIGMOID_ADD_BACKENDS[device_type]
-        except KeyError:
-            raise unittest.SkipTest(
-                f"{device_type} not supported by this test"
-            ) from None
-        if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
-            raise unittest.SkipTest("sycl extension requires ninja to build")
-        ext = importlib.import_module(module_name)
+        ext = importlib.import_module(_SIGMOID_ADD_BACKENDS[self.device_type])
         x = torch.zeros(100, device=device, dtype=torch.float32)
         y = torch.zeros(100, device=device, dtype=torch.float32)
         z = ext.sigmoid_add(x, y).cpu()
@@ -464,6 +462,7 @@ class TestTorchLibrary(common.TestCase):
 instantiate_device_type_tests(
     TestCppExtensionAOTDevice,
     globals(),
+    only_for=list(_SIGMOID_ADD_BACKENDS),
     allow_mps=True,
     allow_xpu=True,
 )
