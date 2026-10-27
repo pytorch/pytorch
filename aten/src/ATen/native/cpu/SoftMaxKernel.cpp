@@ -31,6 +31,75 @@
 
 namespace at::native {
 namespace {
+// The log_softmax backward kernels compute grad_output - exp(output) * grad_sum
+// in their vectorized loops as before, and then call
+// log_softmax_backward_fixup to recompute the few elements (normally at most
+// one per row) with exp(output) > 1/2 without cancellation, see
+// Note [Accurate log_softmax] in LogSoftmaxKernelImpl.h. Testing for them in
+// the vectorized loops instead makes those loops much slower: exp is an
+// out-of-line call, so every extra vector that is live across it is spilled
+// and reloaded.
+constexpr double kLogHalf = -0.69314718055994531;
+
+template <typename acc_t>
+inline acc_t log_softmax_backward(acc_t grad_output, acc_t output, acc_t grad_sum) {
+  if (output > static_cast<acc_t>(kLogHalf) && grad_output * grad_sum >= acc_t(0) &&
+      std::abs(grad_sum) < std::numeric_limits<acc_t>::infinity()) {
+    return (grad_output - grad_sum) - grad_sum * std::expm1(output);
+  }
+  return grad_output - std::exp(output) * grad_sum;
+}
+
+// Recomputes grad_input[j] for the j in [0, size) with exp(output[j]) > 1/2.
+// grad_sum(j) returns the sum of grad_output over the softmax dim for element j.
+// grad_input must not overlap grad_output or output, which
+// log_softmax_backward_cpu_out ensures.
+template <typename scalar_t, typename grad_t, typename GradSum>
+inline void log_softmax_backward_fixup(
+    scalar_t* grad_input,
+    const grad_t* grad_output,
+    const scalar_t* output,
+    const GradSum& grad_sum,
+    int64_t size) {
+  using acc_t = at::opmath_type<scalar_t>;
+  using Vec = vec::Vectorized<acc_t>;
+  const acc_t log_half = static_cast<acc_t>(kLogHalf);
+  const Vec log_half_vec(log_half);
+  // Scan blocks of elements for exp(output) > 1/2, and only go over a block
+  // element by element if it has some.
+  const int64_t block_size = 16 * Vec::size();
+  for (int64_t begin = 0; begin < size; begin += block_size) {
+    const int64_t end = std::min(size, begin + block_size);
+    Vec near_one(0);
+    int64_t j = begin;
+    if constexpr (vec::is_reduced_floating_point_v<scalar_t>) {
+      using bVec = vec::Vectorized<scalar_t>;
+      for (; j + bVec::size() <= end; j += bVec::size()) {
+        auto [y0, y1] = vec::convert_to_float<scalar_t>(bVec::loadu(output + j));
+        near_one = near_one | (y0 > log_half_vec) | (y1 > log_half_vec);
+      }
+    } else {
+      for (; j + Vec::size() <= end; j += Vec::size()) {
+        near_one = near_one | (Vec::loadu(output + j) > log_half_vec);
+      }
+    }
+    bool any_near_one = near_one.zero_mask() != (1 << Vec::size()) - 1;
+    for (; j < end; j++) {
+      any_near_one = any_near_one || static_cast<acc_t>(output[j]) > log_half;
+    }
+    if (!any_near_one) {
+      continue;
+    }
+    for (j = begin; j < end; j++) {
+      const acc_t y = static_cast<acc_t>(output[j]);
+      if (y > log_half) {
+        grad_input[j] = static_cast<scalar_t>(log_softmax_backward(
+            static_cast<acc_t>(grad_output[j]), y, static_cast<acc_t>(grad_sum(j))));
+      }
+    }
+  }
+}
+
 template <typename scalar_t>
 inline void _vec_log_softmax_lastdim(
     const scalar_t* input_data_base,
@@ -184,6 +253,12 @@ inline void _vec_host_softmax_backward_lastdim(
                 grad_input_data,
                 grad_data,
                 output_data,
+                dim_size);
+            log_softmax_backward_fixup(
+                grad_input_data,
+                grad_data,
+                output_data,
+                [sum](int64_t) { return sum; },
                 dim_size);
           } else {
             auto sum = vec::map2_reduce_all<scalar_t>(
@@ -492,6 +567,12 @@ _vec_log_softmax_backward(
               grad_input_ptr[d2] = grad_output_ptr[d2] -
                   std::exp(output_ptr[d2]) * tmp_sum_data[d2];
             }
+            log_softmax_backward_fixup(
+                grad_input_ptr,
+                grad_output_ptr,
+                output_ptr,
+                [tmp_sum_data](int64_t j) { return tmp_sum_data[j]; },
+                size);
           }
         }
       });
@@ -606,6 +687,12 @@ _vec_log_softmax_backward(
               grad_input_ptr[d2] = grad_output_buffer_ptr[d2] -
                   std::exp(float(output_ptr[d2])) * tmp_sum_data[d2];
             }
+            log_softmax_backward_fixup(
+                grad_input_ptr,
+                grad_output_buffer_ptr,
+                output_ptr,
+                [tmp_sum_data](int64_t j) { return tmp_sum_data[j]; },
+                size);
           }
         }
       });
