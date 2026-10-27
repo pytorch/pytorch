@@ -2218,12 +2218,8 @@ class TestFlyDSLHTIDevice(TestCase):
         a = torch.randn(m, k, device=device, dtype=dtype)
         b = torch.randn(n, k, device=device, dtype=dtype).t()
         out = torch.empty(m, n, device=device, dtype=dtype)
-        args = [
-            flyc.from_torch_tensor(t).mark_layout_dynamic() for t in (out, a, b)
-        ]
-        args.extend(
-            (param, fx.Stream(torch.cuda.current_stream(device).cuda_stream))
-        )
+        args = [flyc.from_torch_tensor(t).mark_layout_dynamic() for t in (out, a, b)]
+        args.extend((param, fx.Stream(torch.cuda.current_stream(device).cuda_stream)))
         launch = flyc.compile(gemm_gfx950, *args)
         launch(*args)
         golden = out.clone()
