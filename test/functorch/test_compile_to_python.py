@@ -503,8 +503,8 @@ class TestAOTCompileToPython(TestCase):
         # Step 1 (compile_fx, capturing the dense graph) runs under the options with
         # step 2's pins over them, so cpp_wrapper=True or fx_wrapper=True cannot send
         # it down the wrapper branch that step 2 then compiles without (it loses the
-        # aliasing between inputs), and freezing, from the
-        # options or the ambient config, cannot route it through freezing's compiler.
+        # aliasing between inputs), and freezing, from the options or the ambient
+        # config, cannot route it through freezing's compiler.
         import torch._inductor.compile_fx as compile_fx_module
 
         seen = []
