@@ -890,11 +890,13 @@ def _custom_op_registered(name: str) -> bool:
 
 
 def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
-    """Import the modules that register the custom ops an artifact's graphs call.
+    """Import the modules that register the custom ops an artifact calls or guards
+    on.
 
-    A compiled graph calls ``torch.ops.<ns>.<op>`` directly, so nothing on the
-    serving path imports the module whose ``torch.library.custom_op`` registers it,
-    and under lazy imports the model's own import of that module may never resolve.
+    An artifact calls ``torch.ops.<ns>.<op>`` directly, and a Dynamo artifact's
+    guards look it up by that name, so nothing on the serving path imports the
+    module whose ``torch.library.custom_op`` registers it, and under lazy imports
+    the model's own import of that module may never resolve.
     A module is imported only if one of its ops is not registered yet, so a process
     that registers them some other way does not need the module by that name. The
     import is best effort: an op still not registered after it only has to be
