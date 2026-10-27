@@ -2012,8 +2012,12 @@ class CudaReproTests(TestCase):
             with config.patch(emulate_precision_casts=emulate_precision_casts):
                 if compiled:
                     fn = torch.compile(fn, backend="inductor", fullgraph=True)
+                # MIOpen/cuDNN conv-backward reductions are nondeterministic
+                # otherwise, which would flake any f1-vs-f2 grad comparison
+                torch.use_deterministic_algorithms(True)
                 out = fn(t)
                 (-(grad_out * out.float()).sum()).backward()
+                torch.use_deterministic_algorithms(False)
             return (
                 out.detach(),
                 t.grad,
@@ -2028,15 +2032,11 @@ class CudaReproTests(TestCase):
 
         f1_out, f1_grad, f1_weight_grad, f1_bias_grad = run(f1, True)
         f2_out, f2_grad, f2_weight_grad, f2_bias_grad = run(f2, True)
-        # identical math must agree bit-exactly on what the fix computes
-        # (forward and input grads); conv weight/bias grads come from a
-        # nondeterministic reduction on ROCm (and possibly CUDA), so a few
-        # last-ulp elements are allowed there; a dropped rounding shifts them
-        # by orders of magnitude more
+        # identical math must agree bit-exactly; this is the invariant
         self.assertEqual(f1_out, f2_out, atol=0, rtol=0)
         self.assertEqual(f1_grad, f2_grad, atol=0, rtol=0)
-        self.assertEqual(f1_weight_grad, f2_weight_grad, atol=1e-2, rtol=1e-2)
-        self.assertEqual(f1_bias_grad, f2_bias_grad, atol=1e-2, rtol=1e-2)
+        self.assertEqual(f1_weight_grad, f2_weight_grad, atol=0, rtol=0)
+        self.assertEqual(f1_bias_grad, f2_bias_grad, atol=0, rtol=0)
 
         eager_out, _, _, _ = run(f1, False)
         self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
