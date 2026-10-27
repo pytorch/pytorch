@@ -137,7 +137,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("operation", ["contains", "get", "pop"])
+    @parametrize("operation", ["contains", "get", "pop", "setitem", "delitem"])
     @parametrize(
         "make_key",
         [
@@ -152,6 +152,15 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x, mapping, key):
             if operation == "contains":
                 return x + (key in mapping)
+            if operation == "setitem":
+                mapping[key] = 2
+                return x + 1
+            if operation == "delitem":
+                try:
+                    del mapping[key]
+                except KeyError:
+                    return x - 1
+                return x + 1
             return x + getattr(mapping, operation)(key, 0)
 
         absent, present = make_key(), make_key()
@@ -159,9 +168,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
         mapping[present] = 1
         x = torch.zeros(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        for key in (absent, present, absent):
+        for key in (present, absent, present, absent):
+            expected_mapping, actual_mapping = mapping.copy(), mapping.copy()
             self.assertEqual(
-                compiled(x, mapping.copy(), key), fn(x, mapping.copy(), key)
+                compiled(x, actual_mapping, key), fn(x, expected_mapping, key)
+            )
+            self.assertEqual(
+                list(actual_mapping.items()), list(expected_mapping.items())
             )
 
     def test_dunder_dict_pop_deleted_key_in_hop(self):
