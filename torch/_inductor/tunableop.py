@@ -432,9 +432,15 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                 # check, a job raising a TimeoutError subclass would be filed as
                 # "timeout" and skip the sticky-fault restart below.
                 if not getattr(worker, "running", False):
-                    return Outcome(
-                        None, "timeout" if isinstance(e, TimeoutError) else "crash"
+                    status: WorkerStatus = (
+                        "timeout" if isinstance(e, TimeoutError) else "crash"
                     )
+                    # get() has already killed or closed the worker, but kill()
+                    # never waits, so reap it here rather than leaving the child
+                    # a zombie until the next start() drops the old Popen. Same
+                    # teardown the "error" path below gets.
+                    _shutdown_locked(graceful=False)
+                    return Outcome(None, status)
                 log.debug("TunableOp job raised %r; treating as an error", e)
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
