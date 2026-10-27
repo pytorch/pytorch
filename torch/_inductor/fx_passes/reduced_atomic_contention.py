@@ -411,15 +411,13 @@ def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     if not torch.cuda.is_available() and not torch.xpu.is_available():
         return None
 
-    try:
-        _, total_gpu = torch.accelerator.get_memory_info()
-    except Exception as e:
-        _artifact_log.debug(
-            "partitioned_scatter: memory query failed (%s), "
-            "running without memory gating",
-            e,
-        )
-        return None
+    if cuda_available:
+        _, total_gpu = torch.cuda.mem_get_info()
+    else:
+        # XPU mem_get_info also queries free memory, which can fail when the
+        # device does not support sycl::aspect::ext_intel_free_memory. The
+        # scatter budget only needs the total capacity.
+        total_gpu = torch.xpu.get_device_properties().total_memory
 
     floor_bytes: int = config.partitioned_scatter_non_model_floor_bytes
     allowed_peak = max(0, total_gpu - floor_bytes)
