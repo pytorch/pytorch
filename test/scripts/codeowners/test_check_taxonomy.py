@@ -23,12 +23,9 @@ def parse(codeowners: str):
         return parse_codeowners(path)
 
 
-def ownership_errors(codeowners: str) -> dict[str, list[str]]:
-    return {
-        title: entries
-        for title, entries in find_ownership_errors(parse(codeowners)).items()
-        if entries
-    }
+def ownership_errors(codeowners: str, *, exceptions=None) -> dict[str, list[str]]:
+    errors = find_ownership_errors(parse(codeowners), reviewers_not_owners=exceptions or {})
+    return {title: entries for title, entries in errors.items() if entries}
 
 
 def run_lint(codeowners: str, *args: str) -> subprocess.CompletedProcess:
@@ -187,6 +184,28 @@ class TestFindOwnershipErrors(TestCase):
                     "CODEOWNERS:10 /torch/fx/: @dave not on the block's owner line",
                 ]
             },
+        )
+
+    def test_reviewer_exceptions(self):
+        codeowners = """\
+# Grouped review-surface definitions:
+#
+# [compiler_dynamo]
+# label: module: dynamo
+# owner: @alice
+/torch/_dynamo/ @alice @bob
+/torch/_dynamo/eval_frame.py @alice
+"""
+        exceptions = {
+            "torch/_dynamo/": frozenset({"@bob"}),
+            "torch/_dynamo/eval_frame.py": frozenset({"@alice"}),
+            "torch/removed.py": frozenset({"@carol"}),
+        }
+        # @bob is allowed; the eval_frame.py exception is unneeded since @alice is
+        # an owner; the removed rule's exception is ignored.
+        self.assertEqual(
+            ownership_errors(codeowners, exceptions=exceptions),
+            {"Unneeded reviewer exceptions": ["/torch/_dynamo/eval_frame.py: @alice"]},
         )
 
     def test_owners_reset_at_section(self):
