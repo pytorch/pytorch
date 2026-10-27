@@ -72,7 +72,7 @@ void CuptiCallbackApi::__callback_switchboard(
   switch (domain) {
     // add the fastest path for kernel launch callbacks
     // as these are the most frequent ones
-    case CUPTI_CB_DOMAIN_RUNTIME_API:
+    case CUPTI_CB_DOMAIN_RUNTIME_API: {
       switch (cbid) {
         case CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000:
           cblist = &callbacks_.runtime[domainIndex(
@@ -89,22 +89,32 @@ void CuptiCallbackApi::__callback_switchboard(
         default:
           break;
       }
-      // This is required to teardown cupti after profiling to prevent QPS
-      // slowdown.
-      if (CuptiActivityApi::singleton().teardownCupti_) {
-        if (cbInfo->callbackSite == CUPTI_API_EXIT) {
-          LOG(INFO) << "  Calling cuptiFinalize in exit callsite";
-          // Teardown CUPTI calling cuptiFinalize()
-          CUPTI_CALL(cuptiUnsubscribe(subscriber_));
-          CUPTI_CALL(cuptiFinalize());
-          initSuccess_ = false;
-          subscriber_ = nullptr;
-          CuptiActivityApi::singleton().teardownCupti_ = 0;
-          CuptiActivityApi::singleton().finalizeCond_.notify_all();
-          return;
+      auto& activityApi = CuptiActivityApi::singleton();
+      auto expected = CuptiActivityApi::TeardownState::Pending;
+      // Only the callback that changes Pending to Finalizing runs
+      // cuptiFinalize(). A new trace cancels by changing Pending to Restoring.
+      if (activityApi.teardownState_ ==
+              CuptiActivityApi::TeardownState::Pending &&
+          cbInfo != nullptr && cbInfo->callbackSite == CUPTI_API_EXIT &&
+          activityApi.teardownState_.compare_exchange_strong(
+              expected, CuptiActivityApi::TeardownState::Finalizing)) {
+        LOG(INFO) << "  Calling cuptiFinalize in exit callsite";
+        CUPTI_CALL(cuptiUnsubscribe(subscriber_));
+        CUPTI_CALL(cuptiFinalize());
+        initSuccess_ = false;
+        subscriber_ = nullptr;
+        {
+          // Keep the state at Finalizing until cuptiFinalize() returns. The
+          // teardown thread may reinitialize CUPTI after it sees Restoring.
+          std::lock_guard<std::mutex> lock(activityApi.teardownMutex_);
+          activityApi.teardownState_ =
+              CuptiActivityApi::TeardownState::Restoring;
         }
+        activityApi.teardownCond_.notify_all();
+        return;
       }
       break;
+    }
 
     case CUPTI_CB_DOMAIN_RESOURCE:
       switch (cbid) {

@@ -26,9 +26,11 @@ class CuptiActivityProfiler : public GenericActivityProfiler {
   ~CuptiActivityProfiler() override = default;
 
  protected:
+  void ensureGpuTracingReady() override;
   void setMaxGpuBufferSize(int64_t size) override;
   void enableGpuTracing() override;
   void disableGpuTracing() override;
+  void requestGpuTracingTeardown() override;
   void clearGpuActivities() override;
   bool isGpuCollectionStopped() const override;
   void processGpuActivities(ActivityLogger& logger) override;
