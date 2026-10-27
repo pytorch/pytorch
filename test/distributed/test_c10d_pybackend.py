@@ -1047,6 +1047,14 @@ class FieldOptions(dist.BackendBase.Options):
         self.value = value
 
 
+class SlotOptions(dist.BackendBase.Options):
+    __slots__ = ("value", "unset")
+
+    def __init__(self, value):
+        super().__init__("slot-options")
+        self.value = value
+
+
 class CustomCopyOptions(FieldOptions):
     def __copy__(self):
         copied = super().__copy__()
@@ -1124,6 +1132,28 @@ class TestPyBackendOptions(TestCase):
         self.assertIs(copied.self_ref, copied)
         self.assertEqual(copied.global_ranks_in_group, [2])
 
+    def test_copy_slotted_python_options(self) -> None:
+        opts = SlotOptions([1])
+        copied = copy.copy(opts)
+        self.assertIs(type(copied), SlotOptions)
+        self.assertIs(copied.value, opts.value)
+        self.assertFalse(hasattr(copied, "unset"))
+        deep = copy.deepcopy(opts)
+        self.assertEqual(deep.value, [1])
+        self.assertIsNot(deep.value, opts.value)
+
+    def test_copy_ignores_pickle_state_hooks(self) -> None:
+        class StateOptions(FieldOptions):
+            def __getstate__(self):
+                raise AssertionError("__getstate__ called")
+
+            def __setstate__(self, state):
+                raise AssertionError("__setstate__ called")
+
+        opts = StateOptions([1])
+        self.assertIs(copy.copy(opts).value, opts.value)
+        self.assertEqual(copy.deepcopy(opts).value, [1])
+
     def test_deepcopy_base_options(self) -> None:
         opts = dist.BackendBase.Options("base")
         opts.group_desc = "desc"
@@ -1152,6 +1182,12 @@ class TestPyBackendOptions(TestCase):
         self.assertEqual(child_opts.value, 1)
         # splitGroup writes the child's group name into its copy only.
         self.assertNotEqual(child_opts.group_name, parent_opts.group_name)
+
+    def test_split_group_slotted_python_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: SlotOptions(2))
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), SlotOptions)
+        self.assertEqual(backend.split_opts.value, 2)
 
     def test_split_group_temporary_python_options(self) -> None:
         # Only C++ references the options and their copy, so their Python
