@@ -11802,8 +11802,7 @@
 - func: mse_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_backward_out
-    MPS: mse_loss_backward_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_backward_out
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
