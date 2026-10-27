@@ -918,8 +918,8 @@ class Tracer(TracerBase):
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
-                # Before anything is patched, so a torch.fx.wrap that resolving them
-                # runs is registered before _patch_wrapped_functions reads the table.
+                # Resolve lazy globals before patching: a module body run here may call
+                # torch.fx.wrap, which must register before _patch_wrapped_functions runs.
                 _resolve_lazy_imports(patcher, fn_globals)
                 for module in self._autowrap_search:
                     _resolve_lazy_imports(patcher, module.__dict__)
@@ -1168,12 +1168,12 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 
 class _Patcher:
-    def __init__(self) -> None:
+    def __init__(self, outer: "_Patcher | None" = None) -> None:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
         # The patcher of the trace this one is nested in, if any.
-        self.outer: _Patcher | None = None
+        self.outer = outer
         # Open _maybe_revert_all_patches windows; only the outermost one reverts.
         self.revert_depth = 0
 
@@ -1262,8 +1262,7 @@ def _new_patcher() -> Iterator[_Patcher]:
     global CURRENT_PATCHER
     prior_patcher = CURRENT_PATCHER
     try:
-        CURRENT_PATCHER = _Patcher()
-        CURRENT_PATCHER.outer = prior_patcher
+        CURRENT_PATCHER = _Patcher(outer=prior_patcher)
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
