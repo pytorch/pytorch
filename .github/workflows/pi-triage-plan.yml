@@ -117,6 +117,7 @@ jobs:
       # the review log inspector read pi runs unchanged.
       - name: Upload usage metrics
         if: always() && steps.pi.outputs.execution-file != ''
+        continue-on-error: true
         uses: pytorch/test-infra/.github/actions/upload-claude-usage@ca88203856609d21d36a0219da0a29792c3aff73 # main
         with:
           metrics-file: ${{ steps.pi.outputs.execution-file }}
