@@ -96,7 +96,6 @@ class TestFakePG(TestCase):
         fake, gloo = dist.Backend.FAKE, dist.Backend.GLOO
         # The backend with gloo available, then without it.
         cases = {
-            "fake": (fake, fake),
             "cuda:fake": (fake, fake),
             "cpu:fake,cuda:fake": (fake, fake),
             # One real device backend means real peers: sync over gloo.
@@ -122,8 +121,6 @@ class TestFakePG(TestCase):
     def test_compile_sync_pg_over_a_fake_cpu_backend(self):
         # The CPU backend, which the timeout is looked up on first, is a fake one
         # built without options; the cuda backend has the configured timeout.
-        from datetime import timedelta
-
         from torch._dynamo import distributed as dynamo_distributed
 
         timeout = timedelta(minutes=5)

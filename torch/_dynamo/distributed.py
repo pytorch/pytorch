@@ -62,9 +62,10 @@ def get_guard_pg() -> dist.ProcessGroup | None:
 def _is_fake_world() -> bool:
     """Whether every backend of the default group is fake, so no rank has a real peer
     to rendezvous with."""
+    config = dist.BackendConfig(dist.get_backend_config())
     return all(
-        pair.rpartition(":")[2] == dist.Backend.FAKE
-        for pair in dist.get_backend_config().split(",")
+        backend == dist.Backend.FAKE
+        for backend in config.get_device_backend_map().values()
     )
 
 
