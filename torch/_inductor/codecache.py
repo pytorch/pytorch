@@ -4039,12 +4039,16 @@ class CppCodeCache:
     # Shared by subclasses and never cleared: a key hashes the source and build
     # command, and every miss rewrites its entry for the current cache directory.
     _binary_paths: dict[str, str] = {}
+    # Each kernel's relocatable key, by its host key: computed only for a capture or
+    # a replay, once per kernel.
+    _relocatable_keys: dict[str, str] = {}
 
     @staticmethod
     def cache_clear() -> None:
         from torch.compiler._runtime_cache import clear_cpp_kernels
 
         CppCodeCache.cache.clear()
+        CppCodeCache._relocatable_keys.clear()
         clear_cpp_kernels()
 
     cpp_compile_command_flags: dict[str, Any] = {}
@@ -4157,9 +4161,10 @@ class CppCodeCache:
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
         from torch.compiler._runtime_cache import (
+            capturing,
             has_frozen_cpp_kernel,
+            has_frozen_cpp_kernels,
             record_cpp_kernel,
-            relocatable_cpp_key,
             restore_cpp_kernel,
         )
 
@@ -4174,9 +4179,10 @@ class CppCodeCache:
         # path in the command stay in it (see _relocatable_command_line). The binary
         # itself stays under key, which this host's paths tell apart.
         def relocatable_key() -> str:
-            return kernel_key(_relocatable_command_line(main_cmd_line))
-
-        frozen_key = relocatable_cpp_key(relocatable_key, loaded=key in cls.cache)
+            if key not in cls._relocatable_keys:
+                relocated = _relocatable_command_line(main_cmd_line)
+                cls._relocatable_keys[key] = kernel_key(relocated)
+            return cls._relocatable_keys[key]
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
@@ -4190,6 +4196,7 @@ class CppCodeCache:
         if key not in cls.cache:
             from torch.utils._filelock import FileLock
 
+            replaying = has_frozen_cpp_kernels()
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
@@ -4199,7 +4206,7 @@ class CppCodeCache:
             if (
                 config.cpp_cache_precompile_headers
                 and not _IS_WINDOWS
-                and not (frozen_key is not None and has_frozen_cpp_kernel(frozen_key))
+                and not (replaying and has_frozen_cpp_kernel(relocatable_key()))
             ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
@@ -4265,8 +4272,8 @@ class CppCodeCache:
                 )
 
             cls._binary_paths[key] = binary_path
-            if frozen_key is not None:
-                restore_cpp_kernel(frozen_key, binary_path)
+            if replaying:
+                restore_cpp_kernel(relocatable_key(), binary_path)
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -4292,11 +4299,9 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
-        # A capture may have opened while this kernel loaded.
-        if frozen_key is None:
-            frozen_key = relocatable_cpp_key(relocatable_key, loaded=True)
-        if frozen_key is not None:
-            record_cpp_kernel(frozen_key, cls._binary_paths[key], cls.cache[key])
+        # Checked only now, so a capture that opened while the kernel loaded has it.
+        if capturing():
+            record_cpp_kernel(relocatable_key(), cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod

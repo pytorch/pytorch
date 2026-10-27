@@ -7719,13 +7719,11 @@ class TestPrecompileRuntimeCache(TestCase):
         # A kernel that built several launchers but never ran freezes the first.
         ambiguous = _never_run(_static_runtime_kernel(64))
         ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
-        with self.assertLogs("torch.compiler._runtime_cache", "WARNING") as logs:
-            payload, report = _freeze_triton_kernel(
-                "source", [ambiguous], require_tuned_backward=False
-            )
+        payload, report = _freeze_triton_kernel(
+            "source", [ambiguous], require_tuned_backward=False
+        )
         saved = pickle.loads(payload)
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
-        self.assertIn("frozen untuned, with the first of its 2 static", logs.output[0])
         self.assertEqual(
             (report["source_key"], report["static_config_count"]), ("source", 2)
         )
@@ -7888,11 +7886,17 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched = _never_run(_static_runtime_kernel(32))
         unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
         kernels = {"untuned": [unlaunched], "tuned": [_static_runtime_kernel(64)]}
-        with mock.patch("torch._logging.trace_structured") as trace:
+        with (
+            mock.patch("torch._logging.trace_structured") as trace,
+            self.assertLogs("torch.compiler._runtime_cache", "WARNING") as logs,
+        ):
             frozen = pickle.loads(
                 _freeze_triton_kernels(kernels, require_tuned_backward=False)
             )
         self.assertEqual(set(frozen), {"untuned", "tuned"})
+        # One warning for every untuned kernel.
+        [warning] = logs.output
+        self.assertIn("1 backward Triton kernel(s), so they are frozen", warning)
         [call] = trace.call_args_list
         self.assertEqual(
             call.kwargs["metadata_fn"](),
