@@ -4917,6 +4917,34 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served", out.stdout)
         return out.stdout
 
+    def test_a_version_locked_artifact_reports_its_version_before_its_op_modules(
+        self,
+    ):
+        single = self.mod.single
+        with self._capture(single, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            python_code = f.read()
+        edits = (
+            (f"TORCH_VERSION = {torch.__version__!r}", "TORCH_VERSION = '0.0'"),
+            (
+                "CUSTOM_OP_MODULES = {}",
+                "CUSTOM_OP_MODULES = {'precompile_missing_mod': ('missing_ns::f',)}",
+            ),
+        )
+        for old, new in edits:
+            self.assertIn(old, python_code)
+            python_code = python_code.replace(old, new, 1)
+        with open(self.artifact, "w") as f:
+            f.write(python_code)
+        # An unreadable cache: load falls back to python_code alone.
+        with open(self.cache, "wb") as f:
+            f.write(b"")
+        with self.assertRaisesRegex(
+            torch.compiler.PrecompileError, "produced by torch 0.0"
+        ):
+            load(self.artifact, self.cache)(self.model, self.x2)
+
     def test_capture_takes_pathlike_paths(self):
         import pathlib
 
@@ -9536,7 +9564,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 self._modules_of_graph_calling(torch.ops.quantized.add.default), {}
             )
 
-    def test_an_op_torch_registers_on_first_use_from_main_needs_no_module(self):
+    def test_an_op_torch_registers_on_first_use_needs_no_module(self):
         from torch._precompile import _custom_op_modules
 
         op_name = f"{self._namespace('lazy')}::f"
@@ -9544,15 +9572,23 @@ class TestPrecompileCustomOpRecording(TestCase):
         # torch.sparse.semi_structured does.
         torch_module = types.ModuleType(f"torch._precompile_test_{uuid.uuid4().hex}")
         exec(
-            "import torch\n\n\ndef first_use():\n"
-            f"    @torch.library.custom_op('{op_name}', mutates_args=())\n"
-            "    def f(x: torch.Tensor) -> torch.Tensor:\n        return x.clone()\n",
+            "import torch\n\n\ndef first_use(suffix=''):\n"
+            f"    @torch.library.custom_op('{op_name}' + suffix, mutates_args=())\n"
+            "    def f(x: torch.Tensor) -> torch.Tensor:\n        return x.clone()\n"
+            "\n\ndef first_use_too():\n    first_use('_too')\n",
             torch_module.__dict__,
         )
-        # First used by a script, with no module being imported.
+        sys.modules[torch_module.__name__] = torch_module
+        self.addCleanup(sys.modules.pop, torch_module.__name__)
+        # First used by a script, and while a user module is being imported.
         exec("lazy.first_use()", {"__name__": "__main__", "lazy": torch_module})
+        self._import_module_from_source(
+            f"import {torch_module.__name__} as lazy\n\nlazy.first_use_too()\n"
+        )
         with self.assertNoLogs("torch._precompile", level="WARNING"):
-            self.assertEqual(_custom_op_modules({(op_name, "")}), {})
+            self.assertEqual(
+                _custom_op_modules({(op_name, ""), (f"{op_name}_too", "")}), {}
+            )
 
     def test_a_registered_op_needs_the_overload_the_graph_calls(self):
         from torch._precompile_driver import _custom_op_registered
@@ -9605,35 +9641,48 @@ class TestPrecompileCustomOpRecording(TestCase):
         from torch._functorch._aot_autograd.aot_autograd_result import (
             BundledAOTAutogradResult,
         )
-        from torch._precompile import _aot_custom_op_names
+        from torch._precompile import _aot_custom_op_names, _served_custom_op_names
 
         def compiled(code):
             return types.SimpleNamespace(result=types.SimpleNamespace(source_code=code))
 
-        def artifact(key, forward_code, backward=None):
+        def artifact(key, forward_code, backward=None, printed=None):
             content = object.__new__(BundledAOTAutogradResult)
-            content.aot_forward_graph_str = None
+            content.aot_forward_graph_str = printed
             content.aot_backward_graph_str = None
             content.compiled_fw = compiled(forward_code)
             content.compiled_bw = backward
             return types.SimpleNamespace(key=key, content=content)
 
+        # The generated code wins over the printed graph, whose op a pass removed.
+        lowered = artifact(
+            "lowered",
+            "buf0 = torch.ops.ns.post_pass.default(x)",
+            printed="torch.ops.ns.removed.default(x)",
+        )
         with self.assertNoLogs("torch._precompile", level="WARNING"):
             self.assertEqual(
-                _aot_custom_op_names(
-                    [artifact("lowered", "buf0 = torch.ops.ns.post_pass.default(x)")]
-                ),
+                _aot_custom_op_names([lowered]), ({("ns::post_pass", "")}, True)
+            )
+            self.assertEqual(
+                _served_custom_op_names({("ns::removed", "")}, [lowered]),
                 {("ns::post_pass", "")},
             )
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            self.assertEqual(_aot_custom_op_names([artifact("bare", None)]), set())
+            bare = artifact("bare", None)
+            self.assertEqual(_aot_custom_op_names([bare]), (set(), False))
+            # Without generated code the captured graphs' ops still count.
+            self.assertEqual(
+                _served_custom_op_names({("ns::captured", "")}, [bare]),
+                {("ns::captured", "")},
+            )
         self.assertIn("bare", "\n".join(logs.output))
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             self.assertEqual(
                 _aot_custom_op_names(
                     [artifact("no_backward", "", backward=compiled(None))]
                 ),
-                set(),
+                (set(), False),
             )
         self.assertIn("backward", "\n".join(logs.output))
 
@@ -9791,6 +9840,35 @@ class TestPrecompileCustomOpRecording(TestCase):
             torch.compiler.PrecompileError, f"importing '{module}'.*module body failed"
         ):
             exec(buf.getvalue(), {})
+
+    def test_a_skipped_package_records_the_ops_its_own_module_level_defines(self):
+        ns = self._namespace("vendored")
+        # A vendored library defining ops as its module is imported, as
+        # torch._vendor.quack does.
+        vendored = types.ModuleType(f"torch._vendor.precompile_test_{uuid.uuid4().hex}")
+        exec(
+            "import torch\n\n\n"
+            f"@torch.library.custom_op('{ns}::f', mutates_args=())\n"
+            "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n",
+            vendored.__dict__,
+        )
+        self.assertEqual(
+            torch._library.simple_registry.singleton.registering_module(f"{ns}::f"),
+            vendored.__name__,
+        )
+
+    def test_an_op_a_multiprocessing_worker_main_registers_is_reported(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = self._namespace("mp_main")
+        exec(
+            f"@torch.library.custom_op('{ns}::f', mutates_args=())\n"
+            "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n",
+            {"__name__": "__mp_main__", "torch": torch},
+        )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules({(f"{ns}::f", "")}), {})
+        self.assertIn(f"{ns}::f", "\n".join(logs.output))
 
     def test_a_capture_names_only_the_ops_of_the_graphs_it_serves(self):
         from torch._dynamo.precompile_package import _CapturePackage

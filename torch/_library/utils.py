@@ -726,33 +726,44 @@ def _in_package(name: str | None, packages: Iterable[str]) -> bool:
     )
 
 
+# Names a main module runs under; neither can be imported again.
+_MAIN_MODULES = ("__main__", "__mp_main__")
+
+
 def registering_module(frame: Any) -> str | None:
     """The module whose import runs a registration made from ``frame``, ``"torch"``
     for one torch makes on first use, or None when that is not known.
 
-    That is the nearest module-level frame on the stack, so a registration made
-    through a helper or a factory the module runs at import counts too. With no
-    module being imported (or only ``__main__``, which cannot be imported again), a
-    registration made inside one of torch's functions, past the registration APIs,
-    is torch's own on first use, and any other gives no answer.
+    Past the registration APIs' functions, a registration made from a module's
+    top-level code belongs to that module. One made inside a torch function is
+    torch's own, run on first use whatever is being imported at the time. One made
+    inside any other function belongs to the nearest module-level frame on the
+    stack, so a helper or a factory a module runs at import counts for that module.
+    The main module (``__main__``, or ``__mp_main__`` in a multiprocessing worker)
+    cannot be imported again, so it gives no answer.
 
-    A registration made on first use while some module is being imported is
-    recorded under that module; an artifact importing it then fails, naming the op
-    the import did not register.
+    A registration made on first use, inside a non-torch function, while some
+    module is being imported is recorded under that module; an artifact importing
+    it then fails, naming the op the import did not register.
 
     This is not the module ``Library._register_fake`` checks pystubs against, the
     immediate caller (where the fake impl is written): it is the module whose import
     runs the registration, which is the one an artifact has to import.
     """
     frame = frame.f_back if frame is not None else None
-    while frame is not None and _in_package(
-        frame.f_globals.get("__name__"), _REGISTRATION_APIS
+    while (
+        frame is not None
+        and frame.f_code.co_name != "<module>"
+        and _in_package(frame.f_globals.get("__name__"), _REGISTRATION_APIS)
     ):
         frame = frame.f_back
-    caller = frame.f_globals.get("__name__") if frame is not None else None
+    if frame is None:
+        return None
+    if frame.f_code.co_name != "<module>" and _in_package(
+        frame.f_globals.get("__name__"), ("torch",)
+    ):
+        return "torch"
     while frame is not None and frame.f_code.co_name != "<module>":
         frame = frame.f_back
-    importing = frame.f_globals.get("__name__") if frame is not None else None
-    if importing is not None and importing != "__main__":
-        return importing
-    return "torch" if _in_package(caller, ("torch",)) else None
+    module = frame.f_globals.get("__name__") if frame is not None else None
+    return None if module in (None, *_MAIN_MODULES) else module

@@ -201,7 +201,9 @@ it.
 # self-contained: beyond torch, ``python_code`` imports only CUSTOM_OP_MODULES, the
 # modules registering the Python custom ops its graphs call (a torch submodule that
 # registers ops as it is imported can be one), which must be importable wherever it
-# is served; otherwise it runs on its own -- it inlines the composed graph
+# is served. An op a C++ extension registers is listed only if the extension names
+# its module with ``set_python_module``; otherwise capture warns about it, and the
+# serving process has to load the extension itself; otherwise it runs on its own -- it inlines the composed graph
 # module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
 # prelude/epilogue) or the captured graph (eager), plus all calling-convention
 # metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
@@ -2003,24 +2005,29 @@ def _custom_op_names_in_source(source: str | None) -> set[tuple[str, str]]:
     }
 
 
-def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
-    """The ops the graphs AOTAutograd compiled for ``artifacts`` call.
+def _aot_custom_op_names(
+    artifacts: Iterable[Any],
+) -> tuple[set[tuple[str, str]], bool]:
+    """The ops the graphs AOTAutograd compiled for ``artifacts`` call, and whether
+    they were all read from generated code.
 
     A Dynamo capture sees only its own forward graph. AOTAutograd lowers a dense
     forward (desugaring tensor subclasses, applying decompositions) and a backward,
     and Inductor's passes and lowerings rewrite both; any of them can call ops that
-    graph never does. Each is read from what the artifact keeps of it: the printed
-    graphs and the code Inductor generated.
+    graph never does, or drop ones it does. Each is read from the code Inductor
+    generated, which is what serving runs, or else from the printed graph.
     """
     from torch._functorch._aot_autograd.aot_autograd_result import (
         GenericAOTAutogradResult,
     )
 
     names: set[tuple[str, str]] = set()
+    from_code = True
     for artifact in artifacts:
         content = artifact.content
         # An eager backend's artifact is the Dynamo graph itself, already recorded.
         if not isinstance(content, GenericAOTAutogradResult):
+            from_code = False
             continue
         for kind, printed, compiled in (
             ("forward", content.aot_forward_graph_str, content.compiled_fw),
@@ -2029,7 +2036,11 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
             if compiled is None:
                 continue
             generated = getattr(getattr(compiled, "result", None), "source_code", None)
-            if printed is None and generated is None:
+            if generated is not None:
+                names |= _custom_op_names_in_source(generated)
+                continue
+            from_code = False
+            if printed is None:
                 log.warning(
                     "torch.compiler.precompile: backend %s kept neither AOTAutograd's "
                     "%s graph nor its generated code, so the custom ops only its "
@@ -2039,8 +2050,19 @@ def _aot_custom_op_names(artifacts: Iterable[Any]) -> set[tuple[str, str]]:
                     kind,
                 )
             names |= _custom_op_names_in_source(printed)
-            names |= _custom_op_names_in_source(generated)
-    return names
+    return names, from_code
+
+
+def _served_custom_op_names(
+    captured: Iterable[tuple[str, str]], artifacts: Iterable[Any]
+) -> set[tuple[str, str]]:
+    """The ops a multi-graph artifact's compiled subgraphs call: those in the code
+    Inductor generated, when every subgraph has it (it is what serving runs, so an
+    op AOTAutograd decomposed away or a pass rewrote needs no module), otherwise
+    those of the captured graphs together with whatever AOTAutograd kept."""
+    artifacts = list(artifacts)
+    names, from_code = _aot_custom_op_names(artifacts)
+    return names if artifacts and from_code else {*captured, *names}
 
 
 # Where an operator's schema was registered, for ops no Python registration
@@ -2057,7 +2079,9 @@ _TORCH_CPP_SOURCES = ("torch/csrc/", "aten/src/", "c10/")
 
 
 def _importable(name: str | None) -> str | None:
-    module = sys.modules.get(name) if name and name != "__main__" else None
+    from torch._library.utils import _MAIN_MODULES
+
+    module = sys.modules.get(name) if name and name not in _MAIN_MODULES else None
     if name and module is not None and getattr(module, "__spec__", None) is not None:
         return name
     return None
@@ -2216,7 +2240,9 @@ def _build_python_source(
     _write_custom_op_imports(
         buf,
         _custom_op_modules(
-            _custom_op_names(compiled._gm) | _custom_op_names_in_source(graph_python)
+            # The generated code is what serving runs: an op AOTAutograd decomposed
+            # away or an Inductor pass rewrote needs no module.
+            _custom_op_names_in_source(graph_python)
         ),
     )
     buf.writeline("# " + "=" * 70)
@@ -2761,9 +2787,7 @@ def _build_multigraph_artifact(
         binding,
         mode,
         unreachable,
-        _custom_op_modules(
-            {*custom_op_names, *_aot_custom_op_names(backends.values())}
-        ),
+        _custom_op_modules(_served_custom_op_names(custom_op_names, backends.values())),
     )
     inductor_bundle = None
     if backend != "eager":
@@ -3886,7 +3910,9 @@ def load(
     captures -- or if an installed artifact cannot install onto the serving process (for
     example, a captured source changed since capture), or if a module in its
     ``CUSTOM_OP_MODULES`` (registering custom ops its graphs call) is needed but cannot
-    be found, fails to import, or does not register those ops. A cache whose ``format``/``version`` does not match (a foreign or
+    be found, fails to import, or does not register those ops. Ops from a C++
+    extension that names no Python module are not in ``CUSTOM_OP_MODULES``: load the
+    extension before ``load``. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
