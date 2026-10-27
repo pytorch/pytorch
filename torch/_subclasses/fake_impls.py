@@ -46,6 +46,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_constant,
     maybe_get_fake_device,
     maybe_get_item_memo,
+    maybe_get_real_tensor,
     maybe_get_sym_memo,
     maybe_set_fake_device,
     maybe_set_item_memo,
@@ -500,7 +501,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(
 def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
     constant = maybe_get_fake_constant(offsets)
     if constant is None:
-        constant = getattr(offsets, "real_tensor", None)
+        constant = maybe_get_real_tensor(offsets)
     if is_fake_tensor(constant):
         return None
     if constant is None or constant.device.type != "cpu":
