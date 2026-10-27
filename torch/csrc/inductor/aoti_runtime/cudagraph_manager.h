@@ -149,6 +149,13 @@ class CudaGraphManager {
     warmup_counts_.clear();
   }
 
+  // Applies to later calls; graphs already captured keep replaying.
+  void set_options(const CudaGraphOptions& options) {
+    auto checked_options = checked(options);
+    std::lock_guard<std::mutex> lock(mutex_);
+    options_ = checked_options;
+  }
+
   size_t num_graphs() {
     std::lock_guard<std::mutex> lock(mutex_);
     return graphs_.size();
