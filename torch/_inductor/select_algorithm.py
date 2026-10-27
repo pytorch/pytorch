@@ -692,6 +692,13 @@ class TritonTemplateKernel(TritonKernel):
         self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
+        # The wrapper computes runtime floats on the host and passes them as scalar
+        # args. Defining them here makes them visible to every gen_defines() use.
+        for name, val in meta.items():
+            if isinstance(val, RuntimeFloat):
+                arg = V.graph.sizevars.lookup_precomputed_float(val.value)
+                arg_name = self.rename_indexing(arg)
+                self.defines += f"{name} = tl.full([], {arg_name}, tl.float32)\n"
         self.call_sizes = call_sizes
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
@@ -1172,15 +1179,6 @@ class TritonTemplateKernel(TritonKernel):
                 continue
 
             self.args.input(input_node.get_name())
-
-        # The wrapper computes runtime floats on the host and passes them as
-        # scalar args; register them before the arg list is built. Templates must
-        # call def_kernel before any helper uses gen_defines().
-        for name, val in self.meta.items():
-            if isinstance(val, RuntimeFloat):
-                arg = V.graph.sizevars.lookup_precomputed_float(val.value)
-                arg_name = self.rename_indexing(arg)
-                self.defines += f"{name} = tl.full([], {arg_name}, tl.float32)\n"
 
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
@@ -2111,9 +2109,9 @@ class TritonTemplateKernel(TritonKernel):
         if not additional_call_args:
             if V.graph.cpp_wrapper:
                 raise AssertionError("cpp_wrapper requires SymbolicGridFn")
-            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             if any(isinstance(v, RuntimeFloat) for v in self.meta.values()):
                 raise AssertionError("RuntimeFloat requires a SymbolicGridFn")
+            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
             fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
             call_args.append(

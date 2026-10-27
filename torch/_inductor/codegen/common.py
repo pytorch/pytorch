@@ -2054,7 +2054,7 @@ class KernelArgs:
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
             if isinstance(outer, sympy.Symbol) and symbol_is_type(
-                outer, (SymT.UNBACKED_FLOAT, SymT.PRECOMPUTED_FLOAT)
+                outer, (SymT.UNBACKED_FLOAT)
             ):
                 arg_defs.append(f"const float {inner}")
                 arg_types.append("const float")

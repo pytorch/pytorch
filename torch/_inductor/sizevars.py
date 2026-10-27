@@ -306,6 +306,9 @@ class SizeVarAllocator:
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
         self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
+        # Float expressions (PRECOMPUTED_FLOAT) get their own forward map so
+        # integer index rewriting never substitutes them; the inverse is shared.
+        self.precomputed_float_replacements: dict[Expr, sympy.Symbol] = {}
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
         # optimization_hint is called with the same expression repeatedly
         # while lowering (on one model, 76k calls over 388 distinct
@@ -1031,6 +1034,21 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
+    def guard_float(self, expr: Expr | float) -> float:
+        """
+        Like guard_int, but for a float-valued expression, e.g. a softmax scale
+        1/sqrt(head_dim) under dynamic shapes. Guards that expr equals its hint.
+        """
+        if not isinstance(expr, Expr):
+            return float(expr)
+        hinted = expr.xreplace(self.shape_env.backed_var_to_val)
+        if hinted.free_symbols:
+            raise NotImplementedError(
+                f"cannot specialize {expr}, which depends on data-dependent sizes"
+            )
+        # evaluate_expr's default hint is int-only and would guard expr == 0.
+        return float(self.shape_env.evaluate_expr(expr, hint=float(hinted)))
+
     def guard_int(self, expr: Expr | int) -> int:
         """
         Similar to guard_int in symbolic_shapes.py, except this function works with SymPy
@@ -1384,13 +1402,15 @@ class SizeVarAllocator:
         which the wrapper computes on the host and passes to kernels as a scalar.
         """
         expr = self.remove_precomputed_replacements(expr)
-        if expr not in self.precomputed_replacements:
+        if expr not in self.precomputed_float_replacements:
             sym = make_symbol(
-                SymT.PRECOMPUTED_FLOAT, len(self.precomputed_replacements), real=True
+                SymT.PRECOMPUTED_FLOAT,
+                len(self.precomputed_float_replacements),
+                real=True,
             )
-            self.precomputed_replacements[expr] = sym
+            self.precomputed_float_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
-        return self.precomputed_replacements[expr]
+        return self.precomputed_float_replacements[expr]
 
     def size_arg_hint(
         self, expr: Expr | int, *, hint_override: int | None = None

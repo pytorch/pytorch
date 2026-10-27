@@ -1750,7 +1750,8 @@ class TestTemplateRender(TestCase):
 
     @requires_gpu()
     @requires_triton()
-    @config.patch(cuda_backend="triton")
+    # The patched lowerings are not part of the cache key.
+    @config.patch(cuda_backend="triton", force_disable_caches=True)
     def test_runtime_float_kwarg_computed_on_host(self):
         """
         A symbolic RuntimeFloat template kwarg is computed by the wrapper and
@@ -1775,51 +1776,71 @@ class TestTemplateRender(TestCase):
 {{def_kernel("A")}}
     xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)
     xmask = xindex < {{size("A", 0)}}
-    tmp0 = tl.load(A + xindex, xmask) * SCALE
-    {{store_output(("xindex",), "tmp0", mask="xmask", val_shape=("XBLOCK",))}}
+    scaled = tl.load(A + xindex, xmask) * SCALE
+    {{store_output(("xindex",), "scaled", mask="xmask", val_shape=("XBLOCK",))}}
 """,
         )
         self.addCleanup(TritonTemplate.all_templates.pop, scale_template.name, None)
 
-        def scaled_lowering(a):
-            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
-            n = a.get_size()[0]
-            scale = FloatTrueDiv(sympy.Float(1.0), OpaqueUnaryFn_sqrt(ToFloat(n)))
-            choices = []
-            scale_template.maybe_append_choice(
-                choices,
-                input_nodes=(a,),
-                layout=layout,
-                num_stages=1,
-                num_warps=1,
-                XBLOCK=64,
-                SCALE=RuntimeFloat(scale),
-            )
-            return autotune_select_algorithm("scaled", choices, [a], layout)[0]
+        def make_lowering(symbolic):
+            def scaled_lowering(a):
+                layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+                n = a.get_size()[0]
+                one = sympy.Float(1.0)
+                scale = FloatTrueDiv(one, OpaqueUnaryFn_sqrt(ToFloat(n)))
+                choices = []
+                for xblock in (64, 128):
+                    scale_template.maybe_append_choice(
+                        choices,
+                        input_nodes=(a,),
+                        layout=layout,
+                        num_stages=1,
+                        num_warps=1,
+                        XBLOCK=xblock,
+                        SCALE=RuntimeFloat(scale if symbolic else 0.5),
+                    )
+                return autotune_select_algorithm("scaled", choices, [a], layout)[0]
 
-        lowering = (
-            scaled_lowering,
-            False,
-            ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-            False,
-        )
-        for cpp_wrapper in (False, True):
+            promotion = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            return {aten.neg.default: (scaled_lowering, False, promotion, False)}
+
+        def fn(a):
+            return torch.neg(a) + 1
+
+        cases = [
+            {"cpp_wrapper": False},
+            {"cpp_wrapper": True},
+            {"max_autotune": True, "benchmark_epilogue_fusion": True},
+        ]
+        for patches in cases:
             torch._dynamo.reset()
             counter = CompileCounterWithBackend("inductor")
             with (
-                self.subTest(cpp_wrapper=cpp_wrapper),
-                config.patch(cpp_wrapper=cpp_wrapper),
-                patch_lowering({aten.neg.default: lowering}),
+                self.subTest(**patches),
+                config.patch(patches),
+                patch_lowering(make_lowering(symbolic=True)),
             ):
-                compiled = torch.compile(torch.neg, backend=counter, dynamic=True)
+                compiled = torch.compile(fn, backend=counter, dynamic=True)
                 for n in (100, 300):
                     a = torch.randn(n, device=GPU_TYPE)
-                    self.assertEqual(compiled(a), a / math.sqrt(n))
+                    self.assertEqual(compiled(a), a / math.sqrt(n) + 1)
                 self.assertEqual(counter.frame_count, 1)
                 _, (code, *_) = run_and_get_code(compiled, a)
                 FileCheck().check("SCALE = tl.full(").run(code)
-                FileCheck().check("pf0 = ").run(code)
                 FileCheck().check_not("SCALE : tl.constexpr").run(code)
+                host_decl = (
+                    r"double pf\d+ = " if patches.get("cpp_wrapper") else r"pf\d+ = "
+                )
+                FileCheck().check_regex(host_decl).run(code)
+
+        # A numeric RuntimeFloat stays a constexpr with no host-computed arg.
+        torch._dynamo.reset()
+        with patch_lowering(make_lowering(symbolic=False)):
+            a = torch.randn(100, device=GPU_TYPE)
+            out, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), a)
+            self.assertEqual(out, a * 0.5 + 1)
+            FileCheck().check("SCALE : tl.constexpr = 0.5").run(code)
+            FileCheck().check_not("SCALE = tl.full(").run(code)
 
     def test_subgraph_nodes_participate_in_template_index_dtype(self):
         """Covers implicit template buffers that are not explicit arguments."""
