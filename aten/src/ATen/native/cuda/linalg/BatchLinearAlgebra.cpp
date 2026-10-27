@@ -56,7 +56,7 @@ struct MagmaInitializer {
 namespace at::native {
 
 void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots);
-void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian);
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -423,7 +423,7 @@ void ldl_factor_kernel(
        {
 #ifndef USE_ROCM
          if (hermitian) {
-           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info);
          }
 #endif
          ldl_factor_cusolver(
@@ -438,7 +438,7 @@ void ldl_factor_kernel(
 #ifndef USE_ROCM
     // By default the custom kernel takes hermitian=true.
       if (hermitian) {
-        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info);
       }
 #endif
     // Otherwise use cusolver if available and magma otherwise.
