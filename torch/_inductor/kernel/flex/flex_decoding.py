@@ -281,7 +281,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     # TODO: fix autotuning.
 
-    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale))
+    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale).unwrap_if_number())
     if "SPLIT_KV" not in kernel_options:
         kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv, device)
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]

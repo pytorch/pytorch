@@ -38,7 +38,6 @@ from .common import (
     create_placeholder,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
-    guard_scale,
     infer_dense_strides,
     is_tensor_ir_node,
     load_flex_template,
@@ -192,7 +191,7 @@ def flex_attention(
             value,
             subgraph,
             block_mask,
-            guard_scale(scale),
+            V.graph.sizevars.guard_float(scale),
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
@@ -206,7 +205,7 @@ def flex_attention(
             value,
             subgraph,
             block_mask,
-            guard_scale(scale),
+            V.graph.sizevars.guard_float(scale),
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
@@ -308,7 +307,7 @@ def flex_attention(
             mask_graph=mask_graph,
             score_mod_other_buffers=score_mod_other_buffers,
             mask_mod_other_buffers=mask_mod_other_buffers,
-            scale=guard_scale(scale),
+            scale=V.graph.sizevars.guard_float(scale),
             sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
             sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
             subgraph_buffer=subgraph_buffer,
@@ -450,7 +449,7 @@ def flex_attention(
         dtype=torch.float32,  # The max scores are always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
-    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale))
+    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale).unwrap_if_number())
 
     # Determine GQA broadcast factor.
     gqa_shared_heads = FloorDiv(Hq, Hkv)
@@ -1126,7 +1125,7 @@ def flex_attention_backward(*args, **kwargs):
         device=value.get_device(),
     )
 
-    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale))
+    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale).unwrap_if_number())
 
     # Determine GQA factor
     gqa_shared_heads = FloorDiv(Hq, Hkv)

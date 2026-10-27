@@ -2193,6 +2193,32 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @skip_on_cpu
+    @common_utils.parametrize("prescale_qk", [False, True])
+    def test_dynamic_shapes_symbolic_scale(self, device, prescale_qk):
+        # A head dim derived from a dynamic size makes the default scale symbolic;
+        # the decode template receives it as a host-computed runtime arg.
+        def view_heads(t):
+            return t.view(1, t.shape[1], 4, -1).transpose(1, 2)
+
+        kernel_options = {"PRESCALE_QK": prescale_qk}
+
+        def attention(q, kv):
+            q, kv = view_heads(q), view_heads(kv)
+            return flex_attention(q, kv, kv, kernel_options=kernel_options)
+
+        compiled = torch.compile(attention, fullgraph=True, dynamic=True)
+        for q_len, kv_len in ((4, 512), (8, 1024)):
+            q = torch.randn(1, q_len, 256, device=device, dtype=torch.float16)
+            kv = torch.randn(1, kv_len, 256, device=device, dtype=torch.float16)
+            out, (code, *_) = run_and_get_code(compiled, q, kv)
+            out_ref = attention(q, kv)
+            out_gold = attention(q.double(), kv.double())
+            # PRESCALE_QK trades accuracy for speed.
+            self._check_equal(out_gold, out_ref, out, 2.0 if prescale_qk else 1.1)
+        FileCheck().check("SPLIT_KV").check("SM_SCALE = tl.full(").run(code)
+
+    @supported_platform
     def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self, device):
         torch._dynamo.reset()
         H = Hq

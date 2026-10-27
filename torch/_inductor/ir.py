@@ -6455,6 +6455,8 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        # Symbolic RuntimeFloat template kwargs; see TemplateBuffer.
+        self.runtime_float_values: list[sympy.Expr] = []
         self.failed: bool = False
         # When True, benchmark using CUDA graph capture/replay
         self._benchmark_with_cudagraphs: bool = False
@@ -6561,11 +6563,9 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self._choices: list[ChoiceCaller] = unfiltered_choices
         self.original_inputs = inputs
         # Any choice may be selected, so track every choice's RuntimeFloat symbols.
-        triton_caller = torch._inductor.select_algorithm.TritonTemplateCaller
         self.runtime_float_values = [
             value
             for choice in unfiltered_choices
-            if isinstance(choice, triton_caller)
             for value in choice.runtime_float_values
         ]
         self._output_plannable = all(

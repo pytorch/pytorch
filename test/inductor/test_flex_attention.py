@@ -6593,8 +6593,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         compiled = torch.compile(
             attention, backend=counter, fullgraph=True, dynamic=True
         )
-        # CPU flex attention is inference-only.
-        requires_grad = device != "cpu"
+        # CPU and MPS flex attention are inference-only.
+        requires_grad = device not in ("cpu", "mps")
         for tokens, head_dim in cases:
             x = torch.randn(1, tokens, 384, device=device, requires_grad=requires_grad)
             x_ref = x.detach().clone().requires_grad_(requires_grad)
@@ -6612,7 +6612,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(counter.frame_count, expected_frames)
 
     @supported_platform
-    @expected_not_implemented_on_mps  # no backward
     @temp_float32_matmul_precision("highest")
     def test_dynamic_shapes_symbolic_default_scale(self, device):
         # The default scale 1/sqrt(head_dim) is symbolic when head_dim is derived
