@@ -9814,16 +9814,23 @@ else:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
+        stage = "load"
         try:
-            run(pc.load(artifact, cache))
+            runnable = pc.load(artifact, cache)
+            stage = "first call"
+            run(runnable)
         except (AttributeError, RuntimeError) as e:
-            # The op's namespace, as the missing op's first call names it.
+            # The op's namespace, as the missing op's lookup names it.
             ns = "precompile_op_test_" + module.rpartition("_")[2]
             assert ns in str(e), e
         else:
             raise AssertionError("ran a custom op that nothing registered")
     messages = [str(w.message) for w in caught]
     assert any(repr(module) in m for m in messages), messages
+    # A Dynamo artifact looks the op up as it loads (its guards, and the eager
+    # backend's pickled graphs, name it); a make_fx one at the op's first call.
+    expected = "load" if tracer == "dynamo" else "first call"
+    assert stage == expected, (stage, expected)
 print("custom op phase ok:", phase)
 """
 

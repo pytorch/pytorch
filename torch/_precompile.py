@@ -3757,12 +3757,14 @@ def capture(
     The artifact records the importable module defining each
     ``torch.library.custom_op`` its compiled code calls and imports it when it
     loads, if the op is not registered yet. That import is best effort: if it
-    fails, or leaves the op unregistered, ``load`` warns and the op must be
-    registered by its first call, as before. An op defined in
+    fails, or leaves the op unregistered, ``load`` warns, and the op must be
+    registered by its first call, or, for a Dynamo artifact, before ``load``,
+    which looks it up (its guards, and the eager backend's pickled graphs, name
+    it). An op defined in
     ``__main__`` or in a module the import system cannot find again by name, or
     registered through ``torch.library.Library`` or ``torch.ops.load_library``,
     has no such module: capture logs a warning for the first kind, and the
-    serving process must register all of them before the first call. The same
+    serving process must register all of them by then. The same
     holds for any op the recorded code does not show (one a tensor subclass's
     ``__torch_dispatch__`` calls under the eager backend, or one called from a
     frame served eagerly, ``PrecompileSummary.eager_fallbacks``), and for an
@@ -3950,7 +3952,8 @@ def load(
     ``load`` imports a module in the artifact's ``CUSTOM_OP_MODULES`` (user code)
     only when one of the custom ops it registers is not registered yet. If the
     module cannot be imported or, imported, leaves one of its ops unregistered,
-    ``load`` warns, and the op must be registered by its first call. The recorded
+    ``load`` warns, and the op must be registered by its first call, or, for a
+    Dynamo artifact, which looks it up as it loads, before ``load``. The recorded
     module is the one defining the op's function, which is not always the one
     calling ``torch.library.custom_op`` on it.
     """

@@ -900,7 +900,8 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
     import is best effort: an op still not registered after it only has to be
     registered by its first call, as under ``torch.compile`` and as an op with no
     module here (``__main__``, ``torch.library.Library``,
-    ``torch.ops.load_library``) does, so this warns rather than raises.
+    ``torch.ops.load_library``) does, so this warns rather than raises. (A Dynamo
+    artifact needs it now: it looks the op up as it loads.)
     """
     for module, module_ops in modules.items():
         if all(_custom_op_registered(op) for op in module_ops):
@@ -912,7 +913,8 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
                 f"precompile: module {module!r}, which registers custom op(s) "
                 f"{', '.join(module_ops)} this artifact's compiled graphs call, failed "
                 f"to import ({type(e).__name__}: {e}); they must be registered by "
-                "their first call",
+                "their first call, or now for a Dynamo artifact, which looks them up "
+                "as it loads",
                 stacklevel=2,
             )
             continue
@@ -921,6 +923,7 @@ def _import_custom_op_modules(modules: dict[str, tuple[str, ...]]) -> None:
             _warnings.warn(
                 f"precompile: importing module {module!r} did not register custom "
                 f"op(s) {', '.join(missing)}, which this artifact's compiled graphs "
-                "call; they must be registered by their first call",
+                "call; they must be registered by their first call, or now for a "
+                "Dynamo artifact, which looks them up as it loads",
                 stacklevel=2,
             )

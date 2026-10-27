@@ -1375,22 +1375,20 @@ def _resolve_lazy_imports(
         return
 
     scope: dict[str, Any] = frame_dict if frame_dict is not None else {}
+    is_lazy: Callable[[dict[str, Any], str], bool] = is_lazy_import
 
-    def unresolved(
-        is_lazy: Callable[[dict[str, Any], str], bool],
-    ) -> list[tuple[dict[str, Any], str]]:
+    def unresolved() -> list[tuple[dict[str, Any], str]]:
         entries = [(scope, name) for name in list(scope)]
         # Plus the torch.fx.wrap targets, which patching reads.
         targets = list(_wrapped_fns_to_patch.items())
         entries += [(target_dict, name) for (_, name), target_dict in targets]
         return [(d, name) for d, name in entries if name in d and is_lazy(d, name)]
 
-    registered_fns = set(_wrapped_fns_to_patch)
-    registered_methods = len(_wrapped_methods_to_patch)
-    lazy = unresolved(is_lazy_import)
+    lazy = unresolved()
     if lazy:
         from torch.utils._python_dispatch import _disable_current_modes
 
+        registered = set(_wrapped_fns_to_patch)
         with contextlib.ExitStack() as stack:
             for trace_patcher in _trace_patchers(patcher):
                 stack.enter_context(_maybe_revert_all_patches(trace_patcher))
@@ -1403,21 +1401,20 @@ def _resolve_lazy_imports(
             while lazy:
                 for d, name in lazy:
                     _ = d[name]
-                lazy = unresolved(is_lazy_import)
+                lazy = unresolved()
         # A module body it ran can register torch.fx.wrap targets the traces have
         # not patched yet. Outermost first, so an inner trace leaves the name to
         # the patch that outlives it. Only those: a trace in a revert window does
         # not show its patches, so it would record a builtin's again.
         new_fns = [
-            (key, frame_dict)
-            for key, frame_dict in _wrapped_fns_to_patch.items()
-            if key not in registered_fns
+            (key, target_dict)
+            for key, target_dict in _wrapped_fns_to_patch.items()
+            if key not in registered
         ]
-        new_methods = _wrapped_methods_to_patch[registered_methods:]
-        if new_fns or new_methods:
+        if new_fns:
             for trace_patcher in reversed(_trace_patchers(patcher)):
                 made = len(trace_patcher.patches_made)
-                _patch_wrap_targets(trace_patcher, new_fns, new_methods)
+                _patch_wrap_targets(trace_patcher, new_fns, [])
                 # Still inside a revert window, e.g. Dynamo's, whose reapply
                 # installs them.
                 if trace_patcher.revert_depth > 0:
