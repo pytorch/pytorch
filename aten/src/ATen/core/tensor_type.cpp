@@ -401,12 +401,12 @@ bool TensorType::equals(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
   }
-  auto rt = rhs.expect<TensorType>();
+  const auto& rt = rhs.expectRef<TensorType>();
 
-  return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-      stride_properties() == rt->stride_properties() &&
-      device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
-      undefined() == rt->undefined();
+  return scalar_type_ == rt.scalarType() && sizes() == rt.sizes() &&
+      stride_properties() == rt.stride_properties() &&
+      device() == rt.device() && requiresGrad() == rt.requiresGrad() &&
+      undefined() == rt.undefined();
 }
 
 VaryingShape<int64_t> TensorType::strides() const {

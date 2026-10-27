@@ -33,7 +33,6 @@ import os
 import warnings
 
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
-from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 from .cuda_to_hip_mappings import CAFFE2_PATH_MAPPINGS
 
 from collections.abc import Iterator
@@ -69,7 +68,7 @@ PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 
 __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
-           'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
+           'find_bracket_group', 'find_parentheses_group', 'hip_header_magic', 'replace_extern_shared',
            'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_special_file', 'is_caffe2_gpu_file',
            'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
            'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'CurrentState', 'HipifyResult', 'hipify']
@@ -146,6 +145,15 @@ class GeneratedFileCleaner:
 # Follow UNIX convention for paths to use '/' instead of '\\' on Windows
 def _to_unix_path(path: str) -> str:
     return path.replace(os.sep, '/')
+
+def _rel_path_for_hipify(path: str, output_directory: str) -> tuple[str, str]:
+    """Returns (base, rel) with rel relative to base, for get_hip_file_path."""
+    try:
+        return output_directory, _to_unix_path(os.path.relpath(path, output_directory))
+    except ValueError:
+        # On Windows no relative path exists across drives, so anchor at the drive root instead.
+        drive, rest = os.path.splitdrive(os.path.abspath(path))
+        return drive + os.sep, _to_unix_path(rest).lstrip('/')
 
 def match_extensions(filename: str, extensions: Iterable) -> bool:
     """Helper method to see if filename ends with certain extension"""
@@ -473,22 +481,6 @@ def find_parentheses_group(input_string, start):
 
 
 RE_ASSERT = re.compile(r"\bassert[ ]*\(")
-
-
-def replace_math_functions(input_string):
-    """FIXME: Temporarily replace std:: invocations of math functions
-        with non-std:: versions to prevent linker errors NOTE: This
-        can lead to correctness issues when running tests, since the
-        correct version of the math function (exp/expf) might not get
-        called.  Plan is to remove this function once HIP supports
-        std:: math function calls inside device code
-
-    """
-    output_string = input_string
-    for func in MATH_TRANSPILATIONS:
-        output_string = output_string.replace(fr'{func}(', f'{MATH_TRANSPILATIONS[func]}(')
-
-    return output_string
 
 
 RE_SYNCTHREADS = re.compile(r":?:?\b(__syncthreads)\b(\w*\()")
@@ -834,7 +826,7 @@ def preprocessor(
         hipify_result.current_state = CurrentState.DONE
         return hipify_result
 
-    rel_filepath = _to_unix_path(os.path.relpath(filepath, output_directory))
+    rel_base, rel_filepath = _rel_path_for_hipify(fin_path, output_directory)
 
     with open(fin_path, encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
@@ -848,7 +840,7 @@ def preprocessor(
     orig_output_source = output_source
 
     # get_hip_file_path needs a relative path to work correctly
-    fout_path = os.path.abspath(os.path.join(output_directory, get_hip_file_path(rel_filepath, is_pytorch_extension)))
+    fout_path = os.path.abspath(os.path.join(rel_base, get_hip_file_path(rel_filepath, is_pytorch_extension)))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -891,7 +883,7 @@ def preprocessor(
                               "THC/")) or
                 (f.startswith("THC") and not f.startswith("THCP"))
             ):
-                return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
+                return templ.format(_to_unix_path(get_hip_file_path(m.group(1), is_pytorch_extension)))
             # if filename is one of the files being hipified for this extension
             if (is_pytorch_extension and any(s.endswith(filename) for s in all_files)):
                 header_dir = None
@@ -924,13 +916,13 @@ def preprocessor(
                     header_result = HIPIFY_FINAL_RESULT[header_filepath]
                     if header_result.current_state == CurrentState.INITIALIZED:
                         # get_hip_file_path needs a relative path to work correctly
-                        header_rel_path = os.path.relpath(header_filepath, output_directory)
-                        header_fout_path = os.path.abspath(os.path.join(output_directory,
+                        header_rel_base, header_rel_path = _rel_path_for_hipify(header_filepath, output_directory)
+                        header_fout_path = os.path.abspath(os.path.join(header_rel_base,
                                                                         get_hip_file_path(header_rel_path, is_pytorch_extension)))
                         header_result.hipified_path = header_fout_path
                         HIPIFY_FINAL_RESULT[header_filepath] = header_result
-                        return templ.format(os.path.relpath(header_fout_path if header_fout_path is not None
-                                                            else header_filepath, header_dir))
+                        return templ.format(_to_unix_path(os.path.relpath(header_fout_path if header_fout_path is not None
+                                                                          else header_filepath, header_dir)))
                 hipified_header_filepath = HIPIFY_FINAL_RESULT[header_filepath].hipified_path
                 return templ.format(_to_unix_path(os.path.relpath(hipified_header_filepath if hipified_header_filepath is not None
                                                                   else header_filepath, header_dir)))
@@ -950,10 +942,6 @@ def preprocessor(
     # Perform Kernel Launch Replacements
     if not hip_clang_launch:
         output_source = processKernelLaunches(output_source, stats)
-
-    # Replace std:: with non-std:: versions
-    if (filepath.endswith((".cu", ".cuh"))) and "PowKernel" not in filepath:
-        output_source = replace_math_functions(output_source)
 
     # Include header if device code is contained.
     output_source = hip_header_magic(output_source)
@@ -1136,11 +1124,22 @@ def hipify(
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
 
+    # `preprocessor` normalizes each path with `_to_unix_path` before testing
+    # membership in `all_files`, and `matched_files_iter` already yields
+    # `_to_unix_path`-normalized entries. Normalize `extra_files` here too so the
+    # two forms can match; otherwise on Windows the backslash spelling never equals
+    # the forward-slash form tested later, the `extra_files` escape hatch is
+    # effectively dead, and the source is silently skipped (never hipified).
+    normalized_extra_files = []
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)
+        f = _to_unix_path(f)
+        normalized_extra_files.append(f)
         if f not in all_files_set:
             all_files.append(f)
+            all_files_set.add(f)
+    extra_files = normalized_extra_files
 
     # List all files in header_include_paths to ensure they are hipified
     from pathlib import Path
@@ -1150,9 +1149,9 @@ def hipify(
         else:
             header_include_dir_path = Path(os.path.join(output_directory, header_include_dir))
         all_files.extend(
-            str(path) for path in header_include_dir_path.rglob('*') if path.is_file()
-            and _fnmatch(str(path), includes)
-            and (not _fnmatch(str(path), ignores))
+            _to_unix_path(str(path)) for path in header_include_dir_path.rglob('*') if path.is_file()
+            and _fnmatch(_to_unix_path(str(path)), includes)
+            and (not _fnmatch(_to_unix_path(str(path)), ignores))
             and match_extensions(path.name, header_extensions)
         )
 

@@ -20,6 +20,7 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     find_free_port,
     IS_WINDOWS,
     munge_exc,
@@ -225,13 +226,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 199, in outmost_fn
+    -   File [file_path], line 200, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 202, in outer_fn
+    -   File [file_path], line 203, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 205, in fn
+    -   File [file_path], line 206, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 208, in inner
+    -   File [file_path], line 209, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -357,9 +358,7 @@ class LoggingTests(LoggingTestCase):
         except Exception:
             pass
         record = self.getRecord(records, "WON'T CONVERT")
-        self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            """\
+        expected = """\
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
@@ -373,7 +372,13 @@ torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",
+    output = output.add(torch.ones(10, 10))"""
+        expected = expectedIfCppFakeTensor(
+            expected.replace("FakeTensor(...", "tensor(..."), expected
+        )
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            expected,
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)

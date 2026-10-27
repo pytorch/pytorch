@@ -1908,7 +1908,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
     @requires_gpu_and_triton
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1997,7 +1996,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3393")
     @requires_gpu_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
@@ -2029,6 +2027,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # Save the AOT graphs
         aot_graphs = []
         from torch._inductor import compile_fx
+        from torch._inductor.utils import fresh_cache
 
         def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
             aot_graphs.append(graph)
@@ -2039,7 +2038,10 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         )
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        opt_fn(*args1).sum().backward()
+        # A warm FX-graph cache short-circuits inner_compile, leaving aot_graphs
+        # empty; use a fresh cache so the hook always runs.
+        with fresh_cache():
+            opt_fn(*args1).sum().backward()
 
         fwd_graph = aot_graphs[0]
         # Determine which fused attention backend is expected based on the
@@ -3995,6 +3997,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
+    alias = torch.ops.aten.alias.default(sin);  alias = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
