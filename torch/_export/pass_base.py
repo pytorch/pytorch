@@ -109,7 +109,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             def make_val(
                 x: Argument,
             ) -> (
-                FakeTensor
+                torch.Tensor
                 | torch.SymInt
                 | torch.SymFloat
                 | torch.SymBool
@@ -119,7 +119,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 | str
                 | None
             ):
-                if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                if is_fake_tensor(x):
                     return x
                 elif isinstance(x, torch.Tensor):
                     if x.is_quantized:
