@@ -378,7 +378,7 @@ dev = [
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 # License info:
 #   - The main Pytorch project license is BSD-3-Clause.
 #   - Explicit license-files list; audit in test/test_license.py (issue #183434).
@@ -465,6 +465,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
