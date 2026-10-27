@@ -755,8 +755,6 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
-  bool is_dropout = p_dropout > 0.0;
-
   auto q_dtype = q.dtype();
   TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
       "FlashAttention only support fp16 and bf16 data type");
@@ -870,17 +868,6 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
   constexpr bool uses_swa = false;
 #endif
 
-  at::PhiloxCudaState philox_args;
-  if (is_dropout) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None)
-    {
-      philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
-      philox_args = at::PhiloxCudaState(
-          philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
-    }
-  }
   if (max_seqlen_q > 0) {
     using sdp::aotriton_adapter::mk_input_aotensor;
     using sdp::aotriton_adapter::mk_output_aotensor;
