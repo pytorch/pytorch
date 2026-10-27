@@ -20,9 +20,9 @@
 #
 # Environment:
 #   LLVM_BOLT_VERSION          LLVM release to take llvm-bolt from (default
-#                              23.1.4). Releases before 23.1 mis-instrument
-#                              accesses to function-local thread_local
-#                              variables in shared libraries on AArch64.
+#                              21.1.8, the version the manywheel images build
+#                              in .ci/docker/common/install_llvm_tools.sh, so
+#                              the profiles match the BOLT that consumes them)
 #   LLVM_BOLT_HOME             use the llvm-bolt and merge-fdata of this LLVM
 #                              install instead of downloading a release
 #   BOLT_WORKLOAD_VARIANT      synthetic_workload.py --variant (default all)
@@ -39,7 +39,7 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-LLVM_BOLT_VERSION="${LLVM_BOLT_VERSION:-23.1.4}"
+LLVM_BOLT_VERSION="${LLVM_BOLT_VERSION:-21.1.8}"
 BOLT_WORKLOAD_VARIANT="${BOLT_WORKLOAD_VARIANT:-all}"
 BOLT_WORKLOAD_STEPS="${BOLT_WORKLOAD_STEPS:-20000}"
 BOLT_WORKLOAD_WARMUP="${BOLT_WORKLOAD_WARMUP:-50}"
@@ -144,14 +144,8 @@ else
     x86_64) llvm_arch=X64 ;;
     *) die "unsupported architecture: $(uname -m)" ;;
   esac
-  if command -v zstd > /dev/null; then
-    archive_ext=tar.zst
-    tar_decompress=--zstd
-  else
-    archive_ext=tar.xz
-    tar_decompress=--xz
-  fi
-  archive="LLVM-${LLVM_BOLT_VERSION}-Linux-${llvm_arch}.${archive_ext}"
+  # Every release ships .tar.xz; newer ones also ship .tar.zst.
+  archive="LLVM-${LLVM_BOLT_VERSION}-Linux-${llvm_arch}.tar.xz"
   url="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_BOLT_VERSION}/${archive}"
   log "Downloading ${url}"
   curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "${WORK_DIR}/${archive}" "${url}"
@@ -159,7 +153,7 @@ else
   mkdir -p "${LLVM_HOME}"
   # Only the BOLT tools and the instrumentation runtime are needed. llvm-bolt
   # looks the runtime up in ../lib relative to its own location.
-  tar -x "${tar_decompress}" -f "${WORK_DIR}/${archive}" -C "${LLVM_HOME}" \
+  tar -x --xz -f "${WORK_DIR}/${archive}" -C "${LLVM_HOME}" \
     --strip-components=1 --wildcards \
     '*/bin/llvm-bolt' '*/bin/merge-fdata' '*/lib/libbolt_rt_instr.a'
   rm -f "${WORK_DIR:?}/${archive}"

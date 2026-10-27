@@ -30,7 +30,7 @@ on:
         description: LLVM release that provides llvm-bolt and merge-fdata
         required: false
         type: string
-        default: "23.1.4"
+        default: "21.1.8"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -118,7 +118,7 @@ jobs:
         id: collect
         timeout-minutes: 330
         env:
-          LLVM_BOLT_VERSION: ${{ inputs.llvm-bolt-version || '23.1.4' }}
+          LLVM_BOLT_VERSION: ${{ inputs.llvm-bolt-version || '21.1.8' }}
           BOLT_WORKLOAD_VARIANT: ${{ inputs.workload-variant || 'all' }}
           BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '20000' }}
           # Leaves time for instrumentation, conversion and trial optimization.
