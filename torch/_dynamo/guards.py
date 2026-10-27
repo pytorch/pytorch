@@ -4179,17 +4179,14 @@ class GuardBuilder(GuardBuilderBase):
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-            elif torch._subclasses.fake_tensor.is_fake_tensor(value):
-                from torch._dynamo.output_graph import OutputGraph
-
-                if isinstance(self.check_fn_manager.output_graph, OutputGraph):
-                    pytype = type(self.get(guard))
-                else:
-                    # Rebuilding guards from serialized state: the source value
-                    # is the unpickled fake, which is a plain Tensor, so read
-                    # the Parameter marker instead.
-                    is_param = isinstance(value, torch.nn.Parameter)
-                    pytype = torch.nn.Parameter if is_param else torch.Tensor
+            elif (
+                torch._subclasses.fake_tensor.is_fake_tensor(value)
+                and pytype is torch.Tensor
+                and isinstance(value, torch.nn.Parameter)
+            ):
+                # A C++ fake Parameter can be a plain Tensor carrying the
+                # Parameter marker.
+                pytype = torch.nn.Parameter
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -5264,8 +5261,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
                 template_ctx = no_dispatch()
             elif is_fake:
-                is_param = isinstance(obj, torch.nn.Parameter)
-                pytype = torch.nn.Parameter if is_param else torch.Tensor
+                # As in TENSOR_MATCH, a C++ fake Parameter can be a plain Tensor
+                # carrying the Parameter marker.
+                if pytype is torch.Tensor and isinstance(obj, torch.nn.Parameter):
+                    pytype = torch.nn.Parameter
                 fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                 template_ctx = torch._C._ExcludeDispatchKeyGuard(fake_key)
             with template_ctx:
