@@ -23,43 +23,58 @@ section_notes:
   protected_codeownership:
     - "# Keep these rules last."
 ownership:
-  - labels: ["module: linear cross entropy"]
+  - name: linear_cross_entropy
+    labels: ["module: linear cross entropy"]
     owners: [pearu]
     section: python_nn_api
     paths:
       - /torch/nn/modules/linear_cross_entropy.py: [pearu]
-  - labels: ["module: dynamo"]
+  - name: dynamo
+    labels: ["module: dynamo"]
     owners: [alice, pytorch/dev-infra]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/
       - /torch/_dynamo/eval_frame.py: [alice, someone@example.com]
       - /torch/nn/dynamo_hooks.py: {section: python_nn_api}
-  - labels: ["module: dynamo", "module: tvm"]
+  - name: tvm_dynamo
+    labels: ["module: dynamo", "module: tvm"]
     owners: []
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/backends/tvm.py
-  - labels: ["module: nn"]
+  - name: nn
+    labels: ["module: nn"]
     owners: [bob]
     section: python_nn_api
     paths:
       - /torch/nn/: [bob]
-  - section: compiler_dynamo
+  - name: unowned_compiler_dynamo
+    section: compiler_dynamo
     paths:
       - /torch/_dynamo/unlabeled.py
-  - section: protected_codeownership
+  - name: unowned_protected_codeownership
+    section: protected_codeownership
     paths:
       - /CODEOWNERS: [albanD]
 """
 
 
+def render(ownership: str) -> str:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory, "OWNERSHIP.yaml")
+        path.write_text(ownership)
+        return render_codeowners(load_ownership(path))
+
+
 class TestGenerateCodeowners(TestCase):
+    def test_duplicate_names(self):
+        ownership = OWNERSHIP.replace("name: nn\n", "name: dynamo\n")
+        with self.assertRaisesRegex(ValueError, "duplicate OWNERSHIP.yaml names: dynamo"):
+            render(ownership)
+
     def test_render(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory, "OWNERSHIP.yaml")
-            path.write_text(OWNERSHIP)
-            text = render_codeowners(load_ownership(path))
+        text = render(OWNERSHIP)
         header, sections = text.split(SECTION_MARKER + "\n")
         self.assertIn("#     oncall: pt2: dynamo\n", header)
         self.assertIn("#   them until they exist): module: tvm\n", header)

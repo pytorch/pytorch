@@ -29,8 +29,10 @@ class PathRule:
 
 @dataclass(frozen=True)
 class LabelGroup:
-    """Paths owned together, identified by their label set (empty: not owned yet)."""
+    """Paths owned together under one label set (empty: not owned yet)."""
 
+    # Stable identifier, independent of label renames.
+    name: str
     labels: tuple[str, ...]
     owners: tuple[str, ...]
     paths: tuple[PathRule, ...]
@@ -56,6 +58,12 @@ def parse_path_rule(entry, *, section: str) -> PathRule:
 
 def load_ownership(path: Path) -> OwnershipFile:
     document = yaml.safe_load(path.read_text())
+    names = [entry.get("name") for entry in document["ownership"]]
+    if None in names:
+        raise ValueError("every OWNERSHIP.yaml entry needs a `name`")
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate OWNERSHIP.yaml names: {', '.join(duplicates)}")
     return OwnershipFile(
         oncall_queues={k: tuple(v) for k, v in document["oncall_queues"].items()},
         planned_labels=tuple(document["planned_labels"]),
@@ -63,6 +71,7 @@ def load_ownership(path: Path) -> OwnershipFile:
         section_notes={k: tuple(v) for k, v in document["section_notes"].items()},
         groups=tuple(
             LabelGroup(
+                name=entry["name"],
                 labels=tuple(entry.get("labels", ())),
                 owners=tuple(entry.get("owners", ())),
                 paths=tuple(
@@ -208,6 +217,22 @@ def render_codeowners(ownership: OwnershipFile) -> str:
     return "\n".join(lines) + "\n"
 
 
+def emit_lint_error(*, description: str, original: str | None, replacement: str | None) -> None:
+    """Emit a lintrunner message; with a replacement, `lintrunner -a` applies it."""
+    lint_message = {
+        "path": "CODEOWNERS",
+        "line": None,
+        "char": None,
+        "code": LINTER_CODE,
+        "severity": "error",
+        "name": "stale-codeowners",
+        "original": original,
+        "replacement": replacement,
+        "description": description,
+    }
+    print(json.dumps(lint_message), flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -222,27 +247,31 @@ def main() -> int:
             text=True,
         ).stdout.strip()
     )
+    try:
+        generated = render_codeowners(load_ownership(repo / "OWNERSHIP.yaml"))
+    except ValueError as error:
+        if args.lintrunner:
+            emit_lint_error(
+                description=f"OWNERSHIP.yaml is invalid: {error}",
+                original=None,
+                replacement=None,
+            )
+            return 0
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     codeowners = repo / "CODEOWNERS"
-    generated = render_codeowners(load_ownership(repo / "OWNERSHIP.yaml"))
     current = codeowners.read_text()
     if args.lintrunner:
         if current != generated:
-            lint_message = {
-                "path": "CODEOWNERS",
-                "line": None,
-                "char": None,
-                "code": LINTER_CODE,
-                "severity": "error",
-                "name": "stale-codeowners",
-                "original": current,
-                "replacement": generated,
-                "description": (
+            emit_lint_error(
+                description=(
                     "CODEOWNERS is generated from OWNERSHIP.yaml. Run "
                     "`python scripts/codeowners/generate_codeowners.py` or "
                     "`lintrunner -a` to regenerate it."
                 ),
-            }
-            print(json.dumps(lint_message), flush=True)
+                original=current,
+                replacement=generated,
+            )
         return 0
     if args.check:
         if current != generated:

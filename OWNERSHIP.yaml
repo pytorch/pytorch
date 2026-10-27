@@ -2,8 +2,10 @@
 #   python scripts/codeowners/generate_codeowners.py
 # or `lintrunner -a`; the CODEOWNERS_GENERATED lint fails until they match.
 #
-# Each entry under `ownership` is a label group, identified by its label set:
-# its owners and every path it owns, listed once.
+# Each entry under `ownership` is a label group: a `name`, its labels, its owners,
+# and every path it owns, listed once. The name is a stable identifier that
+# doesn't change when a label is renamed; it is the group's most specific label
+# followed by its other labels, or unowned_<section> for paths without labels.
 # Handles are written without the leading @. A path with handles is an active
 # CODEOWNERS rule (those handles get review requests); a bare path is a
 # commented rule. `section` is the CODEOWNERS section the group's paths are
@@ -78,7 +80,8 @@ section_notes:
     - "# Keep these rules last so they override broader patterns."
 
 ownership:
-  - labels: ["module: functorch"]
+  - name: functorch
+    labels: ["module: functorch"]
     owners: [Chillee, kshitij12345, zou3519]
     section: functorch
     paths:
@@ -90,12 +93,14 @@ ownership:
       - /torch/func/
       - /test/functorch/test_ops.py: [zou3519, chillee, kshitij12345]
       - /test/functorch/test_vmap.py: [zou3519, chillee, kshitij12345]
-  - labels: ["module: compiled autograd"]
+  - name: compiled_autograd
+    labels: ["module: compiled autograd"]
     owners: []
     section: compiler_autograd
     paths:
       - /test/compiled_autograd_skips/
-  - labels: ["module: aotdispatch"]
+  - name: aotdispatch
+    labels: ["module: aotdispatch"]
     owners: [aorenste, bdhirsh, Chillee, ezyang]
     section: compiler_autograd
     paths:
@@ -120,12 +125,14 @@ ownership:
       - /torch/_functorch/compilers.py
       - /torch/_functorch/partitioners.py
       - /torch/_functorch/_aot_autograd/*.py: [bdhirsh, aorenste]
-  - labels: ["module: aotdispatch", "module: complex"]
+  - name: complex_aotdispatch
+    labels: ["module: aotdispatch", "module: complex"]
     owners: [amjames, hameerabbasi]
     section: compiler_autograd
     paths:
       - /torch/_functorch/_aot_autograd/complex_decomposition.py: [hameerabbasi, amjames]
-  - labels: ["module: linear algebra"]
+  - name: linear_algebra
+    labels: ["module: linear algebra"]
     owners: [lezcano, nikitaved]
     section: core_aten_linalg
     paths:
@@ -152,14 +159,16 @@ ownership:
       - /torch/linalg/: [lezcano, nikitaved]
       - /aten/src/ATen/native/Distance.cpp
       - /aten/src/ATen/native/Distance.h
-  - labels: ["module: fft"]
+  - name: fft
+    labels: ["module: fft"]
     owners: []
     section: core_aten_linalg
     paths:
       - /aten/src/ATen/native/SpectralOps.cpp
       - /aten/src/ATen/native/SpectralOpsUtils.h
       - /test/test_spectral_ops.py
-  - labels: ["module: linear algebra", "module: floatx (formerly float8)"]
+  - name: floatx_linear_algebra
+    labels: ["module: linear algebra", "module: floatx (formerly float8)"]
     owners: [drisspg, slayton58]
     section: core_aten_linalg
     paths:
@@ -167,7 +176,8 @@ ownership:
       - /aten/src/ATen/native/ScaledBlasUtils.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.h
       - /test/test_scaled_matmul_cuda.py: [drisspg, slayton58]
-  - labels: ["module: sparse"]
+  - name: sparse
+    labels: ["module: sparse"]
     owners: [amjames, nikitaved, pearu]
     section: sparse
     paths:
@@ -206,14 +216,16 @@ ownership:
       - /aten/src/ATen/SparseCsrTensorUtils.h
       - /aten/src/ATen/SparseTensorImpl.cpp: [amjames, pearu, nikitaved]
       - /aten/src/ATen/SparseTensorImpl.h
-  - labels: ["module: mta"]
+  - name: mta
+    labels: ["module: mta"]
     owners: [janeyx99]
     section: core_aten_optimizers
     paths:
       - /aten/src/ATen/native/Foreach*: [janeyx99]
       - /torch/foreach/: [janeyx99]
       - /test/test_foreach.py: [janeyx99]
-  - labels: ["module: optimizer"]
+  - name: optimizer
+    labels: ["module: optimizer"]
     owners: [albanD, janeyx99]
     section: core_aten_optimizers
     paths:
@@ -222,7 +234,8 @@ ownership:
       - /torch/optim/: [albanD, janeyx99]
       - /test/optim/: [janeyx99]
       - /test/test_optim.py: [janeyx99]
-  - labels: ["module: autograd"]
+  - name: autograd
+    labels: ["module: autograd"]
     owners: [albanD, soulitzer]
     section: autograd
     paths:
@@ -233,7 +246,8 @@ ownership:
       - /test/autograd/: [soulitzer]
       - /test/test_autograd.py: [soulitzer]
       - /test/test_autograd_fallback.py: [soulitzer]
-  - labels: ["module: abi"]
+  - name: abi
+    labels: ["module: abi"]
     owners: [janeyx99]
     section: core_csrc_misc
     paths:
@@ -241,18 +255,21 @@ ownership:
       - /torch/csrc/stable/: [janeyx99]
       - /torch/header_only_apis.txt: {notify: [janeyx99], section: python_core_api}
       - /torch/headeronly/: {notify: [janeyx99], section: python_core_api}
-  - labels: ["module: lazy"]
+  - name: lazy
+    labels: ["module: lazy"]
     owners: []
     section: core_lazy_runtime
     paths:
       - /torch/csrc/lazy/
-  - labels: ["module: mtia"]
+  - name: mtia
+    labels: ["module: mtia"]
     owners: [egienvalue]
     section: backend_device_runtime
     paths:
       - /aten/src/ATen/detail/MTIAHooksInterface.h: [egienvalue]
       - /torch/csrc/mtia/: [egienvalue]
-  - labels: ["module: cuda"]
+  - name: cuda
+    labels: ["module: cuda"]
     owners: [Aidyn-A, eqy, syed-ahmed]
     section: backend_cuda
     paths:
@@ -272,7 +289,8 @@ ownership:
       - /torch/csrc/cuda/: [eqy, syed-ahmed, Aidyn-A]
       - /torch/cuda/: [eqy, syed-ahmed, Aidyn-A]
       - /c10/cuda/: [eqy, syed-ahmed, Aidyn-A]
-  - labels: ["module: cuda", "module: cublas"]
+  - name: cublas_cuda
+    labels: ["module: cuda", "module: cublas"]
     owners: [drisspg, slayton58]
     section: backend_cuda
     paths:
@@ -280,19 +298,22 @@ ownership:
       - /aten/src/ATen/native/cuda/GroupedBlas.cpp: [drisspg, slayton58]
       - /aten/src/ATen/cuda/CUDABlas.cpp: [drisspg, slayton58]
       - /aten/src/ATen/cuda/CUDABlas.h: [drisspg, slayton58]
-  - labels: ["module: cuda", "module: floatx (formerly float8)"]
+  - name: floatx_cuda
+    labels: ["module: cuda", "module: floatx (formerly float8)"]
     owners: [drisspg, slayton58]
     section: backend_cuda
     paths:
       - /aten/src/ATen/native/cuda/ScaledBlas.cpp: [drisspg, slayton58]
-  - labels: ["module: cuda", "module: cudnn"]
+  - name: cudnn_cuda
+    labels: ["module: cuda", "module: cudnn"]
     owners: [Aidyn-A, eqy, syed-ahmed]
     section: backend_cuda
     paths:
       - /torch/backends/cudnn/: [eqy, syed-ahmed, Aidyn-A]
       - /aten/src/ATen/native/cudnn/: [eqy, syed-ahmed, Aidyn-A]
       - /aten/src/ATen/cudnn/: [eqy, syed-ahmed, Aidyn-A]
-  - labels: ["module: mps"]
+  - name: mps
+    labels: ["module: mps"]
     owners: [Isalia20, malfet]
     section: backend_mps
     paths:
@@ -303,7 +324,8 @@ ownership:
       - /torch/backends/mps/
       - /torch/csrc/mps/
       - /torch/mps/
-  - labels: ["oncall: mobile"]
+  - name: mobile
+    labels: ["oncall: mobile"]
     owners: []
     section: mobile_delegates
     paths:
@@ -321,7 +343,8 @@ ownership:
       - /torch/backends/_nnapi/
       - /torch/backends/xnnpack/
       - /torch/csrc/jit/backends/
-  - labels: ["module: xpu"]
+  - name: xpu
+    labels: ["module: xpu"]
     owners: [EikanWang, gujinghui]
     section: backend_xpu
     paths:
@@ -333,7 +356,8 @@ ownership:
       - /torch/csrc/xpu/: [EikanWang, gujinghui]
       - /torch/xpu/: [EikanWang, gujinghui]
       - /aten/src/ATen/native/mkldnn/xpu/: [EikanWang, gujinghui]
-  - labels: ["module: rocm"]
+  - name: rocm
+    labels: ["module: rocm"]
     owners: [jeffdaily, jithunnair-amd]
     section: backend_rocm
     paths:
@@ -344,12 +368,14 @@ ownership:
       - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
       - /torch/utils/hipify/: {notify: [jeffdaily, jithunnair-amd], section: python_core_api}
       - /tools/amd_build/: {notify: [jeffdaily, jithunnair-amd], section: infra_developer_tools}
-  - labels: ["module: vulkan"]
+  - name: vulkan
+    labels: ["module: vulkan"]
     owners: []
     section: backend_vulkan
     paths:
       - /aten/src/ATen/native/vulkan/
-  - labels: ["module: dsl-native-ops"]
+  - name: dsl_native_ops
+    labels: ["module: dsl-native-ops"]
     owners: [drisspg, pearu, slayton58]
     section: python_core_api
     paths:
@@ -358,62 +384,73 @@ ownership:
       - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
       - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
       - /torch/nn/modules/linear_cross_entropy*.py: {notify: [slayton58, pearu], section: python_nn_api}
-  - labels: ["module: complex"]
+  - name: complex
+    labels: ["module: complex"]
     owners: [amjames, hameerabbasi]
     section: python_core_api
     paths:
       - /torch/_subclasses/complex_tensor/: [hameerabbasi, amjames]
       - /test/complex_tensor/: [hameerabbasi, amjames]
-  - labels: ["module: fakeTensor"]
+  - name: faketensor
+    labels: ["module: fakeTensor"]
     owners: [aorenste]
     section: python_core_api
     paths:
       - /torch/_subclasses/fake_tensor.py: [aorenste]
       - /torch/_subclasses/fake_utils.py: [aorenste]
-  - labels: ["module: pytree"]
+  - name: pytree
+    labels: ["module: pytree"]
     owners: [XuehaiPan]
     section: python_core_api
     paths:
       - /torch/utils/_pytree.py: [XuehaiPan]
       - /torch/utils/_cxx_pytree.py: [XuehaiPan]
-  - labels: ["module: nn"]
+  - name: nn
+    labels: ["module: nn"]
     owners: [albanD, jbschlosser]
     section: python_nn_api
     paths:
       - /torch/nn/: [albanD, jbschlosser]
-  - labels: ["module: nn", "module: nn.utils.parametrize"]
+  - name: nn_utils_parametrize
+    labels: ["module: nn", "module: nn.utils.parametrize"]
     owners: [lezcano]
     section: python_nn_api
     paths:
       - /torch/nn/utils/parametriz*.py: [lezcano]
-  - labels: ["module: flex attention"]
+  - name: flex_attention
+    labels: ["module: flex attention"]
     owners: [drisspg]
     section: python_nn_api
     paths:
       - /torch/nn/attention/flex_attention.py: [drisspg]
-  - labels: ["module: dataloader"]
+  - name: dataloader
+    labels: ["module: dataloader"]
     owners: [aelavender, divyanshk, ramanishsingh, scotts]
     section: python_data_api
     paths:
       - /torch/utils/data/: [divyanshk, ramanishsingh, scotts, aelavender]
-  - labels: ["module: masked operators"]
+  - name: masked_operators
+    labels: ["module: masked operators"]
     owners: []
     section: python_specialized_api
     paths:
       - /test/test_masked.py
       - /test/test_maskedtensor.py
       - /torch/masked/
-  - labels: ["module: tensorboard"]
+  - name: tensorboard
+    labels: ["module: tensorboard"]
     owners: []
     section: python_specialized_api
     paths:
       - /torch/utils/tensorboard/
-  - labels: ["module: sdpa"]
+  - name: sdpa
+    labels: ["module: sdpa"]
     owners: [liangel-02]
     section: python_api_tests
     paths:
       - /test/test_varlen_attention.py: [liangel-02]
-  - labels: ["oncall: jit"]
+  - name: jit
+    labels: ["oncall: jit"]
     owners: []
     section: jit_torchscript
     paths:
@@ -438,17 +475,20 @@ ownership:
       - /torch/csrc/jit/
       - /torch/jit/
       - /torch/csrc/jit/python/init.cpp
-  - labels: ["module: jiterator"]
+  - name: jiterator
+    labels: ["module: jiterator"]
     owners: []
     section: jit_torchscript
     paths:
       - /test/test_jiterator.py
-  - labels: ["module: cpp-extensions"]
+  - name: cpp_extensions
+    labels: ["module: cpp-extensions"]
     owners: [ezyang, fmassa, malfet]
     section: cpp_api_custom_ops
     paths:
       - /torch/utils/cpp_extension.py: [fmassa, ezyang, malfet]
-  - labels: ["module: onnx"]
+  - name: onnx
+    labels: ["module: onnx"]
     owners: [justinchuby, titaiwangms, xadupre]
     section: onnx_export
     paths:
@@ -457,7 +497,8 @@ ownership:
       - /torch/csrc/jit/passes/onnx.h: [titaiwangms, xadupre]
       - /torch/csrc/jit/passes/onnx.cpp: [titaiwangms, xadupre]
       - /torch/csrc/jit/passes/onnx/: [titaiwangms, xadupre]
-  - labels: ["oncall: quantization"]
+  - name: quantization
+    labels: ["oncall: quantization"]
     owners: [digantdesai, jerryzh168, jianyuh, salilsdesai]
     section: quantization
     paths:
@@ -477,7 +518,8 @@ ownership:
       - /aten/src/ATen/native/quantized/cuda/: [jerryzh168]
       - /aten/src/ATen/native/quantized/cudnn/: [jerryzh168]
       - /aten/src/ATen/native/ao_sparse/: [salilsdesai, digantdesai, jianyuh]
-  - labels: ["oncall: profiler"]
+  - name: profiler
+    labels: ["oncall: profiler"]
     owners: [ryanzhang22, scotts]
     section: profiler
     paths:
@@ -498,19 +540,22 @@ ownership:
       - /torch/csrc/autograd/profiler_python.h
       - /torch/csrc/profiler/: [scotts, ryanzhang22]
       - /torch/profiler/: [scotts, ryanzhang22]
-  - labels: ["module: android"]
+  - name: android
+    labels: ["module: android"]
     owners: []
     section: mobile_android
     paths:
       - /android/
       - /test/mobile/custom_build/
-  - labels: ["module: ci"]
+  - name: ci
+    labels: ["module: ci"]
     owners: [pytorch/pytorch-dev-infra]
     section: infra_ci
     paths:
       - /.ci/: [pytorch/pytorch-dev-infra]
       - /.github/: {notify: [pytorch/pytorch-dev-infra], section: infra_github_automation}
-  - labels: ["module: ci", "module: rocm"]
+  - name: rocm_ci
+    labels: ["module: ci", "module: rocm"]
     owners: [jeffdaily]
     section: infra_ci
     paths:
@@ -518,17 +563,20 @@ ownership:
       - /.ci/docker/common/install_roc*.sh: [jeffdaily]
       - /.ci/docker/common/install_amdsmi.sh: [jeffdaily]
       - /.ci/docker/ci_commit_pins/rocm-*.txt: [jeffdaily]
-  - labels: ["module: ci", "module: inductor"]
+  - name: inductor_ci
+    labels: ["module: ci", "module: inductor"]
     owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony]
     section: infra_ci
     paths:
       - /.ci/docker/ci_commit_pins/triton.txt: [desertfire, Chillee, eellison, jeffdaily, jataylo, jithunnair-amd, pruthvistony]
-  - labels: ["module: ci", "module: xpu"]
+  - name: xpu_ci
+    labels: ["module: ci", "module: xpu"]
     owners: [EikanWang, gujinghui]
     section: infra_ci
     paths:
       - /.ci/docker/ci_commit_pins/triton-xpu.txt: [EikanWang, gujinghui]
-  - labels: ["module: build"]
+  - name: build
+    labels: ["module: build"]
     owners: []
     section: infra_build_packaging
     paths:
@@ -563,7 +611,8 @@ ownership:
       - /ubsan.supp
       - /ufunc_defs.bzl
       - /version.txt
-  - labels: ["module: third_party"]
+  - name: third_party
+    labels: ["module: third_party"]
     owners: []
     section: third_party_backend_deps
     paths:
@@ -593,12 +642,14 @@ ownership:
       - /third_party/miniz-3.0.2/: {section: third_party_serialization_schema}
       - /third_party/onnx: {section: third_party_serialization_schema}
       - /third_party/protobuf: {section: third_party_serialization_schema}
-  - labels: ["module: third_party", "module: xpu"]
+  - name: xpu_third_party
+    labels: ["module: third_party", "module: xpu"]
     owners: [EikanWang, gujinghui]
     section: third_party_backend_deps
     paths:
       - /third_party/xpu.txt: [EikanWang, gujinghui]
-  - labels: ["module: benchmark"]
+  - name: benchmark
+    labels: ["module: benchmark"]
     owners: []
     section: benchmark_operator_runtime
     paths:
@@ -621,7 +672,8 @@ ownership:
       - /benchmarks/inference/: {section: benchmark_models}
       - /benchmarks/nested/: {section: benchmark_models}
       - /benchmarks/transformer/: {section: benchmark_models}
-  - labels: ["oncall: distributed"]
+  - name: distributed
+    labels: ["oncall: distributed"]
     owners: []
     section: distributed
     paths:
@@ -629,18 +681,21 @@ ownership:
       - /test/distributed/
       - /torch/csrc/distributed/
       - /torch/distributed/
-  - labels: ["oncall: distributed", "module: optimizer"]
+  - name: optimizer_distributed
+    labels: ["oncall: distributed", "module: optimizer"]
     owners: [weifengpy]
     section: distributed
     paths:
       - /torch/distributed/optim/: [weifengpy]
-  - labels: ["module: tensorpipe"]
+  - name: tensorpipe
+    labels: ["module: tensorpipe"]
     owners: [jiayisuse, lw]
     section: distributed
     paths:
       - /torch/csrc/distributed/rpc/tensorpipe_agent.cpp: [jiayisuse, lw]
       - /torch/csrc/distributed/rpc/tensorpipe_agent.h: [jiayisuse, lw]
-  - labels: ["module: c10d"]
+  - name: c10d
+    labels: ["module: c10d"]
     owners: [d4l3k, fduwjj, kapilsh, kwen2501]
     section: distributed
     paths:
@@ -649,7 +704,8 @@ ownership:
       - /torch/csrc/distributed/c10d/Backend.*: [kwen2501]
       - /torch/csrc/distributed/c10d/Ops.*: [kwen2501]
       - /torch/distributed/distributed_c10d.py: [d4l3k, fduwjj, kapilsh]
-  - labels: ["module: fsdp"]
+  - name: fsdp
+    labels: ["module: fsdp"]
     owners: [weifengpy]
     section: distributed
     paths:
@@ -657,20 +713,23 @@ ownership:
       - /torch/distributed/_composable/fsdp/: [weifengpy]
       - /torch/distributed/_composable/replicate_with_fsdp.py: [weifengpy]
       - /torch/distributed/fsdp/: [weifengpy]
-  - labels: ["module: ddp"]
+  - name: ddp
+    labels: ["module: ddp"]
     owners: [weifengpy]
     section: distributed
     paths:
       - /torch/distributed/_composable/replicate.py: [weifengpy]
       - /torch/nn/parallel/: [weifengpy]
-  - labels: ["module: dtensor"]
+  - name: dtensor
+    labels: ["module: dtensor"]
     owners: [weifengpy]
     section: distributed
     paths:
       - /torch/distributed/tensor/placement_types.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
-  - labels: ["module: lint"]
+  - name: lint
+    labels: ["module: lint"]
     owners: []
     section: infra_linting
     paths:
@@ -696,17 +755,20 @@ ownership:
       - /scripts/lint_xrefs.sh
       - /scripts/lintrunner.py
       - /tools/linter/
-  - labels: ["module: codegen", "module: autograd"]
+  - name: autograd_codegen
+    labels: ["module: codegen", "module: autograd"]
     owners: [albanD, soulitzer]
     section: infra_codegen
     paths:
       - /tools/autograd/: [albanD, soulitzer]
-  - labels: ["module: codegen"]
+  - name: codegen
+    labels: ["module: codegen"]
     owners: []
     section: infra_codegen
     paths:
       - /torchgen/
-  - labels: ["module: testing"]
+  - name: testing
+    labels: ["module: testing"]
     owners: [pytorch/pytorch-dev-infra]
     section: infra_test
     paths:
@@ -714,12 +776,14 @@ ownership:
       - /torch/testing/_internal/common_methods_invocations.py
       - /torch/testing/_internal/common_device_type.py
       - /test/run_test.py: [pytorch/pytorch-dev-infra]
-  - labels: ["module: testing", "module: higher order operators"]
+  - name: higher_order_operators_testing
+    labels: ["module: testing", "module: higher order operators"]
     owners: [aorenste, bohnstingl, tugsbayasgalan, ydwu4]
     section: infra_test
     paths:
       - /torch/testing/_internal/hop_db.py: [tugsbayasgalan, ydwu4, aorenste, bohnstingl]
-  - labels: ["module: serialization"]
+  - name: serialization
+    labels: ["module: serialization"]
     owners: []
     section: serialization_package
     paths:
@@ -727,14 +791,16 @@ ownership:
       - /caffe2/serialize/
       - /test/test_serialization.py
       - /torch/serialization.py
-  - labels: ["module: package/deploy"]
+  - name: package_deploy
+    labels: ["module: package/deploy"]
     owners: []
     section: serialization_package
     paths:
       - /test/package/
       - /test/test_package.py
       - /torch/package/
-  - labels: ["oncall: export"]
+  - name: export
+    labels: ["oncall: export"]
     owners: [angelayi, avikchaudhuri, SherlockNoMad, tugsbayasgalan, ydwu4, zhxchen17]
     section: compiler_export_fx
     paths:
@@ -742,7 +808,8 @@ ownership:
       - /torch/_export/: [avikchaudhuri, tugsbayasgalan, zhxchen17, ydwu4, angelayi]
       - /torch/export/: [avikchaudhuri, tugsbayasgalan, zhxchen17, ydwu4, angelayi]
       - /torch/_export/serde/schema.py: [SherlockNoMad, zhxchen17]
-  - labels: ["module: fx"]
+  - name: fx
+    labels: ["module: fx"]
     owners: [zou3519]
     section: compiler_export_fx
     paths:
@@ -755,26 +822,30 @@ ownership:
       - /test/test_fx_reinplace_pass.py
       - /torch/fx/
       - /torch/fx/proxy.py: [zou3519]
-  - labels: ["module: higher order operators"]
+  - name: higher_order_operators
+    labels: ["module: higher order operators"]
     owners: [aorenste, bohnstingl]
     section: compiler_export_fx
     paths:
       - /test/higher_order_ops/
       - /torch/_higher_order_ops/: [aorenste, bohnstingl]
       - /test/test_hop_infra.py: [aorenste, bohnstingl]
-  - labels: ["module: dynamic shapes"]
+  - name: dynamic_shapes
+    labels: ["module: dynamic shapes"]
     owners: [laithsakka]
     section: compiler_export_fx
     paths:
       - /torch/fx/experimental/symbolic_shapes.py: [laithsakka]
       - /torch/fx/experimental/sym_node.py: [laithsakka]
       - /torch/fx/experimental/recording.py: [laithsakka]
-  - labels: ["module: ProxyTensor"]
+  - name: proxytensor
+    labels: ["module: ProxyTensor"]
     owners: [aorenste]
     section: compiler_export_fx
     paths:
       - /torch/fx/experimental/proxy_tensor.py: [aorenste]
-  - labels: ["module: dynamo"]
+  - name: dynamo
+    labels: ["module: dynamo"]
     owners: []
     section: compiler_dynamo
     paths:
@@ -787,32 +858,38 @@ ownership:
       - /test/test_cpython_diff_sync.py
       - /torch/_dynamo/
       - /torch/csrc/dynamo/
-  - labels: ["module: dynamo", "module: tvm"]
+  - name: tvm_dynamo
+    labels: ["module: dynamo", "module: tvm"]
     owners: [guan404ming]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/backends/tvm.py: [guan404ming]
-  - labels: ["module: dynamo", "module: complex"]
+  - name: complex_dynamo
+    labels: ["module: dynamo", "module: complex"]
     owners: [amjames, hameerabbasi]
     section: compiler_dynamo
     paths:
       - /test/dynamo/test_complex.py: [hameerabbasi, amjames]
-  - labels: ["module: dynamo", "module: onnx"]
+  - name: onnx_dynamo
+    labels: ["module: dynamo", "module: onnx"]
     owners: [justinchuby, titaiwangms, xadupre]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/backends/onnxrt.py: [titaiwangms, xadupre, justinchuby]
-  - labels: ["module: dynamo", "module: higher order operators"]
+  - name: higher_order_operators_dynamo
+    labels: ["module: dynamo", "module: higher order operators"]
     owners: [aorenste, bohnstingl]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/variables/higher_order_ops.py: [aorenste, bohnstingl]
-  - labels: ["module: dynamo", "module: pytree"]
+  - name: pytree_dynamo
+    labels: ["module: dynamo", "module: pytree"]
     owners: [XuehaiPan]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/polyfills/pytree.py: [XuehaiPan]
-  - labels: ["module: inductor"]
+  - name: inductor
+    labels: ["module: inductor"]
     owners: []
     section: compiler_inductor
     paths:
@@ -828,7 +905,8 @@ ownership:
       - /torch/_precompile_driver.py
       - /torch/csrc/inductor/
       - /torch/utils/_indented_buffer.py
-  - labels: ["module: inductor", "module: flex attention"]
+  - name: flex_attention_inductor
+    labels: ["module: inductor", "module: flex attention"]
     owners: [drisspg]
     section: compiler_inductor
     paths:
@@ -837,7 +915,8 @@ ownership:
       - /torch/_inductor/codegen/cpp_flex_attention_template.py: [drisspg]
       - /test/inductor/test_flex_attention.py: [drisspg]
       - /test/inductor/test_flex_decoding.py: [drisspg]
-  - labels: ["module: nativert"]
+  - name: nativert
+    labels: ["module: nativert"]
     owners: []
     section: nativert
     paths:
@@ -845,33 +924,39 @@ ownership:
       - /test/export/test_nativert.py
       - /torch/csrc/api/include/torch/nativert/
       - /torch/nativert/
-  - labels: ["module: docs"]
+  - name: docs
+    labels: ["module: docs"]
     owners: [albanD]
     section: docs_general
     paths:
       - /docs/
       - /docs/source/conf.py: [albanD]
-  - labels: ["oncall: distributed infra", "module: docs"]
+  - name: docs_distributed_infra
+    labels: ["oncall: distributed infra", "module: docs"]
     owners: [d4l3k, kapilsh]
     section: docs_general
     paths:
       - /docs/source/distributed*: [d4l3k, kapilsh]
-  - labels: ["module: docs", "module: higher order operators"]
+  - name: higher_order_operators_docs
+    labels: ["module: docs", "module: higher order operators"]
     owners: [bohnstingl]
     section: docs_general
     paths:
       - /docs/source/higher_order_ops/: [bohnstingl]
-  - labels: ["module: docs", "module: xpu"]
+  - name: xpu_docs
+    labels: ["module: docs", "module: xpu"]
     owners: [EikanWang, gujinghui]
     section: docs_general
     paths:
       - /docs/source/notes/get_start_xpu.md: [EikanWang, gujinghui]
 
   # Paths without a label group yet, by CODEOWNERS section.
-  - section: core_aten_native_ops
+  - name: unowned_core_aten_native_ops
+    section: core_aten_native_ops
     paths:
       - /aten/
-  - section: core_aten_runtime
+  - name: unowned_core_aten_runtime
+    section: core_aten_runtime
     paths:
       - /aten/CMakeLists.txt
       - /aten/src/ATen/.gitignore
@@ -1035,10 +1120,12 @@ ownership:
       - /aten/src/README.md
       - /aten/src/THC/
       - /aten/tools/
-  - section: core_c10_dispatch
+  - name: unowned_core_c10_dispatch
+    section: core_c10_dispatch
     paths:
       - /c10/
-  - section: core_csrc_misc
+  - name: unowned_core_csrc_misc
+    section: core_csrc_misc
     paths:
       - /torch/csrc/CudaIPCTypes.cpp
       - /torch/csrc/CudaIPCTypes.h
@@ -1118,7 +1205,8 @@ ownership:
       - /torch/csrc/utils.cpp
       - /torch/csrc/utils.h
       - /torch/csrc/utils/
-  - section: core_tests
+  - name: unowned_core_tests
+    section: core_tests
     paths:
       - /test/HowToWriteTestsUsingFileCheck.md
       - /test/allowlist_for_publicAPI.json: [albanD]
@@ -1303,11 +1391,13 @@ ownership:
       - /test/test_view_ops.py
       - /test/test_weak.py
       - /test/forward_backward_compatibility/check_forward_backward_compatibility.py: [larryliu0820]
-  - section: backend_device_runtime
+  - name: unowned_backend_device_runtime
+    section: backend_device_runtime
     paths:
       - /test/custom_backend/
       - /torch/backends/
-  - section: python_core_api
+  - name: unowned_python_core_api
+    section: python_core_api
     paths:
       - /torch/CMakeLists.txt
       - /torch/_C/
@@ -1382,7 +1472,8 @@ ownership:
       - /torch/types.py
       - /torch/utils/
       - /torch/_vendor/quack/: [slayton58, drisspg]
-  - section: python_api_tests
+  - name: unowned_python_api_tests
+    section: python_api_tests
     paths:
       - /test/cpython/
       - /test/distributions/
@@ -1397,12 +1488,14 @@ ownership:
       - /test/torch_np/
       - /test/typing/
       - /test/xpu/test_transformers.py
-  - section: cpp_runtime_tests
+  - name: unowned_cpp_runtime_tests
+    section: cpp_runtime_tests
     paths:
       - /test/cpp/
       - /test/cpp_api_parity/
       - /test/test_cpp_api_parity.py
-  - section: cpp_api_custom_ops
+  - name: unowned_cpp_api_custom_ops
+    section: cpp_api_custom_ops
     paths:
       - /aten/src/ATen/native/native_functions.yaml
       - /aten/src/ATen/native/prim_native_functions.cpp
@@ -1436,7 +1529,8 @@ ownership:
       - /torch/library.h
       - /torch/library.py
       - /torch/utils/_cpp_extension_versioner.py
-  - section: infra_developer_tools
+  - name: unowned_infra_developer_tools
+    section: infra_developer_tools
     paths:
       - /.devcontainer/
       - /.vscode/
@@ -1446,7 +1540,8 @@ ownership:
       - /binaries/
       - /scripts/
       - /tools/
-  - section: infra_test
+  - name: unowned_infra_test
+    section: infra_test
     paths:
       - /test/benchmark_utils/
       - /test/junit_xml_testdata/
@@ -1465,15 +1560,18 @@ ownership:
       - /torch/_logging/
       - /torch/testing/
       - /torch/utils/benchmark/
-  - section: caffe2
+  - name: unowned_caffe2
+    section: caffe2
     paths:
       - /caffe2/
-  - section: compiler_export_fx
+  - name: unowned_compiler_export_fx
+    section: compiler_export_fx
     paths:
       - /test/onnx/exporter/test_exportable_module.py
       - /test/onnx/test_fx_type_promotion.py
       - /test/package/package_bc/test_fx_module.pt
-  - section: ai_agent_tooling
+  - name: unowned_ai_agent_tooling
+    section: ai_agent_tooling
     paths:
       - /.agents/
       - /.claude/
@@ -1488,7 +1586,8 @@ ownership:
       - /AI_POLICY.md
       - /CLAUDE.md
       - /torch/_dynamo/CLAUDE.md
-  - section: docs_general
+  - name: unowned_docs_general
+    section: docs_general
     paths:
       - /CITATION.cff
       - /CODE_OF_CONDUCT.md
@@ -1499,7 +1598,8 @@ ownership:
       - /README.md
       - /RELEASE.md
       - /SECURITY.md
-  - section: protected_codeownership
+  - name: unowned_protected_codeownership
+    section: protected_codeownership
     paths:
       - /CODEOWNERS: [albanD, malfet]
       - /OWNERSHIP.yaml: [albanD, malfet]
