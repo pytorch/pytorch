@@ -16,7 +16,11 @@ def _get_collective_info(node):
         is_reduce_scatter_tensor,
     )
     from torch._inductor.fx_passes.overlap_scheduling import get_group_name
+    from torch._inductor.utils import get_collective_config
 
+    # symm_mem replacements can't carry a collective config.
+    if get_collective_config(node) is not None:
+        return None
     if is_all_gather_into_tensor(node):
         return True, get_group_name(node)
     if is_reduce_scatter_tensor(node):
@@ -148,8 +152,13 @@ def _has_multicast_support(device_index: int) -> bool:
         from torch._C._autograd import DeviceType
         from torch._C._distributed_c10d import _SymmetricMemory
 
+        acc = torch.accelerator.current_accelerator(True)
+        if acc is None:
+            return False
         return bool(
-            _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index)
+            _SymmetricMemory.has_multicast_support(
+                getattr(DeviceType, acc.type.upper()), device_index
+            )
         )
     except Exception:
         return False
@@ -165,10 +174,15 @@ def _select_low_contention_all_gather_target(
 
     device_index = None
     input_val = input_node.meta.get("val")
-    if isinstance(input_val, torch.Tensor) and input_val.device.type == "cuda":
+    acc = torch.accelerator.current_accelerator()
+    if (
+        isinstance(input_val, torch.Tensor)
+        and acc is not None
+        and input_val.device.type == acc.type
+    ):
         device_index = input_val.device.index
     if device_index is None:
-        device_index = torch.cuda.current_device()
+        device_index = torch.accelerator.current_device_index()
 
     if _has_multicast_support(device_index):
         return symm_mem._low_contention_all_gather_ce_multicast.default

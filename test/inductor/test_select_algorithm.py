@@ -1846,7 +1846,9 @@ class TestTemplateRender(TestCase):
                 )
                 # Allow prologue fusion on input B (sigmoid(b) can be
                 # absorbed so the template reads b directly)
-                self.allowed_prologue_inps = OrderedSet([inputs[1].get_name()])
+                self.load_input_fusion_allowed_inputs = OrderedSet(
+                    [inputs[1].get_name()]
+                )
                 self.epilogue_fusable_outputs = {self.name: "result"}
 
             def _render(self, kernel):
