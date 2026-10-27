@@ -136,6 +136,19 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         self.assertEqual(mesh_group.group_desc, "mesh_dim_0")
         self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
 
+    @skip_if_lt_x_gpu(4)
+    @with_comms(eager_init=True)
+    def test_device_mesh_preserve_rank_order_eager(self):
+        # with_comms does not bind Gloo to the accelerator device.
+        torch.accelerator.set_device_index(self.rank)
+        _get_default_group().bound_device_id = torch.device(self.device_type, self.rank)
+        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
+        group = DeviceMesh(self.device_type, mesh_tensor).get_group(1)
+        global_ranks = [get_global_rank(group, i) for i in range(get_world_size(group))]
+        for ranks in mesh_tensor:
+            if self.rank in ranks:
+                self.assertEqual(global_ranks, sorted(ranks.tolist()))
+
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
     @property
@@ -237,6 +250,45 @@ class DeviceMeshTest(DTensorTestBase):
             curr_device = torch.cuda.current_device()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
+
+    @with_comms(eager_init=True)
+    def test_device_mesh_preserve_rank_order_eager(self):
+        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
+        dim_ranks = mesh_tensor
+
+        default_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        default_group = default_mesh.get_group(1)
+        default_global_ranks = [
+            get_global_rank(default_group, i)
+            for i in range(get_world_size(default_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                self.assertEqual(default_global_ranks, sorted(ranks.tolist()))
+
+        ordered_mesh = DeviceMesh(
+            self.device_type, mesh_tensor, preserve_rank_order=True
+        )
+        ordered_group = ordered_mesh.get_group(1)
+        ordered_global_ranks = [
+            get_global_rank(ordered_group, i)
+            for i in range(get_world_size(ordered_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                self.assertEqual(ordered_global_ranks, ranks.tolist())
+        self.assertEqual(
+            ordered_mesh.get_local_rank(1), ordered_mesh.get_coordinate()[1]
+        )
+
+    @with_comms(eager_init=True, backend="nccl-legacy")
+    def test_device_mesh_preserve_rank_order_eager_nccl_legacy(self):
+        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
+        group = DeviceMesh(self.device_type, mesh_tensor).get_group(1)
+        global_ranks = [get_global_rank(group, i) for i in range(get_world_size(group))]
+        for ranks in mesh_tensor:
+            if self.rank in ranks:
+                self.assertEqual(global_ranks, sorted(ranks.tolist()))
 
     @with_comms()
     def test_get_group_and_get_all_groups(self):
