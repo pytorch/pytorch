@@ -128,6 +128,12 @@ class TriageWorkflowContract(unittest.TestCase):
         agent = step(PLAN, lambda s: s.get("uses") == "./.github/actions/pi-agent")
         self.assertLessEqual(set(agent["with"]["tools"].split(",")), READ_ONLY_TOOLS)
 
+    def test_metrics_are_best_effort_but_model_failures_block_apply(self):
+        metrics = step(PLAN, lambda s: "upload-claude-usage" in s.get("uses", ""))
+        self.assertIs(metrics.get("continue-on-error"), True)
+        agent = step(PLAN, lambda s: s.get("uses") == "./.github/actions/pi-agent")
+        self.assertFalse(agent.get("continue-on-error", False))
+
     def test_model_credentials_are_short_lived(self):
         aws = step(PLAN, lambda s: "configure-aws-credentials" in s.get("uses", ""))
         self.assertEqual(aws["with"]["role-duration-seconds"], 900)
