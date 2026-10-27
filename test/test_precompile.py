@@ -7818,6 +7818,38 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertIsNone(saved.kernel.inductor_meta["combo_tuning_groups"])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_keeps_a_kernel_frozen_untuned_untuned(self):
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
+
+        never_run = _never_run(_static_runtime_kernel(32))
+        never_run.inductor_meta["coordinate_descent_tuning"] = True
+        never_run._should_coordesc_tune = True
+        payload, report = _freeze_triton_kernel(
+            "source", [never_run], require_tuned_backward=False
+        )
+        self.assertIsNotNone(report)
+        # A later capture in this process runs the kernel loaded from that record,
+        # whose one static launcher looks tuned.
+        loaded = _static_runtime_kernel(32)
+        loaded.inductor_meta = pickle.loads(payload).kernel.inductor_meta
+        loaded.is_backward, loaded._forward_use = True, False
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
+            _freeze_triton_kernel("source", [loaded], require_tuned_backward=True)
+        source = failure.exception.sources[0]
+        self.assertEqual([r["reason"] for r in source["instances"]], ["frozen_untuned"])
+        self.assertTrue(source["untuned_backward_eligible"])
+        payload, report = _freeze_triton_kernel(
+            "source", [loaded], require_tuned_backward=False
+        )
+        self.assertEqual(report["source_key"], "source")
+        self.assertTrue(
+            pickle.loads(payload).kernel.inductor_meta["precompile_frozen_untuned"]
+        )
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_refuses_untuned_when_an_instance_ran(self):
         from torch.compiler._runtime_cache import (
             _freeze_triton_kernel,
@@ -9980,6 +10012,27 @@ class TestPrecompileCustomOpModules(TestCase):
         if fake:
             op.register_fake(fake_body)
         return op
+
+    def test_guard_op_names_read_the_guard_state_without_importing(self):
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._precompile import _guard_op_names
+
+        ns = f"precompile_guard_ops_{uuid.uuid4().hex}"
+        held, by_def, _ = (self._define_op(ns, n) for n in ("held", "by_def", "source"))
+        # A module only the capturing process can import by that name.
+        name = f"precompile_nowhere_{uuid.uuid4().hex}"
+        module = types.ModuleType(name)
+        buf = io.BytesIO()
+        with mock.patch.dict(sys.modules, {name: module}):
+            state = [module, {"op": held._opoverload}, by_def]
+            GuardsStatePickler({}, {}, {}, {}, buf).dump(state)
+        frames = [{"variants": [{"guards_state": buf.getvalue()}]}]
+        kept = [("BUILTIN_MATCH", f"G['torch'].ops.{ns}.source")]
+        self.assertEqual(
+            _guard_op_names(frames, kept),
+            {f"{ns}::{n}" for n in ("held", "by_def", "source")},
+        )
+        self.assertNotIn(name, sys.modules)
 
     def test_custom_op_names_cover_higher_order_args_subgraphs_and_packets(self):
         from torch._precompile import _op_names

@@ -2076,16 +2076,73 @@ def _backend_op_names(
     return names | eager_names, eager_names
 
 
-# A guard on an operator names it by its source, e.g. G['torch'].ops.ns.op.
+# A guard can name an operator by the source load evaluates, e.g. G['torch'].ops.ns.op.
 _GUARDED_OP = re.compile(r"(?:\.ops|\['ops'\])\.(\w+)\.(\w+)")
 
 
-def _guard_op_names(guards: Iterable[tuple[str, str]]) -> set[str]:
-    """The ``ns::op`` names of the operators the kept ``(guard type, source)``
-    ``guards`` name, which ``load`` looks up as it rebuilds them, whether or not a
-    backend still calls them (Inductor lowers away a triton_op or an op with a
-    lowering)."""
-    return {f"{ns}::{op}" for _, name in guards for ns, op in _GUARDED_OP.findall(name)}
+class _Placeholder:
+    """What :func:`_guard_op_names` rebuilds every other object of a guard state as."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def __call__(self, *args: object, **kwargs: object) -> _Placeholder:
+        return _Placeholder()
+
+    def __setstate__(self, state: object) -> None:
+        pass
+
+    def __setitem__(self, key: object, value: object) -> None:
+        pass
+
+    def append(self, item: object) -> None:
+        pass
+
+    extend = add = append
+
+
+def _guard_op_names(
+    frames: list[dict[str, Any]], kept_guards: Iterable[tuple[str, str]]
+) -> set[str]:
+    """The ``ns::op`` names of the operators the frames' guards need, which ``load``
+    looks up whether or not a backend still calls them (Inductor lowers away a
+    triton_op or an op with a lowering): those a kept ``(guard type, source)``
+    names, and the operators and custom ops the guard state holds, which ``load``
+    unpickles. The state is read without running any other reduction, so it
+    imports no module, such as one only the serving process can import."""
+    from torch._dynamo.guards import GuardsStatePickler
+    from torch._dynamo.package import _GuardsStateUnpickler
+
+    names = {
+        f"{ns}::{op}" for _, name in kept_guards for ns, op in _GUARDED_OP.findall(name)
+    }
+
+    def record(name: str) -> _Placeholder:
+        names.add(name)
+        return _Placeholder()
+
+    recorded: dict[str, Callable[..., _Placeholder]] = {
+        "_unpickle_op": lambda ns, op, overload: record(_op_name(ns, op, overload)),
+        "_unpickle_custom_op_def": record,
+    }
+
+    def reduction(owner: object, name: str) -> object:
+        if owner is GuardsStatePickler and name in recorded:
+            return recorded[name]
+        return _Placeholder
+
+    class Scanner(_GuardsStateUnpickler):
+        def find_class(self, module: str, name: str) -> object:
+            if (module, name) == ("builtins", "getattr"):
+                return reduction
+            if (module, name) == (GuardsStatePickler.__module__, "GuardsStatePickler"):
+                return GuardsStatePickler
+            return _Placeholder
+
+    for frame in frames:
+        for variant in frame["variants"]:
+            Scanner(io.BytesIO(variant["guards_state"])).load()
+    return names
 
 
 def _custom_op_modules(
@@ -2659,7 +2716,7 @@ def _build_multigraph_python_source(
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
     op_names, eager_op_names = _backend_op_names(backends)
-    op_names |= _guard_op_names(summary.kept_guards)
+    op_names |= _guard_op_names(frames, summary.kept_guards)
     _write_custom_op_imports(
         buf,
         op_names,
