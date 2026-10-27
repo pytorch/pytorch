@@ -121,6 +121,7 @@ from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
+    is_fake_tensor,
     maybe_get_fake_dispatch_keys,
 )
 from torch._subclasses.meta_utils import safe_grad
@@ -5224,10 +5225,6 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
-            pytype = type(obj)
             # _dispatch_keys() on a fake reports the Python and
             # PythonTLSSnapshot keys of the fake itself; the converter may
             # have recorded the real tensor's keys (from_meta_and_device
@@ -5235,7 +5232,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = torch._subclasses.fake_tensor.is_fake_tensor(obj)
+            is_fake = is_fake_tensor(obj)
+            # For FakeTensors, use pytype if set, otherwise default to
+            # torch.Tensor. This is important for cross-compilation where
+            # we compile with fake tensors but run with real tensors.
+            pytype = type(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
