@@ -62,6 +62,9 @@ except ImportError:
 
 TEST_NCCL4PY = HAS_NCCL_COLL_CONFIG and not torch.version.hip
 requires_nccl4py = unittest.skipUnless(TEST_NCCL4PY, "requires nccl4py 0.5+ and CUDA")
+requires_nccl4py_on_cuda = unittest.skipUnless(
+    HAS_NCCL_COLL_CONFIG or torch.version.hip, "requires nccl4py 0.5+ on CUDA"
+)
 
 
 def coll_config(**kwargs):
@@ -825,9 +828,7 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
 
 
 @instantiate_parametrized_tests
-@unittest.skipUnless(
-    HAS_NCCL_COLL_CONFIG or torch.version.hip, "requires nccl4py 0.5+ on CUDA"
-)
+@requires_nccl4py_on_cuda
 class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     def _collective(self, op, config, async_op=True, group=None):
         size = self.world_size
@@ -1070,9 +1071,7 @@ class ProcessGroupNCCL2CollectiveConfigNonblockingTest(
 
 
 @instantiate_parametrized_tests
-@unittest.skipUnless(
-    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
-)
+@requires_nccl4py_on_cuda
 class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl_version((2, 31, 0), "per-collective configuration")
     @parametrize(
@@ -1102,10 +1101,7 @@ class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
         from torch.fx.experimental.proxy_tensor import make_fx
 
         size = self.world_size
-        config = NCCLCollConfig(
-            min_ctas=1,
-            max_ctas=2,
-        )
+        config = coll_config(min_ctas=1, max_ctas=2)
         collective = getattr(dist, name)
 
         class Module(torch.nn.Module):
@@ -1162,7 +1158,7 @@ class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
     def test_config_mutation_recompiles(self):
         from torch._dynamo.testing import CompileCounterWithBackend
 
-        config = NCCLCollConfig(min_ctas=1, max_ctas=2, user_profiler_tag=1)
+        config = coll_config(min_ctas=1, max_ctas=2, user_profiler_tag=1)
 
         def fn(tensor):
             output = tensor.clone()
@@ -1173,7 +1169,10 @@ class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         tensor = torch.ones(4, device=self.device)
         self.assertEqual(compiled(tensor), tensor * self.world_size)
-        config.user_profiler_tag = 2
+        if isinstance(config, dict):
+            config["user_profiler_tag"] = 2
+        else:
+            config.user_profiler_tag = 2
         self.assertEqual(compiled(tensor), tensor * self.world_size)
         self.assertEqual(counter.frame_count, 2)
         torch._dynamo.reset()
