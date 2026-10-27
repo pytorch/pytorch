@@ -10414,21 +10414,32 @@ class AOTInductorTestsTemplate:
                 event.synchronize()
                 return y * 2
 
-        for model, reason in (
-            (CpuOp(), "cpu device"),
-            (Item(), "incompatible op"),
-            (MutatesInput(), "mutates inputs"),
-            (Cond(), "control flow operator: torch.cond"),
-            (SyncsEvent(), "waits on the host for a CUDA event"),
+        class WhileLoop(torch.nn.Module):
+            def forward(self, x):
+                return torch._higher_order_ops.while_loop(
+                    lambda i, x: i < 3,
+                    lambda i, x: (i + 1, x * 2),
+                    (x.new_zeros(()), x),
+                )[1]
+
+        for model, reason, configs in (
+            (CpuOp(), "cpu device", {}),
+            # AOT mode lowers without graph partitioning, which skips CPU ops.
+            (CpuOp(), "cpu device", {"triton.cudagraphs": True}),
+            (Item(), "incompatible op", {}),
+            (MutatesInput(), "mutates inputs", {}),
+            (Cond(), "control flow operator: torch.cond", {}),
+            (SyncsEvent(), "waits on the host for a CUDA event", {}),
+            (WhileLoop(), "control flow operator: torch.while_loop", {}),
         ):
             with (
-                self.subTest(type(model).__name__),
+                self.subTest(type(model).__name__, **configs),
                 self.assertRaisesRegex(Exception, f"CUDA graph: .*{reason}"),
             ):
                 AOTIRunnerUtil.compile(
                     model,
                     (torch.randn(4, 4, device=self.device),),
-                    inductor_configs={"aot_inductor.cudagraphs": True},
+                    inductor_configs={"aot_inductor.cudagraphs": True, **configs},
                 )
 
     def test_aot_cudagraphs_checks_subgraphs(self):
