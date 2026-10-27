@@ -205,6 +205,7 @@ function install_fbgemm() {
   local build_variant=$1
 
   local fbgemm_commit
+  # fbgemm pin is the v1.5.0-rc3 tag commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
@@ -240,14 +241,7 @@ function install_fbgemm() {
     # the CUID hash, giving each object a distinct __hip_cuid. Inline (not exported) and
     # scoped to the ROCm build so it does not affect the PyTorch build (already built).
     if [[ "${build_variant}" == "rocm" ]]; then
-      # The inductor-periodic ROCm benchmark job runs its tests only on MI350
-      # (gfx950), so build fbgemm for that single arch instead of the image's
-      # multi-arch default to cut build time.
-      if [[ "${GITHUB_WORKFLOW}" == "inductor-periodic" ]]; then
-        SCCACHE_RECACHE=1 PYTORCH_ROCM_ARCH="gfx950" python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
-      else
-        SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
-      fi
+      SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
     else
       python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
     fi
@@ -270,6 +264,7 @@ function install_fbgemm() {
 
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
+  # torchrec pin is the release/v1.4.0 branch head (untagged)
   torchrec_commit=$(get_pinned_commit torchrec)
 
   pip_uninstall torchrec-nightly
@@ -343,6 +338,10 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
+function install_nccl4py() {
+  pip_install nccl4py==0.5.0
+}
+
 function install_spmd_types() {
   local commit
   commit=$(get_pinned_commit spmd_types)
@@ -355,7 +354,8 @@ function install_flash_attn_cute() {
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
     flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK do not pin CuTeDSL, so install the pinned version first.
+  install_cutlass_dsl
   pip_install \
     "$flash_attn_package" \
     quack-kernels==0.6.5 \
