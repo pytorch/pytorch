@@ -9860,6 +9860,25 @@ class TestPrecompileCustomOpRecording(TestCase):
             vendored.__name__,
         )
 
+    def test_a_torch_helper_run_as_a_torch_module_imports_records_that_module(self):
+        ns = self._namespace("torch_helper")
+        # A torch helper registering ops, as torch._native's register_op_override
+        # does, run by another torch module's top-level code.
+        helper = types.ModuleType(f"torch._precompile_helper_{uuid.uuid4().hex}")
+        exec(
+            "import torch\n\n\ndef register(name):\n"
+            "    @torch.library.custom_op(name, mutates_args=())\n"
+            "    def f(x: torch.Tensor) -> torch.Tensor:\n        return x.clone()\n",
+            helper.__dict__,
+        )
+        importer = types.ModuleType(f"torch._precompile_importer_{uuid.uuid4().hex}")
+        importer.helper = helper
+        exec(f"helper.register('{ns}::f')\n", importer.__dict__)
+        self.assertEqual(
+            torch._library.simple_registry.singleton.registering_module(f"{ns}::f"),
+            importer.__name__,
+        )
+
     def test_an_op_a_multiprocessing_worker_main_registers_is_reported(self):
         from torch._precompile import _custom_op_modules
 
