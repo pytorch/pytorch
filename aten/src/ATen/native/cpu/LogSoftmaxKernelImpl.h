@@ -15,18 +15,100 @@
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
-// sum_j exp(data[j] - max_input).
+// Note [Accurate log_softmax]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// log_softmax(x)_i = (x_i - max) - log(sum_j exp(x_j - max)). An argmax element
+// contributes exactly 1 to the sum, so the sum is 1 + R, where R sums the other
+// terms. Rounding 1 + R gives the argmax output (e.g. the cross-entropy loss of
+// a confident correct prediction) an absolute error of about the unit roundoff
+// u of the accumulation type (2^-24 for float), and once R <= u it becomes
+// exactly 0 instead of -R. Following Eq. 5 of
+// Barron et al., "A Fix for Softmax and Cross-Entropy" (arXiv:2610.31642), we
+// leave one argmax term out of the sum and use log1p(R) instead. Each element
+// with x_j - max == 0 contributes exactly 1, so rather than summing them we
+// count them and add (count - 1) to R. Testing x_j - max == 0, not x_j == max,
+// keeps the NaN result for rows containing inf.
+//
+// The backward, grad_input_i = g_i - exp(y_i) * S with S = sum_j g_j, cancels
+// in the same situation: exp(y_i) rounds to 1 and the target gradient of cross
+// entropy becomes 0. Where exp(y_i) > 1/2 (normally at most one element per
+// row, but rounded outputs of tied maxima can both exceed it), g_i and S have
+// the same sign and S is finite, we evaluate the algebraically identical
+//   (g_i - S) - S * expm1(y_i).
+// For the one-hot gradient produced by nll_loss, g_i - S is exactly 0 at the
+// target and S * expm1(y_i) is accurate. Requiring the same sign keeps g_i - S
+// from overflowing; we test g_i * S >= 0, which may overflow (keeping its sign)
+// or underflow to 0 (when one of them is too small for g_i - S to overflow).
+// Requiring a finite S keeps the old result (+-inf rather than NaN) when S is
+// infinite. Elsewhere the usual form is kept: with opposite signs it does not
+// cancel, and where 1 - exp(y_i) >= 1/2 it loses at most a couple of ulps for a
+// one-hot gradient.
+//
+// The CPU kernels (the backward in SoftMaxKernel.cpp) and the CUDA kernels
+// implement this. Still using the old formulas: the MPS, XPU, Vulkan, Metal and
+// out-of-tree (e.g. MTIA) kernels, sparse log_softmax, the torch/_decomp
+// decompositions and torch/_refs log_softmax (so torch.compile differs from
+// eager here), the TorchScript NNC and oneDNN Graph lowerings, the chunked
+// F.linear_cross_entropy path, and the forward-mode and double-backward
+// formulas in derivatives.yaml.
+
+// exp(shifted), or 0 where shifted == 0 (an element equal to the max).
+template <typename Vec>
+inline Vec vec_log_softmax_exp_without_max(Vec shifted) {
+  return Vec::blendv(shifted.exp(), Vec(0), shifted == Vec(0));
+}
+
+// sum_j exp(data[j] - max_input) without one argmax term, in one pass.
 template <typename scalar_t>
 inline vec::vec_scalar_t<scalar_t> log_softmax_sum(
     const scalar_t* data,
     int64_t size,
     vec::vec_scalar_t<scalar_t> max_input) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
-  return vec::map_reduce_all<scalar_t>(
-      [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-      [](Vec x, Vec y) { return x + y; },
-      data,
-      size);
+  using acc_t = vec::vec_scalar_t<scalar_t>;
+  using Vec = vec::Vectorized<acc_t>;
+  const Vec max_vec(max_input);
+  Vec sum_vec(0);
+  Vec max_count_vec(0);
+  // Accumulates the first count lanes of x.
+  auto accumulate = [&](Vec x, int64_t count = Vec::size()) {
+    Vec shifted = x - max_vec;
+    Vec exp_vec = vec_log_softmax_exp_without_max(shifted);
+    Vec is_max = shifted.eq(Vec(0));
+    if (count < Vec::size()) {
+      exp_vec = Vec::set(Vec(0), exp_vec, count);
+      is_max = Vec::set(Vec(0), is_max, count);
+    }
+    sum_vec += exp_vec;
+    max_count_vec += is_max;
+  };
+  int64_t d = 0;
+  if constexpr (vec::is_reduced_floating_point_v<scalar_t>) {
+    using bVec = vec::Vectorized<scalar_t>;
+    for (; d < size - (size % bVec::size()); d += bVec::size()) {
+      auto [x0, x1] = vec::convert_to_float<scalar_t>(bVec::loadu(data + d));
+      accumulate(x0);
+      accumulate(x1);
+    }
+    if (d < size) {
+      const int64_t count = size - d;
+      auto [x0, x1] = vec::convert_to_float<scalar_t>(bVec::loadu(data + d, count));
+      accumulate(x0, std::min<int64_t>(count, Vec::size()));
+      if (count > Vec::size()) {
+        accumulate(x1, count - Vec::size());
+      }
+    }
+  } else {
+    for (; d < size - (size % Vec::size()); d += Vec::size()) {
+      accumulate(Vec::loadu(data + d));
+    }
+    if (d < size) {
+      accumulate(Vec::loadu(data + d, size - d), size - d);
+    }
+  }
+  auto add = [](Vec& x, Vec& y) { return x + y; };
+  acc_t sum = vec::vec_reduce_all<acc_t>(add, sum_vec);
+  acc_t max_count = vec::vec_reduce_all<acc_t>(add, max_count_vec);
+  return sum + (max_count - acc_t(1));
 }
 
 template <typename scalar_t>
@@ -79,7 +161,7 @@ void serial_vec_log_softmax_lastdim_range(
     // See [Note AVX-SSE transitions] for why this should call the
     // vectorized version (aside from perf improvements).
     vec::map(
-        [](Vec x) { return x.log(); },
+        [](Vec x) { return x.log1p(); },
         tmp_sum_scalar.get(),
         tmp_sum_scalar.get(),
         loop_end);
@@ -134,10 +216,12 @@ serial_vec_logsoftmax_range(
     int64_t begin,
     int64_t end) {
   using Vec = vec::Vectorized<scalar_t>;
-  // thread local temp buffer which holds vertical reduction result: max and sum.
-  auto buffer = std::make_unique<scalar_t []>(chunk_size * 2);
+  // thread local temp buffer which holds vertical reduction result: max, sum
+  // and the number of elements equal to max.
+  auto buffer = std::make_unique<scalar_t []>(chunk_size * 3);
   scalar_t* input_max_data = buffer.get();
   scalar_t* tmp_sum_data = buffer.get() + chunk_size;
+  scalar_t* max_count_data = buffer.get() + chunk_size * 2;
 
   for (int64_t i = begin; i < end; i++) {
     int64_t outer_idx = i / num_chunks;
@@ -152,10 +236,12 @@ serial_vec_logsoftmax_range(
     for (; d0 < size - (size % Vec::size()); d0 += Vec::size()) {
       min_vec.store(input_max_data + d0);
       zero_vec.store(tmp_sum_data + d0);
+      zero_vec.store(max_count_data + d0);
     }
     for (; d0 < size; d0++) {
       input_max_data[d0] = -std::numeric_limits<scalar_t>::infinity();
       tmp_sum_data[d0] = scalar_t(0);
+      max_count_data[d0] = scalar_t(0);
     }
 
     // compute max
@@ -186,19 +272,28 @@ serial_vec_logsoftmax_range(
       for (; d2 < size - (size % Vec::size()); d2 += Vec::size()) {
         Vec data_vec = Vec::loadu(input_ptr + d2);
         Vec sum_vec = Vec::loadu(tmp_sum_data + d2);
+        Vec max_count_vec = Vec::loadu(max_count_data + d2);
         Vec max_vec = Vec::loadu(input_max_data + d2);
-        sum_vec += (data_vec - max_vec).exp();
+        Vec shifted_vec = data_vec - max_vec;
+        sum_vec += vec_log_softmax_exp_without_max(shifted_vec);
+        max_count_vec += shifted_vec.eq(Vec(0));
         sum_vec.store(tmp_sum_data + d2);
+        max_count_vec.store(max_count_data + d2);
       }
       for (; d2 < size; d2++) {
-        scalar_t data_val = input_ptr[d2];
-        scalar_t max_val = input_max_data[d2];
-        tmp_sum_data[d2] += std::exp(data_val - max_val);
+        scalar_t shifted = input_ptr[d2] - input_max_data[d2];
+        if (shifted == scalar_t(0)) {
+          max_count_data[d2] += scalar_t(1);
+        } else {
+          tmp_sum_data[d2] += std::exp(shifted);
+        }
       }
     }
 
     // apply log
-    vec::map([](Vec x) { return x.log(); }, tmp_sum_data, tmp_sum_data, size);
+    vec::map2(
+        [](Vec sum, Vec max_count) { return (sum + (max_count - Vec(1))).log1p(); },
+        tmp_sum_data, tmp_sum_data, max_count_data, size);
 
     // compute x - max - sum
     for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
@@ -234,9 +329,10 @@ serial_vec_logsoftmax_range(
     int64_t end) {
   using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
-  auto buffer = std::make_unique<float []>(chunk_size * 2);
+  auto buffer = std::make_unique<float []>(chunk_size * 3);
   float* input_max_data = buffer.get();
   float* tmp_sum_data = buffer.get() + chunk_size;
+  float* max_count_data = buffer.get() + chunk_size * 2;
 
   // thread local buffer that holds input data in float32 to save next 2 dtype conversion
   auto input_buffer = std::make_unique<float []>(dim_size * chunk_size);
@@ -257,10 +353,13 @@ serial_vec_logsoftmax_range(
       min_fvec.store(input_max_data + d0 + fVec::size());
       zero_fvec.store(tmp_sum_data + d0);
       zero_fvec.store(tmp_sum_data + d0 + fVec::size());
+      zero_fvec.store(max_count_data + d0);
+      zero_fvec.store(max_count_data + d0 + fVec::size());
     }
     for (; d0 < size; d0++) {
       input_max_data[d0] = -std::numeric_limits<float>::infinity();
       tmp_sum_data[d0] = float(0);
+      max_count_data[d0] = float(0);
     }
 
     // compute max
@@ -302,22 +401,35 @@ serial_vec_logsoftmax_range(
         fVec data_fvec1 = fVec::loadu(input_buffer_ptr + d2 + fVec::size());
         fVec sum_fvec0 = fVec::loadu(tmp_sum_data + d2);
         fVec sum_fvec1 = fVec::loadu(tmp_sum_data + d2 + fVec::size());
+        fVec max_count_fvec0 = fVec::loadu(max_count_data + d2);
+        fVec max_count_fvec1 = fVec::loadu(max_count_data + d2 + fVec::size());
         fVec max_fvec0 = fVec::loadu(input_max_data + d2);
         fVec max_fvec1 = fVec::loadu(input_max_data + d2 + fVec::size());
-        sum_fvec0 += (data_fvec0 - max_fvec0).exp();
-        sum_fvec1 += (data_fvec1 - max_fvec1).exp();
+        fVec shifted_fvec0 = data_fvec0 - max_fvec0;
+        fVec shifted_fvec1 = data_fvec1 - max_fvec1;
+        sum_fvec0 += vec_log_softmax_exp_without_max(shifted_fvec0);
+        sum_fvec1 += vec_log_softmax_exp_without_max(shifted_fvec1);
+        max_count_fvec0 += shifted_fvec0.eq(fVec(0));
+        max_count_fvec1 += shifted_fvec1.eq(fVec(0));
         sum_fvec0.store(tmp_sum_data + d2);
         sum_fvec1.store(tmp_sum_data + d2 + fVec::size());
+        max_count_fvec0.store(max_count_data + d2);
+        max_count_fvec1.store(max_count_data + d2 + fVec::size());
       }
       for (; d2 < size; d2++) {
-        float data_val = input_buffer_ptr[d2];
-        float max_val = input_max_data[d2];
-        tmp_sum_data[d2] += std::exp(data_val - max_val);
+        float shifted = input_buffer_ptr[d2] - input_max_data[d2];
+        if (shifted == 0.f) {
+          max_count_data[d2] += 1.f;
+        } else {
+          tmp_sum_data[d2] += std::exp(shifted);
+        }
       }
     }
 
     // apply log
-    vec::map([](fVec x) { return x.log(); }, tmp_sum_data, tmp_sum_data, size);
+    vec::map2(
+        [](fVec sum, fVec max_count) { return (sum + (max_count - fVec(1))).log1p(); },
+        tmp_sum_data, tmp_sum_data, max_count_data, size);
 
     // compute x - max - sum
     for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
