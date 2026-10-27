@@ -682,6 +682,9 @@ class AsyncCompile:
                 extra_config,
             )
 
+            # Every graph that shares this compile resolves the future, so set the
+            # kernel up once: again would clear what its use since recorded.
+            @functools.cache
             def get_result() -> CachingAutotuner:
                 try:
                     kernel, elapsed_us = task.result()
