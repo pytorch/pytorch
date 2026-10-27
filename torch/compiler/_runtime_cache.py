@@ -588,20 +588,21 @@ def _freeze_triton_kernel(
     # either. Its configs compute the same values up to floating-point reduction
     # order, so unless the caller requires tuned backward kernels, it is frozen
     # untuned. A source a forward instance shares is still refused: a forward no
-    # call ran means the capture missed a path serving may need. A record frozen
-    # untuned and loaded back stays untuned, whether or not this capture ran it.
+    # call ran means the capture missed a path serving may need. A backward record
+    # frozen untuned and loaded back stays untuned, whether or not this capture ran
+    # it, and is frozen again from that record.
     untuned = None
-    frozen_untuned = any(
-        kernel.inductor_meta.get("precompile_frozen_untuned") for kernel in instances
-    )
-    if frozen_untuned or (
+    marked = [k for k in instances if k.inductor_meta.get("precompile_frozen_untuned")]
+    if (
         instances
         and not any(kernel._forward_use for kernel in instances)
-        and not any(kernel._launched for kernel in instances)
+        and (marked or not any(kernel._launched for kernel in instances))
     ):
         # Under the strict policy, only to tell whether the opt-in would freeze it.
         untuned = _freeze_untuned_backward(
-            key, instances, reject if not require_tuned_backward else lambda *_: None
+            key,
+            marked or instances,
+            reject if not require_tuned_backward else lambda *_: None,
         )
         if untuned is not None and not require_tuned_backward:
             return untuned
@@ -801,9 +802,10 @@ def _report_untuned_triton_kernels(untuned: list[dict[str, object]]) -> None:
     # every backward kernel this way.
     names = [str(report["kernel_name"]) for report in untuned]
     log.warning(
-        "precompile: no captured step ran %d backward Triton kernel(s), so they are "
-        "frozen untuned, each with the first of its static configs that does not "
-        "spill registers past the autotuning threshold: %s. The "
+        "precompile: %d backward Triton kernel(s) that no captured step ran, or "
+        "that were loaded from a record frozen untuned, are frozen untuned, each "
+        "with the first of its static configs that does not spill registers past "
+        "the autotuning threshold: %s. The "
         "precompile_triton_untuned_kernels artifact lists them all.",
         len(names),
         ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
