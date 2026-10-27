@@ -1971,12 +1971,18 @@ Tensor asarray(
       tensor = from_dlpack(py::handle(obj), py::arg("copy") = copy_arg)
                    .cast<Tensor>();
     } catch (const py::error_already_set& e) {
-      // Only buffers and __cuda_array_interface__ objects have another path
-      // (below, and in internal_new_from_data); anything else would reach the
-      // same from_dlpack call in internal_new_from_data.
-      if (!e.matches(PyExc_Exception) ||
-          (PyObject_CheckBuffer(obj) == 0 &&
-           !PyObject_HasAttrString(obj, "__cuda_array_interface__"))) {
+      if (!e.matches(PyExc_Exception)) {
+        throw;
+      }
+      // Only buffers and, with NumPy, __cuda_array_interface__ objects have
+      // another path (below, and in internal_new_from_data); anything else
+      // would reach the same from_dlpack call in internal_new_from_data.
+      bool has_other_path = PyObject_CheckBuffer(obj) != 0;
+#ifdef USE_NUMPY
+      has_other_path = has_other_path ||
+          PyObject_HasAttrString(obj, "__cuda_array_interface__");
+#endif
+      if (!has_other_path) {
         throw;
       }
     }
