@@ -13,12 +13,9 @@ where cl.exe
 :: Clone OpenBLAS
 cd %DEPENDENCIES_DIR%
 :: v0.3.29
-git init -q OpenBLAS
-if errorlevel 1 exit /b 1
-git -C OpenBLAS fetch -q --depth 1 https://github.com/OpenMathLib/OpenBLAS.git 8795fc7985635de1ecf674b87e2008a15097ffab
-if errorlevel 1 exit /b 1
-git -C OpenBLAS checkout -q FETCH_HEAD
-if errorlevel 1 exit /b 1
+git init -q OpenBLAS || exit /b 1
+git -C OpenBLAS fetch -q --depth 1 https://github.com/OpenMathLib/OpenBLAS.git 8795fc7985635de1ecf674b87e2008a15097ffab || exit /b 1
+git -C OpenBLAS checkout -q FETCH_HEAD || exit /b 1
 
 echo Configuring OpenBLAS...
 mkdir OpenBLAS\build

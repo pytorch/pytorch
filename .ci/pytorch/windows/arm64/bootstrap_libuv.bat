@@ -12,12 +12,9 @@ where cl.exe
 
 cd %DEPENDENCIES_DIR%
 :: v1.47.0
-git init -q libuv
-if errorlevel 1 exit /b 1
-git -C libuv fetch -q --depth 1 https://github.com/libuv/libuv.git be6b81a352d17513c95be153afcb3148f1a451cd
-if errorlevel 1 exit /b 1
-git -C libuv checkout -q FETCH_HEAD
-if errorlevel 1 exit /b 1
+git init -q libuv || exit /b 1
+git -C libuv fetch -q --depth 1 https://github.com/libuv/libuv.git be6b81a352d17513c95be153afcb3148f1a451cd || exit /b 1
+git -C libuv checkout -q FETCH_HEAD || exit /b 1
 
 echo Configuring libuv...
 mkdir libuv\build
