@@ -4078,11 +4078,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
-            return variables.UserMethodVariable(
-                variables.UserFunctionVariable(type_attr, source=fn_source),
-                self,
-                source=source,
-            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
+            else:
+                fn_vt = variables.UserFunctionVariable(type_attr, source=fn_source)
+                if fn_source:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
