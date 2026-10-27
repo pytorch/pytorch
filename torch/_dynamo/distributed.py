@@ -74,11 +74,14 @@ def _is_fake_world() -> bool:
 
 
 def _compile_sync_backend() -> str | None:
-    """The backend get_compile_sync_pg builds its group on, or None when this build
-    cannot build it (a real world without gloo)."""
+    """The backend get_compile_sync_pg builds its group on, or None when it cannot
+    build one: in a real world without gloo, or an MPI one, whose default group has
+    no store for gloo to rendezvous through."""
     if _is_fake_world():
         return dist.Backend.FAKE
-    if dist.is_gloo_available():
+    config = dist.BackendConfig(dist.get_backend_config())
+    mpi = dist.Backend.MPI in config.get_device_backend_map().values()
+    if dist.is_gloo_available() and not mpi:
         return dist.Backend.GLOO
     return None
 
@@ -117,9 +120,10 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
                 # No fallback: per above, the accelerator backend would let a
                 # compile time collective match a runtime one.
                 raise RuntimeError(
-                    "Compile time cross rank synchronization requires the gloo "
-                    "backend, which this build of PyTorch does not have. Either "
-                    "build with gloo, or turn off "
+                    "Compile time cross rank synchronization runs over a gloo "
+                    "process group, which needs a build of PyTorch with gloo and a "
+                    "default process group that is not MPI's (gloo cannot "
+                    "rendezvous through an MPI group). Otherwise, turn off "
                     "torch._functorch.config._sync_decision_cross_ranks and "
                     "torch._functorch.config._sync_cache_decision_cross_ranks."
                 )
