@@ -1868,6 +1868,15 @@ if __name__ == "__main__":
         else:
             self.assertEqual(z.data_ptr(), x.data_ptr())
 
+    def test_dlpack_device_matches_exported_dl_device(self):
+        # __dlpack_device__ must report the DLDevice that the exported DLTensor
+        # carries, otherwise from_dlpack mistakes a same-device tensor for a
+        # cross-device one.
+        for i in range(torch.xpu.device_count()):
+            x = torch.empty(1, device=f"xpu:{i}")
+            dl_device = tuple(int(v) for v in x.__dlpack_device__())
+            self.assertEqual(dl_device, torch._C._torchDeviceToDLDevice(x.device))
+
     def test_storage_pin_memory(self):
         t = torch.empty(10, pin_memory=True)
         self.assertTrue(t.is_pinned())

@@ -42,10 +42,12 @@ TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
 
   int target_device = 0;
   auto global_index = at::xpu::getGlobalIdxFromDevice(target_device);
-  auto devices = sycl::device::get_devices();
-  EXPECT_EQ(devices[global_index], at::xpu::get_raw_device(target_device));
+  auto platform = at::xpu::get_raw_device(target_device).get_platform();
+  auto device_at_index = platform.ext_oneapi_device_at_index(global_index);
+  EXPECT_EQ(global_index, target_device);
+  EXPECT_EQ(device_at_index, at::xpu::get_raw_device(target_device));
 
-  void* ptr = sycl::malloc_device(8, devices[global_index], at::xpu::get_device_context());
+  void* ptr = sycl::malloc_device(8, device_at_index, at::xpu::get_device_context());
   at::Device device = at::xpu::getDeviceFromPtr(ptr);
   sycl::free(ptr, at::xpu::get_device_context());
   EXPECT_EQ(device.index(), target_device);
@@ -57,7 +59,10 @@ TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
   // Test the last device.
   target_device = at::xpu::device_count() - 1;
   global_index = at::xpu::getGlobalIdxFromDevice(target_device);
-  EXPECT_EQ(devices[global_index], at::xpu::get_raw_device(target_device));
+  EXPECT_EQ(global_index, target_device);
+  EXPECT_EQ(
+      platform.ext_oneapi_device_at_index(global_index),
+      at::xpu::get_raw_device(target_device));
 
   target_device = at::xpu::device_count();
   ASSERT_THROW(at::xpu::getGlobalIdxFromDevice(target_device), c10::Error);
