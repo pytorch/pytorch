@@ -1085,6 +1085,19 @@ command = [
 ]
 
 [[linter]]
+code = 'CODEOWNERS_GENERATED'
+include_patterns = [
+    'CODEOWNERS',
+    'OWNERSHIP.yaml',
+    'scripts/codeowners/generate_codeowners.py',
+]
+command = [
+    'python3',
+    'scripts/codeowners/generate_codeowners.py',
+    '--lintrunner',
+]
+
+[[linter]]
 code = 'CPYTHON_DIFF_SYNC'
 # Trigger set only: the adapter always runs verify_all() over the whole tree.
 include_patterns = [

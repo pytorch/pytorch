@@ -1,3 +1,7 @@
+# This file is generated from OWNERSHIP.yaml by
+# scripts/codeowners/generate_codeowners.py. Edit OWNERSHIP.yaml and rerun
+# the script (or `lintrunner -a`) instead of editing this file.
+
 # IMPORTANT:
 # This file is ONLY used to subscribe for notifications for PRs
 # related to a specific file path. Approvals from people in this
@@ -1414,5 +1418,6 @@
 # DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet.
 # Keep these rules last so they override broader patterns.
 /CODEOWNERS @albanD @malfet
+/OWNERSHIP.yaml @albanD @malfet
 /.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
 #
