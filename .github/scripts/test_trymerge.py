@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import errno
 import gzip
 import json
 import os
@@ -4499,6 +4500,23 @@ class TestDrciRetries(TestCase):
             self.assertEqual(mock_fetch.call_count, 1)
         mock_sleep.assert_not_called()
 
+    @mock.patch("trymerge.time.monotonic")
+    def test_call_that_is_not_retried_opens_the_outage_window(
+        self, mock_clock: Any, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_clock.return_value = 1000.0
+        mock_fetch.side_effect = [_drci_http_error(504, b"")]
+        with mock.patch("builtins.print"):
+            self.assertIsNone(get_drci_classifications(1))
+            mock_clock.return_value = 1000.0 + DRCI_OUTAGE_WINDOW_SECONDS - 1
+            mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
+            self.assertEqual(get_drci_classifications(1), {})
+            mock_sleep.assert_not_called()
+            mock_clock.return_value = 1000.0 + DRCI_OUTAGE_WINDOW_SECONDS
+            mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
     def test_retries_after_a_failure_with_a_pause(
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:
@@ -4592,6 +4610,7 @@ class TestDrciRetries(TestCase):
         for dropped in (
             RemoteDisconnected("closed"),
             URLError(ConnectionResetError("reset")),
+            URLError(TimeoutError(errno.ETIMEDOUT, "Connection timed out")),
             URLError(socket.gaierror(socket.EAI_AGAIN, "Temporary failure")),
             IncompleteRead(b"{", 10),
             json.JSONDecodeError("cut off", "{", 1),

@@ -506,10 +506,11 @@ DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
 # (maxDuration in drci.ts) and sends nothing until it finishes, so only a
 # connection that is truly stuck waits longer. A timed-out call is not retried.
 DRCI_TIMEOUT_SECONDS = 960
-# After a call fails every attempt, calls within this window retry without
-# pausing: one merge-loop iteration calls Dr.CI several times in a row, and during
-# an outage each would otherwise pay the pauses. Must stay shorter than
-# MERGE_RETRY_INTERVAL_SECONDS, so the next iteration pauses again.
+# After a call fails (every attempt, or one that is not retried), calls within
+# this window retry without pausing: one merge-loop iteration calls Dr.CI
+# several times in a row, and during an outage each would otherwise pay the
+# pauses. Must stay shorter than MERGE_RETRY_INTERVAL_SECONDS, so the next
+# iteration pauses again.
 DRCI_OUTAGE_WINDOW_SECONDS = 120
 _drci_failed_at: float | None = None
 # What to do after a failed Dr.CI call; see _drci_retry_kind.
@@ -2696,10 +2697,15 @@ def _drci_retry_kind(err: Exception) -> DrciRetry:
         if err.code == 504:  # HUD ran out its maxDuration
             return "stop"
         return "pause" if err.code in (400, 408, 429) or err.code >= 500 else "now"
-    reason = err.reason if isinstance(err, URLError) else err
-    if isinstance(reason, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
+    if isinstance(err, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
         return "stop"
     if isinstance(err, URLError):
+        reason = err.reason
+        if isinstance(reason, TimeoutError):
+            # No errno: DRCI_TIMEOUT_SECONDS ran out while sending. An errno
+            # (ETIMEDOUT): the kernel gave up while connecting or sending, which
+            # a later attempt may get past; Dr.CI's recompute is safe to repeat.
+            return "stop" if reason.errno is None else "pause"
         # urlopen wraps errors raised while connecting and sending. Refused
         # connections, no route (as on internal runners) and unknown hosts do
         # not clear by waiting; a temporary DNS failure or a connection broken
@@ -3730,7 +3736,7 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in {MERGE_RETRY_INTERVAL_SECONDS // 60} min",
                 flush=True,
             )
             time.sleep(MERGE_RETRY_INTERVAL_SECONDS)
