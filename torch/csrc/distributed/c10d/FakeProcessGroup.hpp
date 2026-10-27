@@ -47,20 +47,4 @@ class FakeWork : public Work {
   std::vector<at::Tensor> result_;
 };
 
-// Options for the Python FakeProcessGroup
-// (torch/testing/_internal/distributed/fake_pg.py). Kept in C++ so that
-// ProcessGroup::splitGroup's clone() preserves the fake-specific fields.
-struct FakeProcessGroupOptions : Backend::Options {
-  explicit FakeProcessGroupOptions() : Backend::Options("fake") {}
-
-  c10::intrusive_ptr<Backend::Options> clone() const override {
-    return c10::make_intrusive<FakeProcessGroupOptions>(*this);
-  }
-
-  int fake_option = 0;
-  bool error_on_collective = false;
-  // See NOTE [FakeProcessGroup uniform-rank simulation]
-  bool simulate_uniform_ranks = false;
-};
-
 } // namespace c10d

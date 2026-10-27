@@ -5144,29 +5144,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             return ivalue.toCustomClass<::c10d::Work>();
           });
 
-  intrusive_ptr_class_<::c10d::FakeProcessGroupOptions>(
-      module, "_FakeProcessGroupOptions", backendOptions)
-      .def(py::init())
-      .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroupOptions::fake_option)
-      .def_readwrite(
-          "error_on_collective",
-          &::c10d::FakeProcessGroupOptions::error_on_collective)
-      .def_readwrite(
-          "simulate_uniform_ranks",
-          &::c10d::FakeProcessGroupOptions::simulate_uniform_ranks)
-      .def(
-          "__copy__",
-          [](const ::c10d::FakeProcessGroupOptions& self) {
-            return ::c10d::FakeProcessGroupOptions(self);
-          })
-      .def(
-          "__deepcopy__",
-          [](const ::c10d::FakeProcessGroupOptions& self,
-             const py::dict& memo) {
-            return ::c10d::FakeProcessGroupOptions(self);
-          },
-          py::arg("memo"));
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
