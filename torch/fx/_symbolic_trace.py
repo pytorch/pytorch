@@ -1163,12 +1163,14 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 
 class _Patcher:
-    def __init__(self) -> None:
+    def __init__(self, enclosing: "_Patcher | None" = None) -> None:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
         # Open _maybe_revert_all_patches windows; only the outermost one reverts.
         self.revert_depth = 0
+        # The patcher of the trace this one's trace runs inside, if any.
+        self.enclosing = enclosing
 
     def patch(
         self,
@@ -1255,7 +1257,7 @@ def _new_patcher() -> Iterator[_Patcher]:
     global CURRENT_PATCHER
     prior_patcher = CURRENT_PATCHER
     try:
-        CURRENT_PATCHER = _Patcher()
+        CURRENT_PATCHER = _Patcher(prior_patcher)
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
@@ -1292,6 +1294,18 @@ def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]
             raise AssertionError(
                 "CURRENT_PATCHER was changed during a revert_all_patches"
             )
+
+
+@contextlib.contextmanager
+def _revert_trace_patches(patcher: _Patcher) -> Iterator[None]:
+    """Revert ``patcher``'s patches and those of the traces its trace runs inside,
+    innermost first: a nested trace patches over the enclosing trace's patches."""
+    with contextlib.ExitStack() as stack:
+        current: _Patcher | None = patcher
+        while current is not None:
+            stack.enter_context(_maybe_revert_all_patches(current))
+            current = current.enclosing
+        yield
 
 
 def _patch_wrapped_functions(patcher: _Patcher) -> None:
@@ -1333,15 +1347,17 @@ def _resolve_lazy_imports(
     patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
 ) -> None:
     """Resolve the unresolved lazy imports among ``names`` (default: all) of
-    ``frame_dict`` with ``patcher``'s patches reverted, FX's tracing flag off and
-    no dispatch or torch function mode active but the default device.
+    ``frame_dict`` with the patches of ``patcher`` and of any trace its trace runs
+    inside reverted, FX's tracing flag off and no dispatch or torch function mode
+    active but the default device.
 
     Reading an unresolved lazy import runs its module body, which must not see the
     globals and ``torch.nn.Module`` methods FX patched for the trace, nor take
     itself to be traced (a module that calls a ``torch.compile``'d function at
     import), nor run under make_fx's fake, proxy or pre-dispatch modes or
-    export's torch function handlers. Only FX's own reads go through here; a lazy import the traced code
-    itself reads resolves as any other code it runs, with the patches applied.
+    export's torch function handlers. Only FX's own reads go through here; a lazy
+    import the traced code itself reads resolves as any other code it runs, with
+    the patches applied.
     ``importlib.is_lazy_import`` exists only on PEP 690-style lazy-import runtimes
     (e.g. Cinder).
     """
@@ -1358,7 +1374,7 @@ def _resolve_lazy_imports(
 
         registered = len(_wrapped_fns_to_patch), len(_wrapped_methods_to_patch)
         with (
-            _maybe_revert_all_patches(patcher),
+            _revert_trace_patches(patcher),
             _is_fx_tracing_context(False),
             _disable_current_modes(),
             _no_torch_function_modes(),

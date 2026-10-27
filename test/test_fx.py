@@ -2126,6 +2126,46 @@ class TestFX(JitTestCase):
         [tensor] = made
         self.assertNotIsInstance(tensor, FakeTensor)
 
+    def test_lazy_import_resolves_outside_an_enclosing_trace(self):
+        unresolved = object()
+        original_call = torch.nn.Module.__call__
+        saw_original = []
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    saw_original.append(torch.nn.Module.__call__ is original_call)
+                    value = object()
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def inner_forward(self, x):
+            return x + 1
+
+        class Inner(torch.nn.Module):
+            forward = types.FunctionType(
+                inner_forward.__code__,
+                Globals(__builtins__=builtins, helper=unresolved),
+                "forward",
+            )
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                # A trace nested in this one, as make_fx runs for a cond branch.
+                torch.fx.Tracer().trace(Inner())
+                return x * 2
+
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is unresolved,
+            create=True,
+        ):
+            torch.fx.Tracer().trace(Outer())
+        self.assertEqual(saw_original, [True])
+        self.assertIs(torch.nn.Module.__call__, original_call)
+
     def test_lazy_import_keeps_the_default_device(self):
         from torch.overrides import _get_current_function_mode_stack, TorchFunctionMode
 
