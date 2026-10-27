@@ -10011,6 +10011,69 @@ class AOTInductorTestsTemplate:
                 lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
+    @requires_gpu
+    @requires_cuda_tma
+    @requires_autotune_at_compile_time
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_triton_tma_autotuning_with_sample_inputs(self, dynamic, tma_version):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        kernel = (
+            add_kernel_with_tma_1d_new_api
+            if tma_version == "new"
+            else add_kernel_with_tma_1d_old_api
+        )
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                block_size = 256
+                out = torch.zeros_like(a)
+                descriptors = [
+                    create_tensor_descriptor_shim(
+                        tensor, [block_size], new_api=tma_version == "new"
+                    )
+                    for tensor in (a, b, out)
+                ]
+                grid = lambda meta: (  # noqa: E731
+                    triton.cdiv(out.numel(), meta["BLOCK_SIZE"]),
+                )
+                kernel[grid](*descriptors, BLOCK_SIZE=block_size)
+                return out
+
+        a = torch.randn(301, device=self.device)
+        b = torch.randn(301, device=self.device)
+        dynamic_shapes = None
+        if dynamic:
+            dim0 = Dim("s0", min=2, max=1024)
+            dynamic_shapes = {"a": {0: dim0}, "b": {0: dim0}}
+        with (
+            config.patch("triton.autotune_with_sample_inputs", True),
+            patch(
+                "torch._inductor.codegen.wrapper.trace_structured",
+                wraps=torch._logging.trace_structured,
+            ) as trace,
+        ):
+            self.check_model(Model(), (a, b), dynamic_shapes=dynamic_shapes)
+        autotune_code = [
+            call.kwargs["payload_fn"]()
+            for call in trace.call_args_list
+            if call.args[0] == "artifact"
+            and call.kwargs["metadata_fn"]()["name"]
+            == "inductor_autotune_at_compile_time_code"
+        ]
+        self.assertEqual(len(autotune_code), 1)
+        descriptor_factory = (
+            "from_tensor" if tma_version == "new" else "create_1d_tma_descriptor"
+        )
+        FileCheck().check_count(f"{descriptor_factory}(_REAL_AUTOTUNE_INPUT_", 3).run(
+            autotune_code[0]
+        )
+
     @requires_autotune_at_compile_time
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
