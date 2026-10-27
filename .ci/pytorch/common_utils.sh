@@ -205,6 +205,7 @@ function install_fbgemm() {
   local build_variant=$1
 
   local fbgemm_commit
+  # fbgemm pin is the v1.5.0-rc3 tag commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
@@ -263,6 +264,7 @@ function install_fbgemm() {
 
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
+  # torchrec pin is the release/v1.4.0 branch head (untagged)
   torchrec_commit=$(get_pinned_commit torchrec)
 
   pip_uninstall torchrec-nightly
