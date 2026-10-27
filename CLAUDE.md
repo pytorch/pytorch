@@ -231,16 +231,16 @@ Follow these rules for all code changes in this repository:
   comments you are adding or rewriting.
 - New or substantially rewritten comments in C++/CUDA headers (`.h`, `.cuh`,
   `.hpp`) should be short: at most a one-line description per declaration,
-  plus a pointer like `// See Note [Foo] in ATen/native/Foo.cpp`. Put long
-  explanations, including `Note [...]` blocks, in the source file (`.cpp`,
+  plus a `// See Note [Foo]` pointer. Put long explanations, including
+  `Note [...]` blocks and interface contracts, in the source file (`.cpp`,
   `.cu`, `.mm`, ...) that implements the op or uses the code, even when the
   code itself (a template, an inline function) lives in the header. Any edit to
   a header, even to a comment, recompiles every file that includes it.
-  Exceptions: Doxygen docs in headers covered by `docs/cpp/source/Doxyfile`'s
-  `INPUT` (including all of `torch/csrc/api/include`), and header-only code
-  with no natural source file (e.g. `torch/headeronly`,
-  `ATen/native/cuda/Loops.cuh`). Existing long comments in headers can stay
-  and take small edits.
+  Exceptions: Doxygen docs in headers that `docs/cpp/source/Doxyfile` feeds to
+  Doxygen (or the `aten/src/ATen/templates/` headers they are generated from),
+  and header-only code with no natural source file (e.g. `torch/headeronly`,
+  `ATen/native/cuda/Loops.cuh`). Existing long comments in headers can stay and
+  take small edits.
 
 If uncertain, choose the simpler, more concise implementation.
 
