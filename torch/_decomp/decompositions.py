@@ -6210,6 +6210,11 @@ def max_pool2d_with_indices_backward(
         Gradient w.r.t. input [B, C, H_in, W_in]
     """
 
+    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
+    # (#163327) and numerical differences on macOS 15+.
+    if grad_output.device.type == "mps":
+        return NotImplemented
+
     if not stride:
         stride = kernel_size
 
@@ -6261,11 +6266,6 @@ def max_pool2d_with_indices_backward(
         return NotImplemented
 
     if grad_output.is_xpu:
-        return NotImplemented
-
-    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
-    # (#163327) and numerical differences on macOS 15+.
-    if grad_output.device.type == "mps":
         return NotImplemented
 
     # Get spatial dimensions
