@@ -95,6 +95,8 @@ namespace at::hip::detail {
             // support has two bugs we work around: CompV3's tail selection (FourWaveTailCompV3) and CShuffleEpilogue,
             // which writes wrong results, so they store straight from the accumulators instead.
             static constexpr bool EightWaves = Config::M_Warp * Config::N_Warp == 8;
+            static_assert(!EightWaves || !Config::FixedVectorSizeC,
+                    "eight-wave configs use DirectEpilogue, which ignores VectorSizeC and always stores wide C vectors");
 
             using GemmPipeline = std::conditional_t<EightWaves,
                 FourWaveTailCompV3<PipelineProblem>, ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>>;
@@ -280,8 +282,14 @@ namespace at::hip::detail {
             return ceil_div(tiles, p.cus) * (Config::M_Tile + Config::N_Tile) * ceil_div(k, Config::K_Tile) * Config::K_Tile;
         }
 
+        // Unaligned and Fallback run without a fits check, so they must accept every shape.
+        template <typename Config>
+        constexpr bool AcceptsAnyShape =
+                Config::PadM && Config::PadN && Config::PadK && Config::FixedVectorSizeC && Config::VectorSizeC == 1;
+
         template <GemmTypeConfigs Type, typename Run>
         void run_gemm_type(const GemmProblem& p, Run&& run) {
+            static_assert(AcceptsAnyShape<typename Type::Unaligned>, "the Unaligned config must pad M, N and K and use 1-element C vectors");
             using Candidates = typename Type::Candidates;
             int64_t best_cost = std::numeric_limits<int64_t>::max();
             size_t best = 0;
@@ -300,7 +308,6 @@ namespace at::hip::detail {
                 }, Candidates{});
             }
             if (best_cost == std::numeric_limits<int64_t>::max()) {
-                TORCH_CHECK(config_fits<typename Type::Unaligned>(p), "ck_tile group gemm: the Unaligned config must accept every shape");
                 run(typename Type::Unaligned{});
                 return;
             }
@@ -491,6 +498,7 @@ namespace at::hip::detail {
             }
 
             using Configs = CkTileGroupGemmConfigs<Arch, DataType>;
+            static_assert(AcceptsAnyShape<typename Configs::Fallback>, "the Fallback config must pad M, N and K and use 1-element C vectors");
             // Contiguous dims: A's is K (row-major) or M, B's is N (row-major) or K, C's is N. A jagged dim (-1) is never contiguous.
             const auto vectors_fit = [](int64_t extent, index_t elems) { return extent < 0 || extent % elems == 0; };
             const GemmProblem problem{
