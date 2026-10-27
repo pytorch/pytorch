@@ -73,6 +73,188 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    def test_ordered_dict_key_identity_guard(self):
+        def fn(x, mapping):
+            key, other = mapping
+            return x + 1, key, id(key)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
+            result = compiled(x, mapping)
+            self.assertEqual(result, fn(x, mapping))
+            self.assertIs(result[1], next(iter(mapping)))
+
+    def test_ordered_dict_copy_key_identity_guard(self):
+        def fn(x, mapping):
+            key = next(iter(mapping.copy()))
+            return x + 1, key, id(key)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
+            result = compiled(x, mapping)
+            self.assertEqual(result, fn(x, mapping))
+            self.assertIs(result[1], next(iter(mapping)))
+
+    @parametrize("subclass", [False, True])
+    @parametrize("storage_order", [False, True])
+    def test_ordered_dict_copy_reordered_input(self, storage_order, subclass):
+        class Mapping(OrderedDict):
+            pass
+
+        mapping_type = Mapping if subclass else OrderedDict
+
+        def fn(x, mapping):
+            return x + 1, mapping.copy()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(3)
+        for order in ("abc", "cba", "cba"):
+            mapping = mapping_type(
+                (key, x + index)
+                for index, key in enumerate(order if storage_order else "abc")
+            )
+            if not storage_order:
+                for key in order:
+                    mapping.move_to_end(key)
+            actual = compiled(x, mapping)
+            self.assertEqual(actual, fn(x, mapping))
+            self.assertEqual(list(actual[1]), list(mapping))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("failure", ["exception", "graph_break"])
+    def test_ordered_dict_copy_key_comparison_exception(self, failure):
+        class Key:
+            def __init__(self, value):
+                self.value = value
+                self.fail = False
+
+            def __hash__(self):
+                return 1
+
+            def __eq__(self, other):
+                if self.fail:
+                    if failure == "exception":
+                        raise ValueError("key equality failed during copy")
+                    torch._dynamo.graph_break()
+                return self.value == other.value
+
+        class Mapping(OrderedDict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                if key.value == 1:
+                    self.first.fail = True
+                return value
+
+        def make_input():
+            first, second = Key(1), Key(2)
+            mapping = Mapping([(first, 1), (second, 2)])
+            mapping.first = first
+            return mapping
+
+        def fn(x, mapping):
+            try:
+                mapping.copy()
+            except ValueError as error:
+                return x + 1, str(error)
+            return x + 2, "not raised"
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if failure == "exception":
+            self.assertEqual(compiled(x, make_input()), fn(x, make_input()))
+        else:
+            with self.assertRaisesRegex(Unsupported, "Call to.*graph_break") as caught:
+                compiled(x, make_input())
+            self.assertNotIn(
+                "Dictionary mutated during iteration", str(caught.exception)
+            )
+
+    def test_hook_dict_copy_guard_keys(self):
+        def hook(module, args, output):
+            return output + 1
+
+        def fn(x, module):
+            return x + 1, module._forward_hooks.copy()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            module.register_forward_hook(hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+
+    @parametrize("owner", [dict, OrderedDict])
+    @parametrize("method", ["keys", "values", "items", "input_keys"])
+    @parametrize("reordered", [False, True])
+    def test_dict_view_iteration_order(self, owner, method, reordered):
+        def fn(x, obj):
+            view = obj if method == "input_keys" else getattr(owner, method)(obj)
+            return x + 1, list(view), type(view)
+
+        mapping = OrderedDict(a=1, b=2)
+        if reordered:
+            mapping.move_to_end("a")
+        obj = owner.keys(mapping) if method == "input_keys" else mapping
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        mapping.move_to_end("b" if reordered else "a")
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2 if owner is OrderedDict else 1)
+
+    @parametrize("with_kwargs", [False, True])
+    @parametrize("operation", ["forward", "values"])
+    def test_hook_dict_iteration_order(self, with_kwargs, operation):
+        def add(module, args, *rest):
+            return rest[-1] + 1
+
+        def multiply(module, args, *rest):
+            return rest[-1] * 2
+
+        def fn(x, module):
+            if operation == "forward":
+                return module(x)
+            for hook in module._forward_hooks.values():
+                x = hook(module, (x,), x)
+            return x
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            module.register_forward_hook(add, with_kwargs=with_kwargs)
+            module.register_forward_hook(multiply, with_kwargs=with_kwargs)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, 1)
+        module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
+        self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("return_keys", [False, True])
+    def test_hook_dict_keys_guard(self, return_keys):
+        def hook(module, args, output):
+            return output + 1
+
+        def fn(x, module):
+            keys = module._forward_hooks.keys()
+            return x + 1, list(keys) if return_keys else len(keys)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for index in range(2):
+            module = torch.nn.Identity()
+            module.register_forward_hook(hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, index + 1 if return_keys else 1)
+
     hw_classification = HardwareClassification.GENERIC
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
@@ -3094,23 +3276,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             mapping = OrderedDict([(stored, 1)])
             self.assertEqual(compiled(x, mapping), fn(x, mapping.copy()))
 
-    @parametrize("operation", ["unpack", "copy"])
-    def test_ordered_dict_key_identity_guard(self, operation):
-        def fn(x, mapping):
-            if operation == "unpack":
-                key, other = mapping
-            else:
-                key = next(iter(mapping.copy()))
-            return x + 1, id(key)
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(2)
-        for _ in range(2):
-            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
-            self.assertEqual(compiled(x, mapping), fn(x, mapping))
-
-    @parametrize("operation", ["copy", "move_to_end"])
-    def test_hook_dict_copy_and_move_to_end_guard_keys(self, operation):
+    def test_hook_dict_move_to_end_guard_keys(self):
         def hook(module, args, output):
             return output + 1
 
@@ -3118,8 +3284,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         key = first.register_forward_hook(hook).id
 
         def fn(x, module):
-            if operation == "copy":
-                return x + 1, module._forward_hooks.copy()
             try:
                 module._forward_hooks.move_to_end(key, last=False)
             except KeyError:
@@ -3192,27 +3356,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(mapping), 2)
             self.assertIs(next(iterator), key)
             self.assertEqual(mapping[key], x + 1)
-
-    @parametrize("storage_order", [False, True])
-    def test_ordered_dict_copy_reordered_input(self, storage_order):
-        def fn(x, mapping):
-            return x + 1, mapping.copy()
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.randn(3)
-        for order in ("abc", "cba", "cba"):
-            mapping = OrderedDict(
-                (key, x + index)
-                for index, key in enumerate(order if storage_order else "abc")
-            )
-            if not storage_order:
-                for key in order:
-                    mapping.move_to_end(key)
-            actual = compiled(x, mapping)
-            self.assertEqual(actual, fn(x, mapping))
-            self.assertEqual(list(actual[1]), list(mapping))
-        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("operation", ["getitem", "get", "contains"])
     def test_ordered_dict_readonly_input_order(self, operation):
