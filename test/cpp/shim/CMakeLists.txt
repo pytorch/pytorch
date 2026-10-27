@@ -20,7 +20,7 @@ add_executable(test_shim
 target_compile_definitions(test_shim PRIVATE USE_GTEST)
 
 
-target_link_libraries(test_shim PRIVATE gtest_main torch)
+target_link_libraries(test_shim PRIVATE gtest_main torch ${CMAKE_DL_LIBS})
 target_include_directories(test_shim PRIVATE ${ATen_CPU_INCLUDE})
 
 if(INSTALL_TEST)
