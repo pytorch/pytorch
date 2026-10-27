@@ -6564,6 +6564,9 @@ class AOTInductorTestsTemplate:
             aot_inductor_module(y3)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(y4)
+        # The package runs one model instance, so each rejected call must have
+        # returned it to the pool for this call to run.
+        self.assertEqual(aot_inductor_module(y0), y0)
 
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_check_overbound_no_input_leak(self):

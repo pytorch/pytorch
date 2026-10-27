@@ -260,7 +260,7 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
-        lease.mark_pending();
+        lease.mark_in_flight();
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -273,7 +273,7 @@ class AOTInductorModelContainer {
     [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
     auto lease = pool_.checkout(stream);
     lease->run(input_handles, output_handles, stream, proxy_executor);
-    lease.mark_pending();
+    lease.mark_in_flight();
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -424,7 +424,7 @@ class AOTInductorModelContainer {
           /* use_inactive = */ false,
           /* validate_full_update = */ false);
       const_folded = ConstantState::FOLDED;
-      lease.mark_pending();
+      lease.mark_in_flight();
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
@@ -452,7 +452,7 @@ class AOTInductorModelContainer {
       lease->update_constants_array(active_array);
       const_folded = ConstantState::FOLDED;
 
-      lease.mark_pending();
+      lease.mark_in_flight();
     }
   }
 
