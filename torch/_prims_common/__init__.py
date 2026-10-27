@@ -79,6 +79,7 @@ torch_function_passthrough = {
     torch.sym_max,
     torch.sym_min,
     torch._sym_sqrt,  # type: ignore[attr-defined]
+    torch._sym_isnan,  # type: ignore[attr-defined]
     torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]

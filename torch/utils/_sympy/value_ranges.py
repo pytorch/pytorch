@@ -505,6 +505,18 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.decreasing_map(a, sympy.Not)
 
     @staticmethod
+    def isnan(x):
+        x = ValueRanges.wrap(x)
+        if x.is_int:
+            return ValueRanges.wrap(sympy.false)
+        # Float value ranges do not model NaN, so a float range proves nothing.
+        return ValueRanges.unknown_bool()
+
+    @classmethod
+    def isnotnan(cls, x):
+        return cls.not_(cls.isnan(x))
+
+    @staticmethod
     def or_(a, b):
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.Or)
 
@@ -1268,6 +1280,16 @@ def _rewrite_for_value_range_analysis(
     return expr
 
 
+def _may_be_nan(expr: sympy.Basic, ranges: dict[sympy.Symbol, ValueRanges]) -> bool:
+    from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+    unrefined = ValueRanges.unknown()
+    return any(
+        symbol_is_type(s, SymT.UNBACKED_FLOAT) and ranges.get(s, unrefined) == unrefined
+        for s in expr.free_symbols
+    )
+
+
 def bound_sympy(
     expr: sympy.Expr, ranges: dict[sympy.Symbol, ValueRanges] | None = None
 ) -> ValueRanges:
@@ -1297,6 +1319,18 @@ def bound_sympy(
             ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
         else:
             ranges = context.fake_mode.shape_env.var_to_range
+
+    # Float value ranges do not model NaN. An unbacked float whose range was
+    # never refined (a torch._check that refines it also rules out NaN) may be
+    # NaN, so comparisons on it cannot be decided from ranges: e.g.
+    # zuf0 <= oo is False for NaN.
+    # (sympy Symbols are also Booleans; only real predicates are not Exprs.)
+    if (
+        isinstance(expr, sympy.logic.boolalg.Boolean)
+        and not isinstance(expr, sympy.Expr)
+        and _may_be_nan(expr, ranges)
+    ):
+        return ValueRanges.unknown_bool()
 
     if expr.has(PythonMod, Mod, sympy.Mod):
         expr = _rewrite_for_value_range_analysis(expr, ranges)
