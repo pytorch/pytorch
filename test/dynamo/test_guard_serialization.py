@@ -1572,6 +1572,24 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
 
+    def test_ordered_dict_storage_order_and_aliases(self):
+        shared = []
+        mapping = collections.OrderedDict(a=shared, b=shared)
+        mapping["self"] = mapping
+        mapping.alias = mapping
+        mapping.move_to_end("a")
+        buf = io.BytesIO()
+        GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(
+            (mapping, vars(mapping))
+        )
+        loaded, attrs = load_guards_state(buf.getvalue())
+        self.assertEqual(list(dict.keys(loaded)), ["a", "b", "self"])
+        self.assertEqual(list(loaded), ["b", "self", "a"])
+        self.assertIs(loaded["a"], loaded["b"])
+        self.assertIs(loaded["self"], loaded)
+        self.assertIs(loaded.alias, loaded)
+        self.assertIs(loaded.__dict__, attrs)
+
     @parametrize("descriptor", _RAW_DESCRIPTORS)
     def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
         owner = descriptor.__objclass__
@@ -4882,18 +4900,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
-    def test_nn_module_hook_membership(self):
+    @parametrize("flag_name", ["with_kwargs", "always_call"])
+    def test_nn_module_hook_membership(self, flag_name):
         def hook(module, args, *rest):
             return rest[-1] + 1
 
         def make_module(flags):
             module = torch.nn.Identity()
             for flag in flags:
-                module.register_forward_hook(hook, with_kwargs=flag)
+                module.register_forward_hook(hook, **{flag_name: flag})
             return module
 
         def fn(x, module):
-            return module(x)
+            flags = getattr(
+                module,
+                "_forward_hooks_with_kwargs"
+                if flag_name == "with_kwargs"
+                else "_forward_hooks_always_called",
+            )
+            return x + sum(
+                index + 1
+                for index, (key, _) in enumerate(module._forward_hooks.items())
+                if key in flags
+            )
 
         x = torch.ones(2)
         module = make_module((False, True))
@@ -4910,6 +4939,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
         self._test_check_fn(ref, loaded, {"x": x, "module": module}, False)
+
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_iteration_order(self, reordered):
+        def fn(x, mapping):
+            return x + sum(mapping.values())
+
+        x = torch.ones(2)
+        mapping = collections.OrderedDict(a=1, b=2)
+        if reordered:
+            mapping.move_to_end("a")
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
+        mapping.move_to_end("b" if reordered else "a")
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
 
     @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
     def test_empty_nn_module_hooks_dict(self):

@@ -1844,8 +1844,10 @@ class Module:
                     *_global_forward_hooks.items(),
                     *self._forward_hooks.items(),
                 ):
-                    # mark that always called hook is run
-                    if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
+                    # Only the eager exception handlers below read this set.
+                    if not torch.compiler.is_compiling() and (
+                        hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called
+                    ):
                         called_always_called_hooks.add(hook_id)
 
                     if hook_id in self._forward_hooks_with_kwargs or hook_id in _global_forward_hooks_with_kwargs:
