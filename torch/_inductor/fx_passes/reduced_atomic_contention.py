@@ -410,7 +410,15 @@ def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     """
     if not torch.cuda.is_available() and not torch.xpu.is_available():
         return None
-    _, total_gpu = torch.accelerator.get_memory_info()
+    try:
+        _, total_gpu = torch.accelerator.get_memory_info()
+    except Exception as e:
+        _artifact_log.debug(
+            "partitioned_scatter: memory query failed (%s), "
+            "running without memory gating",
+            e,
+        )
+        return None
 
     floor_bytes: int = config.partitioned_scatter_non_model_floor_bytes
     allowed_peak = max(0, total_gpu - floor_bytes)
