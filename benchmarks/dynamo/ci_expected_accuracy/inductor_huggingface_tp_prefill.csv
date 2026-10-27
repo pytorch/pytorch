@@ -2,6 +2,10 @@ name,accuracy,graph_breaks
 
 
 
+Qwen/Qwen2.5-0.5B-Instruct,pass,0
+
+
+
 Qwen/Qwen3-0.6B,pass,0
 
 
