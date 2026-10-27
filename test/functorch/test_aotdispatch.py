@@ -12904,7 +12904,8 @@ Expected a .* tangent but got a plain Tensor.""",
             expected_compile_count=3,
         )
 
-    def test_saved_tensors_hooks_freed_invalidates_cache_entry(self):
+    @parametrize("freed_hook", ["pack", "unpack"])
+    def test_saved_tensors_hooks_freed_invalidates_cache_entry(self, freed_hook):
         from torch._dynamo.eval_frame import _debug_get_cache_entry_list
         from torch._dynamo.testing import CompileCounter
 
@@ -12914,6 +12915,11 @@ Expected a .* tangent but got a plain Tensor.""",
         def unpack(x):
             return x / 2
 
+        def make_hooks():
+            return list(
+                saved_tensors_hooks_to_gm(pack, unpack, "pack_hash", "unpack_hash")
+            )
+
         def fn(x):
             return x.sin()
 
@@ -12921,7 +12927,7 @@ Expected a .* tangent but got a plain Tensor.""",
         cnt = CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         x = torch.randn(3, requires_grad=True)
-        hooks = saved_tensors_hooks_to_gm(pack, unpack, "pack_hash", "unpack_hash")
+        hooks = make_hooks()
         for _ in range(2):
             with torch.autograd.graph.saved_tensors_hooks(*hooks):
                 opt_fn(x)
@@ -12930,14 +12936,22 @@ Expected a .* tangent but got a plain Tensor.""",
         self.assertEqual(len(annotations), 1)
         self.assertNotEqual(annotations[0], "Invalidated")
 
-        # New hooks can be allocated at a freed hook's address, so freeing the
-        # hooks must invalidate the entry instead of leaving it reachable.
-        del hooks
+        # New hooks can be allocated at a freed hook's address, so freeing
+        # either hook must invalidate the entry instead of leaving it reachable.
+        i = ("pack", "unpack").index(freed_hook)
+        hooks[i] = None
         gc.collect()
         self.assertEqual(
             [e.trace_annotation for e in _debug_get_cache_entry_list(fn)],
             ["Invalidated"],
         )
+
+        # Replace only the freed hook: if the new one reused the freed address,
+        # the stale entry's guard would still pass.
+        hooks[i] = make_hooks()[i]
+        with torch.autograd.graph.saved_tensors_hooks(*hooks):
+            opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._functorch.config.patch(donated_buffer=True)
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
