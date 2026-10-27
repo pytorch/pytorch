@@ -258,18 +258,13 @@ def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) ->
         owner.cpp_kernels[key] = (binary_path, load)
 
 
-def relocatable_cpp_key(compute: Callable[[], str], *, loaded: bool) -> str | None:
-    """The key a C++ kernel's binary is frozen and found under, from ``compute``,
-    or None, without computing it, when nothing would use it: no capture is active,
-    and the process already ``loaded`` the kernel or no replay installed frozen C++
-    kernels."""
-    if _active_capture() is None:
-        if loaded:
-            return None
-        with _frozen_cpp_kernels_lock:
-            if not _frozen_cpp_kernels:
-                return None
-    return compute()
+def capturing() -> bool:
+    return _active_capture() is not None
+
+
+def has_frozen_cpp_kernels() -> bool:
+    with _frozen_cpp_kernels_lock:
+        return bool(_frozen_cpp_kernels)
 
 
 def has_frozen_cpp_kernel(key: str) -> bool:
@@ -585,13 +580,6 @@ def _freeze_triton_kernel(
             if not isinstance(payload, bytes):
                 reject(kernel, payload)
                 continue
-            log.warning(
-                "precompile: no captured step ran backward Triton kernel %s (compile "
-                "%s); it is frozen untuned, with the first of its %d static configs",
-                kernel_name,
-                compile_id,
-                len(static),
-            )
             return payload, {
                 "source_key": key,
                 "kernel_name": kernel_name,
@@ -600,9 +588,11 @@ def _freeze_triton_kernel(
                 "static_config_count": len(static),
             }
 
-    def cubin_retained(result: StaticTritonCompileResult) -> bool:
-        saved_result = copy.copy(result)
-        saved_result.kernel = copy.copy(result.kernel)
+    def cubin_retained(
+        kernel: CachingAutotuner, result: StaticTritonCompileResult
+    ) -> bool:
+        with kernel.lock:
+            _, saved_result = _detached_for_freeze(kernel, result)
         try:
             _retain_cubin(saved_result)
         except (OSError, RuntimeError):
@@ -613,7 +603,10 @@ def _freeze_triton_kernel(
     eligible = (
         require_tuned_backward
         and never_run_backward
-        and any(static and cubin_retained(static[0]) for static in static_by_instance)
+        and any(
+            static and cubin_retained(kernel, static[0])
+            for kernel, static in zip(instances, static_by_instance)
+        )
     )
     kernel_name = instances[0].inductor_meta.get("kernel_name") if instances else None
     raise _UnresolvedTritonExport(
@@ -786,6 +779,16 @@ def _freeze_triton_kernels(
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
     if untuned:
+        # One warning for all of them: a training capture that ran no backward
+        # freezes every backward kernel this way.
+        names = [str(report["kernel_name"]) for report in untuned]
+        log.warning(
+            "precompile: no captured step ran %d backward Triton kernel(s), so they "
+            "are frozen untuned, each with the first of its static configs: %s. The "
+            "precompile_triton_untuned_kernels artifact lists them all.",
+            len(names),
+            ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
+        )
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
