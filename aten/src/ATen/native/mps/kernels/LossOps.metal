@@ -424,6 +424,28 @@ struct mse_backward_functor {
   }
 };
 
+struct smooth_l1_backward_functor {
+  template <typename T, typename A>
+  inline T operator()(
+      const T input,
+      const T target,
+      const T grad,
+      const A beta) {
+    // Same branch order as the CPU kernel; the reduction's norm is already
+    // folded into grad by the host.
+    using op_t = c10::metal::opmath_t<T>;
+    const auto x = op_t(input) - op_t(target);
+    const auto g = op_t(grad);
+    if (x <= -op_t(beta)) {
+      return static_cast<T>(-g);
+    }
+    if (x >= op_t(beta)) {
+      return static_cast<T>(g);
+    }
+    return static_cast<T>(x * g / op_t(beta));
+  }
+};
+
 #define INSTANTIATE_CTC_LOSS(T, T_target, T_index)                  \
   template [[host_name("ctc_loss_" #T "_" #T_target "_" #T_index)]] \
   kernel void ctc_loss<T, T_target, T_index>(                       \
@@ -529,3 +551,12 @@ REGISTER_BINARY_CASTOUT_OP(mse, bfloat, bfloat);
 REGISTER_TERNARY_ALPHA_OP(mse_backward, float, float, float);
 REGISTER_TERNARY_ALPHA_OP(mse_backward, half, half, half);
 REGISTER_TERNARY_ALPHA_OP(mse_backward, bfloat, bfloat, bfloat);
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, bfloat, float, bfloat);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, long, long, long);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, int, int, int);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, short, short, short);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, char, char, char);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, uchar, uchar, uchar);

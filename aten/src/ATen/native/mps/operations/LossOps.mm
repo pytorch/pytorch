@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/OpMathType.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/PointwiseOps.h>
@@ -574,87 +575,6 @@ static void smooth_l1_loss_template(const Tensor& input,
   smooth_l1_loss_impl(input, target, reduction, beta, output, mpsInputShape, mpsOutputShape);
 }
 
-static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
-                                         const Tensor& input,
-                                         const Tensor& target,
-                                         int64_t reduction,
-                                         double beta,
-                                         Tensor& grad_input) {
-  if (grad_input.numel() == 0) {
-    return;
-  }
-  TORCH_CHECK(beta >= 0, "smooth_l1_loss_backward does not support negative values for beta.");
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* targetTensor_ = nil;
-    MPSGraphTensor* gradInputTensor_ = nil;
-    MPSGraphTensor* gradOutputTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
-    std::string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
-        reductionToString(reduction) + ":" + std::to_string(beta);
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      auto targetPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, target);
-      auto gradOutputPlaceholderTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-      auto inputTensor = castMPSTensor(mpsGraph, inputPlaceholder, computeType);
-      auto targetTensor = castMPSTensor(mpsGraph, targetPlaceholder, computeType);
-      auto gradOutputTensor = castMPSTensor(mpsGraph, gradOutputPlaceholderTensor, computeType);
-
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:computeType];
-      // xn - yn
-      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
-                                                          secondaryTensor:targetTensor
-                                                                     name:nil];
-      // | xn - yn |
-      MPSGraphTensor* diffAbsTensor = [mpsGraph absoluteWithTensor:diffTensor name:nil];
-      // | xn - yn | < beta
-      MPSGraphTensor* diffAbsLessThanBetaTensor = [mpsGraph lessThanWithPrimaryTensor:diffAbsTensor
-                                                                      secondaryTensor:betaTensor
-                                                                                 name:nil];
-      // ( xn - yn ) / beta
-      MPSGraphTensor* truePredicateTensor = [mpsGraph divisionWithPrimaryTensor:diffTensor
-                                                                secondaryTensor:betaTensor
-                                                                           name:nil];
-      // ( x - y ) / | x - y |
-      MPSGraphTensor* falsePredicateTensor = [mpsGraph divisionWithPrimaryTensor:diffTensor
-                                                                 secondaryTensor:diffAbsTensor
-                                                                            name:nil];
-
-      MPSGraphTensor* lossTensor = [mpsGraph selectWithPredicateTensor:diffAbsLessThanBetaTensor
-                                                   truePredicateTensor:truePredicateTensor
-                                                  falsePredicateTensor:falsePredicateTensor
-                                                                  name:@"lossTensor"];
-      MPSGraphTensor* outputTensor = lossTensor;
-      if (reduction == Reduction::Mean) {
-        MPSGraphTensor* numelTensor = [mpsGraph constantWithScalar:(double)input.numel()
-                                                          dataType:[lossTensor dataType]];
-        outputTensor = [mpsGraph divisionWithPrimaryTensor:lossTensor secondaryTensor:numelTensor name:nil];
-      }
-      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor
-                                                                  secondaryTensor:gradOutputTensor
-                                                                             name:nil];
-      newCachedGraph->inputTensor_ = inputPlaceholder;
-      newCachedGraph->targetTensor_ = targetPlaceholder;
-      newCachedGraph->gradInputTensor_ =
-          castMPSTensor(mpsGraph, gradInputTensor, getMPSDataType(grad_input.scalar_type()));
-      newCachedGraph->gradOutputTensor_ = gradOutputPlaceholderTensor;
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder, gradOutputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
-}
-
 } // namespace mps
 
 // APIs exposed to at::native scope
@@ -923,8 +843,26 @@ Tensor& smooth_l1_loss_backward_out_mps(const Tensor& grad_output,
                                         int64_t reduction,
                                         double beta,
                                         Tensor& grad_input) {
-  mps::smooth_l1_loss_backward_impl(grad_output, input, target, reduction, beta, grad_input);
-
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss_backward does not support negative values for beta.");
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kBool && !isComplexType(input.scalar_type()),
+                              "smooth_l1_loss_backward_mps not implemented for ",
+                              input.scalar_type());
+  // grad_output is a scalar unless the reduction is None (where norm is 1), so
+  // folding the mean's 1/numel into it is a 0-dim op and leaves alpha for beta.
+  // Integer inputs truncate norm first, like the CPU kernel's norm.to<scalar_t>().
+  const double norm = reduction == Reduction::Mean && input.numel() > 0 ? 1.0 / input.numel() : 1.0;
+  const Scalar norm_scalar = isFloatingType(input.scalar_type()) ? Scalar(norm) : Scalar(static_cast<int64_t>(norm));
+  const Tensor grad = norm == 1.0 ? grad_output : grad_output.mul(norm_scalar);
+  auto iter = TensorIteratorConfig()
+                  .add_output(grad_input)
+                  .add_const_input(input)
+                  .add_const_input(target)
+                  .add_const_input(grad)
+                  .promote_inputs_to_common_dtype(true)
+                  .cast_common_dtype_to_outputs(true)
+                  .enforce_safe_casting_to_output(true)
+                  .build();
+  mps::lib.exec_ternary_kernel(iter, "smooth_l1_backward", beta, at::toOpMathType(iter.common_dtype()));
   return grad_input;
 }
 
