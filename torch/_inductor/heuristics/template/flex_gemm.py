@@ -82,10 +82,12 @@ _SKINNY_PRIORITY_RANK = {
 
 # Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
 # expert shapes (E in 8..256, balanced and skewed offs); the first entry is
-# the untuned default for ordinary varlen calls. Of the measured entries here,
-# grouped-main stores accept the last two: both have cluster_n == 1, and the
-# tile_m=128 choice also has cluster_m == 1. Grouped SwiGLU therefore defaults
-# to 128x128 c1x1 (measured at E=64) and autotunes 256x128 c2x1 (E=8).
+# the untuned default for ordinary varlen calls. Grouped-main stores accept
+# only cluster_n == 1 (and cluster_m == 1 at tile_m=128), so grouped SwiGLU
+# defaults to 128x128 c1x1 (measured at E=64). The last three were measured on
+# GB200 MoE GEMMs (T=8192, N=2816, K=2048, ragged offs): 256x256 c2x1 wins at
+# ~1k rows per expert (E=8) and 128x256 c2x1 at ~128 (E=64), ~12% over the
+# entries above.
 _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
     (
         (128, 128, 2, 1, True),
@@ -94,6 +96,9 @@ _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
         (128, 128, 2, 1, False),
         (128, 128, 1, 1, True),
         (256, 128, 2, 1, True),
+        (256, 256, 2, 1, True),
+        (256, 256, 2, 1, False),
+        (128, 256, 2, 1, True),
     )
 )
 
@@ -159,8 +164,8 @@ def flex_gemm_search_space(
     EXHAUSTIVE keeps everything. Legal sets that miss the priority list
     entirely (other capabilities, or constrained calls such as pinned ``swap_ab``)
     benchmark QuACK's order, capped at ``_MAX_UNRANKED_CANDIDATES``. Varlen-M
-    calls rank by the grouped_mm order and only add QuACK's dense default when
-    it is measured (it is the slowest common choice for ragged groups).
+    calls rank by the grouped_mm order and do not add QuACK's dense default
+    unless the varlen order ranks it.
     Dense mm shape hints additionally admit two small-N swapped configs for M <= 128.
     """
     if inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
