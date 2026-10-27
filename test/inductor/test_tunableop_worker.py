@@ -451,7 +451,10 @@ class BenchmarkJobCallTest(TestCase):
         self.assertIn(("benchmark",), calls[1:-1])
 
     def test_call_skips_the_mask_when_it_would_select_nothing(self):
-        for name, mask in (("unset", None), ("all false", (False, False, False, False))):
+        for name, mask in (
+            ("unset", None),
+            ("all false", (False, False, False, False)),
+        ):
             with self.subTest(mask=name):
                 entered = []
 
