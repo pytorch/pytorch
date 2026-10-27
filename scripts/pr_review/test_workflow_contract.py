@@ -61,7 +61,7 @@ from _suite_manifest import (  # noqa: E402,F401
 
 # Imported, not restated: stage B's schema has to offer the sets the sanitizer
 # actually enforces, or the two drift apart silently.
-from extract_verdict import SEVERITIES, VERDICTS  # noqa: E402
+from extract_verdict import MAX_MESSAGE, SEVERITIES, VERDICTS  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -5282,6 +5282,14 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertFalse(item["additionalProperties"])
         self.assertEqual(set(item["properties"]["severity"]["enum"]), SEVERITIES)
 
+    def test_the_prompt_asks_for_messages_shorter_than_the_cap(self):
+        # 0.8 leaves 300 of 1500 for the escaping neutralize() adds; the prompt
+        # also tells stage B to count `&`, `<` and `>` as five characters.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        m = re.search(r"`message` to at most (\d+) characters", prompt)
+        self.assertIsNotNone(m, "stage B no longer states a message budget")
+        self.assertLessEqual(int(m.group(1)), MAX_MESSAGE * 0.8)
+
     def test_the_findings_file_comes_from_the_structured_output(self):
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
         write = "Write stage B's result to the findings file"
@@ -6405,6 +6413,8 @@ SKILL_COMMANDS = {
     "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews": COMMENTS,
     "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments": COMMENTS,
     "gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions": "`role`",
+    "gh api repos/pytorch/pytorch/pulls/comments/<COMMENT_ID>/reactions": "`reactions`",
+    "gh api repos/pytorch/pytorch/issues/comments/<COMMENT_ID>/reactions": "`reactions`",
     # GitHub Actions mode.
     "git diff origin/<baseBranch>...HEAD": None,
     "git diff --stat origin/<baseBranch>...HEAD": None,

@@ -599,7 +599,7 @@ test_python_smoke_b200() {
   # CuTeDSL runtime does, so they are collected nowhere else.
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # The variants' expectations live outside test_ops too: two xfails in
-  # test_ops_gradients.py and nine TestOperators entries in the shared skip
+  # test_ops_gradients.py and nine TestOperatorsDevice entries in the shared skip
   # tuple. An expectation that never runs rots into an unexpected success
   # without anyone noticing, so collect those suites here as well -- a handful
   # of tests each once restricted to this op.
@@ -884,9 +884,7 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  # test_aoti_inference is not run: it loads libaoti_custom_class.so and its model
-  # and data files from its build directory, which the build artifacts don't include.
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_aoti_fallback_shard() {
@@ -1838,7 +1836,7 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 
-  # Kineto's own unit tests, vendored under third_party/kineto. The binaries
+  # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
@@ -2001,8 +1999,8 @@ test_distributed_single_gpu() {
 
 test_distributed_4gpu() {
   # Distributed tests that need more GPUs than the standard 2-GPU distributed
-  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels.
-  # Selection reuses the native `multigpu` marker machinery (see
+  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
+  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
   # test/conftest.py): --distributed-tests discovers every distributed test file
   # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
   # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
