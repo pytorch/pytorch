@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 import torch
-from torch._inductor import tunableop
+from torch._inductor import config as inductor_config, tunableop
 from torch._inductor.autotune_process import _TestBenchmarkRequest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -31,6 +31,9 @@ class _FakeProcess:
         # which is what a fake with no real child should report.
         self._alive = False
         self.process = None
+        # TuningProcess.running: cleared by close()/kill(), i.e. only when
+        # the pipe itself failed. Left True for a child-reported error.
+        self.running = False
 
     def put(self, job):
         self.sent.append(job)
@@ -149,10 +152,35 @@ class TunableOpWorkerTest(TestCase):
                 mock.patch("torch.cuda.current_device", return_value=0),
                 mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
             ):
-                tunableop.get_worker((0, "t.csv")).raises = exc
+                with tunableop._worker_lock:
+                    tunableop._get_worker_locked((0, "t.csv")).raises = exc
                 outcome = tunableop.submit(job)
             self.assertEqual(outcome.status, status)
             self.assertIsNone(outcome.time)
+
+    def test_job_raised_pipe_exception_is_an_error_not_a_timeout(self):
+        # TuningProcess.get re-raises whatever the child sent back. A job that
+        # raises a TimeoutError subclass must not be filed as a pipe timeout:
+        # the worker is still up, so it needs the sticky-fault restart. The
+        # discriminator is running, which a real fault clears and this does not.
+        for exc in (TimeoutError("from the job"), EOFError("from the job")):
+            tunableop._worker = None
+            tunableop._worker_key = None
+            self.created.clear()
+            job = tunableop.BenchmarkJob(None, tuning=False)
+            with (
+                mock.patch("torch.cuda.current_device", return_value=0),
+                mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+            ):
+                with tunableop._worker_lock:
+                    worker = tunableop._get_worker_locked((0, "t.csv"))
+                worker.raises = exc
+                worker.running = True  # the pipe is fine; the job failed
+                outcome = tunableop.submit(job)
+            self.assertEqual(outcome.status, "error")
+            self.assertIsNone(outcome.time)
+            self.assertIsNone(tunableop._worker)
+            self.assertEqual(worker.kill_calls, 1)
 
     def test_a_failure_before_the_worker_is_also_reported(self):
         # The caller is a compile, not a benchmark harness: anything submit()
@@ -174,7 +202,8 @@ class TunableOpWorkerTest(TestCase):
             mock.patch("torch.cuda.current_device", return_value=0),
             mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
         ):
-            worker = tunableop.get_worker((0, "t.csv"))
+            with tunableop._worker_lock:
+                worker = tunableop._get_worker_locked((0, "t.csv"))
             worker.raises = RuntimeError("boom")
             outcome = tunableop.submit(job)
             self.assertEqual(outcome.status, "error")
@@ -192,7 +221,8 @@ class TunableOpWorkerTest(TestCase):
             mock.patch("torch.cuda.current_device", return_value=0),
             mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
         ):
-            tunableop.get_worker((0, "t.csv"))
+            with tunableop._worker_lock:
+                tunableop._get_worker_locked((0, "t.csv"))
             first = tunableop._worker
         with mock.patch(
             "torch.cuda.current_device", side_effect=RuntimeError("no context")
@@ -390,7 +420,7 @@ class TunableopModeValidationTest(TestCase):
     def test_invalid_mode_warns_and_disables(self):
         tunableop._mode_warned = False
         try:
-            with mock.patch.object(tunableop.config, "aten_tunableop_mode", "Tune"):
+            with inductor_config.patch({"cuda.aten_tunableop_mode": "Tune"}):
                 with self.assertLogs(tunableop.log, level="WARNING") as logs:
                     self.assertFalse(tunableop.is_tune_mode())
                     self.assertFalse(tunableop.is_reuse_mode())
@@ -399,7 +429,7 @@ class TunableopModeValidationTest(TestCase):
                 any("TORCHINDUCTOR_ATEN_TUNABLEOP_MODE" in m for m in logs.output)
             )
             # Warns only once: the second invalid value logs nothing.
-            with mock.patch.object(tunableop.config, "aten_tunableop_mode", "bogus"):
+            with inductor_config.patch({"cuda.aten_tunableop_mode": "bogus"}):
                 with self.assertNoLogs(tunableop.log, level="WARNING"):
                     tunableop.is_enabled()
         finally:
@@ -409,7 +439,7 @@ class TunableopModeValidationTest(TestCase):
         tunableop._mode_warned = False
         try:
             for mode in ("off", "tune", "reuse"):
-                with mock.patch.object(tunableop.config, "aten_tunableop_mode", mode):
+                with inductor_config.patch({"cuda.aten_tunableop_mode": mode}):
                     with self.assertNoLogs(tunableop.log, level="WARNING"):
                         tunableop.is_enabled()
         finally:
