@@ -125,7 +125,6 @@ def _normalize_dim(dim: int, ndim: int) -> int:
 # across calls; pointer alignment isn't layout and is checked per call.
 _ELIGIBILITY_CACHE: dict[tuple, tuple[int, int] | None] = {}
 _ELIGIBILITY_CACHE_MAX = 256
-_MISS = object()
 
 
 def _scatter_add_eligibility(
@@ -146,15 +145,16 @@ def _scatter_add_eligibility(
         src.device, src.dtype, src.shape, src.stride(),
     )  # fmt: skip
     try:
-        geometry = _ELIGIBILITY_CACHE.get(key, _MISS)
+        return _ELIGIBILITY_CACHE[key]
+    except KeyError:
+        pass
     except TypeError:
         # Symbolic sizes (tracing) are unhashable.
         return _compute_eligibility(self, d, index, src)
-    if geometry is _MISS:
-        geometry = _compute_eligibility(self, d, index, src)
-        if len(_ELIGIBILITY_CACHE) >= _ELIGIBILITY_CACHE_MAX:
-            _ELIGIBILITY_CACHE.clear()
-        _ELIGIBILITY_CACHE[key] = geometry
+    geometry = _compute_eligibility(self, d, index, src)
+    if len(_ELIGIBILITY_CACHE) >= _ELIGIBILITY_CACHE_MAX:
+        _ELIGIBILITY_CACHE.clear()
+    _ELIGIBILITY_CACHE[key] = geometry
     return geometry
 
 
@@ -181,6 +181,9 @@ def _compute_eligibility(
     for k, (i, s, x) in enumerate(zip(index.shape, self.shape, src.shape)):
         if i > x or (k != d and i > s):
             return None
+    # Every index is out of range, and restriding would read past the view.
+    if self.shape[d] == 0 and index.numel():
+        return None
 
     self_strides = list(self.stride())
     self_strides[d] = 0  # aten's restride_dim trick

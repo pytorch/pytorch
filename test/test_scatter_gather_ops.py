@@ -922,21 +922,6 @@ class TestScatterAddOverrideConds(TestCase):
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
-    @parametrize("narrow", ["self", "src"])
-    def test_declines_index_wider_than_a_view(self, narrow):
-        # aten raises for this. The narrowed operand's storage is wide enough
-        # that as_strided can't catch it; only the explicit shape check does.
-        self_t = torch.zeros(64, 512, device="cuda")
-        src = torch.randn(32, 512, device="cuda")
-        if narrow == "self":
-            self_t = self_t[:, :256]
-        else:
-            src = src[:, :256]
-        idx = _expanded_idx(torch.zeros(32, dtype=torch.int64, device="cuda"), (512,))
-        self.assertEqual(self._conds(self_t, idx, src), (False, False))
-        with self.assertRaisesRegex(RuntimeError, "Expected index"):
-            self_t.scatter_add_(0, idx, src)
-
     def test_alignment_is_checked_on_a_cached_layout(self):
         self_t = torch.zeros(_M_OUT, _D, device="cuda")
         aligned = torch.randn(_M_SRC, _D, device="cuda")
@@ -948,29 +933,6 @@ class TestScatterAddOverrideConds(TestCase):
             self.assertEqual(self._conds(self_t, idx, aligned), (True, True))
             self.assertEqual(self._conds(self_t, idx, misaligned), (False, False))
         spy.assert_called_once()
-
-    def test_cache_eviction_keeps_results_correct(self):
-        self.impl._ELIGIBILITY_CACHE.clear()
-        with patch.object(self.impl, "_ELIGIBILITY_CACHE_MAX", 2):
-            for N in (128, 256, 512, 128):
-                self_t, idx, src, _ = _make_override_triple(100, 50, (N,))
-                self.assertEqual(self.impl._scatter_add_eligibility(self_t, 0, idx, src), (N, 50))
-                self.assertLessEqual(len(self.impl._ELIGIBILITY_CACHE), 2)
-
-    def test_symbolic_sizes_are_not_cached(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, StatelessSymbolicContext
-        mode = FakeTensorMode(shape_env=ShapeEnv())
-
-        def fake(t):
-            ctx = StatelessSymbolicContext(dynamic_sizes=[DimDynamic.DYNAMIC] * t.ndim)
-            return mode.from_tensor(t, symbolic_context=ctx)
-
-        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
-        cached = dict(self.impl._ELIGIBILITY_CACHE)
-        with mode:
-            self.impl._scatter_add_eligibility(fake(self_t), 0, fake(idx), fake(src))
-        self.assertEqual(self.impl._ELIGIBILITY_CACHE, cached)
 
     @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
     def test_alignment_cond_matrix(self, case):
@@ -1104,11 +1066,14 @@ class TestScatterAddOverrideConds(TestCase):
             self.assertFalse(self.impl._tma_cond(self_t, 0, idx, src))
             self.assertFalse(self.impl._vs_cond(self_t, 0, idx, src))
 
-    def test_rejects_empty_self(self):
+    @parametrize("base_rows", [0, 100])
+    def test_rejects_empty_self(self, base_rows):
         # self.shape[0] == 0 with a non-empty src would have every index
         # out of range. Cond must reject so aten raises the index error
-        # instead of our kernel silently writing OOB.
-        self_t = torch.zeros(0, 128, device="cuda", dtype=torch.float32)
+        # instead of our kernel silently writing OOB. A zero-row view of a
+        # larger buffer shares the bare tensor's cache key, so clear it.
+        self.impl._ELIGIBILITY_CACHE.clear()
+        self_t = torch.zeros(base_rows, 128, device="cuda", dtype=torch.float32)[:0]
         src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
         idx = _expanded_idx(
             torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
@@ -1390,6 +1355,48 @@ class TestScatterAddOverrideCorrectness(TestCase):
         torch.cuda.synchronize()
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("narrow", ["self", "src"])
+    def test_declines_index_wider_than_a_view(self, narrow):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        # aten raises for this. The narrowed operand's storage is wide enough
+        # that as_strided can't catch it; only the explicit shape check does.
+        self_t = torch.zeros(64, 512, device="cuda")
+        src = torch.randn(32, 512, device="cuda")
+        if narrow == "self":
+            self_t = self_t[:, :256]
+        else:
+            src = src[:, :256]
+        idx = _expanded_idx(torch.zeros(32, dtype=torch.int64, device="cuda"), (512,))
+        self.assertFalse(cutedsl_impl._is_tma_supported(self_t, 0, idx, src))
+        self.assertFalse(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
+        with self.assertRaisesRegex(RuntimeError, "Expected index"):
+            self_t.scatter_add_(0, idx, src)
+
+    def test_cache_eviction_keeps_results_correct(self):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cutedsl_impl._ELIGIBILITY_CACHE.clear()
+        with patch.object(cutedsl_impl, "_ELIGIBILITY_CACHE_MAX", 2):
+            for N in (128, 256, 512, 128):
+                self_t, idx, src, _ = _make_override_triple(100, 50, (N,))
+                self.assertEqual(cutedsl_impl._scatter_add_eligibility(self_t, 0, idx, src), (N, 50))
+                self.assertLessEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 2)
+
+    def test_symbolic_sizes_are_not_cached(self):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, StatelessSymbolicContext
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        def fake(t):
+            ctx = StatelessSymbolicContext(dynamic_sizes=[DimDynamic.DYNAMIC] * t.ndim)
+            return mode.from_tensor(t, symbolic_context=ctx)
+
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        cached = dict(cutedsl_impl._ELIGIBILITY_CACHE)
+        with mode:
+            cutedsl_impl._scatter_add_eligibility(fake(self_t), 0, fake(idx), fake(src))
+        self.assertEqual(cutedsl_impl._ELIGIBILITY_CACHE, cached)
 
 
 
