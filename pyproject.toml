@@ -129,6 +129,7 @@ include = [
     "!**/__pycache__/**",
     "!**/*.pyc",
     "!third_party/nccl/**",
+    "!third_party/nccl-extensions/**",
     # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
     # it so a dirty checkout does not leak build output into the sdist. Anchored
     # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
@@ -431,6 +432,8 @@ license-files = [
     "third_party/mslk/external/composable_kernel/LICENSE",
     "third_party/mslk/external/cutlass/LICENSE.txt",
     "third_party/mslk/mslk/attention/flash_attn/LICENSE",
+    "third_party/nccl_ep/LICENSE.txt",
+    "third_party/nccl_ep/ThirdPartyNotices.txt",
     "third_party/nlohmann/LICENSE.MIT",
     "third_party/onnx/LICENSE",
     "third_party/perfetto/LICENSE",
