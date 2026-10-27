@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     recover_orig_fp32_precision,
+    skipIfRocm,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -894,10 +895,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         if self.device == GPU_TYPE and TEST_WITH_ROCM:
             # setUp sets fp32_precision="tf32", which hipBLASLt honors as XF32 on
             # gfx942 and gfx950, degrading the eager bmm reference while the fused
-            # path runs full fp32. Unlike its neighbours, _sfdp_pattern_24 registers
-            # _sfdp_extra_check uncalled, so it fuses whatever fp32_precision says and
-            # this test can compare two exact results instead of an exact one against
-            # a degraded reference.
+            # path runs full fp32. ROCm does not gate fp32 fusion on fp32_precision
+            # (see CudaInterface.is_fp32_attention_fusion_safe), so under "ieee" the
+            # pattern still fuses and this test can compare two exact results
+            # instead of an exact one against a degraded reference.
             torch.backends.cuda.matmul.fp32_precision = "ieee"
 
         # The view sizes of _sfdp_pattern_24 are wildcards in the serialized
@@ -2338,14 +2339,15 @@ class TestAttentionFusionDeviceRouting(TestCase):
         matmul = torch.backends.cuda.matmul
         saved = matmul.fp32_precision
         try:
-            if torch.device(device).type == "cuda":
+            if torch.device(device).type == "cuda" and torch.version.hip is None:
                 # CUDA blocks fp32 fusion under "ieee" and allows it under "tf32".
                 matmul.fp32_precision = "ieee"
                 self.assertFalse(_sfdp_params_check(match))
                 matmul.fp32_precision = "tf32"
                 self.assertTrue(_sfdp_params_check(match))
             else:
-                # Non-CUDA inherits the base fall-through and fuses regardless.
+                # ROCm's fused fp32 kernel computes in full fp32, and non-CUDA
+                # devices inherit the base fall-through: both fuse regardless.
                 for precision in ("tf32", "ieee"):
                     matmul.fp32_precision = precision
                     self.assertTrue(_sfdp_params_check(match))
@@ -2496,6 +2498,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             )
 
         @skipIfXpu(msg="FIXME: ENable for XPU")
+        @skipIfRocm(
+            msg="ROCm does not gate fp32 SDPA fusion on fp32_precision (#198509)"
+        )
         def test_skip_non_tf32(self):
             try:
                 orig = torch.backends.cuda.matmul.fp32_precision
