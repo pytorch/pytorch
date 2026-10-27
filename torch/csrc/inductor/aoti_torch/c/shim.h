@@ -636,6 +636,57 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// CUDA graph capture for generated code. These wrap at::cuda::MemPool and
+// at::cuda::CUDAGraph, so a capture allocates from a private pool, and random
+// number generators advance on every replay.
+//
+// A graph handle captures once: after capture_end it can only be replayed,
+// if it was instantiated, and deleted. Deleting it frees the graph and its
+// reference to the pool's memory.
+struct CUDAMemPoolOpaque;
+using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
+
+struct CUDAGraphOpaque;
+using CUDAGraphHandle = CUDAGraphOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_mem_pool(
+    int32_t device_index,
+    CUDAMemPoolHandle* ret_pool // returns new reference
+);
+
+// Graphs captured into the pool keep its memory until they are deleted. Once
+// they all are, the pool can't be captured into again.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_graph(
+    CUDAGraphHandle* ret_graph // returns new reference
+);
+
+// Deleting a graph that is being captured ends the capture, as
+// aoti_torch_cuda_graph_capture_end(graph, false) would.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_graph(CUDAGraphHandle graph);
+
+// Starts capturing the work enqueued on `stream`, in thread-local capture
+// mode. Memory allocated on `stream` during the capture comes from `pool`.
+// The capture must end on the thread that began it.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_begin(
+    CUDAGraphHandle graph,
+    CUDAMemPoolHandle pool,
+    void* stream);
+
+// Ends the capture. With instantiate false, the capture is discarded instead,
+// e.g. because the captured work failed; discarding succeeds even if the
+// capture was invalidated. Either way the stream stops capturing.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph, bool instantiate);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_replay(CUDAGraphHandle graph, void* stream);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details

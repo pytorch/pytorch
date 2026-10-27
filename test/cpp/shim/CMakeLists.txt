@@ -12,12 +12,21 @@ set(TORCH_SHIM_TEST_SRCS
   ${TORCH_SHIM_TEST_ROOT}/test_pyobject_conversion.cpp
 )
 
+if(USE_CUDA)
+  list(APPEND TORCH_SHIM_TEST_SRCS
+    ${TORCH_SHIM_TEST_ROOT}/test_cuda_graph.cpp
+  )
+endif()
+
 add_executable(test_shim
   ${TORCH_SHIM_TEST_SRCS}
 )
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_shim PRIVATE USE_GTEST)
+if(USE_CUDA)
+  target_compile_definitions(test_shim PRIVATE USE_CUDA)
+endif()
 
 
 target_link_libraries(test_shim PRIVATE gtest_main torch ${CMAKE_DL_LIBS})
