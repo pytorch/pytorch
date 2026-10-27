@@ -794,7 +794,7 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_requires_nccl_2_31(self) -> None:
-        if torch.version.hip is None and torch.cuda.nccl.version() >= (2, 31, 0):
+        if torch.cuda.nccl.version() >= (2, 31, 0):
             self.skipTest("NCCL 2.31+ supports collective configs")
         tensor = torch.ones(4, device=self.device)
         with self.assertRaisesRegex(RuntimeError, "requires NCCL 2.31 or later"):
@@ -803,13 +803,6 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
         dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
         self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
-    # Remove once ncclCollConfig is enabled on ROCm. NCCL2_HAS_COLL_CONFIG
-    # still excludes USE_ROCM; that enablement is a separate change.
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "per-collective ncclCollConfig is compiled out on ROCm; "
-        "enablement is tracked separately",
-    )
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
