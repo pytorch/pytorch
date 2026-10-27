@@ -1645,6 +1645,8 @@ def gemm_hti_gfx950_kernel(
     rocdl.sched_barrier(0)
     if wid // n_waves == 1:
         rocdl.s_barrier()
+        # This group's next barrier releases the first group to read stage 0.
+        __waitcnt(0)
     rocdl.sched_barrier(0)
     rocdl.s_barrier()
     rocdl.sched_barrier(0)
@@ -1676,6 +1678,11 @@ def gemm_hti_gfx950_kernel(
             async_load_a_to_lds(0, next_k_tile, 0)
             rocdl.s_barrier()
         consume(k_tile, c10, a1, b0)
+        if const_expr(not prefetch_next):
+            if wid // n_waves == 1:
+                # The tail omits the prefetch barrier, so this barrier releases
+                # the first group to read stage 1 A half 0. B/A half 1 may stay in flight.
+                __waitcnt(half_ldg_b_iters + half_ldg_a_iters)
         rocdl.s_barrier()
 
         b0 = load_b_fragment(0, 1, k_tile + 1)
