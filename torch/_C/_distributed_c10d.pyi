@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
 from typing import Any, overload
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -419,7 +420,12 @@ class Work:
 
 class Backend:
     class Options:
+        @overload
         def __init__(self, backend: str, timeout: timedelta = ...) -> None: ...
+        @overload
+        def __init__(self, other: Backend.Options, /) -> None: ...
+        def __copy__(self) -> Self: ...
+        def __deepcopy__(self, memo: dict[int, Any]) -> Self: ...
         @property
         def backend(self) -> str: ...
         @property
