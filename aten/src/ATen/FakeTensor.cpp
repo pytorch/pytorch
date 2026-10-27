@@ -8,7 +8,7 @@ namespace {
 
 bool isIndexedDeviceType(c10::DeviceType type) {
   return type == kCUDA || type == kHIP || type == kHPU || type == kXPU ||
-      type == kMPS || type == kMTIA || type == kPrivateUse1;
+      type == kMPS || type == kPrivateUse1;
 }
 
 c10::Device normalizeFakeDevice(c10::Device device) {

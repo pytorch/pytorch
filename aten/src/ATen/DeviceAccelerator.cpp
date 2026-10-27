@@ -16,19 +16,6 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
     return kPrivateUse1;
   }
 
-  // 2. Check runtime backends
-  // This state is temporary, these runtime checks should be moved to compile-time
-  // once they provide the new isBuilt API and we are sure they're never in the
-  // same binary as another accelerator.
-#define DETECT_RUNTIME_ACCELERATOR(device_name)     \
-  if (at::has##device_name()) {                     \
-    return k##device_name;                          \
-  }
-
-  DETECT_RUNTIME_ACCELERATOR(MTIA)
-
-#undef DETECT_RUNTIME_ACCELERATOR
-
   // 2. Check compile-time backends
   std::optional<c10::DeviceType> device_type = std::nullopt;
 
@@ -58,7 +45,6 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
 bool isAccelerator(c10::DeviceType device_type) {
   switch (device_type) {
     case at::kCUDA:
-    case at::kMTIA:
     case at::kXPU:
     case at::kHIP:
     case at::kMPS:

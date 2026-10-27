@@ -1216,6 +1216,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Formatting.cpp",
     "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
+    "aten/src/ATen/core/GeneratorForPrivateuseone.cpp",
     "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/Tensor.cpp",

@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 
 using namespace c10;
@@ -445,6 +446,44 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
     ASSERT_TRUE(!seen_strings.contains(res));
     seen_strings.insert(res);
   }
+}
+
+TEST(DispatchKeySet, MTIAAliasesPrivateUse1) {
+  static_assert(DispatchKey::MTIA == DispatchKey::PrivateUse1);
+  static_assert(DispatchKey::AutogradMTIA == DispatchKey::AutogradPrivateUse1);
+  static_assert(DispatchKey::AutocastMTIA == DispatchKey::AutocastPrivateUse1);
+  static_assert(
+      DispatchKey::QuantizedMTIA == DispatchKey::QuantizedPrivateUse1);
+  static_assert(DispatchKey::SparseMTIA == DispatchKey::SparsePrivateUse1);
+  static_assert(
+      DispatchKey::SparseCsrMTIA == DispatchKey::SparseCsrPrivateUse1);
+  static_assert(
+      DispatchKey::NestedTensorMTIA == DispatchKey::NestedTensorPrivateUse1);
+
+  ASSERT_EQ(
+      toBackendComponent(DeviceType::MTIA), BackendComponent::PrivateUse1Bit);
+  ASSERT_EQ(
+      dispatchKeyToDeviceType(DispatchKey::MTIA), DeviceType::PrivateUse1);
+  ASSERT_EQ(
+      dispatchKeyToTensorOptions(DispatchKey::MTIA).device(),
+      Device(kPrivateUse1));
+  ASSERT_EQ(parseDispatchKey("MTIA"), DispatchKey::PrivateUse1);
+  ASSERT_EQ(parseDispatchKey("AutogradMTIA"), DispatchKey::AutogradPrivateUse1);
+  ASSERT_EQ(
+      parseDispatchKey("QuantizedMTIA"), DispatchKey::QuantizedPrivateUse1);
+
+  const Device mtia(kMTIA);
+  ASSERT_EQ(
+      computeDispatchKey(kFloat, kStrided, mtia), DispatchKey::PrivateUse1);
+  ASSERT_EQ(
+      computeDispatchKey(kQInt8, kStrided, mtia),
+      DispatchKey::QuantizedPrivateUse1);
+  ASSERT_EQ(
+      computeDispatchKey(kFloat, kSparse, mtia),
+      DispatchKey::SparsePrivateUse1);
+  ASSERT_EQ(
+      computeDispatchKey(kFloat, kSparseCsr, mtia),
+      DispatchKey::SparseCsrPrivateUse1);
 }
 
 TEST(DispatchKeySet, TestGetRuntimeDispatchKeySet) {

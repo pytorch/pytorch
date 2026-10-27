@@ -101,8 +101,6 @@ class TORCH_API Context {
       return at::detail::getMPSHooks();
     } else if (opt_device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks();
-    } else if (opt_device_type == at::kMTIA) {
-      return at::detail::getMTIAHooks();
     } else if (opt_device_type == at::kHIP) {
       return at::detail::getHIPHooks();
     } else if (opt_device_type == at::kHPU) {

@@ -73,5 +73,14 @@ TEST(DeviceTypeTest, PrivateUseOneRegister) {
   ASSERT_THROW(c10::register_privateuse1_backend("hip"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("mps"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("xpu"), c10::Error);
-  ASSERT_THROW(c10::register_privateuse1_backend("mtia"), c10::Error);
+}
+
+TEST(DeviceTypeTest, MTIAAliasesPrivateUseOne) {
+  static_assert(c10::DeviceType::MTIA == c10::DeviceType::PrivateUse1);
+  static_assert(c10::kMTIA == c10::kPrivateUse1);
+  ASSERT_TRUE(c10::isValidDeviceType(c10::kMTIA));
+  ASSERT_EQ(c10::Device("mtia").type(), c10::DeviceType::PrivateUse1);
+  ASSERT_EQ(c10::Device("mtia:1"), c10::Device(c10::kPrivateUse1, 1));
+  ASSERT_TRUE(c10::Device(c10::kMTIA).is_privateuseone());
+  ASSERT_TRUE(c10::Device(c10::kPrivateUse1).is_mtia());
 }

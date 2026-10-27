@@ -235,4 +235,12 @@ using at::RegistererMTIAHooksRegistry;
 REGISTER_MTIA_HOOKS(MTIAHooks);
 C10_REGISTER_GUARD_IMPL(MTIA, MTIAGuardImpl);
 
+// MTIA is a PrivateUse1 backend: name it and serve the PrivateUse1 hooks.
+static MTIAHooks privateuse1_hooks;
+static const bool privateuse1_registered = [] {
+  c10::register_privateuse1_backend("mtia");
+  at::RegisterPrivateUse1HooksInterface(&privateuse1_hooks);
+  return true;
+}();
+
 } // namespace torch::mtia

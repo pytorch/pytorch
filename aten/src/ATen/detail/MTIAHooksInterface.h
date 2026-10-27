@@ -9,7 +9,7 @@
 
 #include <c10/core/Allocator.h>
 
-#include <ATen/detail/AcceleratorHooksInterface.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/util/python_stub.h>
 
 #include <string>
@@ -23,12 +23,18 @@ constexpr const char* MTIA_HELP =
     "this error has occurred because you are trying "
     "to use some MTIA's functionality without MTIA extension included.";
 
-struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
+// MTIA is a PrivateUse1 backend, so the MTIA extension registers its hooks
+// both here and with RegisterPrivateUse1HooksInterface.
+struct TORCH_API MTIAHooksInterface : PrivateUse1HooksInterface {
 // this fails the implementation if MTIAHooks functions are called, but
 // MTIA backend is not present.
 #define FAIL_MTIAHOOKS_FUNC(func) TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
 
   ~MTIAHooksInterface() override = default;
+
+  bool isBuilt() const override {
+    return false;
+  }
 
   void init() const override {
     // Avoid logging here, since MTIA needs init devices first then it will know

@@ -24,9 +24,10 @@ TEST(TestDeviceType, TestDeviceType) {
       torch::headeronly::kVE,
       torch::headeronly::kLazy,
       torch::headeronly::kIPU,
-      torch::headeronly::kMTIA,
+      static_cast<DeviceType>(19), // was MTIA, now an alias of PrivateUse1
       torch::headeronly::kPrivateUse1,
   };
+  static_assert(torch::headeronly::kMTIA == torch::headeronly::kPrivateUse1);
   for (int8_t i = 0; i <
        static_cast<int8_t>(torch::headeronly::COMPILE_TIME_MAX_DEVICE_TYPES);
        i++) {
