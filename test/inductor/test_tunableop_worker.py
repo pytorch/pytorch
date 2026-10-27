@@ -267,6 +267,10 @@ class TunableOpWorkerTest(TestCase):
         with (
             mock.patch("torch.cuda.current_device", return_value=0),
             mock.patch("torch.cuda.tunable", tunable),
+            mock.patch(
+                "torch.cuda.get_device_properties",
+                return_value=mock.Mock(L2_cache_size=4 * 1024 * 1024),
+            ),
         ):
             tunableop.submit(job)
         self.assertEqual(
@@ -278,6 +282,26 @@ class TunableOpWorkerTest(TestCase):
                 "set_cublaslt_requested_algo_count": 14,
             },
         )
+
+    def test_unset_rotating_buffer_is_stamped_as_unset(self):
+        # Unset, the getter reports the device's L2 size. Converting that to MB
+        # would hand the worker a rounded-down constant instead of the parent's
+        # "use L2" policy, or 0 -- meaning no rotation at all -- below 1 MiB.
+        l2 = 4 * 1024 * 1024 + 512 * 1024  # deliberately not a whole MiB
+        tunable = mock.Mock()
+        tunable.get_filename.return_value = "s.csv"
+        tunable.get_rotating_buffer_size.return_value = l2
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+            mock.patch(
+                "torch.cuda.get_device_properties",
+                return_value=mock.Mock(L2_cache_size=l2),
+            ),
+        ):
+            tunableop.submit(job)
+        self.assertEqual(job.settings["set_rotating_buffer_size"], -1)
 
     def test_snapshot_skips_unreadable_knobs(self):
         tunable = mock.Mock()
@@ -374,6 +398,7 @@ class BenchmarkJobCallTest(TestCase):
 
         class FakeBmreq:
             benchmark_with_cudagraphs = True
+            config_cudagraph_benchmarking = True
 
             def benchmark(self):
                 calls.append(("benchmark",))
@@ -405,7 +430,9 @@ class BenchmarkJobCallTest(TestCase):
         )
         self.assertEqual(calls[0], ("set_device", 3))
         self.assertEqual(calls[1], ("set_filename", "w.csv", False))
+        # benchmark_run_fn captures if either is set, so both must be cleared.
         self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
+        self.assertFalse(job.bmreq.config_cudagraph_benchmarking)
 
     def test_call_skips_set_filename_when_empty(self):
         seen = []
@@ -626,6 +653,12 @@ class TunableOpRealWorkerTest(TestCase):
         with (
             mock.patch("torch.cuda.current_device", return_value=None),
             mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+            # snapshot_settings reads L2 to tell "unset" from a real MB value,
+            # and current_device is None here, so give it something to read.
+            mock.patch(
+                "torch.cuda.get_device_properties",
+                return_value=mock.Mock(L2_cache_size=4 * 1024 * 1024),
+            ),
         ):
             return tunableop.submit(job, timeout=timeout)
 
@@ -737,7 +770,9 @@ class TunableOpRocmWorkerTest(TestCase):
         parent_bytes = tunable.get_rotating_buffer_size()
         self.assertEqual(parent_bytes, 4 * 1024 * 1024)
 
-        stamped = tunableop.snapshot_settings()["set_rotating_buffer_size"]
+        stamped = tunableop.snapshot_settings(torch.cuda.current_device())[
+            "set_rotating_buffer_size"
+        ]
         tunable.set_rotating_buffer_size(stamped)  # what the worker does
         self.assertEqual(tunable.get_rotating_buffer_size(), parent_bytes)
 
