@@ -15,6 +15,7 @@ set(TORCH_SHIM_TEST_SRCS
 if(USE_CUDA)
   list(APPEND TORCH_SHIM_TEST_SRCS
     ${TORCH_SHIM_TEST_ROOT}/test_cuda_graph.cpp
+    ${TORCH_SHIM_TEST_ROOT}/test_cudagraph_manager.cpp
   )
 endif()
 
