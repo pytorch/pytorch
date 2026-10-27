@@ -109,7 +109,6 @@ paths = [
   'third_party/flash-attention/flash_attn/cute/LICENSE',
   'third_party/gloo/LICENSE',
   'third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD',
-  'third_party/kineto/LICENSE',
   'third_party/mslk/LICENSE',
   'third_party/mslk/external/cutlass/LICENSE.txt',
   'third_party/mslk/mslk/attention/flash_attn/LICENSE',
@@ -117,6 +116,7 @@ paths = [
   'third_party/protobuf/LICENSE',
   'third_party/pybind11/LICENSE',
   'third_party/tensorpipe/LICENSE.txt',
+  'torch/csrc/profiler/kineto/LICENSE',
 ]
 
 [[spdx]]
@@ -136,6 +136,7 @@ paths = [
   'third_party/composable_kernel/LICENSE',
   'third_party/cpp-httplib/LICENSE',
   'third_party/cudnn_frontend/LICENSE-MIT.txt',
+  'third_party/dynolog_headers/LICENSE',
   'third_party/fbgemm/external/composable_kernel/LICENSE',
   'third_party/flash-attention/csrc/composable_kernel/LICENSE',
   'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/LICENSE',
@@ -143,7 +144,6 @@ paths = [
   'third_party/fmt/LICENSE',
   'third_party/gloo/gloo/transport/uv/LICENSE.uvw',
   'third_party/ideep/LICENSE',
-  'third_party/kineto/libkineto/third_party/dynolog_headers/LICENSE',
   'third_party/mimalloc/LICENSE',
   'third_party/miniz-3.0.2/LICENSE',
   'third_party/mslk/external/composable_kernel/LICENSE',

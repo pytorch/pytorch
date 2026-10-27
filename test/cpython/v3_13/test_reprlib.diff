@@ -1,0 +1,59 @@
+diff --git a/test/cpython/v3_13/test_reprlib.py b/test/cpython/v3_13/test_reprlib.py
+index ffeb1fba7b80c61094a321a3a70f4bdcaf425525..78562e3c4c9a0fa18f40bf390c1af1eaf67055d9 100644
+--- a/test/cpython/v3_13/test_reprlib.py
++++ b/test/cpython/v3_13/test_reprlib.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_reprlib.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """
+   Test cases for the repr module
+   Nick Mathewson
+@@ -24,7 +42,7 @@ def nestedTuple(nesting):
+         t = (t,)
+     return t
+ 
+-class ReprTests(unittest.TestCase):
++class ReprTests(CPythonTestCase):
+ 
+     def test_init_kwargs(self):
+         example_kwargs = {
+@@ -628,7 +646,7 @@ def write_file(path, text):
+     with open(path, 'w', encoding='ASCII') as fp:
+         fp.write(text)
+ 
+-class LongReprTest(unittest.TestCase):
++class LongReprTest(CPythonTestCase):
+     longname = 'areallylongpackageandmodulenametotestreprtruncation'
+ 
+     def setUp(self):
+@@ -789,7 +807,7 @@ class MyContainer3:
+     wrapped = __repr__
+     wrapper = recursive_repr()(wrapped)
+ 
+-class TestRecursiveRepr(unittest.TestCase):
++class TestRecursiveRepr(CPythonTestCase):
+     def test_recursive_repr(self):
+         m = MyContainer(list('abcde'))
+         m.append(m)
+@@ -830,4 +848,4 @@ class TestRecursiveRepr(unittest.TestCase):
+         self.assertEqual(type_params[0].__bound__, str)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
