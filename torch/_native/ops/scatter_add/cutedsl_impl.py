@@ -121,10 +121,11 @@ def _normalize_dim(dim: int, ndim: int) -> int:
     return dim + ndim if dim < 0 else dim
 
 
-# Eligibility depends only on the layout metadata in the key, so it is cached
+# The layout analysis depends only on the metadata in the key, so it is cached
 # across calls; pointer alignment isn't layout and is checked per call.
 _ELIGIBILITY_CACHE: dict[tuple, tuple[int, int] | None] = {}
 _ELIGIBILITY_CACHE_MAX = 256
+_MISS = object()
 
 
 def _scatter_add_eligibility(
@@ -135,6 +136,9 @@ def _scatter_add_eligibility(
     extent and ``M_src`` the number of index entries. ``d`` is the
     already-normalized scatter axis.
     """
+    # Checked before the key so unsupported dtypes don't fill the cache.
+    if self.dtype not in _SUPPORTED_DTYPES:
+        return None
     key = (
         d,
         self.device, self.dtype, self.shape, self.stride(),
@@ -142,16 +146,15 @@ def _scatter_add_eligibility(
         src.device, src.dtype, src.shape, src.stride(),
     )  # fmt: skip
     try:
-        return _ELIGIBILITY_CACHE[key]
-    except KeyError:
-        pass
+        geometry = _ELIGIBILITY_CACHE.get(key, _MISS)
     except TypeError:
         # Symbolic sizes (tracing) are unhashable.
         return _compute_eligibility(self, d, index, src)
-    geometry = _compute_eligibility(self, d, index, src)
-    if len(_ELIGIBILITY_CACHE) >= _ELIGIBILITY_CACHE_MAX:
-        _ELIGIBILITY_CACHE.clear()
-    _ELIGIBILITY_CACHE[key] = geometry
+    if geometry is _MISS:
+        geometry = _compute_eligibility(self, d, index, src)
+        if len(_ELIGIBILITY_CACHE) >= _ELIGIBILITY_CACHE_MAX:
+            _ELIGIBILITY_CACHE.clear()
+        _ELIGIBILITY_CACHE[key] = geometry
     return geometry
 
 
@@ -164,7 +167,7 @@ def _compute_eligibility(
     a 2D iter where dim 0 is the contiguous slice axis and dim 1 is the
     scatter (index) axis.
     """
-    if self.dtype not in _SUPPORTED_DTYPES or self.dtype != src.dtype:
+    if self.dtype != src.dtype:
         return None
     if index.dtype not in (torch.int32, torch.int64):
         return None

@@ -3,6 +3,7 @@
 import random
 import unittest
 from typing import NamedTuple
+from unittest.mock import patch
 
 import torch
 
@@ -941,9 +942,35 @@ class TestScatterAddOverrideConds(TestCase):
         aligned = torch.randn(_M_SRC, _D, device="cuda")
         misaligned = _misaligned_view(_M_SRC, _D, torch.float32).normal_()
         idx = _expanded_idx(torch.zeros(_M_SRC, dtype=torch.int64, device="cuda"), (_D,))
-        self.assertEqual(self._conds(self_t, idx, aligned), (True, True))
-        # Same shape and strides, so eligibility is a cache hit.
-        self.assertEqual(self._conds(self_t, idx, misaligned), (False, False))
+        self.impl._ELIGIBILITY_CACHE.clear()
+        compute = self.impl._compute_eligibility
+        with patch.object(self.impl, "_compute_eligibility", wraps=compute) as spy:
+            self.assertEqual(self._conds(self_t, idx, aligned), (True, True))
+            self.assertEqual(self._conds(self_t, idx, misaligned), (False, False))
+        spy.assert_called_once()
+
+    def test_cache_eviction_keeps_results_correct(self):
+        self.impl._ELIGIBILITY_CACHE.clear()
+        with patch.object(self.impl, "_ELIGIBILITY_CACHE_MAX", 2):
+            for N in (128, 256, 512, 128):
+                self_t, idx, src, _ = _make_override_triple(100, 50, (N,))
+                self.assertEqual(self.impl._scatter_add_eligibility(self_t, 0, idx, src), (N, 50))
+                self.assertLessEqual(len(self.impl._ELIGIBILITY_CACHE), 2)
+
+    def test_symbolic_sizes_are_not_cached(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, StatelessSymbolicContext
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        def fake(t):
+            ctx = StatelessSymbolicContext(dynamic_sizes=[DimDynamic.DYNAMIC] * t.ndim)
+            return mode.from_tensor(t, symbolic_context=ctx)
+
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        cached = dict(self.impl._ELIGIBILITY_CACHE)
+        with mode:
+            self.impl._scatter_add_eligibility(fake(self_t), 0, fake(idx), fake(src))
+        self.assertEqual(self.impl._ELIGIBILITY_CACHE, cached)
 
     @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
     def test_alignment_cond_matrix(self, case):
