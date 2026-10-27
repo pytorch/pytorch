@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import logging
 import os
+import statistics
 import unittest
 from collections.abc import Callable
 from unittest import mock
@@ -225,18 +226,12 @@ class TestOrigami(TestCase):
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
-    @unittest.skipIf(
-        not DO_PERF_TEST,
-        "Perf test not enabled; set DO_PERF_TEST=1 to enable runtime perf benchmarks",
-    )
     def _benchmark_median(self, compiled, args):
         """Run BENCH_ROUNDS independent benchmarks and return the median.
 
         A single benchmark() call on a shared machine can vary by ±5-8%.
         Taking the median of several rounds suppresses transient noise.
         """
-        import statistics
-
         samples = [
             benchmarker.benchmark(
                 compiled, args, {}, warmup=BENCH_WARMUP, rep=BENCH_REP
@@ -245,6 +240,10 @@ class TestOrigami(TestCase):
         ]
         return statistics.median(samples)
 
+    @unittest.skipIf(
+        not DO_PERF_TEST,
+        "Perf test not enabled; set DO_PERF_TEST=1 to enable runtime perf benchmarks",
+    )
     def test_origami_runtime_matches_regular_max_autotune(self):
         for op_name in ("mm", "addmm", "bmm"):
             for size in (8192, 16384):
@@ -534,13 +533,13 @@ class TestOrigami(TestCase):
 
 
 @unittest.skipIf(
-    HAS_GPU_AND_TRITON and ORIGAMI_ROCM_SUPPORTED,
-    "Skipped on ROCm < 10.0 where origami is available",
+    HAS_GPU_AND_TRITON and IS_ROCM,
+    "Skipped on ROCm where origami is available",
 )
 class TestOrigamiSkippedOnNonROCm(TestCase):
     """Test that origami is properly skipped on unsupported environments.
 
-    Covers non-ROCm hardware (CUDA/CPU) and ROCm >= ORIGAMI_UNSUPPORTED_ROCM_VERSION.
+    Covers non-ROCm hardware (CUDA/CPU) where origami is not available.
     These tests verify that:
     1. origami configuration does not cause errors when disabled
     2. origami.select_topk_configs is not called on non-ROCm hardware

@@ -173,6 +173,27 @@ def _filter_tdm_descriptor_block_configs(
 if IS_ROCM and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
+
+        # On ROCm >= 10.0, rocm-origami < 0.0.3 lacks the API used here.
+        # Warn and disable if an incompatible version is installed.
+        if torch.version.rocm is not None:
+            _rocm_ver = tuple(int(v) for v in torch.version.rocm.split(".")[:2])
+            if _rocm_ver >= (10, 0):
+                from importlib.metadata import PackageNotFoundError, version as _pkg_ver
+
+                try:
+                    _ov = tuple(int(v) for v in _pkg_ver("rocm-origami").split(".")[:3])
+                    if _ov < (0, 0, 3):
+                        log.warning(
+                            "rocm-origami %s is not compatible with ROCm %d.%d+; "
+                            "upgrade to rocm-origami>=0.0.3 or set "
+                            "TORCHINDUCTOR_ORIGAMI=0 to disable. Origami disabled.",
+                            ".".join(str(v) for v in _ov),
+                            *_rocm_ver[:2],
+                        )
+                        origami = None
+                except PackageNotFoundError:
+                    pass
     except ImportError:
         origami = None
         log.info(
