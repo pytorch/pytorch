@@ -249,6 +249,7 @@ def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.
     value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
+
 def get_platform_specific_sdpa():
     ret = []
     if PLATFORM_SUPPORTS_FLASH_ATTENTION:
@@ -266,7 +267,7 @@ PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 # Indicate the Efficient attention backend can support:
 # 1. sequence longher than 512
 # 2. head dimsion larger than 64
-MEM_EFF_CAPABILITY_MATCHES_SM80 = SM80OrLater or TEST_WITH_ROCM
+MEM_EFF_CAPABILITY_MATCHES_SM80 = SM80OrLater or TEST_WITH_ROCM or TEST_XPU
 
 def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: str,
                      requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
@@ -5303,9 +5304,8 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
     @unittest.skipIf(not PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512, "hdim=512 fused attention is unsupported.")
-    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
+    @unittest.skipIf(not SM80OrLater and not TEST_XPU, "bfloat16 requires SM80 or later")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     @parametrize("kv_len,num_heads,is_causal", [(289, 40, False), (400, 16, True)])
     def test_mem_eff_attention_single_query_tail(self, device, kv_len, num_heads, is_causal):
         # head_dim > 128 gives 32 queries per block, so 289 queries leave a single-query
