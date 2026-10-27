@@ -7,7 +7,7 @@ from unittest import mock
 
 import torch
 from torch._inductor import config as inductor_config, tunableop
-from torch._inductor.autotune_process import _TestBenchmarkRequest
+from torch._inductor.autotune_process import _TestBenchmarkRequest, _TestTunableOpJob
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -430,6 +430,54 @@ class BenchmarkJobCallTest(TestCase):
             job()
         self.assertEqual(seen, [])
 
+    def test_call_applies_the_stamped_settings_after_the_flags(self):
+        """The re-entry loop is the only thing carrying the parent's knobs.
+
+        They are process-global C++ state that does not cross the pipe, so if
+        the loop stops running the worker silently tunes with defaults.
+        """
+        calls = []
+
+        class FakeTunable(_NoopTunable):
+            def tuning_enable(self, val):
+                calls.append(("tuning_enable", val))
+
+            def set_max_tuning_duration(self, val):
+                calls.append(("set_max_tuning_duration", val))
+
+            def set_rotating_buffer_size(self, val):
+                calls.append(("set_rotating_buffer_size", val))
+
+        class FakeBmreq:
+            benchmark_with_cudagraphs = True
+
+            def benchmark(self):
+                calls.append(("benchmark",))
+                return 3.0
+
+        job = tunableop.BenchmarkJob(FakeBmreq(), tuning=True)
+        job.filename = ""
+        job.settings = {
+            "set_max_tuning_duration": 11,
+            "set_rotating_buffer_size": 13,
+        }
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", FakeTunable()),
+        ):
+            self.assertEqual(job(), 3.0)
+        self.assertIn(("set_max_tuning_duration", 11), calls)
+        self.assertIn(("set_rotating_buffer_size", 13), calls)
+        # After the flags and before the benchmark: a setter applied afterwards
+        # would not affect the run it was snapshotted for.
+        self.assertLess(
+            calls.index(("tuning_enable", True)),
+            calls.index(("set_max_tuning_duration", 11)),
+        )
+        self.assertLess(
+            calls.index(("set_rotating_buffer_size", 13)), calls.index(("benchmark",))
+        )
+
     def test_call_enters_the_dynamic_dims_mask_around_the_benchmark(self):
         calls = []
 
@@ -540,10 +588,11 @@ class TunableOpRealWorkerTest(TestCase):
     without this. No GPU needed: the jobs never touch CUDA, and only
     current_device/get_filename are patched in the parent.
 
-    Jobs are _TestBenchmarkRequest instances passed directly: the request is
-    callable (see its __call__ in autotune_process.py) and unpickles in the
-    child, which only has torch on its path, so test-file classes cannot be
-    used. submit() stamps job.device before sending.
+    Jobs are real BenchmarkJobs wrapped in _TestTunableOpJob, which stubs
+    torch.cuda in the child; both it and _TestBenchmarkRequest live in
+    autotune_process.py because the child has only torch on its path, so
+    test-file classes cannot be used. submit() stamps device/filename/settings
+    onto the wrapper, which forwards them to the job.
     """
 
     hw_classification = HardwareClassification.GENERIC
@@ -557,7 +606,9 @@ class TunableOpRealWorkerTest(TestCase):
         self.addCleanup(setattr, tunableop, "_worker_key", None)
 
     def _job(self, **kwargs):
-        return _TestBenchmarkRequest(1.0, **kwargs)
+        return _TestTunableOpJob(
+            tunableop.BenchmarkJob(_TestBenchmarkRequest(1.0, **kwargs), tuning=True)
+        )
 
     def _submit(self, job, timeout):
         # current_device is None (not 0): submit() stamps job.device with it,
@@ -575,7 +626,10 @@ class TunableOpRealWorkerTest(TestCase):
         outcome = self._submit(self._job(sleep=600.0), timeout=5.0)
         self.assertEqual(outcome.status, "timeout")
         self.assertIsNone(outcome.time)
-        # get() kills the worker on timeout; put() must restart it.
+        # submit() reaps the killed child rather than leaving it a zombie, so
+        # the module-global worker is cleared and the next call builds a fresh
+        # one. Asserted here because reaping has no other visible effect.
+        self.assertIsNone(tunableop._worker)
         outcome = self._submit(self._job(), timeout=120.0)
         self.assertEqual(outcome.status, "ok")
         self.assertEqual(outcome.time, 1.0)
@@ -585,10 +639,42 @@ class TunableOpRealWorkerTest(TestCase):
         outcome = self._submit(self._job(crash=True), timeout=120.0)
         self.assertEqual(outcome.status, "crash")
         self.assertIsNone(outcome.time)
-        # get() closes the dead worker on EOF; put() must restart it.
+        # Same teardown on the EOF path as on the timeout path.
+        self.assertIsNone(tunableop._worker)
         outcome = self._submit(self._job(), timeout=120.0)
         self.assertEqual(outcome.status, "ok")
         self.assertEqual(outcome.time, 1.0)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_job_with_settings_and_mask_survives_the_pipe(self):
+        """A fully populated BenchmarkJob pickles and runs in the child.
+
+        The fake-process tests stop at what submit() stamps; without this,
+        nothing off ROCm checks that the stamped dict and the mask tuple
+        actually reach the child and that the job runs there.
+        """
+        wrapped = _TestTunableOpJob(
+            tunableop.BenchmarkJob(
+                _TestBenchmarkRequest(1.0),
+                tuning=True,
+                nearest_match=True,
+                dyn_dims_mask=(True, False, True, False),
+            )
+        )
+        with mock.patch.multiple(
+            "torch.cuda.tunable",
+            get_max_tuning_duration=mock.Mock(return_value=11),
+            get_max_tuning_iterations=mock.Mock(return_value=12),
+            get_rotating_buffer_size=mock.Mock(return_value=13 * 1024 * 1024),
+            get_cublaslt_requested_algo_count=mock.Mock(return_value=14),
+        ):
+            outcome = self._submit(wrapped, timeout=120.0)
+        self.assertEqual(outcome.status, "ok")
+        self.assertEqual(outcome.time, 1.0)
+        # What submit() stamped, and therefore what the child received.
+        self.assertEqual(wrapped.settings["set_max_tuning_duration"], 11)
+        self.assertEqual(wrapped.settings["set_rotating_buffer_size"], 13)
+        self.assertEqual(wrapped.filename, "t.csv")
 
 
 class TunableOpRocmWorkerTest(TestCase):
