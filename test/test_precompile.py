@@ -9537,6 +9537,27 @@ class TestPrecompileCustomOpRecording(TestCase):
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(_op_names(gm), {(called_name, ""), (passed_name, "")})
 
+    def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
+        from torch._precompile import _custom_op_modules
+
+        op, qualname = self._op("in_main")
+        op._init_fn.__module__ = "__main__"
+        recorded, _ = self._op("recorded")
+        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        recorded._init_fn.__module__ = module.__name__
+        ns = f"precompile_library_{uuid.uuid4().hex}"
+        lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
+        lib.define("f(Tensor x) -> Tensor")
+        names = [(qualname, ""), (f"{ns}::f", ""), (recorded._qualname, "")]
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules(names), (module.__name__,))
+        (message,) = logs.output
+        self.assertIn(qualname, message)
+        self.assertIn(f"{ns}::f", message)
+        self.assertNotIn(recorded._qualname, message)
+
     def test_a_capture_records_the_ops_of_each_backend_graph(self):
         from torch._dynamo.precompile_package import _CapturePackage
 

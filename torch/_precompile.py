@@ -1988,9 +1988,24 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
 
 
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``."""
-    modules = {_custom_op_module(op_name, overload) for op_name, overload in op_names}
-    return tuple(sorted(m for m in modules if m is not None))
+    """The modules registering the ops among ``op_names``, warning once about the
+    ops no importable module is known to register."""
+    modules: set[str] = set()
+    unrecorded: set[str] = set()
+    for op_name, overload in op_names:
+        if (module := _custom_op_module(op_name, overload)) is None:
+            unrecorded.add(op_name)
+        else:
+            modules.add(module)
+    if unrecorded:
+        log.warning(
+            "torch.compiler.precompile: the captured graphs call %s, which no "
+            "importable module is known to register (defined in __main__, or a C++ "
+            "op without set_python_module). The artifact serves only where something "
+            "else registers them before it is loaded.",
+            ", ".join(sorted(unrecorded)),
+        )
+    return tuple(sorted(modules))
 
 
 def _write_custom_op_imports(buf: Any, modules: tuple[str, ...]) -> None:
