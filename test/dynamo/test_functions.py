@@ -7228,6 +7228,253 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
 
+    @unittest.skipIf(sys.version_info < (3, 14), "__annotate__ requires Python 3.14+")
+    def test_manual_annotate(self):
+        # CPython test_type_annotations.AnnotateTests.check_annotations, function case.
+        def fn(x):
+            def f():
+                pass
+
+            out = [f.__annotations__, f.__annotate__]
+            try:
+                f.__annotate__ = 42
+            except TypeError as e:
+                out.append(str(e))
+            f.__annotate__ = lambda: 42
+            try:
+                f.__annotations__
+            except TypeError as e:
+                out.append("positional argument" in str(e))
+            f.__annotate__ = lambda x: 42
+            try:
+                f.__annotations__
+            except TypeError as e:
+                out.append(str(e))
+            f.__annotate__ = lambda x: {"x": x}
+            out.append(f.__annotations__)
+            # Setting annotate to None does not invalidate the cached __annotations__
+            f.__annotate__ = None
+            out.append(f.__annotations__)
+            # But setting it to a new callable does
+            f.__annotate__ = lambda x: {"y": x}
+            out.append(f.__annotations__)
+            # Setting f.__annotations__ also clears __annotate__
+            f.__annotations__ = {"z": 43}
+            out.append(f.__annotate__)
+            return x + 1, out
+
+        x = torch.ones(2)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(
+            ref[1],
+            [
+                {},
+                None,
+                "__annotate__ must be callable or None",
+                True,
+                "__annotate__ returned non-dict of type 'int'",
+                {"x": 1},
+                {"x": 1},
+                {"y": 1},
+                None,
+            ],
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 14), "__annotate__ requires Python 3.14+")
+    def test_generated_annotate(self):
+        # CPython test_type_annotations.DeferredEvaluationTests.test_generated_annotate,
+        # function case. Format values: VALUE=1, FORWARDREF=3, STRING=4.
+        def fn(x):
+            def func(y: int):
+                pass
+
+            annotate = func.__annotate__
+            out = [isinstance(annotate, types.FunctionType), annotate.__name__]
+            for fmt in (3, 4):
+                try:
+                    annotate(fmt)
+                except NotImplementedError:
+                    out.append("NotImplementedError")
+            try:
+                annotate(None)
+            except TypeError:
+                out.append("TypeError")
+            out.append(annotate(1))
+            out.append(func.__annotations__)
+            return x + 1, out
+
+        x = torch.ones(2)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(
+            ref[1],
+            [
+                True,
+                "__annotate__",
+                "NotImplementedError",
+                "NotImplementedError",
+                "TypeError",
+                {"y": int},
+                {"y": int},
+            ],
+        )
+
+    @parametrize(
+        "attr",
+        [
+            "__defaults__",
+            "__kwdefaults__",
+            "__closure__",
+            "__annotations__",
+            "__type_params__",
+            "__globals__",
+            "__code__",
+            "__dict__",
+            "__doc__",
+        ],
+    )
+    def test_bound_method_getattr_forwards_to_func(self, attr):
+        # method_getattro reads anything the method type lacks off __func__.
+        class A:
+            def m(self, a: int = 3, *, k=1):
+                "doc"
+                return a
+
+        def fn(x, a):
+            return x + 1 if getattr(a.m, attr) == getattr(A.m, attr) else x - 1
+
+        x = torch.ones(2)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A())
+        self.assertEqual(res, fn(x, A()))
+
+    def test_more_defaults_than_params(self):
+        # CPython binds parameter i to __defaults__[i - (argcount - ndefaults)].
+        def g(a, b):
+            return a * 10 + b
+
+        g.__defaults__ = (1, 2, 3)
+
+        def fn(x):
+            def h(a):
+                return a
+
+            h.__defaults__ = (4, 5, 6)
+            return x + g(), x + g(7), x + h()
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    def test_nested_defaults_set_to_none(self):
+        def fn(x):
+            def h(a, b=1, *, k=1):
+                return a + b + k
+
+            h.__defaults__ = None
+            h.__kwdefaults__ = None
+            out = [h(x, 2, k=3), h.__defaults__, h.__kwdefaults__]
+            del h.__defaults__
+            del h.__kwdefaults__
+            out += [h(x, 4, k=5), h.__defaults__, h.__kwdefaults__]
+            return out, h
+
+        x = torch.zeros(1)
+        ref_out, ref_h = fn(x)
+        res_out, res_h = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res_out, ref_out)
+        self.assertEqual(res_h.__defaults__, ref_h.__defaults__)
+        self.assertEqual(res_h.__kwdefaults__, ref_h.__kwdefaults__)
+
+    def test_del_doc_and_module_read_none(self):
+        # __doc__/__module__ are T_OBJECT members: after del they read as None.
+        def fn(x):
+            def h():
+                "hdoc"
+
+            del h.__doc__
+            delattr(h, "__module__")
+            return x + 1, h.__doc__, h.__module__, h
+
+        x = torch.zeros(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res[:3], ref[:3])
+        self.assertEqual((res[3].__doc__, res[3].__module__), (None, None))
+
+    def test_type_params_invalid_write(self):
+        def fn(x):
+            def h(a):
+                return a
+
+            out = []
+            try:
+                h.__type_params__ = [1]
+            except TypeError as e:
+                out.append(str(e))
+            try:
+                del h.__type_params__
+            except TypeError as e:
+                out.append(str(e))
+            return x + 1, out, h.__type_params__
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    @parametrize("attr", ["__name__", "__qualname__", "__doc__", "__module__"])
+    def test_live_function_slot_read(self, attr):
+        def g():
+            pass
+
+        @functools.wraps(g)
+        def w():
+            pass
+
+        class A:
+            def m(self):
+                pass
+
+        a = A()
+        for f in (g, w, A.m):
+            setattr(f, attr, "new")
+
+        def fn(x):
+            out = []
+            for f in (g, w, a.m):
+                out.append(x + 1 if getattr(f, attr) == "new" else x - 1)
+            return out
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        setattr(g, attr, "newer")
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("wrap", [staticmethod, classmethod])
+    def test_descriptor_on_new_instance_sees_func_write(self, wrap):
+        def m(*args):
+            pass
+
+        class A:
+            pass
+
+        A.m = wrap(m)
+
+        def fn(t):
+            m.k = 5
+            f = A().m
+            return t + (f.k if wrap is staticmethod else f.__func__.k)
+
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        m.k = 0
+        self.assertEqual(res, fn(t))
+
     def test_str_handler_for_user_defined_object(self):
         """
         Confirms handler behaviour for `str` is the same between eager and dynamo.
