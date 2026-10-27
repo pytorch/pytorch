@@ -21,7 +21,7 @@ import torch._functorch.config
 import torch.fx as fx
 import torch.nn
 import torch.utils.checkpoint
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
@@ -94,7 +94,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         )
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("operation", ["contains", "get", "pop"])
+    @parametrize("operation", ["contains", "items_contains", "get", "pop", "delitem"])
     @parametrize("present", [False, True])
     def test_input_dict_lookup_comparison_count(self, mapping_type, operation, present):
         class Key:
@@ -112,6 +112,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
             stored.calls = 0
             if operation == "contains":
                 result = probe in mapping
+            elif operation == "items_contains":
+                result = (probe, 7) in mapping.items()
+            elif operation == "delitem":
+                try:
+                    mapping.__delitem__(probe)
+                    result = True
+                except KeyError:
+                    result = False
             else:
                 result = getattr(mapping, operation)(probe, 11)
             return x + stored.calls, result
@@ -127,8 +135,11 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual, expected)
 
     @parametrize("key", ["a", 3, (1, 2)])
-    def test_input_dict_contains_key_guard(self, key):
+    @parametrize("items_view", [False, True])
+    def test_input_dict_contains_key_guard(self, key, items_view):
         def fn(x, mapping, key):
+            if items_view:
+                return x + ((key, 1) in mapping.items())
             return x + (key in mapping)
 
         x = torch.zeros(1)
@@ -176,6 +187,59 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 list(actual_mapping.items()), list(expected_mapping.items())
             )
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("with_default", [False, True])
+    def test_missing_dict_pop_in_hop(self, mapping_type, with_default):
+        def fn(x, mapping):
+            def body(x):
+                try:
+                    value = (
+                        mapping.pop("missing", 2)
+                        if with_default
+                        else mapping.pop("missing")
+                    )
+                except KeyError:
+                    value = 2
+                return x + value
+
+            return torch.cond(x.sum() > 0, body, body, (x,))
+
+        x = torch.ones(2)
+        mapping = mapping_type()
+        mapping["present"] = 1
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), x + 2
+        )
+        self.assertEqual(list(mapping.items()), [("present", 1)])
+
+    def test_rejected_dict_pop_preserves_tracked_items(self):
+        from torch._dynamo.side_effects import SideEffects
+        from torch._dynamo.variables.dicts import ConstDictVariable
+
+        original_check = SideEffects.check_allowed_side_effect
+        rejected_sizes = []
+
+        def check(side_effects, variable):
+            try:
+                return original_check(side_effects, variable)
+            except Unsupported:
+                if isinstance(variable, ConstDictVariable):
+                    rejected_sizes.append(len(variable.items))
+                raise
+
+        def fn(x, mapping):
+            def body(x):
+                return x + mapping.pop("a")
+
+            return torch.cond(x.sum() > 0, body, body, (x,))
+
+        with patch.object(SideEffects, "check_allowed_side_effect", check):
+            with self.assertRaises(UncapturedHigherOrderOpError):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.ones(2), {"a": 1}
+                )
+        self.assertEqual(rejected_sizes, [1])
 
     def test_dunder_dict_pop_deleted_key_in_hop(self):
         class Obj:

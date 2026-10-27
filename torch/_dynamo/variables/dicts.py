@@ -42,6 +42,7 @@ from ..exc import (
     raise_observed_exception,
     raise_type_error,
     unimplemented,
+    Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import (
@@ -695,7 +696,23 @@ class ConstDictVariable(VariableTracker):
         # A __dict__ deletion marker is already absent; do not record another
         # attribute mutation (which may be forbidden inside a HOP).
         is_proxy = isinstance(self.items, SideEffectsProxyDict)
-        value = self.items.get(key) if is_proxy else self.items.pop(key, None)
+        if is_proxy:
+            value = self.items.get(key)
+        else:
+            try:
+                # Authorize before the single lookup removes a tracked entry.
+                if (
+                    self
+                    not in tx.output.side_effects.ignore_mutation_on_these_variables
+                ):
+                    tx.output.side_effects.check_allowed_side_effect(self)
+            except Unsupported:
+                # A missing key is a read, even when mutation is forbidden.
+                value = self.items.get(key)
+                if value is not None:
+                    raise
+            else:
+                value = self.items.pop(key, None)
         if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, key, key_present=False)
@@ -918,10 +935,13 @@ class ConstDictVariable(VariableTracker):
             hkey = self._lookup_key(tx, key)
         tx.output.side_effects.mutation(self)
         if value is None:
-            if hkey not in self.items:
+            if isinstance(self.items, SideEffectsProxyDict) and hkey not in self.items:
+                raise_observed_exception(KeyError, tx, args=[key])
+            try:
+                del self.items[hkey]
+            except KeyError:
                 raise_observed_exception(KeyError, tx, args=[key])
             self.should_reconstruct_all = True
-            del self.items[hkey]
         else:
             self.items[hkey] = value
         return ConstantVariable.create(None)
@@ -1646,9 +1666,11 @@ class DictItemsVariable(DictViewVariable):
             return ConstantVariable.create(False)
         key, val = item.items
         key_ht = self.dv_dict._lookup_key(tx, key)
-        if key_ht not in self.dv_dict.items:
+        stored = self.dv_dict.items.get(key_ht)
+        present = stored is not None and type(stored) is not variables.DeletedVariable
+        self.dv_dict.install_dict_contains_guard(tx, key_ht, key_present=present)
+        if not present:
             return ConstantVariable.create(False)
-        stored = self.dv_dict.items[key_ht]
         return generic_richcompare_bool(tx, stored, val, "__eq__")
 
     def tp_richcompare_impl(
