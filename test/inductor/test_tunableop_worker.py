@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import os
 import unittest
 from unittest import mock
@@ -313,6 +314,25 @@ class TunableOpWorkerTest(TestCase):
             self.assertEqual(job.filename, "parent.csv")
 
 
+class _NoopTunable:
+    """Stands in for torch.cuda.tunable: swallows the flags __call__ always sets."""
+
+    def set_filename(self, *args, **kwargs):
+        pass
+
+    def enable(self, val):
+        pass
+
+    def tuning_enable(self, val):
+        pass
+
+    def _nearest_match_enable(self, val):
+        pass
+
+    def _record_borrowed_enable(self, val):
+        pass
+
+
 class BenchmarkJobCallTest(TestCase):
     """BenchmarkJob.__call__ runs in the worker: set device first, then flags."""
 
@@ -409,6 +429,68 @@ class BenchmarkJobCallTest(TestCase):
         ):
             job()
         self.assertEqual(seen, [])
+
+    def test_call_enters_the_dynamic_dims_mask_around_the_benchmark(self):
+        calls = []
+
+        class FakeTunable(_NoopTunable):
+            @contextlib.contextmanager
+            def dynamic_dims_mask(self, M, N, K, BATCH):
+                calls.append(("enter", (M, N, K, BATCH)))
+                try:
+                    yield
+                finally:
+                    calls.append(("exit",))
+
+        class FakeBmreq:
+            benchmark_with_cudagraphs = True
+
+            def benchmark(self):
+                calls.append(("benchmark",))
+                return 2.5
+
+        job = tunableop.BenchmarkJob(
+            FakeBmreq(), tuning=True, dyn_dims_mask=(True, False, True, False)
+        )
+        job.filename = ""
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", FakeTunable()),
+        ):
+            self.assertEqual(job(), 2.5)
+        # Every benchmark must run inside the scope, not before or after it.
+        # Asserted as a span rather than an exact sequence: a later diff splits
+        # __call__ into a warm plus a measured call, and both must stay inside.
+        self.assertEqual(calls[0], ("enter", (True, False, True, False)))
+        self.assertEqual(calls[-1], ("exit",))
+        self.assertIn(("benchmark",), calls[1:-1])
+
+    def test_call_skips_the_mask_when_it_would_select_nothing(self):
+        for name, mask in (("unset", None), ("all false", (False, False, False, False))):
+            with self.subTest(mask=name):
+                entered = []
+
+                class FakeTunable(_NoopTunable):
+                    def dynamic_dims_mask(self, **kwargs):
+                        entered.append(kwargs)
+                        raise AssertionError("mask should not be entered")
+
+                class FakeBmreq:
+                    benchmark_with_cudagraphs = True
+
+                    def benchmark(self):
+                        return 1.0
+
+                job = tunableop.BenchmarkJob(
+                    FakeBmreq(), tuning=True, dyn_dims_mask=mask
+                )
+                job.filename = ""
+                with (
+                    mock.patch("torch.cuda.set_device"),
+                    mock.patch("torch.cuda.tunable", FakeTunable()),
+                ):
+                    self.assertEqual(job(), 1.0)
+                self.assertEqual(entered, [])
 
 
 class TunableopModeValidationTest(TestCase):

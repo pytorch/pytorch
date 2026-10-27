@@ -132,12 +132,15 @@ class BenchmarkJob:
         self.bmreq = bmreq
         self.tuning = tuning
         self.nearest_match = nearest_match
+        # (M, N, K, BATCH). Thread-local in the parent, so unlike the knobs in
+        # settings it cannot be snapshotted -- the caller passes it explicitly
+        # and __call__ re-enters it around the benchmark.
+        self.dyn_dims_mask = dyn_dims_mask
         # Stamped by submit() with the parent's tuning knobs (see
         # snapshot_settings): the worker is a long-lived fresh process that
         # would otherwise tune with defaults.
         self.settings: dict[str, Any] = {}
         self.record_borrowed = record_borrowed
-        self.dyn_dims_mask = dyn_dims_mask
         # False for tune-only jobs (the ladder): the caller discards the time
         # and only needs the tuning side effect, so skip the second benchmark
         # and halve the worker cost per bucket.
@@ -213,17 +216,17 @@ class BenchmarkJob:
         # Without this a validated borrow is thrown away: the write path is gated
         # on it, so reuse mode would decide the same thing on every later pass.
         tunable._record_borrowed_enable(self.record_borrowed)
-        # TunableOp cannot tune under graph capture. Both flags: the bmreq was
-        # built in the parent where config_cudagraph_benchmarking may be
-        # snapshotted True (ROCm max-autotune), and benchmark_run_fn captures
-        # if either is set -- the warm call would then tune nothing and record
-        # nothing, silently.
         # Re-enter the parent's tuning knobs (snapshot_settings): process-global
         # C++ state, not env vars, so the worker would otherwise silently use
         # defaults. Numerical-check tolerances have no getter and are not
         # propagated -- documented in snapshot_settings.
         for name, value in self.settings.items():
             getattr(tunable, name)(value)
+        # TunableOp cannot tune under graph capture. Both flags: the bmreq was
+        # built in the parent where config_cudagraph_benchmarking may be
+        # snapshotted True (ROCm max-autotune), and benchmark_run_fn captures
+        # if either is set -- the warm call would then tune nothing and record
+        # nothing, silently.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
 
@@ -405,17 +408,14 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 # Not propagated, and not an exhaustive-by-accident list:
 #   * numerical-check tolerances -- set_numerical_check_tolerances has no
 #     getter, so there is nothing to snapshot;
-#   * wildcard_fallback_enable, record_untuned_enable and
-#     _record_borrowed_enable -- these do have getters, but they select what
-#     the worker records rather than how it tunes, and the worker's recording
-#     policy is set per job rather than inherited from the parent;
+#   * record_untuned_enable -- it does have a getter, but it governs offline
+#     recording rather than how a GEMM is tuned, and it is env-settable, so the
+#     worker inherits it that way. _record_borrowed_enable is likewise not
+#     snapshotted: the job stamps it directly (record_borrowed), set by the
+#     caller from the compile mode, as it does for nearest_match;
 #   * the thread-local dynamic-dims mask. It is per call rather than per
-#     process, so a snapshot is the wrong mechanism for it -- but nothing
-#     carries it to the worker either: BenchmarkJob has no field for it and
-#     __call__ runs bmreq.benchmark() outside any dynamic_dims_mask context.
-#     With cuda.autotune_tunableop_dynamic_dims_wildcard set, a GEMM routed
-#     here therefore records only its concrete key, where the same GEMM
-#     benchmarked inline would also record the wildcard one.
+#     process, so a snapshot is the wrong mechanism for it -- the job carries
+#     it explicitly instead (dyn_dims_mask, re-entered in __call__).
 # Anything read from the environment reaches the worker by inheritance.
 _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
     ("get_max_tuning_duration", "set_max_tuning_duration"),
