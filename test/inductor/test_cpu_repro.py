@@ -1358,28 +1358,36 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_cosh_near_overflow(self):
         # https://github.com/pytorch/pytorch/issues/183765
+        # https://github.com/pytorch/pytorch/issues/201938
         def fn(x):
             return torch.cosh(x)
 
-        x = torch.tensor([88.5, 88.85, 89.0, 89.4, -88.85, -89.0]).repeat(3, 6)
-        for dtype in [torch.float32, torch.double]:
+        values = {
+            torch.float32: [88.5, 88.85, 89.0, 89.4, -88.85, -89.0],
+            torch.float64: [709.5, 709.78, 709.9, 710.0, -709.9, -710.4],
+        }
+        for dtype, vals in values.items():
             with torch.no_grad():
                 torch._dynamo.reset()
-                _x = x.to(dtype)
+                _x = torch.tensor(vals, dtype=dtype).repeat(3, 6)
                 self.assertFalse(torch.cosh(_x).isinf().any())
                 self.common(fn, (_x,))
 
     @requires_vectorization
     def test_sinh_near_overflow(self):
         # https://github.com/pytorch/pytorch/issues/183763
+        # https://github.com/pytorch/pytorch/issues/201938
         def fn(x):
             return torch.sinh(x)
 
-        x = torch.tensor([88.5, 88.85, 89.0, -89.0, -89.2, 0.0]).repeat(3, 6)
-        for dtype in [torch.float32, torch.double]:
+        values = {
+            torch.float32: [88.5, 88.85, 89.0, -89.0, -89.2, 0.0],
+            torch.float64: [709.5, 709.78, 709.9, -709.9, -710.4, 0.0],
+        }
+        for dtype, vals in values.items():
             with torch.no_grad():
                 torch._dynamo.reset()
-                _x = x.to(dtype)
+                _x = torch.tensor(vals, dtype=dtype).repeat(3, 6)
                 self.assertFalse(torch.sinh(_x).isinf().any())
                 self.common(fn, (_x,))
 
