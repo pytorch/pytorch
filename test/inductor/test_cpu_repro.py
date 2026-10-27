@@ -7,6 +7,7 @@ import itertools
 import math
 import os
 import platform
+import re
 import sys
 import unittest
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
     CppOverrides,
+    CppScheduling,
     CppVecKernel,
     CppVecOverrides,
     KernelGroup,
@@ -5030,6 +5032,39 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
+
+    def test_kernel_group_skips_exact_arg_count_below_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        with (
+            fresh_cache(),
+            patch.object(
+                KernelGroup,
+                "get_num_args",
+                autospec=True,
+                side_effect=KernelGroup.get_num_args,
+            ) as get_num_args,
+        ):
+            opt_fn = torch.compile(fn, backend="inductor")
+            self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Twenty arguments is far below the limit, so the exact count, which
+        # formats every argument, is never needed.
+        get_num_args.assert_not_called()
+
+    @patch.object(CppScheduling, "MAX_FUSED_KERNEL_ARGS_NUM", 6)
+    def test_kernel_group_flushes_when_args_exceed_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        opt_fn = torch.compile(fn, backend="inductor")
+        _, code = run_and_get_cpp_code(opt_fn, *xs)
+        self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Each add has two arguments, so a limit of six splits them across kernels.
+        kernels = set(re.findall(r"cpp_fused_\w+?_\d+\b", code))
+        self.assertGreater(len(kernels), 1)
 
     @requires_vectorization
     def test_vertical_reduction_tail_store_uses_tail_width(self):
