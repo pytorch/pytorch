@@ -11,9 +11,6 @@ inputs:
   workflow-sha:
     description: Trusted workflow and policy commit for this event
     required: true
-  expected-base-ref:
-    description: Pull request destination branch from the triggering event
-    required: true
   output-dir:
     description: Stable directory for analysis and diagnostic artifacts
     required: true
@@ -40,7 +37,6 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-        EXPECTED_BASE_REF: ${{ inputs.expected-base-ref }}
         GH_TOKEN: ${{ github.token }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         PR_NUMBER: ${{ inputs.pr-number }}
@@ -51,7 +47,6 @@ runs:
           "$PR_NUMBER" \
           --repository "$REPOSITORY" \
           --workflow-sha "$WORKFLOW_SHA" \
-          --expected-base-ref "$EXPECTED_BASE_REF" \
           --output-dir "$OUTPUT_DIR" \
           --github-output "$GITHUB_OUTPUT"
 
