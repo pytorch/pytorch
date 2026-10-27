@@ -1380,20 +1380,25 @@ class TestScatterAddOverrideCorrectness(TestCase):
         with self.assertRaisesRegex(ValueError, msg):
             run(out, idx, src)
 
-    def test_vec_accepts_dst_row_stride_finer_than_a_vector(self):
-        # Half-precision dst rows padded by 2 elements: 4B-aligned, which the
-        # paired atomics need, but not a multiple of vec_elems. TMA declines,
-        # and vec-scatter's declared dst stride contract must still accept it.
+    @parametrize("site", ["row_stride", "ptr"])
+    def test_vec_accepts_dst_finer_than_a_vector(self, site):
+        # A dst that is 4B-aligned, which the paired atomics need, but not 16B:
+        # TMA declines, and vec-scatter's declared dst contract must accept it.
         from torch._native.ops.scatter_add import cutedsl_impl, vec_scatter_kernel
         torch.manual_seed(0)
-        self_t, idx, src, idx_1d = _make_override_triple(
-            200, 100, (128,), dtype=torch.float16, outer_pad_self=2
-        )
+        if site == "row_stride":
+            # Half-precision rows padded by 2 elements, not a multiple of vec_elems.
+            self_t, idx, src, idx_1d = _make_override_triple(
+                200, 100, (128,), dtype=torch.float16, outer_pad_self=2
+            )
+        else:
+            _, idx, src, idx_1d = _make_override_triple(200, 100, (128,))
+            self_t = _misaligned_view(200, 128, torch.float32).zero_()
         self.assertFalse(cutedsl_impl._is_tma_supported(self_t, 0, idx, src))
         self.assertTrue(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
         ref = _naive_scatter_add(self_t, idx_1d, src)
         vec_scatter_kernel.vec_scatter_add_into(self_t, idx_1d, src)
-        tol = _override_tol(torch.float16)
+        tol = _override_tol(self_t.dtype)
         self.assertEqual(self_t, ref, atol=tol, rtol=tol)
 
 
