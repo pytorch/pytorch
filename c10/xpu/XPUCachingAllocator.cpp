@@ -2414,7 +2414,6 @@ class NativeCachingAllocator : public XPUAllocator {
 #ifdef _WIN32
       TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
 #endif
-#if SYCL_COMPILER_VERSION >= 20260200
       namespace syclex = sycl::ext::oneapi::experimental;
       std::istringstream ss(handle);
       auto version = ss.get();
@@ -2425,12 +2424,20 @@ class NativeCachingAllocator : public XPUAllocator {
 
       if (type == SHAREABLE_XPU_MALLOC) {
         auto handle_size = static_cast<size_t>(ss.get());
+#if SYCL_COMPILER_VERSION >= 20260200
         syclex::ipc::handle_data_t handle_data(handle_size);
+#else
+        syclex::ipc_memory::handle_data_t handle_data(handle_size);
+#endif
         ss.read(
             reinterpret_cast<char*>(handle_data.data()),
             static_cast<std::streamsize>(handle_size));
 
+#if SYCL_COMPILER_VERSION >= 20260200
         xpu_ipc_ptr = syclex::ipc::memory::open(
+#else
+        xpu_ipc_ptr = syclex::ipc_memory::open(
+#endif
             handle_data,
             c10::xpu::get_device_context(),
             c10::xpu::get_raw_device(device));
@@ -2451,9 +2458,12 @@ class NativeCachingAllocator : public XPUAllocator {
     // destructor would risk calling ipc::memory::close after the SYCL runtime
     // has already shut down during process exit.
     void clear() {
-#if SYCL_COMPILER_VERSION >= 20260200
       if (xpu_ipc_ptr) {
+#if SYCL_COMPILER_VERSION >= 20260200
         sycl::ext::oneapi::experimental::ipc::memory::close(
+#else
+        sycl::ext::oneapi::experimental::ipc_memory::close(
+#endif
             xpu_ipc_ptr, c10::xpu::get_device_context());
         xpu_ipc_ptr = nullptr;
       }
@@ -2461,10 +2471,6 @@ class NativeCachingAllocator : public XPUAllocator {
         delete expandable_segment;
         expandable_segment = nullptr;
       }
-#else
-      TORCH_CHECK(
-          false, "MemHandleCacheEntry requires SYCL compiler 2026.2 or later.");
-#endif
     }
 
     void* ptr() {
