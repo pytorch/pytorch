@@ -36,6 +36,8 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
+    isRocmArchAnyOf,
+    NAVI4_ARCH,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
@@ -1177,6 +1179,28 @@ class TestTransformersAccelerator(NNTestCase):
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
+    def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
+        # The fused kernel always returns a contiguous tensor, so its meta rule
+        # must not hand back the strides of a non-contiguous src: inductor asserts
+        # the fallback's runtime metadata against them.
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=4,
+            dim_feedforward=64,
+            dropout=0.0,
+            batch_first=True,
+        ).to(device).eval()
+
+        x = torch.rand(4, 64, 16, device=device).transpose(1, 2).contiguous().transpose(1, 2)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+        self.assertEqual(eager_out, compiled_out)
+
 
 
     @onlyAccelerator
@@ -1743,7 +1767,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not (isSM8XDevice or isSM120Device),
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM or not (isSM8XDevice or isSM120Device),
         "Does not support fused SDPA or not SM86+ hardware",
     )
     @parametrize("head_dim", [193, 256])
@@ -6426,7 +6450,11 @@ class TestSDPAAccelerator(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float,
                                                dtype: torch.dtype, scale: str, enable_gqa: bool,
                                                n_heads: list[int], sdpa_backend: str):
-        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256 + 1):
+        if (
+            not TEST_WITH_ROCM
+            and (isSM8XDevice or isSM120Device)
+            and head_dim in range(193, 256 + 1)
+        ):
             self.skipTest("Flash attention on SM86-SM89 and SM120-SM121 for head_dim > 192 is currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
@@ -6522,7 +6550,11 @@ class TestSDPAAccelerator(NNTestCase):
 
         # Backward for Flash Attention on SM86-SM89 and SM120-SM121 with
         # head_dim >= 193 is currently disabled.
-        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256):
+        if (
+            not TEST_WITH_ROCM
+            and (isSM8XDevice or isSM120Device)
+            and head_dim in range(193, 256)
+        ):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
 
@@ -6566,6 +6598,9 @@ class TestSDPAAccelerator(NNTestCase):
                         fudge_factors['grad_query'] = 1100.0
                 if dtype == torch.float32:
                     fudge_factors['grad_key'] = 90.0
+                # AOTriton bf16 grad_query error on gfx120x is ~6x gfx110x/gfx1151: ROCm/aotriton#259
+                if dtype == torch.bfloat16 and isRocmArchAnyOf(NAVI4_ARCH):
+                    fudge_factors['grad_query'] = max(fudge_factors['grad_query'], 520.0)
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
