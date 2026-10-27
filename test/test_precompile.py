@@ -7841,13 +7841,22 @@ class TestPrecompileRuntimeCache(TestCase):
         source = failure.exception.sources[0]
         self.assertEqual([r["reason"] for r in source["instances"]], ["frozen_untuned"])
         self.assertTrue(source["untuned_backward_eligible"])
+        # A fresh instance of the same source that never ran is not frozen instead.
+        fresh = _never_run(_static_runtime_kernel(64))
+        fresh.inductor_meta["coordinate_descent_tuning"] = True
+        fresh._should_coordesc_tune = True
         payload, report = _freeze_triton_kernel(
-            "source", [loaded], require_tuned_backward=False
+            "source", [fresh, loaded], require_tuned_backward=False
         )
         self.assertEqual(report["source_key"], "source")
-        self.assertTrue(
-            pickle.loads(payload).kernel.inductor_meta["precompile_frozen_untuned"]
-        )
+        saved = pickle.loads(payload).kernel
+        self.assertTrue(saved.inductor_meta["precompile_frozen_untuned"])
+        self.assertEqual(saved.compile_results[0].config.kwargs, {"XBLOCK": 32})
+        # A forward use is still refused, even under the opt-in.
+        loaded._forward_use, loaded._launched = True, False
+        with self.assertRaises(_UnresolvedTritonExport) as failure:
+            _freeze_triton_kernel("source", [loaded], require_tuned_backward=False)
+        self.assertFalse(failure.exception.sources[0]["untuned_backward_eligible"])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_refuses_untuned_when_an_instance_ran(self):
@@ -7944,7 +7953,7 @@ class TestPrecompileRuntimeCache(TestCase):
             _report_untuned_triton_kernels(untuned)
         # One warning for every untuned kernel.
         [warning] = logs.output
-        self.assertIn("1 backward Triton kernel(s), so they are frozen", warning)
+        self.assertIn("1 backward Triton kernel(s) that no captured step ran", warning)
         [call] = trace.call_args_list
         self.assertEqual(
             call.kwargs["metadata_fn"](),
@@ -10022,11 +10031,17 @@ class TestPrecompileCustomOpModules(TestCase):
         # A module only the capturing process can import by that name.
         name = f"precompile_nowhere_{uuid.uuid4().hex}"
         module = types.ModuleType(name)
+
+        # Rebuilt as a class, which the stream then instantiates.
+        class Local(typing.NamedTuple):
+            x: int
+
         buf = io.BytesIO()
         with mock.patch.dict(sys.modules, {name: module}):
-            state = [module, {"op": held._opoverload}, by_def]
+            state = [module, Local(1), {"op": held._opoverload}, by_def]
             GuardsStatePickler({}, {}, {}, {}, buf).dump(state)
-        frames = [{"variants": [{"guards_state": buf.getvalue()}]}]
+        variant = {"guards_state": buf.getvalue()}
+        frames = [{"code": Local.__new__.__code__, "variants": [variant]}]
         kept = [("BUILTIN_MATCH", f"G['torch'].ops.{ns}.source")]
         self.assertEqual(
             _guard_op_names(frames, kept),

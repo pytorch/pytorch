@@ -2080,25 +2080,30 @@ def _backend_op_names(
 _GUARDED_OP = re.compile(r"(?:\.ops|\['ops'\])\.(\w+)\.(\w+)")
 
 
-class _Placeholder:
-    """What :func:`_guard_op_names` rebuilds every other object of a guard state as."""
+class _PlaceholderType(type):
+    """The type of what :func:`_guard_op_names` rebuilds every other object of a
+    guard state as. Each is a class, since a reduction can rebuild one that the
+    stream then instantiates (a function-local NamedTuple), and takes whatever
+    else the stream asks of an object."""
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __call__(cls, *args: object, **kwargs: object) -> type:
+        return _placeholder()
+
+    def __setstate__(cls, state: object) -> None:
         pass
 
-    def __call__(self, *args: object, **kwargs: object) -> _Placeholder:
-        return _Placeholder()
-
-    def __setstate__(self, state: object) -> None:
+    def __setitem__(cls, key: object, value: object) -> None:
         pass
 
-    def __setitem__(self, key: object, value: object) -> None:
-        pass
-
-    def append(self, item: object) -> None:
+    def append(cls, item: object) -> None:
         pass
 
     extend = add = append
+
+
+def _placeholder() -> type:
+    new = staticmethod(lambda *args, **kwargs: _placeholder())
+    return _PlaceholderType("_Placeholder", (), {"__new__": new})
 
 
 def _guard_op_names(
@@ -2117,11 +2122,11 @@ def _guard_op_names(
         f"{ns}::{op}" for _, name in kept_guards for ns, op in _GUARDED_OP.findall(name)
     }
 
-    def record(name: str) -> _Placeholder:
+    def record(name: str) -> type:
         names.add(name)
-        return _Placeholder()
+        return _placeholder()
 
-    recorded: dict[str, Callable[..., _Placeholder]] = {
+    recorded: dict[str, Callable[..., type]] = {
         "_unpickle_op": lambda ns, op, overload: record(_op_name(ns, op, overload)),
         "_unpickle_custom_op_def": record,
     }
@@ -2129,7 +2134,7 @@ def _guard_op_names(
     def reduction(owner: object, name: str) -> object:
         if owner is GuardsStatePickler and name in recorded:
             return recorded[name]
-        return _Placeholder
+        return _placeholder()
 
     class Scanner(_GuardsStateUnpickler):
         def find_class(self, module: str, name: str) -> object:
@@ -2137,11 +2142,20 @@ def _guard_op_names(
                 return reduction
             if (module, name) == (GuardsStatePickler.__module__, "GuardsStatePickler"):
                 return GuardsStatePickler
-            return _Placeholder
+            return _placeholder()
 
     for frame in frames:
         for variant in frame["variants"]:
-            Scanner(io.BytesIO(variant["guards_state"])).load()
+            try:
+                Scanner(io.BytesIO(variant["guards_state"])).load()
+            except Exception as e:
+                log.warning(
+                    "precompile: cannot read the guard state of frame %s (%s), so "
+                    "the artifact may miss custom ops its guards hold; serving needs "
+                    "them registered before load",
+                    frame["code"].co_name,
+                    e,
+                )
     return names
 
 
