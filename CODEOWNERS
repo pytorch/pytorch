@@ -27,7 +27,7 @@
 #     oncall: mobile: android, vulkan
 #     oncall: pt2: ProxyTensor, aotdispatch, compiled autograd, dynamic shapes, dynamo, fakeTensor, higher order operators, inductor
 # - Labels planned but not yet created on GitHub (issues can't be routed to
-#   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates
+#   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
@@ -43,7 +43,7 @@
 # Sections are kept temporarily so scripts/codeowners/owners.py keeps its
 # section-name fallback; ownership is recorded per label block, not per section.
 # Review-surface hierarchy:
-# - Sections: core_aten_native_ops, functorch, compiler_autograd, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests, backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_vulkan, python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_runtime_tests, jit_torchscript, cpp_api_custom_ops, onnx_export, quantization, profiler, mobile_runtime, mobile_android, mobile_delegates, infra_ci, infra_build_packaging, third_party_core_build_deps, third_party_backend_deps, third_party_serialization_schema, benchmark_compiler, distributed, infra_developer_tools, infra_linting, infra_codegen, infra_test, benchmark_operator_runtime, benchmark_models, caffe2, serialization_package, compiler_export_fx, compiler_dynamo, compiler_inductor, nativert, ai_agent_tooling, docs_general, protected_codeownership
+# - Sections: core_aten_native_ops, functorch, compiler_autograd, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests, backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan, python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_runtime_tests, jit_torchscript, cpp_api_custom_ops, onnx_export, quantization, profiler, mobile_runtime, mobile_android, mobile_delegates, infra_ci, infra_github_automation, infra_build_packaging, third_party_core_build_deps, third_party_backend_deps, third_party_serialization_schema, benchmark_compiler, distributed, infra_developer_tools, infra_linting, infra_codegen, infra_test, benchmark_operator_runtime, benchmark_models, caffe2, serialization_package, compiler_export_fx, compiler_dynamo, compiler_inductor, nativert, ai_agent_tooling, docs_general, protected_codeownership
 #
 # Grouped review-surface definitions:
 #
@@ -445,8 +445,6 @@
 # owner: @janeyx99
 /torch/csrc/shim* @janeyx99
 /torch/csrc/stable/ @janeyx99
-/torch/header_only_apis.txt @janeyx99
-/torch/headeronly/ @janeyx99
 #
 # [core_lazy_runtime]
 # label: module: lazy
@@ -708,6 +706,15 @@
 /torch/xpu/ @EikanWang @gujinghui
 /aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
 #
+# [backend_rocm]
+# label: module: rocm
+# owner: @jeffdaily @jithunnair-amd
+/aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
+# /torch/backends/miopen/
+/c10/hip/ @jeffdaily @jithunnair-amd
+/aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+/aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+#
 # [backend_vulkan]
 # label: module: vulkan
 # owner: none
@@ -787,6 +794,12 @@
 # /torch/types.py
 # /torch/utils/
 /torch/_vendor/quack/ @slayton58 @drisspg
+# label: module: dsl-native-ops
+# owner: @drisspg @pearu @slayton58
+/torch/_native/ @slayton58 @drisspg
+/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
+/test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
+/test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
 # label: module: complex
 # owner: @amjames @hameerabbasi
 /torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
@@ -795,6 +808,13 @@
 # owner: @aorenste
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
+# label: module: abi, module: headeronly
+# owner: @janeyx99
+/torch/header_only_apis.txt @janeyx99
+/torch/headeronly/ @janeyx99
+# label: module: rocm, module: hipify
+# owner: @jeffdaily @jithunnair-amd
+/torch/utils/hipify/ @jeffdaily @jithunnair-amd
 # label: module: pytree
 # owner: @XuehaiPan
 /torch/utils/_pytree.py @XuehaiPan
@@ -804,13 +824,9 @@
 # label: module: nn
 # owner: @albanD @jbschlosser
 /torch/nn/ @albanD @jbschlosser
-# label: module: dsl-native-ops
+# label: module: nn, module: dsl-native-ops
 # owner: @drisspg @pearu @slayton58
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
-/torch/_native/ @slayton58 @drisspg
-/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
-/test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
-/test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
 # label: module: nn, module: nn.utils.parametrize
 # owner: @lezcano
 /torch/nn/utils/parametriz*.py @lezcano
@@ -1000,7 +1016,6 @@
 # label: module: ci
 # owner: @pytorch/pytorch-dev-infra
 /.ci/ @pytorch/pytorch-dev-infra
-/.github/ @pytorch/pytorch-dev-infra
 # label: module: ci, module: rocm
 # owner: @jeffdaily
 /.ci/docker/ubuntu-rocm/ @jeffdaily
@@ -1013,6 +1028,11 @@
 # label: module: ci, module: xpu
 # owner: @EikanWang @gujinghui
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
+#
+# [infra_github_automation]
+# label: module: ci, module: github automation
+# owner: @pytorch/pytorch-dev-infra
+/.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
 # label: module: build
@@ -1141,15 +1161,9 @@
 # /binaries/
 # /scripts/
 # /tools/
-# label: module: rocm
+# label: module: build, module: rocm
 # owner: @jeffdaily @jithunnair-amd
 /tools/amd_build/ @jeffdaily @jithunnair-amd
-/aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
-# /torch/backends/miopen/
-/c10/hip/ @jeffdaily @jithunnair-amd
-/aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
-/aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
-/torch/utils/hipify/ @jeffdaily @jithunnair-amd
 #
 # [infra_linting]
 # label: module: lint

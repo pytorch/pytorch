@@ -16,7 +16,7 @@ oncall_queues:
   "oncall: distributed": ["module: c10d", "module: ddp", "module: dtensor", "module: fsdp", "module: tensorpipe"]
   "oncall: mobile": ["module: android", "module: vulkan"]
   "oncall: pt2": ["module: ProxyTensor", "module: aotdispatch", "module: compiled autograd", "module: dynamic shapes", "module: dynamo", "module: fakeTensor", "module: higher order operators", "module: inductor"]
-planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates"]
+planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates", "module: hipify", "module: headeronly", "module: github automation"]
 # CODEOWNERS section order (temporary, see above).
 sections:
   - core_aten_native_ops
@@ -35,6 +35,7 @@ sections:
   - backend_cuda
   - backend_mps
   - backend_xpu
+  - backend_rocm
   - backend_vulkan
   - python_core_api
   - python_nn_api
@@ -51,6 +52,7 @@ sections:
   - mobile_android
   - mobile_delegates
   - infra_ci
+  - infra_github_automation
   - infra_build_packaging
   - third_party_core_build_deps
   - third_party_backend_deps
@@ -251,8 +253,6 @@ ownership:
     paths:
       - /torch/csrc/shim*: [janeyx99]
       - /torch/csrc/stable/: [janeyx99]
-      - /torch/header_only_apis.txt: [janeyx99]
-      - /torch/headeronly/: [janeyx99]
   - name: lazy
     labels: ["module: lazy"]
     owners: []
@@ -343,12 +343,31 @@ ownership:
       - /torch/csrc/xpu/: [EikanWang, gujinghui]
       - /torch/xpu/: [EikanWang, gujinghui]
       - /aten/src/ATen/native/mkldnn/xpu/: [EikanWang, gujinghui]
+  - name: rocm
+    labels: ["module: rocm"]
+    owners: [jeffdaily, jithunnair-amd]
+    section: backend_rocm
+    paths:
+      - /aten/src/ATen/hip/: [jeffdaily, jithunnair-amd]
+      - /torch/backends/miopen/
+      - /c10/hip/: [jeffdaily, jithunnair-amd]
+      - /aten/src/ATen/native/miopen/: [jeffdaily, jithunnair-amd]
+      - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
   - name: vulkan
     labels: ["module: vulkan"]
     owners: []
     section: backend_vulkan
     paths:
       - /aten/src/ATen/native/vulkan/
+  - name: dsl_native_ops
+    labels: ["module: dsl-native-ops"]
+    owners: [drisspg, pearu, slayton58]
+    section: python_core_api
+    paths:
+      - /torch/_native/: [slayton58, drisspg]
+      - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
+      - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
+      - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
   - name: complex
     labels: ["module: complex"]
     owners: [amjames, hameerabbasi]
@@ -363,6 +382,19 @@ ownership:
     paths:
       - /torch/_subclasses/fake_tensor.py: [aorenste]
       - /torch/_subclasses/fake_utils.py: [aorenste]
+  - name: headeronly_abi
+    labels: ["module: abi", "module: headeronly"]
+    owners: [janeyx99]
+    section: python_core_api
+    paths:
+      - /torch/header_only_apis.txt: [janeyx99]
+      - /torch/headeronly/: [janeyx99]
+  - name: hipify_rocm
+    labels: ["module: rocm", "module: hipify"]
+    owners: [jeffdaily, jithunnair-amd]
+    section: python_core_api
+    paths:
+      - /torch/utils/hipify/: [jeffdaily, jithunnair-amd]
   - name: pytree
     labels: ["module: pytree"]
     owners: [XuehaiPan]
@@ -376,16 +408,12 @@ ownership:
     section: python_nn_api
     paths:
       - /torch/nn/: [albanD, jbschlosser]
-  - name: dsl_native_ops
-    labels: ["module: dsl-native-ops"]
+  - name: dsl_native_ops_nn
+    labels: ["module: nn", "module: dsl-native-ops"]
     owners: [drisspg, pearu, slayton58]
     section: python_nn_api
     paths:
       - /torch/nn/modules/linear_cross_entropy*.py: [slayton58, pearu]
-      - /torch/_native/: [slayton58, drisspg]
-      - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
-      - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
-      - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
   - name: nn_utils_parametrize
     labels: ["module: nn", "module: nn.utils.parametrize"]
     owners: [lezcano]
@@ -549,7 +577,6 @@ ownership:
     section: infra_ci
     paths:
       - /.ci/: [pytorch/pytorch-dev-infra]
-      - /.github/: [pytorch/pytorch-dev-infra]
   - name: rocm_ci
     labels: ["module: ci", "module: rocm"]
     owners: [jeffdaily]
@@ -571,6 +598,12 @@ ownership:
     section: infra_ci
     paths:
       - /.ci/docker/ci_commit_pins/triton-xpu.txt: [EikanWang, gujinghui]
+  - name: github_automation_ci
+    labels: ["module: ci", "module: github automation"]
+    owners: [pytorch/pytorch-dev-infra]
+    section: infra_github_automation
+    paths:
+      - /.github/: [pytorch/pytorch-dev-infra]
   - name: build
     labels: ["module: build"]
     owners: []
@@ -716,18 +749,12 @@ ownership:
       - /torch/distributed/tensor/placement_types.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
       - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
-  - name: rocm
-    labels: ["module: rocm"]
+  - name: rocm_build
+    labels: ["module: build", "module: rocm"]
     owners: [jeffdaily, jithunnair-amd]
     section: infra_developer_tools
     paths:
       - /tools/amd_build/: [jeffdaily, jithunnair-amd]
-      - /aten/src/ATen/hip/: [jeffdaily, jithunnair-amd]
-      - /torch/backends/miopen/
-      - /c10/hip/: [jeffdaily, jithunnair-amd]
-      - /aten/src/ATen/native/miopen/: [jeffdaily, jithunnair-amd]
-      - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
-      - /torch/utils/hipify/: [jeffdaily, jithunnair-amd]
   - name: lint
     labels: ["module: lint"]
     owners: []
