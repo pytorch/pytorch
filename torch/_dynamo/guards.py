@@ -3043,23 +3043,21 @@ class GuardBuilder(GuardBuilderBase):
                 return False
 
         metadata = value.__tensor_flatten__()[1]
+        cls = type(value)
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        ref = self.arg_ref(guard)
         has_custom_guard = hasattr(value, "__metadata_guard__")
         if has_custom_guard:
             verify_guard_fn_signature(value)
-            cls = type(value)
-        else:
-            _validate_default_subclass_metadata_guard(metadata, type(value))
-
-        ref = self.arg_ref(guard)
-        if has_custom_guard:
             reason = (
-                f"{type(value).__name__}.__metadata_guard__() rejected the metadata "
+                f"{class_name}.__metadata_guard__() rejected the metadata "
                 f"for {ref}. Keep the metadata stable or change the check "
                 "if this difference is safe."
             )
         else:
+            _validate_default_subclass_metadata_guard(metadata, cls)
             reason = (
-                f"Metadata from {type(value).__name__}.__tensor_flatten__() for "
+                f"Metadata from {class_name}.__tensor_flatten__() for "
                 f"{ref} no longer matches what Dynamo saw during compilation. "
                 "This metadata can affect tensor subclass behavior; keep it stable "
                 "or define __metadata_guard__() if some differences are safe."

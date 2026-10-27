@@ -2702,12 +2702,23 @@ s50 > 3""",
         self.assertEqual(failures, [])
         compiled(tensor_type(torch.ones(2), 2))
 
-        expected = (
-            "CustomGuardTensor.__metadata_guard__() rejected"
-            if custom_guard
-            else "CtxSubclassTensor.__tensor_flatten__()"
-        )
-        self.assertIn(expected, "\n".join(failures))
+        self.assertEqual(len(failures), 1)
+        class_name = f"{tensor_type.__module__}.{tensor_type.__qualname__}"
+        if custom_guard:
+            expected_hint = (
+                f"(HINT: {class_name}.__metadata_guard__() rejected the metadata "
+                "for x. Keep the metadata stable or change the check "
+                "if this difference is safe.)"
+            )
+        else:
+            expected_hint = (
+                f"(HINT: Metadata from {class_name}.__tensor_flatten__() for "
+                "x no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe.)"
+            )
+        self.assertIn("___check_metadata_", failures[0])
+        self.assertIn(expected_hint, failures[0])
 
     def test_tensor_subclass_ctx_recursive_guards(self):
         x0 = torch.ones(2, 2)
