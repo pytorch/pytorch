@@ -42,7 +42,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._debug_mode import DebugMode
 from torch.utils._debug_mode._calls import _TritonKernelCall
 from torch.utils._triton import has_triton_package
@@ -159,7 +160,7 @@ class TestKernelConfigs(TestCase):
     """Under triton.autotune_at_compile_time, the module launches each kernel with the
     config the compile tuned it to."""
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "case",
         [
@@ -191,7 +192,7 @@ class TestKernelConfigs(TestCase):
     @config.patch(coordinate_descent_tuning=True, max_autotune_pointwise=True)
     def test_kernels_launch_with_their_compile_time_config(self, case):
         _, fn, shape, marker, *cfg = case
-        x = torch.randn(shape, device="cuda")
+        x = torch.randn(shape, device=GPU_TYPE)
         with _configs_tuned_at_compile_time() as tuned:
             _, code = _code_for(fn, x, **(cfg[0] if cfg else {}))
         self.assertIn(marker, code)
@@ -211,7 +212,7 @@ class TestKernelConfigs(TestCase):
             (launcher,) = ns[name].launchers
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_fixed_config_kernel_keeps_its_config(self):
         cfg = {"XBLOCK": 128}
 
@@ -220,7 +221,7 @@ class TestKernelConfigs(TestCase):
                 return {**kernel_kwargs, "fixed_config": FixedTritonConfig(cfg)}
 
         fn = lambda x: (x.sin() * 2).relu()  # noqa: E731
-        x = torch.randn(4096, device="cuda")
+        x = torch.randn(4096, device=GPU_TYPE)
         with V.set_choices_handler(FixedChoices()):
             _, code = _code_for(fn, x)
         self.assertIn("@triton_heuristics.fixed_config(", code)
@@ -232,7 +233,7 @@ class TestKernelConfigs(TestCase):
         (launcher,) = ns[name].launchers
         self.assertEqual(config_to_dict(launcher.config), pinned)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("threads", [None, 1])
     @parametrize("cache_hit", [False, True])
     @config.patch(coordinate_descent_tuning=True, fx_graph_cache=True)
@@ -241,7 +242,7 @@ class TestKernelConfigs(TestCase):
         # KERNEL_CONFIGS lookup, so inductor's own load does not pin, from the FX graph
         # cache too.
         fn = lambda x: x.sum(-1)  # noqa: E731
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         if cache_hit:
             _code_for(fn, x)
         counters.clear()
@@ -261,11 +262,11 @@ class TestKernelConfigs(TestCase):
         self.assertIn(HeuristicType.REDUCTION, launched)
         self.assertNotIn(HeuristicType.FIXED, launched)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_compile_to_python_artifact_launches_pinned(self):
         # compile_to_python (as standalone_compile) turns triton.autotune_at_compile_time
         # on, so its module carries the table and its kernels load pinned.
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         decomps = select_decomp_table()
         gm = make_fx(lambda x: (x.sum(-1),), decomps, tracing_mode="fake")(x)
         src, _ = compile_to_python(gm, [x])
@@ -278,7 +279,7 @@ class TestKernelConfigs(TestCase):
         (launcher,) = ns[kernel].launchers
         self.assertEqual(config_to_dict(launcher.config), cfg)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_kernel_the_block_did_not_launch_is_not_pinned(self):
         # async_compile precompiles every kernel, so a single-config kernel has one
         # launcher even if the autotune block never ran it.
@@ -289,7 +290,7 @@ class TestKernelConfigs(TestCase):
             return block(self, *args, **kwargs)
 
         fn = lambda x: (x.sin() * 2).relu()  # noqa: E731
-        x = torch.randn(4096, device="cuda")
+        x = torch.randn(4096, device=GPU_TYPE)
         name = "generate_and_run_autotune_block"
         with mock.patch.object(PythonWrapperCodegen, name, launch_nothing):
             _, code = _code_for(fn, x)
@@ -298,7 +299,7 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(ns["KERNEL_CONFIGS"], {})
         self.assertEqual(ns[kernel].heuristic_type, HeuristicType.POINTWISE)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_bundled_autotune_cache_key_ignores_the_winners(self):
         # AutotuneCacheBundler keys on the wrapper code, both when the graph is compiled
         # and on an FX graph cache hit. The key must not change with the config each
@@ -318,7 +319,7 @@ class TestKernelConfigs(TestCase):
             return result
 
         fn = lambda x: x.sum(-1)  # noqa: E731
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         with (
             mock.patch.object(
                 AutotuneCacheBundler, "begin_compile", classmethod(begin_spy)
@@ -338,7 +339,7 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(len(keys), 4)
         self.assertEqual(len(set(keys)), 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(coordinate_descent_tuning=True)
     def test_a_subgraph_kernel_pinned_first_writes_the_table(self):
         # The predicate is an input, so the root launches no kernel: the first one
@@ -349,8 +350,8 @@ class TestKernelConfigs(TestCase):
 
             return torch.cond(p, outer, lambda t: t.sin() * 2, (x,))
 
-        p = torch.tensor(True, device="cuda")
-        x = torch.randn(64, 128, device="cuda")
+        p = torch.tensor(True, device=GPU_TYPE)
+        x = torch.randn(64, 128, device=GPU_TYPE)
         with _configs_tuned_at_compile_time() as tuned:
             _, code = _code_for(fn, p, x)
         kernels = _kernels(code)
@@ -365,7 +366,7 @@ class TestKernelConfigs(TestCase):
         for name, cfg in ns["KERNEL_CONFIGS"].items():
             self.assertEqual(cfg, tuned[name], name)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("per_subkernel", [False, True])
     @config.patch(
         combo_kernels=True,
@@ -377,7 +378,7 @@ class TestKernelConfigs(TestCase):
         def fn(a, b):
             return a.relu(), b.sigmoid()
 
-        a, b = torch.randn(10, 10, device="cuda"), torch.randn(20, 20, device="cuda")
+        a, b = (torch.randn(n, n, device=GPU_TYPE) for n in (10, 20))
         per_subkernel_cfg = {"combo_kernel_per_subkernel_blocks": per_subkernel}
         with _configs_tuned_at_compile_time() as tuned:
             _, code = _code_for(fn, a, b, **per_subkernel_cfg)
@@ -392,20 +393,20 @@ class TestKernelConfigs(TestCase):
         if per_subkernel:
             self.assertIn("XBLOCK_1", cfg)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(coordinate_descent_tuning=True)
     def test_dynamic_shape_kernel_keeps_its_config_at_every_size(self):
         # Tuned once on the size hints, it launches with that config at other sizes.
         def fn(x):
             return x.sum(-1)
 
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         with _configs_tuned_at_compile_time() as tuned:
             _, code = _code_for(fn, x, dynamic=True)
         with _no_runtime_tuning():
             ns = _load_from_file(code)
             for shape in [(64, 3000), (17, 5000), (200, 129)]:
-                y = torch.randn(shape, device="cuda")
+                y = torch.randn(shape, device=GPU_TYPE)
                 # The size symbols come before or after the tensor, as get_args shows.
                 dims = iter(shape)
                 example = ns["get_args"]()
@@ -418,11 +419,11 @@ class TestKernelConfigs(TestCase):
         (launcher,) = ns[kernel].launchers
         self.assertEqual(config_to_dict(launcher.config), cfg)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_template_keeps_its_one_config(self):
         if not is_big_gpu():
             self.skipTest("Triton GEMM templates need a big GPU")
-        a, b = torch.randn(64, 64, device="cuda"), torch.randn(64, 64, device="cuda")
+        a, b = (torch.randn(64, 64, device=GPU_TYPE) for _ in range(2))
         cfg = {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
         result, code = _code_for(lambda a, b: (a @ b).relu(), a, b, **cfg)
         (template,) = {k for k in _kernels(code) if k.startswith("triton_tem_")}
@@ -439,7 +440,7 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(ns[template].heuristic_type, HeuristicType.TEMPLATE)
         self.assertEqual(ns["call"]([a, b])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_user_defined_kernel_keeps_its_autotuning(self):
         import triton
         import triton.language as tl
@@ -460,7 +461,7 @@ class TestKernelConfigs(TestCase):
             add_one[lambda meta: (triton.cdiv(n, meta["BLOCK"]),)](x, out, n)
             return out.sin()
 
-        x = torch.randn(4096, device="cuda")
+        x = torch.randn(4096, device=GPU_TYPE)
         result, code = _code_for(fn, x)
         self.assertEqual(result, fn(x))
         (user_kernel,) = re.findall(r"^def (add_one\w*)\(", code, re.MULTILINE)
@@ -475,7 +476,7 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(ns[user_kernel].heuristic_type, HeuristicType.USER_AUTOTUNE)
         self.assertEqual(ns["call"]([x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_kernel_without_a_compile_time_config_tunes_on_first_launch(self):
         # As for a kernel the block leaves with more than one launcher.
         block = PythonWrapperCodegen.generate_and_run_autotune_block
@@ -488,7 +489,7 @@ class TestKernelConfigs(TestCase):
         def fn(x):
             return x.sum(-1)
 
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         spy = mock.patch.object(
             PythonWrapperCodegen, "generate_and_run_autotune_block", leave_no_config
         )
@@ -508,7 +509,7 @@ class TestKernelConfigs(TestCase):
             self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
         tuned.assert_called_once()
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "failure", ["compile", "load", "load_pipelined", "load_cached", "load_profiled"]
     )
@@ -521,7 +522,7 @@ class TestKernelConfigs(TestCase):
         # profile_bandwidth the kernel is a DebugAutotuner, which precompiles in run().
         num_stages = 2 if failure == "load_pipelined" else 1
         fn = lambda x: x.sum(-1)  # noqa: E731
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         cached = failure == "load_cached"
         profiled = failure == "load_profiled"
         cfg = {"autotune_local_cache": cached, "max_autotune": True}
@@ -587,9 +588,9 @@ class TestKernelConfigs(TestCase):
         (launcher,) = ns[kernel].launchers
         self.assertIn(config_to_dict(launcher.config), candidates)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_plugin_compiles_the_kernel_again_after_falling_back(self):
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         cfg = {"autotune_local_cache": False, "max_autotune": True}
         result, code = _code_for(lambda x: x.sum(-1), x, **cfg)
         (kernel,) = _kernels(code)
@@ -626,11 +627,11 @@ class TestKernelConfigs(TestCase):
         fixed, reduction = HeuristicType.FIXED, HeuristicType.REDUCTION
         self.assertEqual(seen, [(fixed, False), (reduction, False)])
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_falling_back_decides_on_every_attribute_set_after_init(self):
         # Falling back replaces a pinned kernel's __dict__ with a fresh unpinned one's,
         # so state set after __init__ is dropped unless _kept_on_fallback names it.
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         _, code = _code_for(_softmax, x)
         ns = _load_from_file(code)
         ns["call"]([x])
@@ -647,7 +648,7 @@ class TestKernelConfigs(TestCase):
             dropped = after_init - set(CachingAutotuner._kept_on_fallback) - cached
             self.assertEqual(dropped, {"fallback"}, name)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_the_fallback_can_be_built_again(self):
         # Building the unpinned kernel pops from its metas, so a retry after a failed
         # build would otherwise tune an in-place kernel without cloning what it mutates.
@@ -655,7 +656,7 @@ class TestKernelConfigs(TestCase):
             x.add_(1)
             return x.sum()
 
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         _, code = _code_for(fn, x.clone())
         ns = _load_from_file(code)
         (name,) = _kernels(code)
@@ -665,9 +666,9 @@ class TestKernelConfigs(TestCase):
         for _ in range(2):
             self.assertEqual(kernel.fallback().mutated_arg_names, mutated)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_an_unrelated_error_in_a_pinned_kernel_does_not_fall_back(self):
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         _, code = _code_for(lambda x: x.sum(-1), x)
         calls = []
 
@@ -682,11 +683,11 @@ class TestKernelConfigs(TestCase):
                 _load_from_file(code)
         self.assertEqual(len(calls), 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_falling_back_keeps_the_launch_being_recorded(self):
         # run() records a DebugMode launch before a lazy precompile, which is where a
         # pinned kernel may fall back; the launch must still be finalized afterwards.
-        x = torch.randn(64, 3000, device="cuda")
+        x = torch.randn(64, 3000, device=GPU_TYPE)
         cfg = {"autotune_local_cache": False, "max_autotune": True}
         result, code = _code_for(lambda x: x.sum(-1), x, **cfg)
         ns = _load_from_file(code)
@@ -759,7 +760,7 @@ class TestKernelConfigs(TestCase):
         full = empty.replace("\n", "\n" + row, 1)
         self.assertEqual(_comment_stripped_hash(empty), _comment_stripped_hash(full))
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_pinned_kernel_keeps_the_backends_extra_options(self):
         # An out-of-tree backend can tune options into Config.extra_options.
         options = {"backend_option": 2}
@@ -768,7 +769,7 @@ class TestKernelConfigs(TestCase):
             if in_block:
                 kernel.launchers[0].config.extra_options = options
 
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         with _spy_launches(record):
             result, code = _code_for(_softmax, x)
         ns = _load_from_file(code)
@@ -780,7 +781,7 @@ class TestKernelConfigs(TestCase):
             self.assertEqual(launcher.config.extra_options, options, name)
             self.assertNotIn("extra_options", launcher.config.kwargs, name)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("field", ["extra_options", "num_ctas", "pre_hook"])
     def test_a_row_the_module_cannot_read_back_is_left_out(self, field):
         # An enum does not read back, and a row has no num_ctas or pre_hook.
@@ -794,16 +795,16 @@ class TestKernelConfigs(TestCase):
             if in_block:
                 setattr(kernel.launchers[0].config, field, value)
 
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         with _spy_launches(record):
             result, code = _code_for(_softmax, x)
         ns = _load_from_file(code)
         self.assertEqual(ns["KERNEL_CONFIGS"], {})
         self.assertEqual(ns["call"]([x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_without_compile_time_autotuning_nothing_is_pinned(self):
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         cfg = {"triton.autotune_at_compile_time": None}
         result, code = _code_for(_softmax, x, **cfg)
         self.assertNotIn("KERNEL_CONFIGS", code)
