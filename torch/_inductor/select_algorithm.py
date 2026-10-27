@@ -585,6 +585,21 @@ class RuntimeFloat:
 
     value: sympy.Expr | float
 
+    def __post_init__(self) -> None:
+        # Symbolic values use Inductor's float functions (FloatTrueDiv, ToFloat,
+        # OpaqueUnaryFn_sqrt, FloatPow), as Dynamo produces for SymFloat math. The
+        # Python wrapper cannot print a sympy Pow with a non-positive-integer exponent.
+        bad = [
+            p
+            for p in sympy.sympify(self.value).atoms(sympy.Pow)
+            if not (p.exp.is_Integer and p.exp > 0)
+        ]
+        if bad:
+            raise ValueError(
+                f"RuntimeFloat({self.value}) uses {bad[0]}; write it with "
+                "FloatTrueDiv / OpaqueUnaryFn_sqrt / FloatPow instead of a sympy Pow"
+            )
+
     def unwrap_if_number(self) -> "RuntimeFloat | float":
         value = sympy.sympify(self.value)
         return float(value) if value.is_number else self
