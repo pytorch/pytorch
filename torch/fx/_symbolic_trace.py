@@ -1284,12 +1284,14 @@ def _applied_patchers(patcher: _Patcher | None) -> list[_Patcher]:
 def _suspend_patches(patchers: list[_Patcher]) -> Iterator[None]:
     # Innermost first: a nested patcher recorded the outer one's wrappers as the
     # originals it restores.
-    for patcher in patchers:
-        patcher.revert_all_patches()
+    reverted = []
     try:
+        for patcher in patchers:
+            patcher.revert_all_patches()
+            reverted.append(patcher)
         yield
     finally:
-        for patcher in reversed(patchers):
+        for patcher in reversed(reverted):
             patcher.reapply_all_patches()
 
 
