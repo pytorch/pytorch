@@ -641,6 +641,10 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    # thread_position_in_grid is 32-bit per axis; Metal silently truncates larger grids
+    max_grid_size = 2**32 - 1
+    # Power-of-two stride of the in-kernel loop over ranges that may not fit the grid
+    grid_stride = 2**31
     # Device that generated kernels are launched on. Subclasses reusing the
     # Metal-style call plumbing for another device can override this instead of
     # copying call_kernel(). A retarget is not usable on its own yet: the
@@ -821,9 +825,14 @@ class MetalKernel(SIMDKernel):
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
             self.indexing_code.writeline(f"{acc} = false;")
-            self.indexing_code.writeline(
-                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-            )
+            # Serial reductions keep acc thread-local, so barriers protect nothing here.
+            # They would also be unsafe: a serial threadgroup spans many rows, and under a
+            # grid-stride loop its threads can handle different numbers of rows, while
+            # Metal requires every thread of a threadgroup to reach each barrier.
+            if self.max_threadgroup_size > 1:
+                self.indexing_code.writeline(
+                    "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                )
             self.compute.splice(
                 f"""
                 if ({value}) {{
@@ -831,9 +840,10 @@ class MetalKernel(SIMDKernel):
                 }}
             """
             )
-            self.stores.writeline(
-                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-            )
+            if self.max_threadgroup_size > 1:
+                self.stores.writeline(
+                    "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                )
             return acc
 
         self.headers.add("reduction_utils")
@@ -1087,6 +1097,19 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
+    def grid_stride_prefixes(self) -> OrderedSet[str]:
+        """Prefixes of non-reduction ranges that may exceed the grid. These launch
+        min(numel, grid_stride) threads that each loop over the range in grid_stride steps."""
+        # 32-bit indexing already guards the whole iteration space to fit in int32
+        if self.get_index_dtype_as_torch_dtype() != torch.int64:
+            return OrderedSet()
+        return OrderedSet(
+            t.prefix
+            for t in self.active_range_trees()
+            if not t.is_reduction
+            and not V.graph.sizevars.statically_known_leq(t.numel, self.max_grid_size)
+        )
+
     def codegen_kernel(self, name: str = "generated_kernel") -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
@@ -1099,6 +1122,7 @@ class MetalKernel(SIMDKernel):
             code.writeline("compile_mps_shader('''")
 
         idx_vars = self.active_range_trees()
+        strided = self.grid_stride_prefixes()
         with code.indent():
             if not V.graph.cpp_wrapper:
                 for header in self.headers:
@@ -1166,7 +1190,9 @@ class MetalKernel(SIMDKernel):
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
                 )
                 thread_pos_var_name = (
-                    idx_vars[0].name if len(idx_vars) == 1 else "thread_pos"
+                    idx_vars[0].name
+                    if len(idx_vars) == 1 and not strided
+                    else "thread_pos"
                 )
                 thread_pos_suffix = "," if self.inside_reduction else ""
                 code.writeline(
@@ -1178,13 +1204,40 @@ class MetalKernel(SIMDKernel):
                     )
             code.writeline(") {")
             with code.indent():
-                if len(idx_vars) > 1:
+                if len(idx_vars) > 1 or strided:
                     for idx, var in enumerate(idx_vars):
-                        code.writeline(
-                            f"auto {var.name} = thread_pos.{chr(120 + idx)};"
+                        pos = (
+                            f"thread_pos.{chr(120 + idx)}"
+                            if len(idx_vars) > 1
+                            else "thread_pos"
                         )
-                code.splice(self.indexing_code)
-                code.splice(self.body)
+                        if var.prefix not in strided:
+                            code.writeline(f"auto {var.name} = {pos};")
+                            continue
+                        numel = (
+                            self.sexpr(var.numel)
+                            if isinstance(var.numel, sympy.Integer)
+                            else f"{var.prefix}numel"
+                        )
+                        code.writeline(
+                            f"for ({self.index_dtype} {var.name} = {pos}; {var.name} < {numel}; {var.name} += {self.grid_stride}) {{"
+                        )
+                with code.indent(len(strided)):
+                    code.splice(self.indexing_code)
+                    code.splice(self.body)
+                    # Threads of a threadgroup share their non-reduction indices and so
+                    # iterate in lockstep; the next iteration must not overwrite threadgroup
+                    # memory that other threads are still reading.
+                    if (
+                        strided
+                        and self.inside_reduction
+                        and self.max_threadgroup_size > 1
+                    ):
+                        code.writeline(
+                            "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                        )
+                if strided:
+                    code.writeline("}" * len(strided))
             code.writeline("}")
 
         if V.graph.cpp_wrapper:
@@ -1241,10 +1294,13 @@ class MetalKernel(SIMDKernel):
         # For reduction kernels, limit the maximum size over reduction dimensions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
+            strided = self.grid_stride_prefixes()
             threads = [
                 expr_printer(
                     Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
+                    else Min(v.numel, self.grid_stride)  # type: ignore[misc]
+                    if v.prefix in strided
                     else v.numel
                 )
                 for v in self.active_range_trees()
