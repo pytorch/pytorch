@@ -139,6 +139,41 @@ class TestFakePG(TestCase):
             backend = pg._get_backend(torch.device("cpu"))
             self.assertEqual(backend.options._timeout, timeout)
 
+    def test_compile_sync_pg_timeout_skips_a_backend_without_options(self):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        class NoOptions:
+            @property
+            def options(self):
+                raise RuntimeError("Backend ucc does not implement getBackendOptions.")
+
+        get_backend = dist.ProcessGroup._get_backend
+
+        def cuda_without_options(pg, device):
+            if pg is default_pg and device.type == "cuda":
+                return NoOptions()
+            return get_backend(pg, device)
+
+        timeout = timedelta(minutes=5)
+        # The cuda backend, listed first, has no options to read; the CPU one,
+        # which object collectives use, keeps the configured timeout.
+        dist.init_process_group(
+            backend="cuda:gloo,cpu:gloo",
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            timeout=timeout,
+        )
+        default_pg = dist.distributed_c10d._get_default_group()
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(
+                dist.ProcessGroup, "_get_backend", cuda_without_options
+            ),
+        ):
+            pg = dynamo_distributed.get_compile_sync_pg()
+        self.assertEqual(pg._get_backend(torch.device("cpu")).options._timeout, timeout)
+
     def test_cache_sync_primes_the_fake_group_without_gloo(self):
         from torch._dynamo import distributed as dynamo_distributed
         from torch._functorch import config as functorch_config
