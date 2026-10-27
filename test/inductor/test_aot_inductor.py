@@ -10364,6 +10364,120 @@ class AOTInductorTestsTemplate:
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
+    def test_aot_cudagraphs_accepts_capturable_model(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        model = torch.nn.Sequential(torch.nn.Linear(16, 32), torch.nn.ReLU())
+        self.check_model(
+            model,
+            (torch.randn(4, 16, device=self.device),),
+            options={"aot_inductor.cudagraphs": True},
+        )
+
+    def test_aot_cudagraphs_rejects_non_cuda_model(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("requires a non-CUDA device")
+        with self.assertRaisesRegex(Exception, "doesn't run on CUDA"):
+            AOTIRunnerUtil.compile(
+                torch.nn.Linear(4, 4).to(self.device),
+                (torch.randn(2, 4, device=self.device),),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
+
+    def test_aot_cudagraphs_rejects_uncapturable_models(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class CpuOp(torch.nn.Module):
+            def forward(self, x):
+                return (x.cpu() * 2).to(x.device)
+
+        class Item(torch.nn.Module):
+            def forward(self, x):
+                return x * x.sum().item()
+
+        class MutatesInput(torch.nn.Module):
+            def forward(self, x):
+                x.add_(1)
+                return x * 2
+
+        class Cond(torch.nn.Module):
+            def forward(self, x):
+                return torch.cond(x.sum() > 0, lambda x: x + 1, lambda x: x - 1, (x,))
+
+        class SyncsEvent(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                event = s.record_event()
+                event.synchronize()
+                return y * 2
+
+        for model, reason in (
+            (CpuOp(), "cpu device"),
+            (Item(), "incompatible op"),
+            (MutatesInput(), "mutates inputs"),
+            (Cond(), "control flow operator: torch.cond"),
+            (SyncsEvent(), "waits on the host for a CUDA event"),
+        ):
+            with (
+                self.subTest(type(model).__name__),
+                self.assertRaisesRegex(Exception, f"CUDA graph: .*{reason}"),
+            ):
+                AOTIRunnerUtil.compile(
+                    model,
+                    (torch.randn(4, 4, device=self.device),),
+                    inductor_configs={"aot_inductor.cudagraphs": True},
+                )
+
+    def test_aot_cudagraphs_checks_subgraphs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def cpu_op(x):
+            return (x.cpu() * 2).to(x.device)
+
+        def item(x):
+            return x * x.sum().item()
+
+        for fn, reason in ((cpu_op, "cpu device"), (item, "incompatible op")):
+            with (
+                self.subTest(fn.__name__),
+                torch._dynamo.config.patch(
+                    enable_invoke_subgraph_regional_compile=True,
+                    inline_single_use_invoke_subgraph=False,
+                ),
+            ):
+                region = torch.compiler.nested_compile_region(fn)
+
+                class Model(torch.nn.Module):
+                    def forward(self, x):
+                        return region(x) + region(x * 2)
+
+                with self.assertRaisesRegex(Exception, f"CUDA graph: .*{reason}"):
+                    AOTIRunnerUtil.compile(
+                        Model(),
+                        (torch.randn(4, 4, device=self.device),),
+                        inductor_configs={"aot_inductor.cudagraphs": True},
+                    )
+
+    @requires_multigpu()
+    def test_aot_cudagraphs_rejects_multi_device_model(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return (x.to(f"{GPU_TYPE}:1") * 2).to(x.device)
+
+        with self.assertRaisesRegex(Exception, "CUDA graph: .*multiple devices"):
+            AOTIRunnerUtil.compile(
+                Model(),
+                (torch.randn(4, 4, device=self.device),),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
+
     def test_custom_op_in_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
