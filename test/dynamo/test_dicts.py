@@ -500,6 +500,27 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), (x + 1, False))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    @parametrize(
+        "factory, args",
+        [
+            (itertools.chain, ()),
+            (itertools.count, ()),
+            (itertools.repeat, (1,)),
+            (deque, ()),
+            (torch.Size, ([],)),
+        ],
+    )
+    def test_builtin_iterable_missing_attribute_message(self, factory, args):
+        def fn(x):
+            obj = factory(*args)
+            try:
+                obj.missing
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("case", [(dict, False), (dict, True), (OrderedDict, True)])
     def test_dict_update_preserves_hash_calls(self, mapping_type, case):
@@ -585,6 +606,48 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(actual_type, view_type)
         self.assertTrue(matches_type)
         self.assertEqual(list(actual_view), list(expected_view))
+
+    @parametrize("view_name", ["keys", "values", "items"])
+    def test_ordered_dict_view_hasattr(self, view_name):
+        def fn(x):
+            view = getattr(OrderedDict(a=1), view_name)()
+            return x + 1, tuple(
+                hasattr(view, name)
+                for name in (
+                    "mapping",
+                    "__len__",
+                    "isdisjoint",
+                    "__contains__",
+                    "__or__",
+                    "missing",
+                )
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("ordered_first", [False, True])
+    def test_ordered_dict_input_keys_view_type(self, ordered_first):
+        mapping = OrderedDict(a=1, b=2)
+        ordered_type = type(mapping.keys())
+
+        def fn(x, view):
+            return (
+                x + 1,
+                type(view),
+                isinstance(view, ordered_type),
+                repr(view),
+                list(view),
+            )
+
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        owners = (OrderedDict, dict) if ordered_first else (dict, OrderedDict)
+        for owner in owners:
+            view = owner.keys(mapping)
+            self.assertEqual(compiled(x, view), fn(x, view))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("bound", [False, True])
     def test_ordered_dict_subclass_copy(self, bound):
