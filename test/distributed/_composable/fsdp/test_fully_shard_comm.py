@@ -1455,6 +1455,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         )
 
 
+@instantiate_parametrized_tests
 class TestFullyShardPrefetch(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -1465,19 +1466,29 @@ class TestFullyShardPrefetch(FSDPTest):
         # Activation checkpointing should not affect the expected FSDP events
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2, None],
+                "reshard_after_forward": [True, False, None],
                 "checkpoint_impl": [None, "utils", "composable"],
             },
             self._test_backward_prefetch_forward_backward,
         )
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2, None],
+                "reshard_after_forward": [True, False, None],
                 "checkpoint_impl": [None, "utils", "composable"],
             },
             self._test_backward_prefetch_multi_forward,
         )
         self._test_backward_prefetch_unused_in_backward(True)
+
+    # reshard_after_forward=2 makes every fully_shard call build a new post-forward
+    # mesh, and its NCCL communicators hold /dev/shm until the processes exit, so
+    # run each checkpoint_impl in fresh processes.
+    @skip_if_lt_x_gpu(2)
+    @parametrize("checkpoint_impl", [None, "utils", "composable"], name_fn=str)
+    def test_fully_shard_backward_prefetch_reshard_to_2(self, checkpoint_impl):
+        config = {"reshard_after_forward": [2], "checkpoint_impl": [checkpoint_impl]}
+        self.run_subtests(config, self._test_backward_prefetch_forward_backward)
+        self.run_subtests(config, self._test_backward_prefetch_multi_forward)
 
     def _test_backward_prefetch_forward_backward(
         self,
