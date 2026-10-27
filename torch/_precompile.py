@@ -1917,36 +1917,9 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
-# Operator namespaces torch registers itself; serving never needs a module for them.
-_TORCH_OP_NAMESPACES = frozenset(
-    {
-        "aten",
-        "prims",
-        "prim",
-        "higher_order",
-        "rngprims",
-        "debugprims",
-        "inductor",
-        "profiler",
-        "quantized",
-        "_quantized",
-        "quantized_decomposed",
-        "c10d",
-        "c10d_functional",
-        "_c10d_functional",
-        "_c10d_functional_autograd",
-        "_dtensor",
-        "symm_mem",
-        "mkldnn",
-        "onednn",
-        "mkl",
-    }
-)
-
-
 def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
     """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
-    call, directly or passed to a higher-order op, outside torch's namespaces."""
+    call, directly or passed to a higher-order op."""
     names: set[tuple[str, str]] = set()
     for module in gm.modules():
         graph = getattr(module, "graph", None)
@@ -1961,10 +1934,7 @@ def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
                 else:
                     ops = [op]
                 for overload in ops:
-                    if (
-                        isinstance(overload, torch._ops.OpOverload)
-                        and overload.namespace not in _TORCH_OP_NAMESPACES
-                    ):
+                    if isinstance(overload, torch._ops.OpOverload):
                         schema = overload._schema
                         names.add((schema.name, schema.overload_name))
     return names
