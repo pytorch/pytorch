@@ -646,21 +646,21 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     def test_single_rank_copy(self):
         # A size-1 shard mesh copies each sharded parameter into its output
         mesh = init_device_mesh(
-            device_type.type,
+            device.type,
             (self.world_size, 1),
             mesh_dim_names=("replicate", "shard"),
         )["shard"]
 
         def init_models():
             model = nn.Sequential(
-                nn.Linear(8, 8, device=device_type), nn.Linear(8, 8, device=device_type)
+                nn.Linear(8, 8, device=device), nn.Linear(8, 8, device=device)
             )
             ref_model = copy.deepcopy(model)
             for module in (*model, model):
                 fully_shard(module, mesh=mesh)
             return model, ref_model
 
-        inp = torch.randn((2, 8), device=device_type)
+        inp = torch.randn((2, 8), device=device)
         # The inner modules all-gather again in backward, keeping version counters
         model, ref_model = init_models()
         for _ in range(2):
@@ -677,7 +677,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     def test_copy_fns(self):
         # Records what FSDP passes its copy functions, which delegate to the defaults
         model = nn.Sequential(
-            nn.Linear(8, 8, device=device_type), nn.Linear(8, 4, device=device_type)
+            nn.Linear(8, 8, device=device), nn.Linear(8, 4, device=device)
         )
         for param in model.parameters():
             dist.broadcast(param.detach(), src=0)
@@ -718,7 +718,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         group._all_gather_output_fn = all_gather_output_fn
         group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
         model.set_custom_reduce_scatter(CountingReduceScatter())
-        inp = torch.randn((2, 8), device=device_type)
+        inp = torch.randn((2, 8), device=device)
         model(inp).sum().backward()
         ref_model(inp).sum().backward()
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
@@ -747,10 +747,10 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     def test_post_forward_shard_dim1_parity(self):
         # Post-forward shards are flat, and an empty one needs no divisible dim 0
         model = nn.Sequential(
-            nn.Linear(16, 8, bias=False, device=device_type),
-            nn.Linear(8, 4, bias=False, device=device_type),
+            nn.Linear(16, 8, bias=False, device=device),
+            nn.Linear(8, 4, bias=False, device=device),
         )
-        empty = nn.Parameter(torch.empty(3, 0, device=device_type), requires_grad=False)
+        empty = nn.Parameter(torch.empty(3, 0, device=device), requires_grad=False)
         model.register_parameter("empty", empty)
         for param in model.parameters():
             dist.broadcast(param.detach(), src=0)
@@ -759,7 +759,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             model, reshard_after_forward=2, shard_placement_fn=lambda param: Shard(1)
         )
         # The input gradient reads the all-gathered first weight
-        inp = torch.randn((2, 16), device=device_type, requires_grad=True)
+        inp = torch.randn((2, 16), device=device, requires_grad=True)
         ref_inp = inp.detach().clone().requires_grad_()
         model(inp).sum().backward()
         ref_model(ref_inp).sum().backward()
@@ -776,8 +776,8 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # Post-forward shards chunk dim 0, which 2 ranks cannot split into 3 rows
         def init_model():
             model = nn.Sequential(
-                nn.Linear(8, 4, bias=False, device=device_type),
-                nn.Linear(4, 3, bias=False, device=device_type),
+                nn.Linear(8, 4, bias=False, device=device),
+                nn.Linear(4, 3, bias=False, device=device),
             )
             fully_shard(
                 model,
@@ -786,7 +786,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             )
             return model
 
-        inp = torch.randn((2, 8), device=device_type)
+        inp = torch.randn((2, 8), device=device)
         model = init_model()
         msg = "Resharding the Shard(1) parameter 1.weight to 2 ranks after forward requires dim 0 of its size (3, 4) to be divisible by 2"
         with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
@@ -803,22 +803,22 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_all_gather_output_fn_skipped_when_empty(self):
         # See Note [All-gather output fn]
-        model = nn.Linear(0, 4, bias=False, device=device_type)
+        model = nn.Linear(0, 4, bias=False, device=device)
         fully_shard(model, reshard_after_forward=True)
         calls = []
         group = fully_shard.state(model)._fsdp_param_group
         group._all_gather_output_fn = lambda *args, **kwargs: calls.append(args)
         with torch.no_grad():
             for _ in range(2):
-                model(torch.randn((2, 0), device=device_type))
+                model(torch.randn((2, 0), device=device))
         self.assertEqual(calls, [])
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shards_keep_their_mesh(self):
         # Post-forward shards are all-gathered over the mesh they were resharded to
-        inp = torch.randn((2, 8), device=device_type)
+        inp = torch.randn((2, 8), device=device)
         for reshard_after_forward in (True, False):
-            model = nn.Linear(8, 8, device=device_type)
+            model = nn.Linear(8, 8, device=device)
             for param in model.parameters():
                 dist.broadcast(param.detach(), src=0)
             ref_model = copy.deepcopy(model)
@@ -833,13 +833,13 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_post_forward_reshard_dtensor(self):
         # A size-1 TP dim keeps the post-forward mesh the same on every rank
-        mesh = init_device_mesh(device_type.type, (4, 1), mesh_dim_names=("dp", "tp"))
-        model = nn.Sequential(nn.Linear(8, 8, device=device_type))
+        mesh = init_device_mesh(device.type, (4, 1), mesh_dim_names=("dp", "tp"))
+        model = nn.Sequential(nn.Linear(8, 8, device=device))
         parallelize_module(model[0], mesh["tp"], ColwiseParallel())
         fully_shard(model, mesh=mesh["dp"], reshard_after_forward=2)
         msg = "Resharding 0.weight to smaller mesh is not supported for DTensor parameters yet"
         with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
-            model(torch.randn((2, 8), device=device_type))
+            model(torch.randn((2, 8), device=device))
         # Direct callers of to_sharded_post_forward hit the same limit
         fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
         with self.assertRaisesRegex(NotImplementedError, "not supported for DTensor"):
@@ -858,12 +858,12 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                 return func(*args, **kwargs)
 
         model = nn.Sequential(
-            nn.Linear(8, 8, bias=False, device=device_type),
-            nn.Linear(8, 8, bias=False, device=device_type),
+            nn.Linear(8, 8, bias=False, device=device),
+            nn.Linear(8, 8, bias=False, device=device),
         )
         for module in (model[0], model):
             fully_shard(module, shard_placement_fn=lambda param: Shard(1))
-        inp = torch.randn((2, 8), device=device_type)
+        inp = torch.randn((2, 8), device=device)
 
         def record_copy_ins():
             num_leading_dims.clear()
@@ -2247,7 +2247,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 return self.lin2(y)
 
         torch.manual_seed(42)
-        model = Model().to(device_type)
+        model = Model().to(device)
         ref_model = copy.deepcopy(model)
         for lin in (model.lin0, model.lin1, model.lin2):
             fully_shard(lin, reshard_after_forward=2)
@@ -2261,7 +2261,7 @@ class TestFullyShardPrefetch(FSDPTest):
             for is_last_backward in (False, True):
                 model.set_is_last_backward(is_last_backward)
                 model.set_requires_gradient_sync(is_last_backward)
-                inp = torch.randn((4, 16), device=device_type.type)
+                inp = torch.randn((4, 16), device=device.type)
                 losses = [ref_model(inp).sum(), model(inp).sum()]
                 for loss in losses:
                     loss.backward()
@@ -2827,7 +2827,7 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
 
         backend_has_impl = torch._C._dispatch_has_kernel_for_dispatch_key(
             "fsdp::record_grad_output_stream",
-            torch._C._dispatch_key_for_device(device_type.type),
+            torch._C._dispatch_key_for_device(device.type),
         )
         needs_record_stream = [True] if backend_has_impl else [True, False]
         self.run_subtests(
@@ -2842,9 +2842,7 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
         self, needs_record_stream: bool, mixed_precision: bool
     ):
         torch.manual_seed(42)
-        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(
-            device_type
-        )
+        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(device)
         if mixed_precision:
             model = model.to(torch.bfloat16)
         for param in model.parameters():
@@ -2878,7 +2876,7 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
         def _run_backward():
             with patch.object(torch.Tensor, "record_stream", _record_stream_spy):
                 for _ in range(2):
-                    inp = torch.randn(8, 1024, device=device_type, dtype=inp_dtype)
+                    inp = torch.randn(8, 1024, device=device, dtype=inp_dtype)
                     model(inp).sum().backward()
                 device_module.synchronize()
 
@@ -2890,7 +2888,7 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
             with _scoped_library("fsdp", "FRAGMENT") as test_lib:
 
                 @torch.library.impl(
-                    "fsdp::record_grad_output_stream", device_type.type, lib=test_lib
+                    "fsdp::record_grad_output_stream", device.type, lib=test_lib
                 )
                 def _record(buffer, stream_id, device_index, device_type_enum):
                     buffer.record_stream(
