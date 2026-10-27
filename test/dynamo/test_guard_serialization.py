@@ -4864,6 +4864,35 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
+    def test_nn_module_hook_membership(self):
+        def hook(module, args, *rest):
+            return rest[-1] + 1
+
+        def make_module(flags):
+            module = torch.nn.Identity()
+            for flag in flags:
+                module.register_forward_hook(hook, with_kwargs=flag)
+            return module
+
+        def fn(x, module):
+            return module(x)
+
+        x = torch.ones(2)
+        module = make_module((False, True))
+        ref, loaded = self._test_serialization(
+            ("NN_MODULE_HOOKS_DICT_CONTAINS", "ORDERED_DICT_ORDER_MATCH"), fn, x, module
+        )
+        for flags in ((False, True), (True, False)):
+            self._test_check_fn(
+                ref,
+                loaded,
+                {"x": x, "module": make_module(flags)},
+                flags == (False, True),
+            )
+
+        module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
+        self._test_check_fn(ref, loaded, {"x": x, "module": module}, False)
+
     @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
     def test_empty_nn_module_hooks_dict(self):
         class Module(torch.nn.Module):
