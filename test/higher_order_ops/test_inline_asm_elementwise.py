@@ -315,11 +315,6 @@ TEST_CASES = [
 TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
-def _require_triton():
-    if not has_triton():
-        raise unittest.SkipTest("Triton not available")
-
-
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
@@ -365,7 +360,8 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         # This test always runs torch.compile(inductor); Inductor needs Triton for CUDA.
-        _require_triton()
+        if not has_triton():
+            self.skipTest("Requires Triton")
 
         torch._dynamo.reset()
         compiled_result = torch.compile(fn, backend="inductor")(*inputs)
@@ -423,7 +419,8 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         if tc.compile_only:
-            _require_triton()
+            if not has_triton():
+                self.skipTest("torch.compile requires Triton")
             torch._dynamo.reset()
             result = torch.compile(fn, backend="inductor")(*inputs)
         else:
