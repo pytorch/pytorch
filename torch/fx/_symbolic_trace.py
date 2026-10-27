@@ -1309,7 +1309,7 @@ def _resolve_lazy_imports(
     in, reverted.
 
     Reading an unresolved lazy import runs its module body, which must not see the
-    globals FX patches mid-trace. ``importlib.is_lazy_import`` exists only on PEP
+    globals FX patches mid-trace or FX's tracing flag. ``importlib.is_lazy_import`` exists only on PEP
     690-style lazy-import runtimes (e.g. Cinder).
     """
     is_lazy_import = getattr(importlib, "is_lazy_import", None)
@@ -1323,6 +1323,7 @@ def _resolve_lazy_imports(
     if not lazy_names:
         return
     with contextlib.ExitStack() as stack:
+        stack.enter_context(_is_fx_tracing_context(False))
         # Innermost first: a nested patcher recorded the outer one's wrappers as the
         # originals it restores. A patcher whose patches are already reverted (Dynamo
         # compiling inside the trace) is left as it is.
