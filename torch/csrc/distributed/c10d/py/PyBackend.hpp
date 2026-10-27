@@ -10,6 +10,75 @@
 
 namespace c10d {
 
+// PyBackendOptions is a pybind11 trampoline class to allow a Python class to
+// inherit from torch.distributed.Backend.Options. ProcessGroup::splitGroup()
+// clones the options it hands to a child backend; clone() calls the Python
+// object's __copy__ so the copy keeps the Python subclass and its attributes.
+class PyBackendOptions : public Backend::Options {
+ public:
+  using Backend::Options::Options;
+
+  explicit PyBackendOptions(const Backend::Options& other)
+      : Backend::Options(other) {}
+
+  c10::intrusive_ptr<Backend::Options> clone() const override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::object self;
+    if (PyObject* ptr = pyobj_slot()->load_pyobj()) {
+      self = pybind11::reinterpret_borrow<pybind11::object>(ptr);
+    } else {
+      // Returns a new reference.
+      self = pybind11::reinterpret_steal<pybind11::object>(
+          pybind11::detail::find_registered_python_instance(
+              const_cast<Backend::Options*>(
+                  static_cast<const Backend::Options*>(this)),
+              pybind11::detail::get_type_info(typeid(Backend::Options))));
+    }
+    // Without a live Python object the Python attributes are already gone.
+    TORCH_CHECK_TYPE(
+        self,
+        "cannot clone Python Backend.Options: its Python object was destroyed");
+    auto copy = self.attr("__copy__")();
+    checkCopy(self, copy);
+    auto result = castAndPreserve(copy);
+    // pybind re-wraps a PyBackendOptions whose Python object died as a plain
+    // Backend.Options, whose copy is not a PyBackendOptions.
+    TORCH_CHECK_TYPE(
+        dynamic_cast<PyBackendOptions*>(result.get()) != nullptr,
+        "cannot clone Python Backend.Options: its Python object was destroyed");
+    return result;
+  }
+
+  // Checks that copy is a new instance of self's type (or a subclass), so a
+  // copy never slices or aliases the original. Requires the GIL.
+  static void checkCopy(
+      const pybind11::handle& self,
+      const pybind11::handle& copy) {
+    auto cls = pybind11::type::of(self);
+    TORCH_CHECK_TYPE(
+        !copy.is(self) && pybind11::isinstance(copy, cls),
+        "copy of ",
+        pybind11::str(cls).cast<std::string>(),
+        " must return a new instance of that type or a subclass, got ",
+        pybind11::repr(copy).cast<std::string>());
+  }
+
+  // Casts a Python Options object to C++ and keeps the Python object alive
+  // while C++ holds a reference, so the attributes of a Python subclass are
+  // not lost when the last Python reference is dropped. Requires the GIL.
+  static c10::intrusive_ptr<Backend::Options> castAndPreserve(
+      const pybind11::object& o) {
+    auto opts = o.cast<c10::intrusive_ptr<Backend::Options>>();
+    if (dynamic_cast<PyBackendOptions*>(opts.get()) == nullptr) {
+      return opts;
+    }
+    auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
+        *opts, [&]() { return Py_NewRef(o.ptr()); });
+    Py_DECREF(pyobj);
+    return opts;
+  }
+};
+
 // PyBackend is a pybind11 trampoline class to allow a Python
 // class to inherit from torch.distributed.Backend
 class PyBackend : public Backend {
@@ -308,7 +377,7 @@ class PyBackend : public Backend {
       if (o->is_none()) {
         return c10::make_intrusive<Options>(getBackendName());
       }
-      return o->cast<c10::intrusive_ptr<Options>>();
+      return PyBackendOptions::castAndPreserve(*o);
     }
     return Backend::getBackendOptions();
   }
