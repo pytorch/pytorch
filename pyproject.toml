@@ -129,6 +129,7 @@ include = [
     "!**/__pycache__/**",
     "!**/*.pyc",
     "!third_party/nccl/**",
+    "!third_party/nccl-extensions/**",
     # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
     # it so a dirty checkout does not leak build output into the sdist. Anchored
     # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
@@ -403,6 +404,7 @@ license-files = [
     "third_party/cudnn_frontend/LICENSE.txt",
     "third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0",
     "third_party/cutlass/LICENSE.txt",
+    "third_party/dynolog_headers/LICENSE",
     "third_party/fbgemm/LICENSE",
     "third_party/fbgemm/external/asmjit/LICENSE.md",
     "third_party/fbgemm/external/composable_kernel/LICENSE",
@@ -431,6 +433,8 @@ license-files = [
     "third_party/mslk/external/composable_kernel/LICENSE",
     "third_party/mslk/external/cutlass/LICENSE.txt",
     "third_party/mslk/mslk/attention/flash_attn/LICENSE",
+    "third_party/nccl_ep/LICENSE.txt",
+    "third_party/nccl_ep/ThirdPartyNotices.txt",
     "third_party/nlohmann/LICENSE.MIT",
     "third_party/onnx/LICENSE",
     "third_party/perfetto/LICENSE",
@@ -445,7 +449,6 @@ license-files = [
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
     "torch/csrc/profiler/kineto/LICENSE",
-    "torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]

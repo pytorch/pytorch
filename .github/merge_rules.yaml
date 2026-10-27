@@ -517,6 +517,7 @@
   - trichmo
   - hameerabbasi
   - riccardofelluga
+  - amjames
   mandatory_checks_name:
   - EasyCLA
   - Lint

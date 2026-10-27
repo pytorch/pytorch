@@ -165,9 +165,14 @@ class FakeProcessGroup(dist.BackendBase):
     non-root ranks, the root's input list is unavailable, so the output tensor
     is left unchanged.
 
-    Real collective backends write outputs from kernels autograd never sees;
-    collectives run under ``_AutoDispatchBelowAutograd`` to match, otherwise
-    copies into ``chunk()`` views of tensors requiring grad would be rejected.
+    NOTE [FakeProcessGroup output version counters]
+    Real collective backends write outputs from kernels autograd never sees, so
+    fake writes run below Autograd (which also allows copies into ``chunk()``
+    views of tensors requiring grad). The version counter follows NCCL:
+    ``_AutoDispatchBelowADInplaceOrView`` leaves it alone, as NCCL's kernels
+    do; ``_AutoDispatchBelowAutograd`` bumps it where NCCL runs ``copy_`` (list
+    allgather slots, the root's own scatter output and gather slot) and for
+    ``allgather_coalesced``, which NCCL does not implement.
 
     NOTE [FakeProcessGroup uniform-rank simulation]
     With ``Options.simulate_uniform_ranks`` the group models a world in which
@@ -339,7 +344,7 @@ class FakeProcessGroup(dist.BackendBase):
     def _uniform_reduce_all(self, tensors, reduce_op) -> FakeWork:
         if not self._uniform_ranks():
             return FakeWork()
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             for tensor in tensors:
                 self._apply_uniform_reduction(tensor, reduce_op)
         return FakeWork(tensors)
@@ -387,7 +392,7 @@ class FakeProcessGroup(dist.BackendBase):
 
     def all_gather_single(self, output, input, opts=_ALLGATHER_OPTS):
         self._check_collective_error()
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             for chunk in output.chunk(self.size()):
                 chunk.copy_(input)
         return self._work([output])
@@ -414,7 +419,7 @@ class FakeProcessGroup(dist.BackendBase):
 
     def all_gather_single_coalesced(self, outputs, inputs, opts=_ALLGATHER_OPTS):
         self._check_collective_error()
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             for output, input in zip(outputs, inputs):
                 for chunk in output.chunk(self.size()):
                     chunk.copy_(input)
@@ -445,8 +450,14 @@ class FakeProcessGroup(dist.BackendBase):
                 f"Incorrect output list size {len(output_tensors[0])}. Output "
                 f"list size should be {size}, same as size of the process group.",
             )
-        with torch._C._AutoDispatchBelowAutograd():
-            for tensor in output_tensors[0]:
+        for r, tensor in enumerate(output_tensors[0]):
+            # NCCL copy_s only the root's own slot; peers' arrive by ncclRecv.
+            guard = (
+                torch._C._AutoDispatchBelowAutograd()
+                if r == self.rank()
+                else torch._C._AutoDispatchBelowADInplaceOrView()
+            )
+            with guard:
                 tensor.copy_(input_tensors[0])
         return self._work(output_tensors[0])
 
@@ -487,7 +498,7 @@ class FakeProcessGroup(dist.BackendBase):
             raise _invalid_argument(
                 op, "requires input/output tensor lists to have the same length"
             )
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             for output, inputs in zip(output_tensors, input_tensors):
                 if len(inputs) != self.size():
                     raise _invalid_argument(
@@ -511,7 +522,7 @@ class FakeProcessGroup(dist.BackendBase):
         self, outputTensor, inputTensor, opts=_REDUCE_SCATTER_OPTS
     ):
         self._check_collective_error()
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             self._reduce_scatter_into(outputTensor, inputTensor, opts.reduceOp)
         return self._work([outputTensor])
 
@@ -524,7 +535,7 @@ class FakeProcessGroup(dist.BackendBase):
                 "reduce_scatter_tensor_coalesced",
                 "requires input/output tensor lists to have the same length",
             )
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             for output, input in zip(outputs, inputs):
                 self._reduce_scatter_into(output, input, opts.reduceOp)
         return self._work(outputs)
@@ -549,7 +560,7 @@ class FakeProcessGroup(dist.BackendBase):
             memory_format=suggest_memory_format(output_tensor)
         ):
             raise RuntimeError("Output tensor must be contiguous")
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             flat_input = _flat_view(input_tensor)
             flat_output = _flat_view(output_tensor)
             if self._uniform_ranks():
@@ -597,7 +608,7 @@ class FakeProcessGroup(dist.BackendBase):
                 f"output tensor list size {len(output_tensor)} does not match "
                 f"world size {size}",
             )
-        with torch._C._AutoDispatchBelowAutograd():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             if not self._uniform_ranks():
                 for output, input in zip(output_tensor, input_tensor):
                     output.copy_(input)
