@@ -1782,27 +1782,30 @@ class TestTemplateRender(TestCase):
         )
         self.addCleanup(TritonTemplate.all_templates.pop, scale_template.name, None)
 
-        def make_lowering(symbolic):
-            def scaled_lowering(a):
-                layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
-                n = a.get_size()[0]
-                one = sympy.Float(1.0)
-                scale = FloatTrueDiv(one, OpaqueUnaryFn_sqrt(ToFloat(n)))
-                choices = []
-                for xblock in (64, 128):
-                    scale_template.maybe_append_choice(
-                        choices,
-                        input_nodes=(a,),
-                        layout=layout,
-                        num_stages=1,
-                        num_warps=1,
-                        XBLOCK=xblock,
-                        SCALE=RuntimeFloat(scale if symbolic else 0.5),
-                    )
-                return autotune_select_algorithm("scaled", choices, [a], layout)[0]
+        def scaled(a, n, symbolic=True):
+            # Template computing a / sqrt(n); n may be a size that `a` does not carry.
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            scale = FloatTrueDiv(sympy.Float(1.0), OpaqueUnaryFn_sqrt(ToFloat(n)))
+            choices = []
+            for xblock in (64, 128):
+                scale_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(a,),
+                    layout=layout,
+                    num_stages=1,
+                    num_warps=1,
+                    XBLOCK=xblock,
+                    SCALE=RuntimeFloat(scale if symbolic else 0.5),
+                )
+            return autotune_select_algorithm("scaled", choices, [a], layout)[0]
 
-            promotion = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-            return {aten.neg.default: (scaled_lowering, False, promotion, False)}
+        promotion = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
+        def make_lowering(symbolic):
+            def lowering(a):
+                return scaled(a, a.get_size()[0], symbolic)
+
+            return {aten.neg.default: (lowering, False, promotion, False)}
 
         def fn(a):
             return torch.neg(a) + 1
@@ -1832,6 +1835,30 @@ class TestTemplateRender(TestCase):
                     r"double pf\d+ = " if patches.get("cpp_wrapper") else r"pf\d+ = "
                 )
                 FileCheck().check_regex(host_decl).run(code)
+
+        # Graph partitions receive the symbols of a scale that no template input
+        # carries, here the length of the CPU tensor y.
+        @torch.library.custom_op("test_runtime_float::scale_by_len", mutates_args=())
+        def scale_by_len(a: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return a / math.sqrt(y.shape[0])
+
+        scale_by_len.register_fake(lambda a, y: torch.empty_like(a))
+        op = torch.ops.test_runtime_float.scale_by_len.default
+
+        def partition_lowering(a, y):
+            return scaled(a, y.get_size()[0])
+
+        torch._dynamo.reset()
+        partitioning = {"graph_partition": True, "triton.cudagraphs": True}
+        with (
+            config.patch(partitioning),
+            patch_lowering({op: (partition_lowering, False, promotion, False)}),
+        ):
+            compiled = torch.compile(scale_by_len, fullgraph=True, dynamic=True)
+            for n, m in ((100, 7), (300, 13)):
+                a = torch.randn(n, device=GPU_TYPE)
+                y = torch.randn(m)
+                self.assertEqual(compiled(a, y), a / math.sqrt(m))
 
         # A numeric RuntimeFloat stays a constexpr with no host-computed arg.
         torch._dynamo.reset()

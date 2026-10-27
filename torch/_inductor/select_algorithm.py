@@ -578,9 +578,9 @@ class RuntimeFloat:
     A template kwarg whose symbolic value is computed on the host instead of
     being baked in, so it does not specialize the kernel. Triton templates
     receive it as a scalar kernel arg, cast to an fp32 local instead of a
-    tl.constexpr; CuteDSL templates render it as a host-side Python float. A
-    numeric value is baked in as a plain constant, as before. The template
-    buffer counts the value's size symbols as uses, e.g. for graph partitions.
+    tl.constexpr. A numeric value is baked in as a plain constant, as before.
+    The template buffer counts the value's size symbols as uses, e.g. for graph
+    partitions.
     """
 
     value: sympy.Expr | float
@@ -3793,8 +3793,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             store_output_fusion_allowed_inputs=(
                 self.store_output_fusion_allowed_inputs
             ),
+            runtime_float_values=self.runtime_float_values,
         )
-        buffer.runtime_float_values = self.runtime_float_values
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]

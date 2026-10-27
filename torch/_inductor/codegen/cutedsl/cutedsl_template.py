@@ -6,8 +6,6 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
-import sympy
-
 from torch._inductor.utils import Placeholder, unique
 from torch._inductor.virtualized import V
 
@@ -209,13 +207,6 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
-        from torch._inductor.select_algorithm import RuntimeFloat
-
-        self.runtime_float_values = [
-            sympy.sympify(v.value)
-            for v in (template_kwargs or {}).values()
-            if isinstance(v, RuntimeFloat)
-        ]
 
     def _build_description(
         self, name: str, template_kwargs: dict[str, Any] | None
@@ -241,7 +232,6 @@ class CuteDSLTemplateCaller(ChoiceCaller):
             template=self.template,
             mutated_inputs=self.mutated_inputs,
         )
-        buffer.runtime_float_values = self.runtime_float_values
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
