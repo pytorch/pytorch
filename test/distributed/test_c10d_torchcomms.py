@@ -1003,12 +1003,12 @@ class TestC10dGroupNameHashSalt(TestCase):
         super().setUp()
         self._saved_group_count = c10d._world.group_count
         self._saved_pg_names = dict(c10d._world.pg_names)
-        self._saved_hashed_group_counts = dict(c10d._world.hashed_group_counts)
+        self._saved_hashed_group_counts = dict(c10d._world._hashed_group_counts)
 
     def tearDown(self):
         c10d._world.group_count = self._saved_group_count
-        c10d._world.hashed_group_counts.clear()
-        c10d._world.hashed_group_counts.update(self._saved_hashed_group_counts)
+        c10d._world._hashed_group_counts.clear()
+        c10d._world._hashed_group_counts.update(self._saved_hashed_group_counts)
         c10d._world.pg_names.clear()
         c10d._world.pg_names.update(self._saved_pg_names)
         super().tearDown()
@@ -1045,14 +1045,14 @@ class TestC10dGroupNameHashSalt(TestCase):
         ranks = [0, 1, 2, 3]
         # Rank that was a member of earlier subgroups: more pg_names.
         c10d._world.group_count = 3
-        c10d._world.hashed_group_counts.clear()
+        c10d._world._hashed_group_counts.clear()
         c10d._world.pg_names.clear()
         self._register_dummy_pgs(2)
         name_member = c10d._process_group_name(ranks, use_hashed_name=True)
         # Rank that was a non-member: fewer pg_names, but same group_count because
         # every rank advances it in lockstep regardless of membership.
         c10d._world.group_count = 3
-        c10d._world.hashed_group_counts.clear()
+        c10d._world._hashed_group_counts.clear()
         c10d._world.pg_names.clear()
         name_non_member = c10d._process_group_name(ranks, use_hashed_name=True)
         self.assertEqual(name_member, name_non_member)

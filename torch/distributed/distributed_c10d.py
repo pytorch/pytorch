@@ -1469,11 +1469,6 @@ class _World:
         _group_count = value
 
     @property
-    def hashed_group_counts(self) -> dict[tuple[int, ...], int]:
-        """Number of hashed-name groups created so far for each list of ranks."""
-        return self._hashed_group_counts
-
-    @property
     def tags_to_pg(self) -> dict[str, list[ProcessGroup]]:
         global _tags_to_pg
         return _tags_to_pg
@@ -3322,7 +3317,7 @@ def destroy_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
-        _world.hashed_group_counts.clear()
+        _world._hashed_group_counts.clear()
     else:
         if _TORCHCOMM_AVAILABLE:
             # A single comm may be shared across multiple device types (e.g. a
@@ -3445,7 +3440,7 @@ def _abort_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
-        _world.hashed_group_counts.clear()
+        _world._hashed_group_counts.clear()
     else:
         pg.abort()
         del _world.pg_map[pg]
@@ -6910,7 +6905,7 @@ def _hash_ranks_to_str(ranks: Sequence[int]) -> str:
     # (non-member ranks register fewer PGs). _world.group_count only advances on
     # calls every rank makes, and every hashed-name group over `ranks` is created
     # by all of `ranks`, so the per-ranks count also agrees among its members.
-    ranks_count = _world.hashed_group_counts.get(tuple(ranks), 0)
+    ranks_count = _world._hashed_group_counts.get(tuple(ranks), 0)
     unique_str = "_".join([rank_join, str(_world.group_count), str(ranks_count)])
     return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
@@ -6939,7 +6934,7 @@ def _process_group_name(ranks: Sequence[int], use_hashed_name: bool) -> GroupNam
         # new_group(use_local_synchronization=True)), so they must not advance
         # group_count, which names the groups that every rank creates.
         key = tuple(ranks)
-        _world.hashed_group_counts[key] = _world.hashed_group_counts.get(key, 0) + 1
+        _world._hashed_group_counts[key] = _world._hashed_group_counts.get(key, 0) + 1
     else:
         pg_name = GroupName(str(_world.group_count))
         _world.group_count += 1
