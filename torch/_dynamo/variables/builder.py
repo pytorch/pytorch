@@ -928,10 +928,8 @@ def _is_dim_dynamic_from_source_dynamism(
 
 def _build_dict_items(
     value: dict[Any, Any],
-    build_key_value: Callable[
-        [int, object, object], tuple[VariableTracker, VariableTracker]
-    ],
-) -> dict[VariableTracker, VariableTracker]:
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+) -> dict[T, VariableTracker]:
     entries = [
         (position, *build_key_value(position, key, item))
         for position, key, item in enumerate_items_with_dict_position(value)
