@@ -482,10 +482,10 @@ def _pickle_frozen_triton_kernel(
 
 
 def _freeze_triton_kernel(
-    key: str, instances: list[CachingAutotuner], untuned: list[str] | None = None
-) -> bytes:
-    """The frozen record of a source. Appends its kernel name to ``untuned`` if it
-    was frozen with a config autotuning never picked."""
+    key: str, instances: list[CachingAutotuner]
+) -> tuple[bytes, bool]:
+    """The frozen record of a source, and whether it was frozen with a config
+    autotuning never picked."""
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
     rejected: list[dict[str, object]] = []
@@ -503,16 +503,17 @@ def _freeze_triton_kernel(
             saved, saved_result = _detached_for_freeze(kernel, result)
         payload = _pickle_frozen_triton_kernel(key, kernel, saved, saved_result)
         if isinstance(payload, bytes):
-            return payload
+            return payload, False
         rejected.append(payload)
     # A training capture lowers each backward with its forward, so it can compile
     # a backward that no captured call ran, e.g. one whose outputs were unused.
     # Such a kernel never autotuned down to one config. Every config computes the
     # same values up to floating-point reduction order, so freeze one rather than
-    # leave the artifact unable to serve that kernel without compiling.
+    # leave the artifact unable to serve that kernel without compiling. A forward
+    # no call ran means the capture missed a path, so it is still refused.
     if rejected and all(e["reason"] == "launcher_count_not_one" for e in rejected):
         for kernel in ordered:
-            if kernel._cached_launcher is not None:
+            if kernel._cached_launcher is not None or not kernel.is_backward:
                 continue
             with kernel.lock:
                 static = [
@@ -540,9 +541,7 @@ def _freeze_triton_kernel(
                 }
             payload = _pickle_frozen_triton_kernel(key, kernel, saved, saved_result)
             if isinstance(payload, bytes):
-                if untuned is not None:
-                    untuned.append(kernel.inductor_meta.get("kernel_name", key))
-                return payload
+                return payload, True
             rejected.append(payload)
     kernel_name = instances[0].inductor_meta.get("kernel_name")
     raise _UnresolvedTritonExport(
@@ -704,9 +703,12 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
     untuned: list[str] = []
     for key, instances in kernels.items():
         try:
-            static_kernels[key] = _freeze_triton_kernel(key, instances, untuned)
+            static_kernels[key], frozen_untuned = _freeze_triton_kernel(key, instances)
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
+            continue
+        if frozen_untuned:
+            untuned.append(instances[0].inductor_meta.get("kernel_name", key))
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
         trace_structured(
