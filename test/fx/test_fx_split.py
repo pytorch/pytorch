@@ -119,7 +119,7 @@ class TestFXSplit(TestCase):
                 self.assertEqual(node.meta["name"], node.name)
 
     def test_dataclass_as_graph_entry(self):
-        """
+        r"""
         Test that splitting works when the graph entry is a dataclass instance
         and a wrapped function is called with it, resulting in a call_function
         node with no input dependencies. This tests the edge case fixed in D81232435
@@ -133,7 +133,7 @@ class TestFXSplit(TestCase):
               wrapped_add
                   |
               z (output)
-        """  # noqa: W605
+        """
 
         class TestModuleWithFunctionEntry(torch.nn.Module):
             def forward(self, y):
