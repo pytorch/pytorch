@@ -2594,9 +2594,6 @@ class VariableBuilder:
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
                 if not isinstance(dict_vt, ConstDictVariable):
                     raise AssertionError(f"Expected a dict, got {dict_vt}")
-                # Same key guards as ConstDictVariable.dict_keys installs.
-                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
-                self.tx.output.guard_on_key_order.add(dict_source)
                 return DictKeysVariable(
                     dict_vt, source=self.source, is_ordered=type(value) is odict_keys
                 )
