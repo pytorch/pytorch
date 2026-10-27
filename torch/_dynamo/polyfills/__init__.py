@@ -518,7 +518,16 @@ def odict_update(
             for key in keys():
                 self[key] = data[key]
             data = ()
-    for key, value in data:
+    for pair in data:
+        # mutablemapping_add_pairs checks each PySequence_Fast result's size.
+        pair = tuple(pair)
+        if len(pair) < 2:
+            raise ValueError(
+                f"need more than {len(pair)} value{'s' if not pair else ''} to unpack"
+            )
+        if len(pair) > 2:
+            raise ValueError("too many values to unpack (expected 2)")
+        key, value = pair
         self[key] = value
     for key, value in kwargs.items():
         self[key] = value
