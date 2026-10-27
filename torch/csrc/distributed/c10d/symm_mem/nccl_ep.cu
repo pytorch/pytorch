@@ -156,13 +156,17 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     const at::Tensor& topk_idx,
     const std::optional<at::Tensor>& recv_expert_counter,
     NcclEpLayout layout) {
+    TORCH_CHECK_TYPE(
+        topk_idx.scalar_type() == at::kInt || topk_idx.scalar_type() == at::kLong,
+        "topk_idx must have dtype int32 or int64, got ",
+        topk_idx.scalar_type());
     auto stream = at::cuda::getCurrentCUDAStream();
     auto ep_group = reinterpret_cast<ncclEpGroup_t>(group->group);
 
     auto recv_total_counter = at::empty(
         {1}, topk_idx.options().dtype(at::kInt));
 
-    EpTensor topk(topk_idx);
+    EpTensor topk(topk_idx.to(at::kLong));
     EpTensor total(recv_total_counter);
 
     ncclEpLayoutInfo_t layout_info = NCCL_EP_LAYOUT_INFO_INIT;
@@ -187,7 +191,7 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
         ep_handle,
         layout,
         group->group_name,
-        topk_idx,
+        std::move(topk.t),
         std::move(recv_total_counter));
 }
 
