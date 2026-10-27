@@ -7831,8 +7831,8 @@ class TestPrecompileRuntimeCache(TestCase):
             "source", [never_run], require_tuned_backward=False
         )
         self.assertIsNotNone(report)
-        # A later capture in this process runs the kernel loaded from that record,
-        # whose one static launcher looks tuned.
+        # A later capture runs the kernel loaded from that record, whose one static
+        # launcher looks tuned.
         loaded = _static_runtime_kernel(32)
         loaded.inductor_meta = pickle.loads(payload).kernel.inductor_meta
         loaded.is_backward, loaded._forward_use = True, False
@@ -7841,7 +7841,7 @@ class TestPrecompileRuntimeCache(TestCase):
         source = failure.exception.sources[0]
         self.assertEqual([r["reason"] for r in source["instances"]], ["frozen_untuned"])
         self.assertTrue(source["untuned_backward_eligible"])
-        self.assertIn("capture in a fresh process", str(failure.exception))
+        self.assertIn("without loading that artifact", str(failure.exception))
         # A fresh instance of the same source that never ran is not frozen instead.
         fresh = _never_run(_static_runtime_kernel(64))
         fresh.inductor_meta["coordinate_descent_tuning"] = True
