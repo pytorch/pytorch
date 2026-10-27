@@ -156,6 +156,12 @@ class TestFakePG(TestCase):
             pg = dynamo_distributed._COMPILE_SYNC_PG
             self.assertIsNotNone(pg)
             self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+            # Once the group exists, later syncs do not look at the backends again.
+            with unittest.mock.patch.object(
+                dynamo_distributed, "_compile_sync_backend"
+            ) as backend:
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            backend.assert_not_called()
 
     def test_compile_sync_decisions_stay_local(self):
         # Over a fake world, the compile time syncs return this rank's own
