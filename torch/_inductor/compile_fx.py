@@ -1865,6 +1865,8 @@ class _InProcessFxCompile(FxCompile):
                                 output_strides.append(None)
 
                     _check_triton_bf16_support(graph)
+                    if graph.aot_mode and config.aot_inductor.cudagraphs:
+                        _check_aot_cudagraphs(gm, graph)
 
                     # TODO: The switching between AOT mode and not here is a bit
                     # messy, but it's localized to the block of code below so I'm
@@ -3633,6 +3635,43 @@ def handle_dynamo_export_graph(
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
     return wrapper
+
+
+def _check_aot_cudagraphs(gm: GraphModule, graph: GraphLowering) -> None:
+    """Fails the compile unless the whole graph can be captured into a CUDA
+    graph, as aot_inductor.cudagraphs requires. Runs after lowering, before
+    codegen."""
+
+    def found_at(msg: str, node: torch.fx.Node) -> str:
+        for n in (node, *node.users):
+            if stack_trace := n.meta.get("stack_trace"):
+                return f"{msg}. Found from:\n{stack_trace}"
+        return msg
+
+    devices = [d for d in graph.device_node_mapping if d.type != "meta"]
+    cpu_node = graph.device_node_mapping.get(torch.device("cpu"))
+    mutated = [name for name in graph.graph_inputs if name in graph.mutated_buffers]
+    kernel_names = [getattr(op, "python_kernel_name", None) for op in graph.operations]
+    reason = None
+    if "cuda" not in graph.device_types:
+        reason = "it doesn't run on CUDA"
+    elif graph.disable_cudagraphs_reason:
+        reason = graph.disable_cudagraphs_reason
+    elif node := get_first_incompatible_cudagraph_node(gm):
+        reason = found_at(f"incompatible op {node.target}", node)
+    elif cpu_node is not None:
+        reason = found_at(f"it runs {cpu_node.name} on the CPU", cpu_node)
+    elif len(devices) > 1:
+        reason = f"it uses multiple devices: {', '.join(map(str, devices))}"
+    elif mutated:
+        reason = f"it mutates inputs {', '.join(mutated)}"
+    elif "torch.ops.streams.synchronize_event.default" in kernel_names:
+        reason = "it waits on the host for a CUDA event (Event.synchronize)"
+    if reason:
+        raise RuntimeError(
+            "aot_inductor.cudagraphs=True, but the model can't be captured "
+            f"into a CUDA graph: {reason}"
+        )
 
 
 def _check_triton_bf16_support(graph: GraphLowering) -> None:
