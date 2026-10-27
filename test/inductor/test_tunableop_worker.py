@@ -156,6 +156,45 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(first.close_calls, 1)
         self.assertEqual(first.process.wait.call_count, 1)
 
+    def test_a_crashed_but_live_child_is_still_killed(self):
+        # The child can close its pipes and then wedge in device teardown. The
+        # parent sees EOF, so running is already False and TuningProcess.kill()
+        # skips the signal -- orphaning a process that still holds the GPU.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+        ):
+            with tunableop._worker_lock:
+                worker = tunableop._get_worker_locked((0, "t.csv"))
+            worker.raises = EOFError()
+            worker.running = False
+            worker.process = mock.Mock()
+            worker.process.poll.return_value = None  # closed its pipes, still up
+            outcome = tunableop.submit(job)
+        self.assertEqual(outcome.status, "crash")
+        self.assertEqual(worker.process.kill.call_count, 1)
+
+    def test_worker_device_comes_from_the_job_not_the_process(self):
+        # Inductor does not set the CUDA current device while lowering, so a
+        # graph on cuda:1 can be autotuned with current_device() == 0. Keying on
+        # 0 would tune GPU 1 while writing the file GPU 0's runtime reads.
+        bmreq = mock.Mock()
+        bmreq.output_tensor_meta = mock.Mock(device=torch.device("cuda", 1))
+        bmreq.input_tensor_meta = []
+        tunable = mock.Mock()
+        tunable.get_filename.return_value = ""
+        job = tunableop.BenchmarkJob(bmreq, tuning=False)
+        env = {k: v for k, v in os.environ.items() if k != "PYTORCH_TUNABLEOP_FILENAME"}
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            tunableop.submit(job)
+        self.assertEqual(job.device, 1)
+        self.assertEqual(job.filename, "tunableop_results1.csv")
+
     def test_worker_is_reused_when_device_and_file_are_unchanged(self):
         self._submit(device=2, filename="a.csv")
         self._submit(device=2, filename="a.csv")
