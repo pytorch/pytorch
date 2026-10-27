@@ -16,7 +16,8 @@ inline T unpackIntegral(PyObject* obj, const char* type) {
   if (PyFloat_Check(obj)) {
     return c10::checked_convert<T>(THPUtils_unpackDouble(obj), type);
   }
-  return c10::checked_convert<T>(THPUtils_unpackLong(obj), type);
+  // Still range checked; unsigned targets retain their historical signed wrap.
+  return c10::unsafe_wrapping_convert<T>(THPUtils_unpackLong(obj), type);
 }
 
 inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
