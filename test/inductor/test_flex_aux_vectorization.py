@@ -335,7 +335,9 @@ class TestFlexAuxVectorization(InductorTestCase):
                 torch.cuda, "get_device_capability", return_value=(cuda_major, 0)
             ),
         ):
-            configs = flex_flash_attention_module.get_flex_flash_fwd_configs(True, False)
+            configs = flex_flash_attention_module.get_flex_flash_fwd_configs(
+                True, False
+            )
             self.assertEqual(
                 tuple(config.score_mod_vec_size for config in configs),
                 (1, 2, 4, 8, 16, 32, 64, 128) if cuda_major in (10, 11) else (1, 2),
