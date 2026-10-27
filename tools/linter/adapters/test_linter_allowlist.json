@@ -693,7 +693,6 @@
   "test/profiler/test_python_tracer.py",
   "test/profiler/test_record_function.py",
   "test/profiler/test_torch_tidy.py",
-  "test/profiler/test_trace_validator.py",
   "test/profiler/test_xpu_profiler.py",
   "test/profiler/test_xpu_scope_profiler.py",
   "test/python_native/test_aot_manifest.py",
