@@ -7925,6 +7925,54 @@ class TestPrecompileRuntimeCache(TestCase):
                 [c.kwargs["metadata_fn"]().get("name") for c in trace.call_args_list],
             )
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_untuned_triton_kernels_are_reported_once_written(self):
+        from torch.compiler import _runtime_cache
+
+        unlaunched = _never_run(_static_runtime_kernel(32))
+        unlaunched.launchers.append(_static_runtime_kernel(16).launchers[0])
+
+        def freeze(write):
+            with _runtime_cache.capture_scope():
+                _runtime_cache._capture.triton_kernels["untuned"] = [unlaunched]
+                _runtime_cache.freeze_runtime_cache(
+                    lambda: None, write, require_tuned_backward=False
+                )
+
+        def traced(trace):
+            calls = trace.call_args_list
+            return [c.kwargs.get("metadata_fn", dict)().get("name") for c in calls]
+
+        def failed_write(artifact):
+            raise OSError("write failed")
+
+        # A capture that fails in the write, or before it in _freeze_cpp_kernels,
+        # reports nothing as frozen untuned.
+        with (
+            mock.patch("torch._logging.trace_structured") as trace,
+            self.assertNoLogs("torch.compiler._runtime_cache", "WARNING"),
+        ):
+            with self.assertRaisesRegex(OSError, "write failed"):
+                freeze(failed_write)
+            with (
+                mock.patch.object(
+                    _runtime_cache,
+                    "_freeze_cpp_kernels",
+                    side_effect=RuntimeError("missing.so"),
+                ),
+                self.assertRaisesRegex(RuntimeError, "missing.so"),
+            ):
+                freeze(lambda artifact: None)
+        self.assertNotIn("precompile_triton_untuned_kernels", traced(trace))
+        written = []
+        with (
+            mock.patch("torch._logging.trace_structured") as trace,
+            self.assertLogs("torch.compiler._runtime_cache", "WARNING"),
+        ):
+            freeze(written.append)
+        self.assertEqual(len(written), 1)
+        self.assertIn("precompile_triton_untuned_kernels", traced(trace))
+
     def test_static_records_follow_cache_reset(self):
         import hashlib
 

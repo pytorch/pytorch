@@ -2126,6 +2126,64 @@ class TestFX(JitTestCase):
         [tensor] = made
         self.assertNotIsInstance(tensor, FakeTensor)
 
+    def test_lazy_import_keeps_the_default_device(self):
+        from torch.overrides import _get_current_function_mode_stack, TorchFunctionMode
+
+        unresolved = object()
+
+        class Mode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        def m_forward(self, x):
+            return x + 1
+
+        for new_device in (None, "cpu"):
+            seen = []
+
+            class Globals(dict):
+                def __getitem__(self, name):
+                    value = dict.__getitem__(self, name)
+                    if value is unresolved:
+                        # A module body that builds a tensor, then sets the
+                        # default device.
+                        modes = _get_current_function_mode_stack()
+                        seen.append((torch.ones(1).device, modes))
+                        torch.set_default_device(new_device)
+                        value = object()
+                        dict.__setitem__(self, name, value)
+                    return value
+
+            class M(torch.nn.Module):
+                forward = types.FunctionType(
+                    m_forward.__code__,
+                    Globals(__builtins__=builtins, helper=unresolved),
+                    "forward",
+                )
+
+            with self.subTest(new_device=new_device):
+                torch.set_default_device("meta")
+                try:
+                    with (
+                        unittest.mock.patch.object(
+                            importlib,
+                            "is_lazy_import",
+                            lambda d, name: dict.__getitem__(d, name) is unresolved,
+                            create=True,
+                        ),
+                        Mode() as mode,
+                    ):
+                        torch.fx.Tracer().trace(M())
+                        [(device, modes)] = seen
+                        self.assertEqual(device, torch.device("meta"))
+                        self.assertNotIn(mode, modes)
+                        stack = _get_current_function_mode_stack()
+                        self.assertIs(stack[-1], mode)
+                        self.assertEqual(len(stack), 1 if new_device is None else 2)
+                        self.assertEqual(torch.empty(1).device, torch.get_default_device())
+                finally:
+                    torch.set_default_device(None)
+
     def test_lazy_import_can_run_a_compiled_function(self):
         compiled = torch.compile(lambda t: t + 1, backend="eager")
 
@@ -2177,6 +2235,9 @@ class TestFX(JitTestCase):
                 )
 
     def test_autowrap_under_a_lazy_import_runtime(self):
+        # The only test of a real lazy import runtime; the others fake one through
+        # importlib.is_lazy_import. It is skipped on stock CPython, so it checks
+        # that frame_dict.items() resolves lazy values only where it runs.
         # -L alone is not enough: torch imports under lazy imports only on a runtime
         # set up for them (e.g. a Cinder target with lazy imports enabled), which
         # also runs this process with them on.
