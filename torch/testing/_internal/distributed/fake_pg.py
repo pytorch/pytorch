@@ -5,7 +5,6 @@ import copy
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
-    _FakeProcessGroupOptions,
     AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
@@ -143,7 +142,21 @@ class FakeProcessGroup(dist.BackendBase):
     outside the contract, as does PRODUCT for sparse all-reduce.
     """
 
-    Options = _FakeProcessGroupOptions
+    class Options(dist.BackendBase.Options):
+        """
+        Options for FakeProcessGroup.
+
+        ``fake_option`` is an arbitrary value for tests of options propagation.
+        ``error_on_collective`` makes every collective raise.
+        ``simulate_uniform_ranks``: see NOTE [FakeProcessGroup uniform-rank
+        simulation].
+        """
+
+        def __init__(self) -> None:
+            super().__init__("fake")
+            self.fake_option = 0
+            self.error_on_collective = False
+            self.simulate_uniform_ranks = False
 
     def __init__(self, rank: int, world_size: int, options=None, _token=None) -> None:
         if _token is not _CREATE_TOKEN:
