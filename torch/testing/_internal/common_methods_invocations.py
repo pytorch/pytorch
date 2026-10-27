@@ -23172,7 +23172,6 @@ if "cutedsl" in dsl_ops_by_dsl:
                 DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
             ],
             skips=(
-                DecorateInfo(unittest.skip("generic samples may violate matrix-size constraints"), "TestCommon", "test_noncontiguous_samples"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
             ),
@@ -23198,9 +23197,6 @@ if "cutedsl" in dsl_ops_by_dsl:
                 DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
             ],
             skips=(
-                DecorateInfo(
-                    unittest.skip("generic samples may violate matrix-size constraints"), "TestCommon", "test_noncontiguous_samples"
-                ),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
             ),
