@@ -79,9 +79,8 @@ def _compile_sync_backend() -> str | None:
     no store for gloo to rendezvous through."""
     if _is_fake_world():
         return dist.Backend.FAKE
-    config = dist.BackendConfig(dist.get_backend_config())
-    mpi = dist.Backend.MPI in config.get_device_backend_map().values()
-    if dist.is_gloo_available() and not mpi:
+    # Only a plain "mpi" default group is built without a store; "cpu:mpi,..." has one.
+    if dist.is_gloo_available() and dist.get_backend() != dist.Backend.MPI:
         return dist.Backend.GLOO
     return None
 
