@@ -339,7 +339,12 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         def extract_input(node: torch.fx.Node) -> torch.Tensor | None:
             if "val" in node.meta:
                 fake = node.meta["val"]
-                if (constant := maybe_get_fake_constant(fake)) is not None:
+                # SymInt, SymFloat and SymBool have a constant property too
+                if is_fake_tensor(fake):
+                    constant = maybe_get_fake_constant(fake)
+                else:
+                    constant = getattr(fake, "constant", None)
+                if constant is not None:
                     return constant
                 return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
