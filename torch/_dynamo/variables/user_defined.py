@@ -3230,12 +3230,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and name not in self._slotdefs
                 and not trace_rules.is_polyfilled_callable(method)
             ):
-                # An alias such as `copy = dict.copy` keeps its defining descriptor.
-                # Slots and registered polyfills retain their dispatch below.
+                # Inherited C methods, including aliases such as `copy = dict.copy`,
+                # dispatch through their defining descriptor, not the receiver type.
                 return variables.MethodDescriptorVariable(
                     method, owner=VariableTracker.build(tx, method.__objclass__)
                 ).call_function(tx, [self, *args], kwargs)
 
+            # Slots, Torch methods and registered polyfills retain their specialized
+            # paths; Python overrides continue through UserMethodVariable below.
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
