@@ -4715,6 +4715,8 @@ class TestAsArray(_TestAsArrayBase):
         self.assertEqual(result, original)
         self.assertEqual(result.data_ptr(), original.data_ptr())
         self.assertEqual(torch.asarray(_DLPackBuffer(original), dtype=torch.float64), original.double())
+        with self.assertRaisesRegex(ValueError, "can't alias tensor with dtype"):
+            torch.asarray(_DLPackBuffer(original), dtype=torch.float64, copy=False)
 
     @onlyCUDA
     def test_asarray_prefers_dlpack_over_cuda_array_interface(self, device):
