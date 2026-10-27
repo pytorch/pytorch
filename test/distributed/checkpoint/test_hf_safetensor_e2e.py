@@ -13,7 +13,9 @@ from torch.distributed.checkpoint.quantized_hf_storage import (
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -46,6 +48,8 @@ class MyTestModule(torch.nn.Module):
 
 @instantiate_parametrized_tests
 class TestSingleRankSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_save(self) -> None:
         try:
@@ -492,10 +496,12 @@ class TestCompressedTensorsMXFP4ShardedLoad(DTensorTestBase):
 
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_consolidate_to_one_file(self) -> None:
+    def test_consolidate_to_one_file(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
@@ -567,18 +573,18 @@ for p1 in TWO_D_PLACEMENTS:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
 
 
-@instantiate_parametrized_tests
 class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = NUM_DEVICES
 
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_1d_to_1d_reshard_placement_change(self) -> None:
+    def test_1d_to_1d_reshard_placement_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
@@ -636,7 +642,7 @@ class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_2d_to_2d_reshard_placement_change(self) -> None:
+    def test_2d_to_2d_reshard_placement_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
@@ -692,12 +698,13 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = NUM_DEVICES
 
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_1d_to_2d_reshard_mesh_change(self) -> None:
+    def test_1d_to_2d_reshard_mesh_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
@@ -748,7 +755,7 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(4)
-    def test_2d_to_1d_reshard_mesh_change(self) -> None:
+    def test_2d_to_1d_reshard_mesh_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
@@ -800,7 +807,7 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_dtensor_checkpoint_resharding_with_empty_shard(self):
+    def test_dtensor_checkpoint_resharding_with_empty_shard(self, device):
         """
         Test dtensor checkpoint resharding with dtensor containing empty shards.
         """
@@ -828,6 +835,20 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
             state_dict=state_dict,
             storage_reader=dist_cp.HuggingFaceStorageReader(self.temp_dir),
         )
+
+
+instantiate_device_type_tests(
+    TestDistributedHFSafetensorsConsolidation,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorReshardPlacementChange, globals(), except_for=("cpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDTensorReshardMeshChange, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
