@@ -14973,6 +14973,8 @@ class TestNNDeviceType(NNTestCase):
         ratios. The fp64 reference below is computed in row blocks
         so the test never materializes the full logits matrix.
         """
+        if "mps" in device:
+            self.skipTest("MPS does not support fp64")
         if "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
         torch.manual_seed(0)
@@ -14980,7 +14982,9 @@ class TestNNDeviceType(NNTestCase):
         x = (torch.randn(N, F, device=device) / F**0.5).bfloat16()
         w = torch.randn(C, F, device=device).bfloat16()
         target = torch.randint(0, C, (N,), device=device)
-        options = nn.LinearCrossEntropyOptions(batch_chunk_size=32)
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=32, acc_dtype=torch.float32,
+        )
         out = nn.functional.linear_cross_entropy(x, w, target, options=options)
         self.assertEqual(out.dtype, torch.bfloat16)
         total = 0.0
