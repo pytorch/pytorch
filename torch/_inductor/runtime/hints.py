@@ -400,6 +400,8 @@ class InductorMeta(typing.TypedDict, total=False):
     precomputed_grids: typing.Any
     config_args: typing.Any
     use_fast_triton_launcher: bool
+    # Set on a kernel torch.compiler.precompile froze untuned
+    precompile_frozen_untuned: bool
 
 
 class HalideInputSpec(typing.NamedTuple):

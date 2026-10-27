@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
+import contextvars
 import functools
 import json
 import logging
@@ -17,7 +19,7 @@ from concurrent.futures import (
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -64,6 +66,23 @@ from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
+
+
+# Whether the compiled graph whose cached output code is loading is a backward:
+# loading it runs AsyncCompile.triton with no GraphLowering to say so.
+_loading_graph_is_backward: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_loading_graph_is_backward", default=False
+)
+
+
+@contextlib.contextmanager
+def loading_graph(is_backward: bool) -> Iterator[None]:
+    """Tag the Triton kernels cached output code creates while it loads."""
+    token = _loading_graph_is_backward.set(is_backward)
+    try:
+        yield
+    finally:
+        _loading_graph_is_backward.reset(token)
 
 
 if TYPE_CHECKING:
@@ -563,7 +582,9 @@ class AsyncCompile:
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
-        is_backward = getattr(V.graph, "is_backward", False)
+        is_backward = getattr(V.graph, "is_backward", None)
+        if is_backward is None:
+            is_backward = _loading_graph_is_backward.get()
 
         source_key = CompiledTritonKernels.key(source_code)
         if (kernel := load_triton_kernel(source_key)) is not None:
@@ -580,7 +601,20 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                future.static_autotuner.set_compile_info(compile_id, is_backward)
                 record_triton_kernel(source_key, future.static_autotuner)
+            elif not is_backward:
+                # A compile still pending for another graph applies only that
+                # graph's direction; record this one's forward use too.
+                pending = future
+
+                def forward_used() -> CachingAutotuner:
+                    kernel = cast("CachingAutotuner", pending.result())
+                    kernel._forward_use = True
+                    return kernel
+
+                underlying = getattr(pending, "future", None)
+                future = LambdaFuture(forward_used, future=underlying)
             if is_parallel:
                 return future
             else:
@@ -648,6 +682,9 @@ class AsyncCompile:
                 extra_config,
             )
 
+            # Every graph that shares this compile resolves the future, so set the
+            # kernel up once: again would clear what its use since recorded.
+            @functools.cache
             def get_result() -> CachingAutotuner:
                 try:
                     kernel, elapsed_us = task.result()
@@ -656,13 +693,13 @@ class AsyncCompile:
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
-                kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
                 # Only restore after unpickle in process mode
                 # Thread mode doesn't pickle, so kernel is already in correct state
                 if not self.should_use_thread_workers():
                     kernel.restore_after_unpickle(old_values=None)
+                kernel.set_compile_info(compile_id, is_backward)
 
                 kernel.precompile(
                     warm_cache_only=False,

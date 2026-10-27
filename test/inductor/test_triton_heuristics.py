@@ -1160,6 +1160,7 @@ class TestCachingAutotunerPlugin(TestCase):
             )
 
         self.assertIs(result, sentinel)
+        self.assertTrue(autotuner._launched)
         mock_precompile.assert_not_called()
         mock_autotune.assert_not_called()
 
@@ -1177,6 +1178,7 @@ class TestCachingAutotunerPlugin(TestCase):
             )
 
         self.assertIs(result, sentinel)
+        self.assertTrue(autotuner._launched)
         mock_autotune.assert_not_called()
 
     def test_hooks_fire_in_registration_order(self):
@@ -1819,6 +1821,172 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
+
+
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+class TestCachingAutotunerLaunched(TestCase):
+    """``_launched`` tells precompile whether a kernel ran, even when ``run()`` left
+    no fast-path launcher."""
+
+    def _run(self, autotuner):
+        return autotuner.run(
+            *TestCachingAutotunerPlugin._make_kernel_inputs(),
+            stream=TestCachingAutotunerPlugin._get_stream(),
+        )
+
+    def _make_autotuner(self):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        args["configs"] = args["configs"][:1]
+        return CachingAutotuner(**args)
+
+    def test_set_by_a_launch_without_the_fast_path(self):
+        autotuner = self._make_autotuner()
+        self.assertFalse(autotuner._launched)
+        with torch.autograd.profiler.profile():
+            self._run(autotuner)
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertTrue(autotuner._launched)
+
+    def test_set_by_a_bandwidth_profiling_launch(self):
+        from torch._inductor.runtime.triton_heuristics import DebugAutotuner
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        args["configs"] = args["configs"][:1]
+        # Launches through bench(), not CachingAutotuner.run().
+        autotuner = DebugAutotuner(**args, with_bandwidth_info=True)
+        self._run(autotuner)
+        self.assertTrue(autotuner._launched)
+
+    def test_not_set_by_a_failed_launch(self):
+        autotuner = self._make_autotuner()
+        with (
+            patch.object(autotuner, "_pre_launch", side_effect=RuntimeError("boom")),
+            self.assertRaisesRegex(RuntimeError, "boom"),
+        ):
+            self._run(autotuner)
+        self.assertFalse(autotuner._launched)
+
+    def test_survives_pickling_preparation(self):
+        autotuner = self._make_autotuner()
+        self._run(autotuner)
+        autotuner.set_compile_info(None, is_backward=False)
+
+        def state():
+            return autotuner._launched, autotuner._forward_use
+
+        old_values = autotuner.prepare_for_pickle()
+        # No compile in the process that loads the pickled copy has run or used it.
+        self.assertEqual(state(), (False, False))
+        autotuner.restore_after_unpickle(old_values)
+        self.assertEqual(state(), (True, True))
+        autotuner.prepare_for_pickle()
+        autotuner.restore_after_unpickle(None)
+        self.assertEqual(state(), (False, False))
+
+    def test_forward_use_survives_a_backward_compile(self):
+        autotuner = self._make_autotuner()
+        self.assertFalse(autotuner._forward_use)
+        autotuner.set_compile_info(None, is_backward=True)
+        self.assertFalse(autotuner._forward_use)
+        autotuner.set_compile_info(None, is_backward=False)
+        autotuner.set_compile_info(None, is_backward=True)
+        self.assertTrue(autotuner.is_backward)
+        self.assertTrue(autotuner._forward_use)
+
+    def test_forward_use_recorded_on_a_cache_hit(self):
+        from torch._inductor.async_compile import (
+            AsyncCompile,
+            CompiledTritonKernels,
+            loading_graph,
+        )
+        from torch._inductor.codecache import LambdaFuture, StaticAutotunerFuture
+
+        # A bundled kernel, and a compile still pending for a backward graph.
+        for make_future in (StaticAutotunerFuture, lambda k: LambdaFuture(lambda: k)):
+            autotuner = self._make_autotuner()
+            autotuner.set_compile_info(None, is_backward=True)
+            source = f"# a cached kernel {id(autotuner)}"
+            CompiledTritonKernels.save(source, make_future(autotuner))
+            self.addCleanup(CompiledTritonKernels.remove_future, source)
+            with (
+                loading_graph(False),
+                patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            ):
+                future = AsyncCompile().triton("triton_", source)
+            if isinstance(future, LambdaFuture):
+                self.assertIs(future.result(), autotuner)
+            self.assertTrue(autotuner._forward_use)
+
+    def test_forward_use_recorded_by_a_process_pool_compile(self):
+        from concurrent.futures import Future
+
+        from torch._inductor.async_compile import (
+            AsyncCompile,
+            CompiledTritonKernels,
+            loading_graph,
+        )
+
+        autotuner = self._make_autotuner()
+        # A process worker returns the kernel in its pickled state.
+        autotuner.prepare_for_pickle()
+        task = Future()
+        task.set_result((autotuner, 0))
+        pool = MagicMock()
+        pool.submit.return_value = task
+        source = f"# a kernel compiled in a process worker {id(autotuner)}"
+        self.addCleanup(CompiledTritonKernels.remove_future, source)
+        with (
+            loading_graph(False),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+            patch.object(AsyncCompile, "should_use_thread_workers", return_value=False),
+            patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+            patch.object(autotuner, "precompile"),
+        ):
+            self.assertIs(AsyncCompile().triton("triton_", source).result(), autotuner)
+        self.assertEqual((autotuner.is_backward, autotuner._forward_use), (False, True))
+
+    def test_forward_use_survives_resolving_a_shared_compile_twice(self):
+        from concurrent.futures import Future
+
+        from torch._inductor.async_compile import (
+            AsyncCompile,
+            CompiledTritonKernels,
+            loading_graph,
+        )
+
+        for forward_first in (True, False):
+            autotuner = self._make_autotuner()
+            autotuner.prepare_for_pickle()
+            task = Future()
+            task.set_result((autotuner, 0))
+            pool = MagicMock()
+            pool.submit.return_value = task
+            source = f"# a compile a backward and a forward share {id(autotuner)}"
+            self.addCleanup(CompiledTritonKernels.remove_future, source)
+            with (
+                patch.object(AsyncCompile, "use_process_pool", return_value=True),
+                patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+                patch.object(
+                    AsyncCompile, "should_use_thread_workers", return_value=False
+                ),
+                patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+                patch.object(autotuner, "precompile"),
+            ):
+                with loading_graph(True):
+                    backward = AsyncCompile().triton("triton_", source)
+                with loading_graph(False):
+                    forward = AsyncCompile().triton("triton_", source)
+                first, second = forward, backward
+                if not forward_first:
+                    first, second = second, first
+                self.assertIs(first.result(), autotuner)
+                autotuner._launched = True
+                self.assertIs(second.result(), autotuner)
+            flags = autotuner._forward_use, autotuner._launched
+            self.assertEqual(flags, (True, True))
 
 
 class TestFastLauncherDeviceSupport(TestCase):

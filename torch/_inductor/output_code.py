@@ -1035,6 +1035,7 @@ class CompiledFxGraph(OutputCode):
 
     def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
         from torch._dynamo.utils import dynamo_timed
+        from torch._inductor.async_compile import loading_graph
         from torch._inductor.codecache import PyCodeCache
 
         artifact_path = self.write_to_disk()
@@ -1048,9 +1049,12 @@ class CompiledFxGraph(OutputCode):
                     kernel_sources = {}
 
         try:
-            with dynamo_timed(
-                "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
+            with (
+                dynamo_timed(
+                    "PyCodeCache.load_by_key_path",
+                    log_pt2_compile_event=True,
+                ),
+                loading_graph(self.fx_kwargs["is_backward"]),
             ):
                 code_cache = PyCodeCache.load_by_key_path(
                     self.cache_key,

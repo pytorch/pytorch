@@ -419,6 +419,24 @@ class DynamoTracer:
     configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be serialized,
     are listed in the artifact rather than refused.
+
+    ``require_tuned_backward`` covers a backward Triton kernel the capture compiled
+    but no call ran, e.g. in a graph variant whose backward no captured step
+    reached, and that still needed autotuning: several configs, or coordinate
+    descent or combo tuning not done yet. (One with a single config and nothing
+    left to tune is frozen either way.) By default it is refused like any other
+    kernel that cannot be frozen. With ``require_tuned_backward=False`` it is
+    frozen with its first config that autotuning would not skip for spilling
+    registers (the first, if all spill), tuning off, and reported with a warning
+    and a ``precompile_triton_untuned_kernels`` artifact. Every serving process
+    then runs it with that config, without ``no_compilation()`` too, which can cost
+    performance. The opt-in still refuses such a kernel if its source also serves
+    a forward, if none of its instances has a launcher with a static compile
+    result to freeze, or if its cubin cannot be carried. The same holds,
+    whether or not a call ran it, for a backward kernel loaded in this process
+    from an artifact that froze it untuned: running it cannot tune it, so the
+    default refuses it (capture without loading that artifact first) and the
+    opt-in freezes and reports it untuned again.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -426,6 +444,7 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
+    require_tuned_backward: bool = True
 
 
 class PrecompiledRunnable:
@@ -707,9 +726,11 @@ class _DynamoCapture(Capture[_P, _R]):
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
+        require_tuned_backward: bool,
     ) -> None:
         super().__init__()
         self._session = session
+        self._require_tuned_backward = require_tuned_backward
         self._artifact_path = artifact_path
         self._cache_path = cache_path
         self._gates = {
@@ -806,7 +827,9 @@ class _DynamoCapture(Capture[_P, _R]):
                 ) from e
 
         try:
-            freeze_runtime_cache(snapshot, write)
+            freeze_runtime_cache(
+                snapshot, write, require_tuned_backward=self._require_tuned_backward
+            )
         except PrecompileError:
             raise
         except Exception as e:
@@ -3358,7 +3381,9 @@ def capture(
     picks, which is what ships and what the process keeps using afterwards, may
     differ from the one picked before the block. Compiled JIT kernel
     specializations and autotuning decisions the block does not produce again
-    are kept afterwards.
+    are kept afterwards. A :class:`DynamoTracer` capture with
+    ``require_tuned_backward=False`` can freeze an Inductor backward kernel no
+    call ran untuned; :class:`DynamoTracer` lists when.
     Triton does not cache the decision of an autotuner with ``pre_hook``
     configs, so one that does not prune its configs keeps its earlier decision
     in the block and is benchmarked again on first use in the serving process.
@@ -3468,6 +3493,7 @@ def capture(
         cache_path,
         require_complete=tracer.require_complete,
         require_no_risky_drops=tracer.require_no_risky_drops,
+        require_tuned_backward=tracer.require_tuned_backward,
     )
 
 
