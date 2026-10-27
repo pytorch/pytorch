@@ -3291,6 +3291,22 @@ class TestLinalg(TestCase):
             else:
                 torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=False), (b,))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_cholesky_solve_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196694:
+        # b has the shape of L.shape[:-1], and the JVP read it as a batch of vectors
+        def f(t):
+            L = t.new_tensor([[[2, 0], [0, 3]], [[3, 0], [1, 2]]]) + t * t.new_tensor([[[0, 0], [1, 0]], [[0, 0], [2, 0]]])
+            b = t.new_tensor([[1, 2], [-1, 3]])
+            w = t.new_tensor([[[1, 2], [3, 4]], [[2, -1], [4, 3]]])
+            return (torch.cholesky_solve(b, L, upper=False) * w).sum()
+
+        t = torch.tensor(-7.0, dtype=dtype, device=device)
+        _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
+        self.assertEqual(actual, torch.func.grad(f)(t))
+
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
@@ -4941,6 +4957,20 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_linalg_inv_large_batch(self, device, dtype):
+        # The batched hipBLAS and rocSOLVER kernels launch nothing above 65536
+        # matrices (https://github.com/pytorch/pytorch/issues/196745), so the
+        # batch must exceed that to exercise the 65535-element chunking. Distinct
+        # unitriangular matrices keep the results exact and expose a skipped chunk.
+        batch = 2 * 65535 + 1
+        a = torch.eye(3, device=device, dtype=dtype).repeat(batch, 1, 1)
+        a[:, 0, 1] = torch.linspace(-1, 1, batch, device=device, dtype=dtype)
+        b = torch.ones(batch, 3, 1, device=device, dtype=dtype)
+        self.assertEqual(torch.linalg.inv(a), torch.linalg.inv(a.cpu()))
+        self.assertEqual(torch.linalg.solve(a, b), torch.linalg.solve(a.cpu(), b.cpu()))
+
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -5174,6 +5204,22 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 2)
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
+
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_triangular_solve_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196707:
+        # with unitriangular=True the JVP used the tangent of the diagonal
+        def f(t):
+            a = t.new_tensor([[[2, 0], [0, 3]], [[1, 1], [0, 4]]]) + t * t.new_tensor([[[1, 1 / 4], [0, -1]], [[2, -1 / 3], [0, 1]]])
+            b = t.new_tensor([[[1, 2], [3, -1]], [[2, -2], [1, 4]]])
+            w = t.new_tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+            x = torch.triangular_solve(b, a, upper=True, transpose=False, unitriangular=True)[0]
+            return (x * w).sum()
+
+        t = torch.tensor(-10.0, dtype=dtype, device=device)
+        _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
+        self.assertEqual(actual, torch.func.grad(f)(t))
 
     def check_single_matmul(self, x, y):
 
