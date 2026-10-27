@@ -193,11 +193,31 @@ class TestOrigami(TestCase):
                 self.assertGreater(default_case["topk_calls"], 0)
 
             with self.subTest(op_name=op_name, search_space="EXHAUSTIVE"):
-                exhaustive_case = self._compile_with_config(
-                    op_name,
-                    self._origami_exhaustive_config(),
-                    size=256,
+                # Stub get_exhaustive_mm_configs to return a 2-config generator
+                # so the EXHAUSTIVE compile finishes in seconds. The assertion
+                # only checks that select_topk_configs is NOT called (origami
+                # is bypassed when search_space is EXHAUSTIVE).
+                from functools import partial
+
+                from torch._inductor.heuristics.template.triton import (
+                    ROCmConfigHeuristic,
                 )
+
+                _two_configs = ROCmConfigHeuristic().exhaustive_configs[:2]
+
+                def _stub_exhaustive(self):
+                    return partial(self.preprocess_mm_configs, configs=_two_configs)
+
+                with mock.patch.object(
+                    ROCmConfigHeuristic,
+                    "get_exhaustive_mm_configs",
+                    _stub_exhaustive,
+                ):
+                    exhaustive_case = self._compile_with_config(
+                        op_name,
+                        self._origami_exhaustive_config(),
+                        size=256,
+                    )
                 self.assertEqual(exhaustive_case["topk_calls"], 0)
 
     def test_origami_reduces_compile_work_vs_regular_max_autotune(self):
@@ -229,7 +249,7 @@ class TestOrigami(TestCase):
     def _benchmark_median(self, compiled, args):
         """Run BENCH_ROUNDS independent benchmarks and return the median.
 
-        A single benchmark() call on a shared machine can vary by ±5-8%.
+        A single benchmark() call on a shared machine can vary by +/-5-8%.
         Taking the median of several rounds suppresses transient noise.
         """
         samples = [
