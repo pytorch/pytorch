@@ -5470,11 +5470,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             )
         if tensor_spec is not None:
             _wire_tensor_spec_dims(tensor_spec, fake_e)
-        if (
-            source is not None
-            and is_fake_tensor(fake_e)
-            and (sym_val := maybe_get_item_memo(fake_e)) is not None
-        ):
+        if source is not None and (sym_val := maybe_get_item_memo(fake_e)) is not None:
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
             # this, the tracked fake source name won't match source_to_var and
