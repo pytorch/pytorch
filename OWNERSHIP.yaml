@@ -101,7 +101,7 @@ ownership:
       - /test/compiled_autograd_skips/
   - name: aotdispatch
     labels: ["module: aotdispatch"]
-    owners: [aorenste, bdhirsh, Chillee, ezyang]
+    owners: [aorenste, bdhirsh]
     section: compiler_autograd
     paths:
       - /test/functorch/test_aot_joint_with_descriptors.py
@@ -861,7 +861,7 @@ ownership:
       - /torch/package/
   - name: export
     labels: ["oncall: export"]
-    owners: [angelayi, avikchaudhuri, SherlockNoMad, tugsbayasgalan, ydwu4, zhxchen17]
+    owners: [angelayi, avikchaudhuri, tugsbayasgalan, ydwu4, zhxchen17]
     section: compiler_export_fx
     paths:
       - /test/export/
@@ -870,7 +870,7 @@ ownership:
       - /torch/_export/serde/schema.py: [SherlockNoMad, zhxchen17]
   - name: fx
     labels: ["module: fx"]
-    owners: [zou3519]
+    owners: []
     section: compiler_export_fx
     paths:
       - /test/fx/

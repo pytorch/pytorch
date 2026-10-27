@@ -75,6 +75,20 @@ FAILURE_GUIDANCE = {
         "In OWNERSHIP.yaml, add the reported handles to the entry's `owners`, or "
         "move the path to an entry whose owners include them."
     ),
+    "Unneeded reviewer exceptions": (
+        "Remove the reported entries from REVIEWERS_NOT_OWNERS in "
+        "scripts/codeowners/check_taxonomy.py; their handles are owners now or no "
+        "longer on the rule."
+    ),
+}
+
+# Active rules whose handles are notified without being owners of the rule's label
+# block. These predate the owner lines and are left as they are until the people
+# involved decide; every other rule's handles must be on its block's owner line.
+REVIEWERS_NOT_OWNERS = {
+    "test/functorch/test_aotdispatch.py": frozenset({"@chillee", "@ezyang"}),
+    "torch/_export/serde/schema.py": frozenset({"@sherlocknomad"}),
+    "torch/fx/proxy.py": frozenset({"@zou3519"}),
 }
 
 
@@ -274,7 +288,11 @@ def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
     return ParsedCodeowners(patterns, section_groups, label_blocks, owner_lines)
 
 
-def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
+def find_ownership_errors(
+    parsed: ParsedCodeowners,
+    *,
+    reviewers_not_owners: dict[str, frozenset[str]] = REVIEWERS_NOT_OWNERS,
+) -> dict[str, list[str]]:
     """Check that every label list appears once, with one owner list covering its reviewers.
 
     Label lists are compared as sets: the order of labels on a line carries no meaning.
@@ -311,16 +329,35 @@ def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
         if len(numbers) > 1
     ]
     missing_reviewers = []
+    used_exceptions = set()
+    rule_paths = {pattern.path for pattern in parsed.patterns}
     for pattern in parsed.patterns:
         if not pattern.labels or pattern.owners is None:
             continue
         owners = {owner.casefold() for owner in pattern.owners}
-        missing = [r for r in pattern.reviewers if r.casefold() not in owners]
+        allowed = reviewers_not_owners.get(pattern.path, frozenset())
+        missing = []
+        for reviewer in pattern.reviewers:
+            if reviewer.casefold() in owners:
+                continue
+            if reviewer.casefold() in allowed:
+                used_exceptions.add((pattern.path, reviewer.casefold()))
+            else:
+                missing.append(reviewer)
         if missing:
             missing_reviewers.append(
                 f"CODEOWNERS:{pattern.line_number} /{pattern.path}: "
                 f"{' '.join(missing)} not on the block's owner line"
             )
+    # An exception whose rule still exists but no longer needs it should go; one
+    # whose rule was removed is harmless.
+    unneeded_exceptions = [
+        f"/{path}: {handle}"
+        for path, handles in sorted(reviewers_not_owners.items())
+        if path in rule_paths
+        for handle in sorted(handles)
+        if (path, handle) not in used_exceptions
+    ]
     conflicting_lists = [
         f"{', '.join(sorted(labels))}: "
         + " | ".join(" ".join(owners) or "none" for owners in sorted(map(sorted, lists)))
@@ -334,6 +371,7 @@ def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
         "Label lists written more than once": repeated_label_lists,
         "Label lists with several owner lists": conflicting_lists,
         "Reviewers missing from owner lists": missing_reviewers,
+        "Unneeded reviewer exceptions": unneeded_exceptions,
     }
 
 

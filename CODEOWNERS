@@ -16,7 +16,8 @@
 #   meant to own every path in that label block. These lines are
 #   informational: nothing consumes them yet, and they don't change who is
 #   notified. "none" means no owning group is recorded yet. Everyone an active
-#   rule in the block notifies must also be on that owner line.
+#   rule in the block notifies must also be on that owner line, apart from the
+#   exceptions listed in scripts/codeowners/check_taxonomy.py.
 # - Sections are ordered from broad defaults to narrower overrides.
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
@@ -71,7 +72,7 @@
 # owner: none
 # /test/compiled_autograd_skips/
 # label: module: aotdispatch
-# owner: @aorenste @bdhirsh @Chillee @ezyang
+# owner: @aorenste @bdhirsh
 # /test/functorch/test_aot_joint_with_descriptors.py
 /test/functorch/test_aotdispatch.py @ezyang @Chillee
 # /test/functorch/test_codegen_backward_epilogue.py
@@ -1280,13 +1281,13 @@
 # /test/onnx/test_fx_type_promotion.py
 # /test/package/package_bc/test_fx_module.pt
 # label: oncall: export
-# owner: @angelayi @avikchaudhuri @SherlockNoMad @tugsbayasgalan @ydwu4 @zhxchen17
+# owner: @angelayi @avikchaudhuri @tugsbayasgalan @ydwu4 @zhxchen17
 # /test/export/
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 # label: module: fx
-# owner: @zou3519
+# owner: none
 # /test/fx/
 # /test/test_dynamic_spec_make_fx.py
 # /test/test_fx.py
