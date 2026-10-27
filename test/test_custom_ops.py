@@ -5587,6 +5587,52 @@ Please use `add.register_fake` to add an fake impl.""",
             numpy_sin_inplace(x)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_disable_a_kernel_registered_after_disable_dynamo(self):
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        def kernel(x):
+            return x + 1
+
+        # Caches kernel.__dynamo_disable, which register_kernel's wrapper must not
+        # copy, or calls would skip the disabled-kernel check.
+        torch._disable_dynamo(kernel)(torch.zeros(1))
+        f.register_kernel("cpu")(kernel)
+        x = torch.zeros(3)
+        self.assertEqual(f(x), x + 1)
+        with f.set_kernel_enabled("cpu", False):
+            self.assertEqual(f(x), x)
+
+    def test_register_kernel_errors_name_the_kernel_module(self):
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        def aliasing_kernel(x):
+            return x
+
+        # Not torch's module, so the message cannot come from the wrapper
+        # register_kernel installs.
+        aliasing_kernel.__module__ = "json"
+        f.register_kernel("cpu")(aliasing_kernel)
+        with self.assertRaisesRegex(
+            RuntimeError, "with implementation in <module 'json'"
+        ):
+            f(torch.randn(3))
+
+        # Through a partial, it is still the function's module.
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x.clone()
+
+        g.register_kernel("cpu")(partial(aliasing_kernel))
+        with self.assertRaisesRegex(
+            RuntimeError, "with implementation in <module 'json'"
+        ):
+            g(torch.randn(3))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
         @torch.library.custom_op(
             "_torch_testing::f", mutates_args={}, device_types="cpu"
