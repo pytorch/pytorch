@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import functools
-import os
 import sys
+import threading
 import warnings
 from collections.abc import Sequence
 from ctypes import byref, c_int
@@ -148,6 +148,11 @@ def is_localization_supported(device_id: int | None = None) -> bool:
     not poison subsequent forks. Splitting and context creation always use CUDA
     to validate the actual resources.
 
+    The NVML check does not support predicting a later attachment to an MPS
+    server. Do not reuse a pre-initialization result after such an attachment;
+    query again instead. An already attached MPS client has initialized CUDA,
+    so subsequent queries use the driver path and its actual device topology.
+
     Args:
         device_id (int, optional): Device index. Default: current PyTorch device
             if PyTorch CUDA is initialized, otherwise ``0``.
@@ -176,11 +181,6 @@ def is_localization_supported(device_id: int | None = None) -> bool:
 def _is_localization_supported_nvml(device_id: int) -> bool | None:
     from ctypes import byref, c_int, c_uint, c_void_p, CDLL, create_string_buffer
 
-    # NVML describes physical GPUs; MPS can expose a different CUDA topology.
-    if any(name.startswith("CUDA_MPS_") for name in os.environ) or any(
-        os.path.exists(path) for path in ("/tmp/nvidia-mps", "/run/nvidia-mps")
-    ):
-        return None
     try:
         if not 0 <= device_id < torch.cuda._device_count_nvml():
             return None
@@ -689,6 +689,7 @@ class GreenContext:
             None
         ] * _STREAMS_PER_GREEN_CONTEXT_POOL
         self._curr_stream_idx = -1
+        self._stream_lock = threading.Lock()
         self._green_ctx = green_ctx
 
     @staticmethod
@@ -885,22 +886,25 @@ class GreenContext:
 
         Use the returned stream with :func:`torch.cuda.stream` to run work on
         the green context. Synchronization with other streams is not automatic;
-        use CUDA events as with any other custom stream.
+        use CUDA events as with any other custom stream. Calls from multiple
+        threads safely share a bounded pool, but streams are reused rather than
+        exclusively leased to a caller.
         """
         self._ensure_alive()
-        curr_idx = self._curr_stream_idx + 1
-        idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL
-        if curr_idx < _STREAMS_PER_GREEN_CONTEXT_POOL:
-            green_ctx_stream = _check_cuda_bindings(
-                _drv.cuGreenCtxStreamCreate(  # pyrefly: ignore [missing-attribute]
-                    self._green_ctx,
-                    _drv.CUstream_flags.CU_STREAM_NON_BLOCKING,  # pyrefly: ignore [missing-attribute]
-                    0,
+        with self._stream_lock:
+            curr_idx = self._curr_stream_idx + 1
+            idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL
+            if curr_idx < _STREAMS_PER_GREEN_CONTEXT_POOL:
+                green_ctx_stream = _check_cuda_bindings(
+                    _drv.cuGreenCtxStreamCreate(  # pyrefly: ignore [missing-attribute]
+                        self._green_ctx,
+                        _drv.CUstream_flags.CU_STREAM_NON_BLOCKING,  # pyrefly: ignore [missing-attribute]
+                        0,
+                    )
                 )
-            )
-            self._green_ctx_streams[idx] = green_ctx_stream
-        else:
-            green_ctx_stream = self._green_ctx_streams[idx]
-        self._curr_stream_idx = curr_idx
+                self._green_ctx_streams[idx] = green_ctx_stream
+            else:
+                green_ctx_stream = self._green_ctx_streams[idx]
+            self._curr_stream_idx = curr_idx
         # pyrefly: ignore [bad-argument-type]
         return torch.cuda.ExternalStream(int(green_ctx_stream), self._device_id)
