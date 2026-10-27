@@ -397,6 +397,13 @@ def dictview_richcompare(
     return all(item in self for item in other)
 
 
+def dictview_isdisjoint(self: Iterable[T], other: Iterable[T]) -> bool:
+    """Mirrors dictviews_isdisjoint in Objects/dictobject.c, without its
+    iterate-the-shorter-operand optimization, which does not change the result.
+    """
+    return not any(item in self for item in other)
+
+
 def assert_dict_equal(
     self_: Any, d1: dict[T, U], d2: dict[T, U], msg: str | None = None
 ) -> None:
@@ -518,16 +525,18 @@ def odict_update(
             for key in keys():
                 self[key] = data[key]
             data = ()
+    missing = object()
     for pair in data:
-        # mutablemapping_add_pairs checks each PySequence_Fast result's size.
-        pair = tuple(pair)
-        if len(pair) < 2:
-            raise ValueError(
-                f"need more than {len(pair)} value{'s' if not pair else ''} to unpack"
-            )
-        if len(pair) > 2:
+        # CPython's mutablemapping_add_pairs consumes at most three items per pair.
+        pair = iter(pair)
+        key = next(pair, missing)
+        if key is missing:
+            raise ValueError("need more than 0 values to unpack")
+        value = next(pair, missing)
+        if value is missing:
+            raise ValueError("need more than 1 value to unpack")
+        if next(pair, missing) is not missing:
             raise ValueError("too many values to unpack (expected 2)")
-        key, value = pair
         self[key] = value
     for key, value in kwargs.items():
         self[key] = value
