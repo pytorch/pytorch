@@ -9,21 +9,6 @@ _IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
 # The header location is src/rccl.h versus rccl/rccl.h, respectively.
 _RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
-# List of math functions that should be replaced inside device code only.
-MATH_TRANSPILATIONS = collections.OrderedDict([
-    ("std::max", ("::max")),
-    ("std::min", ("::min")),
-    ("std::ceil", ("::ceil")),
-    ("std::floor", ("::floor")),
-    ("std::exp", ("::exp")),
-    ("std::log", ("::log")),
-    ("std::pow", ("::pow")),
-    ("std::fabs", ("::fabs")),
-    ("std::fmod", ("::fmod")),
-    ("std::remainder", ("::remainder")),
-    ("std::frexp", ("::frexp")),
-])
-
 CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", "hipError_t"),
     ("cudaError_t", "hipError_t"),
@@ -324,6 +309,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("curand_poisson.h", "hiprand/hiprand_kernel.h"),
     ("curand_precalc.h", "hiprand/hiprand_kernel.h"),
     ("curand_uniform.h", "hiprand/hiprand_kernel.h"),
+    ("cusolverDn.h", "hipsolver/hipsolver.h"),
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cusparseLt.h", "hipsparselt/hipsparselt.h"),
     ("cufft.h", "hipfft/hipfft.h"),
@@ -2445,6 +2431,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", "HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F"),
     ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0"),
     ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3"),
+    ("CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT", "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT"),
     ("CUBLASLT_POINTER_MODE_DEVICE", "HIPBLASLT_POINTER_MODE_DEVICE"),
     ("CUBLASLT_POINTER_MODE_HOST", "HIPBLASLT_POINTER_MODE_HOST"),
     ("cublasLtMatrixLayout_t", "hipblasLtMatrixLayout_t"),
@@ -3442,6 +3429,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
     ("nvshmem_free", "rocshmem::rocshmem_free"),
     ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
+    ("nvshmem_barrier_all", "rocshmem::rocshmem_barrier_all"),
     ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
     ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
 

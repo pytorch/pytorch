@@ -71,6 +71,13 @@ class TORCH_API SavedVariable {
     return hooks_->retrieve_unpack_hook_data();
   }
 
+  std::optional<c10::SafePyObject> retrieve_unpack_hook() const {
+    if (!hooks_) {
+      return std::nullopt;
+    }
+    return hooks_->retrieve_unpack_hook();
+  }
+
  private:
   // This field contains either:
   // 1. the variable to save

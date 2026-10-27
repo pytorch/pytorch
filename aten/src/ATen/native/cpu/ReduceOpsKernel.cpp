@@ -224,6 +224,13 @@ void norm_kernel_tensor_iterator_impl(
       iter.dtype(0) == iter.input_dtype() &&
       (iter.input_dtype() == kFloat || iter.input_dtype() == kDouble ||
        iter.input_dtype() == kBFloat16)) {
+
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    constexpr int64_t kAccVecs = 2;
+#else
+    constexpr int64_t kAccVecs = 1;
+#endif
+
     // If we can vectorize over the last dimension and the dtype
     // of the output is the same as that of the input,
     // then we go through the vectorised path.
@@ -236,15 +243,26 @@ void norm_kernel_tensor_iterator_impl(
 
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
-          acc_t buffer[fVec::size()];
-          int64_t d = 0;
-          for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
+
+          constexpr int64_t kBlock = Vec::size() * kAccVecs;
+          constexpr int64_t kLanes = fVec::size() * kAccVecs;
+
+          fVec acc_vec[kAccVecs];
+          for (int64_t v = 0; v < kAccVecs; v++) {
+            acc_vec[v] = fVec{acc_t(0)};
           }
-          acc_vec.store(buffer);
-          for (int j = 1; j < fVec::size(); j++) {
+          acc_t buffer[kLanes];
+          int64_t d = 0;
+          for (; d < size - (size % kBlock); d += kBlock) {
+            for (int64_t v = 0; v < kAccVecs; v++) {
+              Vec data_vec = Vec::loadu(self_data + d + v * Vec::size());
+              norm_two_reduce_step(acc_vec[v], data_vec);
+            }
+          }
+          for (int64_t v = 0; v < kAccVecs; v++) {
+            acc_vec[v].store(buffer + v * fVec::size());
+          }
+          for (int j = 1; j < kLanes; j++) {
             buffer[0] = buffer[0] + buffer[j];
           }
           for (; d < size; d++) {

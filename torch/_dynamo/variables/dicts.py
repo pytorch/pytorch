@@ -19,11 +19,13 @@ in sets.py.
 
 import collections
 import functools
+import gc
 import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
+from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
 
@@ -41,6 +43,7 @@ from ..source import (
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    TypeDictSource,
 )
 from ..utils import (
     _item_debug_repr,
@@ -70,7 +73,9 @@ from .object_protocol import (
     _is_method_type,
     generic_getitem,
     generic_richcompare_bool,
+    generic_str,
     mro_lookup,
+    repr_guard,
 )
 
 
@@ -88,9 +93,13 @@ if TYPE_CHECKING:
 # - Implement tp_richcompare_impl() for key equality
 
 
-def pydict_check(obj: VariableTracker) -> bool:
+def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     # This is a simplified version of the CPython's PyDict_Check function:
     return issubclass(obj.python_type(), dict)
+
+
+def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    return obj.python_type() is dict
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -116,7 +125,8 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self,
-        items: dict[VariableTracker, VariableTracker],
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker],
         **kwargs: Any,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
@@ -149,17 +159,19 @@ class ConstDictVariable(VariableTracker):
             return key if isinstance(key, Hashable) else Hashable(key)
 
         items_cls = cast(type, self._cpython_type)
-        self.items = items_cls({make_hashable(x): v for x, v in items.items()})
+        storage_cls = dict if items_cls is collections.defaultdict else items_cls
+        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
+            {make_hashable(x): v for x, v in items.items()}
+        )
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
         )
-        self.original_items = items.copy()
+        self.original_items = {key.vt: value for key, value in self.items.items()}
         # Re-entrancy guard for is_python_constant against self-referential
-        # dicts (d[k] = d, directly or via an OrderedDict/defaultdict wrapper
-        # whose _base_vt is this instance). Both forms re-enter this same
-        # instance's is_python_constant, so a per-instance flag suffices.
+        # dicts. Both forms re-enter this same instance's is_python_constant, so
+        # a per-instance flag suffices.
         self._checking_python_constant = False
 
     def as_proxy(self) -> dict[Any, Any]:
@@ -177,10 +189,9 @@ class ConstDictVariable(VariableTracker):
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
-        # Re-entrancy guard: a self-referential dict (d[k] = d, directly or via
-        # an OrderedDict/defaultdict wrapper delegating to this _base_vt) would
-        # otherwise recurse forever. A cyclic dict is not a flat python
-        # constant; return False so reconstruct handles the cycle.
+        # Re-entrancy guard: a self-referential dict would otherwise recurse
+        # forever. A cyclic dict is not a flat python constant; return False so
+        # reconstruct handles the cycle.
         if self._checking_python_constant:
             return False
         self._checking_python_constant = True
@@ -199,10 +210,14 @@ class ConstDictVariable(VariableTracker):
         }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = [
-            f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-            for key, value in self.items.items()
-        ]
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "{...}")
+            items = [
+                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
+                for key, value in self.items.items()
+            ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
@@ -361,7 +376,7 @@ class ConstDictVariable(VariableTracker):
         codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self._contains_self_reference():
+        if self._contains_self_reference() and self.source is None:
             codegen.extend_output(
                 [
                     create_instruction("BUILD_MAP", arg=0),
@@ -492,7 +507,7 @@ class ConstDictVariable(VariableTracker):
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
-        return DictIterator(self.items.keys())
+        return DictIterator(self.items)
 
     def tp_init_impl(
         self,
@@ -548,6 +563,13 @@ class ConstDictVariable(VariableTracker):
             tx.output.guard_on_key_order.add(self.source)
         return DictValuesVariable(self)
 
+    def _new_dict(
+        self, items: dict[HashableTracker, VariableTracker]
+    ) -> "ConstDictVariable":
+        # items is already hashed (e.g. self.items.copy()), same as the
+        # "cloning" case ConstDictVariable.__init__ documents/supports.
+        return type(self)(items, mutation_type=ValueMutationNew())
+
     def dict_copy(
         self,
         tx: "InstructionTranslatorBase",
@@ -555,9 +577,7 @@ class ConstDictVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
-        return self.clone(
-            items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
-        )
+        return self._new_dict(self.items.copy())
 
     def dict_get(
         self,
@@ -713,7 +733,9 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
-        reversed_keys = [k.vt for k in reversed(list(self.items.keys()))]
+        reversed_keys: list[VariableTracker] = [
+            k.vt for k in reversed(list(self.items.keys()))
+        ]
         return variables.ListIteratorVariable(
             reversed_keys, mutation_type=ValueMutationNew()
         )
@@ -748,8 +770,12 @@ class ConstDictVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
         self_, other_ = (other, self) if reverse else (self, other)
         if pydict_check(self_) and pydict_check(other_):
-            new = self_.call_method(tx, "copy", [], {})
-            new.call_method(tx, "update", [other_], {})
+            # dict.__or__ copies and merges via internal helpers, bypassing a
+            # subclass's overridden copy/update.
+            new = cast(
+                ConstDictVariable, ConstDictVariable.dict_copy(self_, tx, [], {})
+            )
+            ConstDictVariable.dict_update(new, tx, [other_], {})
             return new
         return ConstantVariable.create(NotImplemented)
 
@@ -759,7 +785,9 @@ class ConstDictVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
-        self.call_method(tx, "update", [other], {})
+        # dict.__ior__ merges via the internal helper, bypassing a subclass's
+        # overridden update.
+        ConstDictVariable.dict_update(self, tx, [other], {})
         return self
 
     def mp_ass_subscript_impl(
@@ -835,22 +863,16 @@ class ConstDictVariable(VariableTracker):
         # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
         # Only supports eq/ne; returns NotImplemented for ordering.
         from .builder import SourcelessBuilder
-        from .user_defined import UserDefinedDictVariable
 
         if op not in ("__eq__", "__ne__"):
             return ConstantVariable.create(NotImplemented)
+        # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
+        # This is correct because CPython's dict_equal operates on the
+        # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
+        # -- it never calls __getitem__ or __len__ on dict subclasses.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
         if not isinstance(other, ConstDictVariable):
-            # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
-            # This is correct because CPython's dict_equal operates on the
-            # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
-            # -- it never calls __getitem__ or __len__ on dict subclasses.
-            # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-            if isinstance(other, UserDefinedDictVariable):
-                if other._base_vt is None:
-                    raise AssertionError("expected _base_vt to be set")
-                other = other._base_vt
-            else:
-                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable.create(NotImplemented)
         eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
             tx, [self, other], {}
         )
@@ -871,6 +893,10 @@ class ConstDictVariable(VariableTracker):
 
 class OrderedDictVariable(ConstDictVariable):
     _cpython_type = collections.OrderedDict
+    # self.items is actually a collections.OrderedDict at runtime for this
+    # class (see ConstDictVariable.__init__'s storage_cls), which is what
+    # gives move_to_end/popitem(last=) below their real backing storage.
+    items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
@@ -951,10 +977,14 @@ class OrderedDictVariable(ConstDictVariable):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
-        items = [
-            (tracked_repr(tx, key.vt), tracked_repr(tx, value))
-            for key, value in self.items.items()
-        ]
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "...")
+            items = [
+                (tracked_repr(tx, key.vt), tracked_repr(tx, value))
+                for key, value in self.items.items()
+            ]
         return VariableTracker.build(tx, self._ordered_dict_repr(items))
 
     def nb_or_impl(
@@ -968,14 +998,19 @@ class OrderedDictVariable(ConstDictVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327-L339
         if not issubclass(other.python_type(), dict):
             return ConstantVariable.create(NotImplemented)
+        # Merge via the internal helper, bypassing a subclass's overridden
+        # copy/update while preserving the OrderedDict subclass type.
         if reverse:
-            new = VariableTracker.build(tx, self.python_type()).call_function(
-                tx, [other], {}
+            new = cast(
+                ConstDictVariable,
+                VariableTracker.build(tx, self.python_type()).call_function(
+                    tx, [other], {}
+                ),
             )
-            new.call_method(tx, "update", [self], {})
+            ConstDictVariable.dict_update(new, tx, [self], {})
         else:
-            new = self.call_method(tx, "copy", [], {})
-            new.call_method(tx, "update", [other], {})
+            new = cast(ConstDictVariable, ConstDictVariable.dict_copy(self, tx, [], {}))
+            ConstDictVariable.dict_update(new, tx, [other], {})
         return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -988,7 +1023,7 @@ class OrderedDictVariable(ConstDictVariable):
                 ]
             )
         )
-        if self._contains_self_reference():
+        if self._contains_self_reference() and self.source is None:
             codegen.extend_output(
                 [
                     *create_call_function(0, False),
@@ -1018,11 +1053,9 @@ class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
-    # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    # proxies to the VariableTracker of the wrapped mapping
+    def __init__(self, dv_dict: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if not isinstance(dv_dict, ConstDictVariable):
-            raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
     def python_type(self) -> type:
@@ -1065,28 +1098,6 @@ class MappingProxyVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
 
-    def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
-        if self.source and tx.output.side_effects.has_existing_dict_mutation():
-            msg = (
-                "A dict has been modified while we have an existing mappingproxy object. "
-                "A mapping proxy object, as the name suggest, proxies a mapping "
-                "object (usually a dict). If the original dict object mutates, it "
-                "is reflected in the proxy object as well. For an existing proxy "
-                "object, we do not know the original dict it points to. Therefore, "
-                "for correctness we graph break when there is dict mutation and we "
-                "are trying to access a proxy object."
-            )
-
-            unimplemented(
-                gb_type="mapping proxy affected by dictionary mutation",
-                context=f"Source: {self.source}, Dict mutation detected",
-                explanation=msg,
-                hints=[
-                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects",
-                    "Or avoid using the mapping proxy objects after modifying its underlying dictionary",
-                ],
-            )
-
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1094,7 +1105,6 @@ class MappingProxyVariable(VariableTracker):
     ) -> VariableTracker:
         # mappingproxy_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/descrobject.c#L1052-L1056
         # TODO(follow-up): add tests for invalid key type, missing key
-        self._check_mutation_guard(tx)
         return self.dv_dict.mp_subscript_impl(tx, key)
 
     def call_method(
@@ -1104,7 +1114,6 @@ class MappingProxyVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self._check_mutation_guard(tx)
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1118,6 +1127,36 @@ class MappingProxyVariable(VariableTracker):
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
+
+    def _check_class_attr_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        # The wrapped mapping is built from the real object, so it does not see
+        # class attribute writes made earlier in the trace until they replay.
+        side_effects = tx.output.side_effects
+        for vt in side_effects.store_attr_mutations:
+            if not isinstance(vt, variables.UserDefinedClassVariable):
+                continue
+            if not side_effects.has_pending_mutation(vt):
+                continue
+            # type's own __dict__ getter, so a metaclass __dict__ is bypassed.
+            class_dict = type.__dict__["__dict__"].__get__(vt.value)
+            mapping = gc.get_referents(class_dict)[0]
+            if mapping in side_effects and side_effects[mapping] is self.dv_dict:
+                unimplemented(
+                    gb_type="mapping proxy of class with pending attribute mutation",
+                    context=f"class: {vt.value}",
+                    explanation="The class __dict__ does not reflect class attributes set earlier in the traced code.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_class_attr_mutation(tx)
+        return VariableTracker.build(
+            tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
+        )
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_class_attr_mutation(tx)
+        return generic_str(tx, self.dv_dict)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1217,15 +1256,19 @@ class DictViewVariable(VariableTracker):
     }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if self.kv == "keys":
-            items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-        elif self.kv == "values":
-            items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-        else:  # items
-            items = ", ".join(
-                f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-                for key, value in self.view_items
-            )
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5741-L5765
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "...")
+            if self.kv == "keys":
+                items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
+            elif self.kv == "values":
+                items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
+            else:  # items
+                items = ", ".join(
+                    f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+                    for key, value in self.view_items
+                )
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def dict_view_reversed(
@@ -1336,8 +1379,27 @@ class DictKeysVariable(DictViewVariable):
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
+        # dictkeys_contains hands dv_dict to PyDict_Contains, a struct lookup,
+        # so a dict subclass's __contains__ never runs -- call the base slot
+        # rather than dispatching on dv_dict's type.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
-        return self.dv_dict.sq_contains_impl(tx, item)
+        return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
+
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
+
+    tp_methods = {
+        "isdisjoint": Method(isdisjoint),
+    }
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1537,6 +1599,14 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
+        elif isinstance(vt, variables.UserMethodVariable):
+            # method_getattro forwards __dict__ to __func__; a bound method has
+            # no __dict__ of its own. Read-only: CPython rejects writes through
+            # a method ("'method' object has no attribute 'x'"), and Dynamo
+            # matches that because UserMethodVariable does not override
+            # get_value_for_setattr, so the VT default declines the store
+            # rather than mutating the function's shared __dict__.
+            return object.__getattribute__(vt.get_function(), "__dict__")
         elif istype(vt, variables.ExceptionVariable):
             # Synthetic exceptions created during tracing have no backing
             # Python object; their __dict__ starts empty and any custom
@@ -1598,13 +1668,27 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # contents explicitly.
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
+        dict_source = vt.source and AttrSource(vt.source, "__dict__")
+        if vt.source and issubclass(vt.python_type(), type):
+            # A class __dict__ is a mappingproxy; guard its items through tp_dict.
+            dict_source = TypeDictSource(vt.source)
+
+        for key in example_value_dict:
+            # DictGetItemSource and ConstantVariable model instance dict keys as
+            # literals, which excludes the str subclasses PyUnicode_Check allows.
+            if not variables.ConstantVariable.is_literal(key):
+                unimplemented(
+                    gb_type="non-literal key in object __dict__",
+                    context=f"key={key!r}, type={type(key)}",
+                    explanation="Dynamo models object __dict__ keys as literal constants.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
         return {
             key: VariableTracker.build(
                 tx,
                 value,
-                source=vt.source
-                and DictGetItemSource(AttrSource(vt.source, "__dict__"), key),
+                source=dict_source and DictGetItemSource(dict_source, key),
             )
             for key, value in example_value_dict.items()
         }
@@ -1694,6 +1778,11 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 class DunderDictVariable(ConstDictVariable):
     """represents object.__dict__"""
 
+    # Overrides ConstDictVariable.items: this class backs its storage with
+    # the side-effects table (via SideEffectsProxyDict) instead of a real
+    # dict, so self.items has a different runtime shape here.
+    items: SideEffectsProxyDict  # pyrefly: ignore[bad-override]
+
     @classmethod
     def create(
         cls,
@@ -1750,9 +1839,16 @@ class DunderDictVariable(ConstDictVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> "ConstDictVariable":
+        # self.items is a SideEffectsProxyDict keyed by HashableTracker, which
+        # is not a VariableTracker; dict()'s overloads (constrained here to
+        # ConstDictVariable.__init__'s VariableTracker key type) have no shape
+        # for a HashableTracker-keyed mapping, even though __init__ accepts it.
         return ConstDictVariable(
-            dict(self.items), mutation_type=ValueMutationNew(), source=None
+            # pyrefly: ignore[no-matching-overload]
+            dict(self.items),
+            mutation_type=ValueMutationNew(),
+            source=None,
         )
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273

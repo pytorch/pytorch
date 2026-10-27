@@ -184,6 +184,7 @@ SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
 TEST_DISCOVER = False
 TEST_IN_SUBPROCESS = False
+TEST_SAVE_TORCHCI_REPORTS = ""
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
@@ -270,6 +271,10 @@ class TestEnvironment:
     # Specifically, this includes env vars that are set to non-default values and
     # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
+    # Every include_in_repro env var's value as set, unparsed ("" if unset); an unset
+    # flag that's on anyway (by default or implication) is "1". Read by
+    # torchci/environment.py.
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -285,7 +290,8 @@ class TestEnvironment:
     #         variable and unimplied. Default: False
     #     include_in_repro (bool): Indicates whether this flag should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure). Default: True
+    #         relevant to reproducing the test failure), and in env_var_values, which test
+    #         run reports record as their flags. Default: True
     #     enabled_fn (Callable): Callable returning whether the flag should be enabled
     #         given the environment variable value and the default value. Default: Lambda
     #         requiring "0" to disable if on by default OR "1" to enable if off by default.
@@ -314,8 +320,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = env_var_val or ("1" if enabled else "")
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -337,7 +345,8 @@ class TestEnvironment:
     #         variable. Default: None
     #     include_in_repro (bool): Indicates whether this setting should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure). Default: True
+    #         relevant to reproducing the test failure), and in env_var_values, which test
+    #         run reports record as their flags. Default: True
     #     parse_fn (Callable): Callable parsing the env var string. Default value just uses
     #         the string itself.
     @staticmethod
@@ -350,6 +359,8 @@ class TestEnvironment:
     ):
         value = default if env_var is None else os.getenv(env_var)
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = os.getenv(env_var) or ""
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
@@ -409,6 +420,14 @@ IS_FBCODE: bool = TestEnvironment.def_flag(
 IS_REMOTE_GPU: bool = TestEnvironment.def_flag(
     "IS_REMOTE_GPU",
     env_var="PYTORCH_TEST_REMOTE_GPU",
+    include_in_repro=False,
+)
+# Drop tests that are already marked skipped when their class is defined, so
+# they are never collected. Only correct when tests are listed on the same kind
+# of machine that runs them, since skip conditions are often hardware checks.
+OMIT_SKIPPED_TESTS: bool = TestEnvironment.def_flag(
+    "OMIT_SKIPPED_TESTS",
+    env_var="PYTORCH_TEST_OMIT_SKIPPED",
     include_in_repro=False,
 )
 
@@ -767,7 +786,16 @@ def instantiate_parametrized_tests(generic_cls):
                 test = decorator(test)
 
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    _omit_skipped_tests(generic_cls)
     return generic_cls
+
+
+def _omit_skipped_tests(cls) -> None:
+    if not OMIT_SKIPPED_TESTS:
+        return
+    for name, attr in list(vars(cls).items()):
+        if name.startswith("test") and getattr(attr, "__unittest_skip__", False):
+            delattr(cls, name)
 
 
 class subtest:
@@ -1140,6 +1168,7 @@ def parse_cmd_line_args():
     global TEST_BAILOUTS
     global TEST_DISCOVER
     global TEST_IN_SUBPROCESS
+    global TEST_SAVE_TORCHCI_REPORTS
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
@@ -1157,6 +1186,7 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-torchci-reports', type=str)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1198,6 +1228,7 @@ def parse_cmd_line_args():
     PYTEST_SINGLE_TEST = args.pytest_single_test
     TEST_DISCOVER = args.discover_tests
     TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_TORCHCI_REPORTS = args.save_torchci_reports
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
@@ -1228,17 +1259,13 @@ def wait_for_process(p, timeout=None):
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
-        exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
-        # try to handle the case where p.wait(timeout=5) times out as well as
-        # otherwise the wait() call in the finally block can potentially hang
+            p.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
-        if exit_status is not None:
-            return exit_status
-        else:
+            # Still alive after the grace period; the finally's wait() would hang.
             p.kill()
+        # Re-raised even when pytest exits in the grace period, so the caller sees
+        # a timeout (retry_shell's 124), not the interrupted run's exit code.
         raise
     except:
         p.kill()
@@ -1527,6 +1554,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if TEST_SAVE_TORCHCI_REPORTS:
+            other_args.append(f'--save-torchci-reports={TEST_SAVE_TORCHCI_REPORTS}')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
@@ -1592,6 +1621,9 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if TEST_SAVE_TORCHCI_REPORTS:
+            prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-prefix={prefix}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
@@ -1746,8 +1778,15 @@ TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_availab
 TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+
+# The CI fleet runs M1 (Apple7, 16 GB) and M2 Pro (Apple8, 32 GB) on the same
+# macOS release, so MACOS_VERSION on its own no longer tells the two apart.
+# Tests that need the memory or the Metal feature set have to say so.
+# Covers M1 Pro/Max/Ultra too: all are Apple7 and share the feature set.
+IS_APPLE_M1 = TEST_MPS and torch.backends.mps.get_name().startswith("Apple M1")
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -1873,11 +1912,16 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# The CI job's test config, such as default, distributed or periodic
+TEST_CONFIG: str | None = TestEnvironment.def_setting(
+    "TEST_CONFIG",
+    env_var="TEST_CONFIG",
+)
 # Enables tests that run only in the periodic-strict CI workflow (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: os.getenv("TEST_CONFIG") == "periodic",
+    implied_by_fn=lambda: TEST_CONFIG == "periodic",
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -2166,6 +2210,25 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     if not isinstance(msg, str):
         raise AssertionError("Are you using skipIfFreeThreaded correctly?")
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
+
+
+def skipIfCppFakeTensor(reason):
+    if not isinstance(reason, str):
+        raise AssertionError("please provide a reason")
+    from torch._dynamo import config
+
+    return unittest.skipIf(config.use_cpp_fake_tensor, reason)
+
+
+_CppFakeExpectedT = TypeVar("_CppFakeExpectedT")
+
+
+def expectedIfCppFakeTensor(
+    cpp_expected: _CppFakeExpectedT, python_expected: _CppFakeExpectedT
+) -> _CppFakeExpectedT:
+    from torch._dynamo import config
+
+    return cpp_expected if config.use_cpp_fake_tensor else python_expected
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -2626,6 +2689,15 @@ def skipIfRocmVersionAtLeast(version=None):
         )
     return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
 
+# Skips a test on ROCm when the version is in [first_bad, first_good), for a
+# regression introduced in one release and fixed in a later one. The window
+# lives only here, so the skip reason cannot drift from the version check.
+def skipIfRocmVersionInRange(first_bad, first_good, reason):
+    def _should_skip():
+        return TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good)
+    window = f"ROCm >= {'.'.join(map(str, first_bad))}, < {'.'.join(map(str, first_good))}"
+    return lazy_skip_if(_should_skip, f"{reason} ({window})")
+
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
@@ -2662,6 +2734,21 @@ def requires_cuda_p2p_access():
     return skip_but_pass_in_sandcastle_if(
         not cuda_p2p_access_available,
         "cuda p2p access is not available",
+    )
+
+def requires_accelerator_p2p_access():
+    acc = torch.accelerator.current_accelerator(True)
+    if acc is not None and acc.type == "cuda":
+        return requires_cuda_p2p_access()
+    device_module = torch.get_device_module(acc) if acc is not None else None
+    can_access_peer = getattr(device_module, "can_device_access_peer", None)
+    num_devices = torch.accelerator.device_count()
+    p2p_access_available = can_access_peer is not None and num_devices >= 2 and all(
+        can_access_peer(i, j) for i in range(num_devices) for j in range(i + 1, num_devices)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not p2p_access_available,
+        "accelerator p2p access is not available",
     )
 
 # Reverts the linalg backend back to default to make sure potential failures in one
@@ -2874,6 +2961,23 @@ def skipIfNoXNNPACK(fn):
 def skipIfNoLapack(fn):
     return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
+def skipIfNoNativeAot(op, *, device="cuda"):
+    """Skip unless this op has native-AOT kernels embedded for the given device."""
+    def unavailable():
+        from torch._native.aot_manifest import get_coverage
+
+        coverage = get_coverage(op, "CUDA")
+        return (
+            coverage is None
+            or not torch.cuda.is_available()
+            or not coverage.is_available(torch.device(device))
+        )
+
+    return lazy_skip_if(
+        unavailable,
+        f"AOT kernels for {op} not embedded for {device}",
+    )
+
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
@@ -2910,12 +3014,46 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+def requires_multigpu(fn):
+    """Marks a test that needs more than one GPU.
+
+    Attaches the pytest marker the distributed CI configs partition on, so the
+    test lands in the multi-GPU run rather than the single-GPU one where it
+    could only ever skip, and skips it wherever fewer than two GPUs are visible.
+
+    The marker is attached only when pytest is importable: files using this also
+    run under an internal test runner that has no pytest, where the skip alone
+    is the whole behaviour.
+    """
+    reason = "requires >= 2 accelerators"
+    skip = torch.accelerator.device_count() < 2
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.multigpu(fn)
+        return unittest.skipIf(skip, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.multigpu(wrapper)
+
+    return unittest.skipIf(skip, reason)(wrapper)
+
+
 def periodic(fn):
-    """Marks a test to run only when periodic test mode is enabled.
+    """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
     and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run.
+    Python test sweep (e.g. distributed or quantization) never run in CI.
+
+    Gated only in CI and on Sandcastle (which has no periodic config);
+    elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
@@ -2923,11 +3061,12 @@ def periodic(fn):
     it runs only in periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
+    skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 
     if isinstance(fn, type):
         if has_pytest:
             fn = pytest.mark.periodic(fn)
-        return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(fn)
+        return unittest.skipIf(skip, reason)(fn)
 
     # Isolate decorator metadata when parameter variants share the original
     # test function.
@@ -2938,7 +3077,7 @@ def periodic(fn):
     if has_pytest:
         wrapper = pytest.mark.periodic(wrapper)
 
-    return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(wrapper)
+    return unittest.skipIf(skip, reason)(wrapper)
 
 
 def slowTest(fn):
@@ -2986,8 +3125,9 @@ def to_gpu(obj, type_map=None):
         if not obj.is_leaf:
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
+        device_type = torch.accelerator.current_accelerator(check_available=True).type
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -3694,6 +3834,12 @@ class TestCase(expecttest.TestCase):
     _diffThreshold = sys.maxsize
     maxDiff = None
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Runs before class decorators, so a skipped parametrized template is
+        # removed before instantiate_parametrized_tests expands it.
+        _omit_skipped_tests(cls)
+
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
         if torch.cuda.is_initialized():
@@ -4162,7 +4308,7 @@ class TestCase(expecttest.TestCase):
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
 
-        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # Detect leaked mutations to the fp32 precision flags. Tests that
         # legitimately mutate these globals must restore them themselves (e.g.
         # via recover_orig_fp32_precision or setUpClass/tearDownClass).
         # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
@@ -5975,14 +6121,17 @@ def disable_gc():
 
 
 def find_library_location(lib_name: str) -> Path:
-    # return the shared library file in the installed folder if exist,
-    # else the file in the build folder
+    # return the shared library file in the installed folder if it exists,
+    # otherwise the file in the build folder
     torch_root = Path(torch.__file__).resolve().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
     torch_root = Path(__file__).resolve().parents[2]
-    return torch_root / 'build' / 'lib' / lib_name
+    path = torch_root.parent / 'build' / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
+    raise FileNotFoundError(f"Could not find library '{lib_name}' in installed or build paths")
 
 def skip_but_pass_in_sandcastle(reason):
     """
@@ -6611,11 +6760,36 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# The legacy getter cross-checks the Float32MatmulPrecision enum against the
+# new backend-specific values and raises when they disagree, so a snapshot
+# taken while a test has them out of sync would throw from setUp/tearDown
+# instead of reporting the leak. Report a sentinel instead; restoring the
+# backend-specific values is what puts the pair back in sync.
+_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
+
+
+def _get_legacy_float32_matmul_precision():
+    try:
+        return torch.get_float32_matmul_precision()
+    except RuntimeError:
+        return _INCONSISTENT_MATMUL_PRECISION
+
+
+def _set_legacy_float32_matmul_precision(value):
+    if value != _INCONSISTENT_MATMUL_PRECISION:
+        torch.set_float32_matmul_precision(value)
+
+
 # Single source of truth for which globals count as "fp32 precision state".
 # Add a new flag here and both recover_orig_fp32_precision and the TestCase
 # leak detector pick it up automatically.
 def _fp32_precision_flag_specs():
     return (
+        # Must stay first: set_float32_matmul_precision also writes the cuda
+        # and mkldnn matmul entries, so it has to be restored before them.
+        ("torch.get_float32_matmul_precision()",
+            _get_legacy_float32_matmul_precision,
+            _set_legacy_float32_matmul_precision),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),

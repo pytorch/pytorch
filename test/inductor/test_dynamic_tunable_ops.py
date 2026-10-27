@@ -5,11 +5,11 @@ Tuning enabled (compile-time autotune):
   concrete miss -> tune, persist concrete, plus a wildcard key if a dim is
   dynamic; concrete hit -> persist the wildcard key if it is still missing.
 
-Tuning disabled (runtime): the AOTI cpp_wrapper emits no
-`TunableDynamicDimsGuard`, so the mask is empty and a concrete miss is
-resolved by `LookupWildcardFallback`'s token scan. With no match,
-`operator()` falls through to `ResultEntry::Default()`, which is the same
-non-tunable aten kernel the caller would have used.
+Tuning disabled (runtime): a concrete miss is resolved by
+`LookupWildcardFallback`'s token scan. This also supports artifacts compiled
+without `TunableDynamicDimsGuard` emission. With no match, `operator()` falls
+through to `ResultEntry::Default()`, which is the same non-tunable aten kernel
+the caller would have used.
 
 Observability caveat, applying to every runtime wildcard test here: nothing
 reports whether a wildcard actually served a dispatch. A wildcard hit and a
@@ -301,6 +301,7 @@ class DynamicTunableOpsTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -310,6 +311,7 @@ class DynamicTunableOpsTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     # -- Tuning enabled --------------------------------------------------
 
@@ -485,7 +487,7 @@ class DynamicTunableOpsTest(TestCase):
     ) -> None:
         """Tuning disabled + concrete miss + wildcard match -> dispatch via
         the wildcard. Phase B deliberately runs without a `dynamic_dims_mask`
-        to mirror the AOTI runtime, which emits no guard."""
+        to verify wildcard fallback independently of AOTI guard emission."""
         m_tuned, n, k = 47, 2053, 1019
         m_test = 53  # different M, same wildcard pattern
         bias_t, mat1_t, mat2_t = _addmm(m_tuned, n, k, seed=6)
@@ -517,10 +519,9 @@ class DynamicTunableOpsTest(TestCase):
         torch.cuda.tunable.tuning_enable(False)
         ref = torch.addmm(bias_x, mat1_x, mat2_x)
 
-        # Phase B (runtime analog): tunable enabled, tuning disabled,
-        # NO `dynamic_dims_mask` context -- the AOTI runtime cannot push
-        # one. Concrete miss for m_test -> LookupWildcardFallback finds
-        # the wildcard seeded in Phase A and dispatches via it.
+        # Phase B (runtime analog): tunable enabled, tuning disabled, and no
+        # dynamic mask. Concrete miss for m_test -> LookupWildcardFallback
+        # finds the wildcard seeded in Phase A and dispatches via it.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
         out = torch.addmm(bias_x, mat1_x, mat2_x)
@@ -884,6 +885,7 @@ class LayoutCoverageWildcardTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -893,6 +895,7 @@ class LayoutCoverageWildcardTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _make_layout(
@@ -1096,6 +1099,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1105,6 +1109,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _make_layout(
@@ -1312,6 +1317,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1321,6 +1327,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _scaled_mm_inputs(
@@ -1505,6 +1512,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1514,6 +1522,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     def _entries_for_op(self, op_substr: str) -> list[_TunableResultEntry]:
         return [e for e in _get_tunable_results() if op_substr in e[0]]
@@ -1691,6 +1700,7 @@ class RecordUntunedConcreteMissTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.record_untuned_enable(False)
@@ -1702,6 +1712,7 @@ class RecordUntunedConcreteMissTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     def _record_untuned_run(self, stem: str, run_op: Callable[[], object]) -> list[str]:
         """Run `run_op` at runtime (TunableOp enabled, tuning disabled) with

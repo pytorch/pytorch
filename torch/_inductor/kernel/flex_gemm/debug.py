@@ -24,9 +24,12 @@ from torch._inductor.kernel.gemm_epilogue import (
 )
 from torch._logging import LazyString, trace_structured
 
+from .constraints import FlexGemmOutputExpansion
+
 
 if TYPE_CHECKING:
     from torch._inductor import ir
+    from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         FlexGemmEpilogueAnalysis,
     )
@@ -34,7 +37,7 @@ if TYPE_CHECKING:
         FlexGemmOutputStorageLayout,
     )
 
-    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputContraction
+    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputTransform
 
 
 flex_gemm_log = logging.getLogger(__name__)
@@ -95,7 +98,7 @@ def format_flex_gemm_problem(
     *,
     alpha: float,
     beta: float,
-    tuned: bool,
+    autotune: bool,
     fast_math: bool,
     explicit_config: dict[str, Any] | None,
 ) -> str:
@@ -104,7 +107,7 @@ def format_flex_gemm_problem(
         f"gemm_op: {gemm_op}",
         "kernel_options:",
         "  backend: QUACK",
-        f"  tuned: {tuned}",
+        f"  autotune: {autotune}",
         f"  fast_math: {fast_math}",
         f"  config: {explicit_config!r}",
         f"alpha: {alpha}",
@@ -150,11 +153,13 @@ def _format_geometry(geometry: "FlexGemmLocalReduceGeometry") -> str:
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_output_contraction(contraction: "FlexGemmOutputContraction | None") -> str:
-    """Format the logical contraction applied to the main output."""
+def _format_output_transform(contraction: "FlexGemmOutputTransform | None") -> str:
+    """Format the lane transform applied to the main output."""
     if contraction is None:
         return "none"
     layout = "chunked" if contraction.chunked else "interleaved"
+    if isinstance(contraction, FlexGemmOutputExpansion):
+        return f"N-axis, expansion, layout={layout}"
     return f"N-axis, group={contraction.group}, layout={layout}"
 
 
@@ -200,7 +205,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     lines = [
         "outputs:",
         f"  main: {_format_fx_tensor(outputs.output)}",
-        f"  output_contraction: {_format_output_contraction(outputs.output_contraction)}",
+        f"  output_transform: {_format_output_transform(outputs.output_transform)}",
     ]
     if outputs.aux_outputs:
         lines.append("  auxiliary:")
@@ -337,19 +342,22 @@ def format_flex_gemm_lowering_plan(
     return "\n".join(lines)
 
 
-def format_flex_gemm_selection(choice: "ir.ChoiceCaller | None", *, tuned: bool) -> str:
-    """Render the search summary and selected FlexGEMM template."""
+def format_flex_gemm_config_candidates(
+    configs: "Sequence[QuackConfigKey]", *, autotune: bool
+) -> str:
+    """Render the QuACK configs Inductor will benchmark or pin."""
     lines = [
-        "search:",
-        f"  mode: {'autotuned' if tuned else 'fixed'}",
-        "  native config selection: QuACK-owned",
-        "",
-        "selected:",
+        f"mode: {'autotune' if autotune else 'default'}",
+        f"candidates: {len(configs)}",
     ]
-    if choice is None:
-        lines.append("  deferred to a multi-template buffer")
-    else:
-        lines.append(f"  template: {choice.name}")
+    for config in configs:
+        fields = dict(config)
+        lines.append(
+            "  tile=({tile_m}, {tile_n}) cluster=({cluster_m}, {cluster_n}) "
+            "swap_ab={swap_ab} dynamic_persistent={is_dynamic_persistent}".format(
+                **fields
+            )
+        )
     lines.extend(
         (
             "",

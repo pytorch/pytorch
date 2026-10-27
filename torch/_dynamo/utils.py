@@ -34,6 +34,7 @@ import math
 import operator
 import os
 import re
+import struct
 import sys
 import textwrap
 import threading
@@ -41,6 +42,7 @@ import time
 import traceback
 import types
 import typing
+import unicodedata
 import uuid
 import warnings
 import weakref
@@ -74,6 +76,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
@@ -93,6 +96,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from . import config
 from .graph_utils import _get_flat_args
 
 
@@ -128,8 +132,6 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
-
-    from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
@@ -1242,6 +1244,45 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
+def constant_bits(value: Any, /) -> bytes | None:
+    if type(value) is float:
+        return struct.pack(">d", value)
+    if type(value) is complex:
+        return struct.pack(">dd", value.real, value.imag)
+    return None
+
+
+def constants_identical(a: Any, b: Any, /) -> bool:
+    """Value-identity comparison for specialized constants. Python float eq is
+    not value-identity: nan != nan while -0.0 == 0.0, so compare float and
+    complex values by IEEE-754 bit pattern, recursively through containers."""
+    bits = constant_bits(a)
+    if type(a) is type(b) and bits is not None:
+        return bits == constant_bits(b)
+
+    if type(a) is type(b) and type(a) in (list, tuple, torch.Size):
+        if a is b:
+            return True
+        return len(a) == len(b) and all(constants_identical(x, y) for x, y in zip(a, b))
+
+    if type(a) is type(b) and type(a) in (set, frozenset):
+        if a is b:
+            return True
+        if len(a) != len(b):
+            return False
+        remaining = list(b)
+        for x in a:
+            for i, y in enumerate(remaining):
+                if constants_identical(x, y):
+                    remaining.pop(i)
+                    break
+            else:
+                return False
+        return True
+
+    return a == b
+
+
 _builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
@@ -1349,6 +1390,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.FakeItemVariable,
         variables.FrozensetVariable,
         variables.ListIteratorVariable,
+        variables.ListReverseIteratorVariable,
         variables.ListVariable,
         variables.MappingProxyVariable,
         variables.NNModuleHooksDictVariable,
@@ -1402,9 +1444,14 @@ def lazily_unpack(
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    disable_ngb = config.patch(nested_graph_breaks=False)
     while True:
         try:
-            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            # This host-side iteration has no resumable frame. Compute the item
+            # before yielding so the config patch does not leak to the caller.
+            with disable_ngb:
+                item = pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            yield item
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -2557,8 +2604,9 @@ class CleanupHook:
             CleanupManager.count -= 1
         # Hooks fire when the owning code object is collected, which can happen
         # after something else has taken over this name -- CompilePackage.install()
-        # reinstalls precompiled state under names a pre-reset compile still
-        # owns. Only clean up while nothing has claimed the name out from under us.
+        # rebinds one a pre-reset compile still owns, and an aot_compile load claims
+        # a builtins-dict key while leaving the binding as it is. Only clean up
+        # while nothing has claimed the name out from under us.
         key = (id(self.scope), self.name)
         if _cleanup_owners.pop(key, None) is not self.token:
             return
@@ -2578,11 +2626,12 @@ class CleanupHook:
         return CleanupHook(scope, name, token)
 
     @staticmethod
-    def disown(scope: dict[str, Any], name: str) -> None:
+    def disown(scope: dict[str, Any], name: str) -> bool:
         """Invalidate whichever hook currently owns (scope, name), so that if
         its code object outlives this call, firing later is a no-op instead of
-        deleting a binding something else has since taken over."""
-        _cleanup_owners.pop((id(scope), name), None)
+        deleting a binding something else has since taken over. Returns whether
+        a hook owned it."""
+        return _cleanup_owners.pop((id(scope), name), None) is not None
 
 
 class CleanupManager(ExactWeakKeyDictionary):
@@ -3166,12 +3215,19 @@ range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 deque_iterator = type(iter(collections.deque()))
 deque_rev_iterator = type(reversed(collections.deque()))
+list_reverseiterator = type(reversed([]))
+list_reverseiterator_len = list_reverseiterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
     method
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
+}
+# defaultdict adds __init__/__repr__/__missing__/copy on top of dict's; a
+# defaultdict subclass inherits both, so UDOV slot delegation needs the union.
+defaultdict_methods = dict_methods | {
+    method for method in collections.defaultdict.__dict__.values() if callable(method)
 }
 set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
@@ -3261,6 +3317,15 @@ def product(it: Iterable[T]) -> int:
 def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def list_reverseiterator_backing_list(it: Any) -> list[Any]:
+    return it.__reduce__()[1][0]
+
+
+def list_reverseiterator_setstate(it: Any, it_index: int) -> Any:
+    it.__setstate__(it_index)
+    return it
 
 
 def dataclass_fields(cls: Any) -> Any:
@@ -3863,7 +3928,7 @@ def same(
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500
+                        fp64_ref.numel() < 1000
                     ):
                         multiplier = 8.0
                     elif (
@@ -4935,12 +5000,14 @@ class numpy_operator_wrapper(Generic[_P, R]):
         if kwargs:
             raise AssertionError(f"Expected no kwargs, got {kwargs}")
 
-        # pyrefly: ignore [bad-assignment]
-        args = (
-            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
-        )
-        out = self.op(*args)
-        return numpy_to_tensor(out)
+        with torch._C.DisableTorchFunction():
+            # pyrefly: ignore [bad-assignment]
+            args = (
+                tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in args
+            )
+            out = self.op(*args)
+            return numpy_to_tensor(out)
 
 
 @functools.lru_cache(maxsize=1)
@@ -5130,6 +5197,28 @@ def _fix_offset(str: str, offset: int) -> int:
     return len(as_utf8[:offset].decode("utf-8", errors="replace"))
 
 
+def _expand_source_and_marker(source: str, marker: str) -> tuple[str, str]:
+    expanded_source: list[str] = []
+    expanded_marker: list[str] = []
+    column = 0
+    for index, char in enumerate(source):
+        if char == "\t":
+            width = 8 - column % 8
+            expanded_source.append(" " * width)
+        elif unicodedata.category(char) in {"Mn", "Me", "Cf"}:
+            # Combining marks, variation selectors, and format characters
+            # render in zero columns.
+            width = 0
+            expanded_source.append(char)
+        else:
+            width = 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+            expanded_source.append(char)
+        if index < len(marker):
+            expanded_marker.append(marker[index] * width)
+        column += width
+    return "".join(expanded_source), "".join(expanded_marker)
+
+
 @dataclasses.dataclass
 class _Anchors:
     # inclusive
@@ -5296,6 +5385,23 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
     return None
 
 
+def _is_expression_range(
+    source_lines: list[str], col_offset: int, end_col_offset: int
+) -> bool:
+    import ast
+
+    first = source_lines[0][_fix_offset(source_lines[0], col_offset) :]
+    last = source_lines[-1][: _fix_offset(source_lines[-1], end_col_offset)]
+    # Wrap in parentheses so continuation lines, comments, and indentation
+    # inside a multiline expression do not trip the parser.
+    segment = "\n".join([first, *source_lines[1:-1], last])
+    try:
+        ast.parse(f"({segment}\n)", mode="eval")
+    except SyntaxError:
+        return False
+    return True
+
+
 def format_source_range(
     filename: str,
     lineno: int | None,
@@ -5317,11 +5423,24 @@ def format_source_range(
         return ""
 
     if (
+        end_lineno is not None
+        and end_lineno != lineno
+        and col_offset is not None
+        and end_col_offset is not None
+        and not _is_expression_range(source_lines, col_offset, end_col_offset)
+    ):
+        # Python 3.11 gives statement-level instructions such as FOR_ITER a
+        # range spanning the whole statement body. Only multiline expressions
+        # are rendered as ranges.
+        return source_lines[0]
+
+    if (
         sys.version_info >= (3, 13)
         and end_lineno is not None
         and end_lineno != lineno
         and col_offset is not None
         and end_col_offset is not None
+        and not any("\t" in line for line in source_lines)
     ):
         # Keep single-line ranges on Dynamo's manual path. The stdlib traceback
         # formatter is useful for multiline spans on 3.13+, but for single-line
@@ -5408,6 +5527,7 @@ def format_source_range(
 
     result = ""
     for line, marker in zip(source_lines, markers):
+        line, marker = _expand_source_and_marker(line, marker)
         result += line + "\n"
         result += marker + "\n"
     return result
@@ -5488,6 +5608,59 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:
+    return type.__dict__["__dict__"].__get__(cls, type(cls))
+
+
+def get_type_mro_no_user_code(cls: type) -> tuple[type, ...]:
+    return type.__dict__["__mro__"].__get__(cls, type(cls))
+
+
+def iter_mro_static_dicts(cls: type) -> Iterator[tuple[type, Mapping[str, object]]]:
+    """Yield MRO classes and dictionaries without invoking metaclass hooks."""
+    for base in get_type_mro_no_user_code(cls):
+        yield base, get_type_dict_no_user_code(base)
+
+
+def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
+    """Yield MRO definitions without invoking custom metaclass hooks."""
+    for _, namespace in iter_mro_static_dicts(cls):
+        if name in namespace:
+            yield namespace[name]
+
+
+def find_bound_builtin_method_descriptor(value: object) -> object | None:
+    if not isinstance(value, types.BuiltinMethodType):
+        return None
+
+    receiver = value.__self__
+    receiver_is_type = issubclass(type(receiver), type)
+    owner = cast(type, receiver if receiver_is_type else type(receiver))
+    for descriptor in iter_mro_static_attrs(owner, value.__name__):
+        if type(descriptor) not in (
+            types.BuiltinFunctionType,
+            types.ClassMethodDescriptorType,
+            types.MethodDescriptorType,
+        ):
+            continue
+        descriptor_get = getattr(descriptor, "__get__", None)
+        if descriptor_get is None:
+            if descriptor is value:
+                return descriptor
+            continue
+        try:
+            rebound = (
+                descriptor_get(None, receiver)
+                if receiver_is_type
+                else descriptor_get(receiver, owner)
+            )
+        except (AttributeError, TypeError):
+            continue
+        if rebound == value:
+            return descriptor
+    return None
+
+
 def is_torch_class(cls: type) -> bool:
     """Check if cls is defined in torch or a torch submodule.
 
@@ -5497,8 +5670,10 @@ def is_torch_class(cls: type) -> bool:
     inplace-view-on-input-tensor detection. This helper identifies classes
     whose descriptors should take that path instead of descriptor VTs.
     """
-    module = getattr(cls, "__module__", None)
-    return module is not None and (module == "torch" or module.startswith("torch."))
+    module = type.__dict__["__module__"].__get__(cls, type(cls))
+    return type(module) is str and (
+        module == "torch" or str.startswith(module, "torch.")
+    )
 
 
 def is_torch_function_object(value: object) -> bool:
@@ -5771,8 +5946,17 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
-def get_current_stream(device: torch.device) -> torch.Stream:
-    return torch.accelerator.current_stream(device)
+@contextmanager
+def temporarily_clear_torch_function_mode_stack() -> Iterator[None]:
+    """Temporarily clear and restore the torch function mode stack."""
+    stack = get_torch_function_mode_stack()
+    # Guard filtering may intentionally allow this to differ from the
+    # compile-time mode stack, so preserve the live stack without asserting.
+    clear_torch_function_mode_stack()
+    try:
+        yield
+    finally:
+        set_torch_function_mode_stack(stack)
 
 
 # call from C dynamo in order to inspect values in pdb
@@ -6087,6 +6271,10 @@ def is_pybind11_enum_member(value: object) -> bool:
     a C++ function returning an enum may construct a new Python wrapper), so
     we check by name membership rather than identity.
     """
+    # A class is never a member. For a Python Enum class, type(value) is
+    # EnumType, whose __members__ is a property object, not a mapping.
+    if isinstance(value, type):
+        return False
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:

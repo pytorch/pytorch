@@ -32,6 +32,7 @@ from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
+    Ignored,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -1291,6 +1292,9 @@ def scatter_upon_const_tensor_extra_check(m):
             KeywordArg("shape"),
             KeywordArg("background_val"),
             dtype=KeywordArg("dtype"),
+            # the replacement takes its device from selector; scatter requires it
+            # to match the full's
+            device=Ignored(),
         ),
         KeywordArg("dim"),
         KeywordArg("selector"),
