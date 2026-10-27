@@ -526,6 +526,7 @@ class DispatchKeySet final {
   class iterator {
    public:
     using self_type = iterator;
+    using iterator_concept = std::input_iterator_tag;
     using iterator_category = std::input_iterator_tag;
     using value_type = DispatchKey;
     using difference_type = ptrdiff_t;
@@ -536,6 +537,8 @@ class DispatchKeySet final {
         num_backends + num_functionality_keys;
     // final key value should be the last DispatchKey
     static constexpr uint8_t end_iter_key_val = num_functionality_keys;
+
+    iterator() = default;
 
     // current_dispatchkey_idx_ will iterate through all functionality bits.
     // current_backendcomponent_idx_ will iterate through all backend bits.
@@ -604,9 +607,9 @@ class DispatchKeySet final {
     }
 
    private:
-    const uint64_t* data_ptr_;
-    uint8_t next_functionality_;
-    uint8_t next_backend_;
+    const uint64_t* data_ptr_ = nullptr;
+    uint8_t next_functionality_ = end_iter_mask_val;
+    uint8_t next_backend_ = 0;
     // These are in an invalid state at construction time, and set by the
     // first increment call
     uint8_t current_dispatchkey_idx_{end_iter_key_val};

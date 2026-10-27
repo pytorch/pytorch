@@ -310,8 +310,11 @@ class GitRepo:
                     self._run_git("push", "--dry-run", self.remote, branch)
                 else:
                     self._run_git("push", self.remote, branch)
+                return
             except RuntimeError as e:
                 print(f"{cnt} push attempt failed with {e}")
+                if cnt == retry - 1:
+                    raise
                 self.fetch()
                 self._run_git("rebase", f"{self.remote}/{branch}")
 
