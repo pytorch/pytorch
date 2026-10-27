@@ -1736,6 +1736,103 @@ def forward(self, x_1, w_1):
             torch.baddbmm(input_t, batch1, batch2, alpha=alpha, beta=beta, out=out)
             self.assertEqual(out, expected)
 
+    @dtypes(torch.float)
+    def test_matmul_cow_input(self, device, dtype):
+        # mm
+        a = torch.randn(4, 8, device=device, dtype=dtype)
+        b = torch.randn(8, 16, device=device, dtype=dtype)
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        torch.mm(a_cow, b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        # bmm
+        a_b = torch.randn(2, 4, 8, device=device, dtype=dtype)
+        b_b = torch.randn(2, 8, 16, device=device, dtype=dtype)
+        a_b_cow = torch._lazy_clone(a_b)
+        b_b_cow = torch._lazy_clone(b_b)
+        torch.bmm(a_b_cow, b_b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(a_b_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_b_cow))
+
+        # addmm
+        bias = torch.randn(4, 16, device=device, dtype=dtype)
+        bias_cow = torch._lazy_clone(bias)
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        torch.addmm(bias_cow, a_cow, b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(bias_cow))
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        # matmul
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        torch.matmul(a_cow, b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+    def test_qlinear_cow_input(self, device):
+        M, K, N = 4, 8, 16
+        qx = torch.randint(-128, 127, (M, K), dtype=torch.int8, device=device)
+        qw = torch.randint(-128, 127, (K, N), dtype=torch.int8, device=device)
+        w_scale = torch.ones(N, dtype=torch.float32, device=device)
+        w_zp = torch.zeros(N, dtype=torch.int32, device=device)
+        bias = torch.zeros(N, dtype=torch.float32, device=device)
+        qx_cow = torch._lazy_clone(qx)
+        qw_cow = torch._lazy_clone(qw)
+        w_scale_cow = torch._lazy_clone(w_scale)
+        w_zp_cow = torch._lazy_clone(w_zp)
+        bias_cow = torch._lazy_clone(bias)
+        torch.ops.onednn.qlinear_pointwise(
+            qx_cow,
+            1.0,
+            0,
+            qw_cow,
+            w_scale_cow,
+            w_zp_cow,
+            bias_cow,
+            1.0,
+            0,
+            torch.float32,
+            "none",
+            [],
+            "",
+        )
+        self.assertTrue(torch._C._is_cow_tensor(qx_cow))
+        self.assertTrue(torch._C._is_cow_tensor(qw_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_scale_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_zp_cow))
+        self.assertTrue(torch._C._is_cow_tensor(bias_cow))
+
+    @dtypes(torch.float)
+    def test_sdpa_cow_input(self, device, dtype):
+        q = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        k = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        v = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        q_cow = torch._lazy_clone(q)
+        k_cow = torch._lazy_clone(k)
+        v_cow = torch._lazy_clone(v)
+        torch.nn.functional.scaled_dot_product_attention(q_cow, k_cow, v_cow)
+        self.assertTrue(torch._C._is_cow_tensor(q_cow))
+        self.assertTrue(torch._C._is_cow_tensor(k_cow))
+        self.assertTrue(torch._C._is_cow_tensor(v_cow))
+
+        # With attn_mask
+        mask = torch.zeros(2, 4, 8, 8, device=device, dtype=dtype)
+        mask_cow = torch._lazy_clone(mask)
+        q_cow = torch._lazy_clone(q)
+        k_cow = torch._lazy_clone(k)
+        v_cow = torch._lazy_clone(v)
+        torch.nn.functional.scaled_dot_product_attention(
+            q_cow, k_cow, v_cow, attn_mask=mask_cow
+        )
+        self.assertTrue(torch._C._is_cow_tensor(q_cow))
+        self.assertTrue(torch._C._is_cow_tensor(k_cow))
+        self.assertTrue(torch._C._is_cow_tensor(v_cow))
+        self.assertTrue(torch._C._is_cow_tensor(mask_cow))
+
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 

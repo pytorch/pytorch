@@ -1418,6 +1418,96 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ):
             self.assertTrue(torch.backends.mkldnn.allow_tf32)
 
+    @dtypes(torch.float)
+    def test_conv_cow_input(self, device, dtype):
+        # 1D
+        x1 = torch.randn(2, 4, 16, device=device, dtype=dtype)
+        w1 = torch.randn(8, 4, 3, device=device, dtype=dtype)
+        b1 = torch.randn(8, device=device, dtype=dtype)
+        x1_cow = torch._lazy_clone(x1)
+        w1_cow = torch._lazy_clone(w1)
+        b1_cow = torch._lazy_clone(b1)
+        F.conv1d(x1_cow, w1_cow, b1_cow)
+        self.assertTrue(torch._C._is_cow_tensor(x1_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w1_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b1_cow))
+
+        # 2D
+        x2 = torch.randn(2, 4, 8, 8, device=device, dtype=dtype)
+        w2 = torch.randn(8, 4, 3, 3, device=device, dtype=dtype)
+        b2 = torch.randn(8, device=device, dtype=dtype)
+        x2_cow = torch._lazy_clone(x2)
+        w2_cow = torch._lazy_clone(w2)
+        b2_cow = torch._lazy_clone(b2)
+        F.conv2d(x2_cow, w2_cow, b2_cow)
+        self.assertTrue(torch._C._is_cow_tensor(x2_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w2_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b2_cow))
+
+        # 3D
+        x3 = torch.randn(2, 4, 4, 8, 8, device=device, dtype=dtype)
+        w3 = torch.randn(8, 4, 3, 3, 3, device=device, dtype=dtype)
+        b3 = torch.randn(8, device=device, dtype=dtype)
+        x3_cow = torch._lazy_clone(x3)
+        w3_cow = torch._lazy_clone(w3)
+        b3_cow = torch._lazy_clone(b3)
+        F.conv3d(x3_cow, w3_cow, b3_cow)
+        self.assertTrue(torch._C._is_cow_tensor(x3_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w3_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b3_cow))
+
+        # Without bias
+        x2_nobias = torch._lazy_clone(x2)
+        w2_nobias = torch._lazy_clone(w2)
+        F.conv2d(x2_nobias, w2_nobias, None)
+        self.assertTrue(torch._C._is_cow_tensor(x2_nobias))
+        self.assertTrue(torch._C._is_cow_tensor(w2_nobias))
+
+    @dtypes(torch.float)
+    def test_deconv_cow_input(self, device, dtype):
+        # 1D
+        x1 = torch.randn(2, 8, 16, device=device, dtype=dtype)
+        w1 = torch.randn(8, 4, 3, device=device, dtype=dtype)
+        b1 = torch.randn(4, device=device, dtype=dtype)
+        x1_cow = torch._lazy_clone(x1)
+        w1_cow = torch._lazy_clone(w1)
+        b1_cow = torch._lazy_clone(b1)
+        F.conv_transpose1d(x1_cow, w1_cow, b1_cow)
+        self.assertTrue(torch._C._is_cow_tensor(x1_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w1_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b1_cow))
+
+        # 2D
+        x2 = torch.randn(2, 8, 8, 8, device=device, dtype=dtype)
+        w2 = torch.randn(8, 4, 3, 3, device=device, dtype=dtype)
+        b2 = torch.randn(4, device=device, dtype=dtype)
+        x2_cow = torch._lazy_clone(x2)
+        w2_cow = torch._lazy_clone(w2)
+        b2_cow = torch._lazy_clone(b2)
+        F.conv_transpose2d(x2_cow, w2_cow, b2_cow)
+        self.assertTrue(torch._C._is_cow_tensor(x2_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w2_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b2_cow))
+
+        # 3D
+        x3 = torch.randn(2, 8, 4, 8, 8, device=device, dtype=dtype)
+        w3 = torch.randn(8, 4, 3, 3, 3, device=device, dtype=dtype)
+        b3 = torch.randn(4, device=device, dtype=dtype)
+        x3_cow = torch._lazy_clone(x3)
+        w3_cow = torch._lazy_clone(w3)
+        b3_cow = torch._lazy_clone(b3)
+        F.conv_transpose3d(x3_cow, w3_cow, b3_cow)
+        self.assertTrue(torch._C._is_cow_tensor(x3_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w3_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b3_cow))
+
+        # Without bias
+        x2_nobias = torch._lazy_clone(x2)
+        w2_nobias = torch._lazy_clone(w2)
+        F.conv_transpose2d(x2_nobias, w2_nobias, None)
+        self.assertTrue(torch._C._is_cow_tensor(x2_nobias))
+        self.assertTrue(torch._C._is_cow_tensor(w2_nobias))
+
 
 instantiate_device_type_tests(
     TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True
