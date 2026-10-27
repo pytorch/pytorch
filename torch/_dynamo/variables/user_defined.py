@@ -62,7 +62,7 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -114,6 +114,7 @@ from .base import (
     MutationType,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    REPR_ADDRESS_PLACEHOLDER,
     ValueMutationNew,
     VariableTracker,
 )
@@ -125,12 +126,12 @@ from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
-    generic_repr,
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
     pynumber_as_ssize_t,
     pynumber_index,
+    repr_guard,
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
@@ -576,9 +577,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.call_method(tx, "__repr__", [], {})
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # type has no tp_str of its own: unless the metaclass defines __str__,
+        # this is object_str, which calls tp_repr.
         metaclass = type(self.value)
-        if metaclass is type or metaclass.__str__ is type.__str__:
-            return generic_repr(tx, self)
+        if metaclass.__str__ is object.__str__:
+            return super().tp_str_impl(tx)
 
         type_attr = self.lookup_metaclass_attr("__str__")
         if type_attr is None:
@@ -769,6 +772,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
+        if (
+            source is not None
+            and name == "from_tensor"
+            and isinstance(cls_attr, (staticmethod, classmethod))
+        ):
+            from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+            if has_triton_tensor_descriptor_host_tma():
+                from triton.tools.tensor_descriptor import TensorDescriptor
+
+                if issubclass(self.value, TensorDescriptor):
+                    factory = cls_attr.__get__(None, self.value)
+                    return VariableTracker.build(tx, factory, source)
+
         if isinstance(cls_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -2252,22 +2269,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
-        # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
-        if self.inherits_base_slot("__repr__"):
+        # The type's tp_repr is its C base's or object_repr unless the class
+        # defines __repr__, which installs slot_tp_repr.
+        cls = type(self.value)
+        if self.inherits_base_slot("__repr__") or cls.__repr__ is object.__repr__:
             return super().tp_repr_impl(tx)
-        if type(self.value).__repr__ is object.__repr__:
-            return VariableTracker.build(tx, repr(self.value))
-        # A C-implemented __repr__ (e.g. `__repr__ = str.upper`) has no Python
-        # body to trace and graph breaks in _maybe_call_special.
+        # slot_tp_repr: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
         res = self._maybe_call_special(tx, "__repr__", [])
         if res is not None:
             return res
-        unimplemented(
-            gb_type="untraceable user-defined __repr__",
-            context=f"Could not trace __repr__ override for {type(self.value).__name__}",
-            explanation="Dynamo could not safely trace this user-defined __repr__ override.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-            skip_frame=True,
+        return VariableTracker.build(
+            tx, f"<{cls.__name__} object at {REPR_ADDRESS_PLACEHOLDER}>"
         )
 
     def tp_str_impl(
@@ -2275,9 +2287,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/typeobject.c#L9475
-        if type(self.value).__str__ is object.__str__:
-            return generic_repr(tx, self)
-        if self.inherits_base_slot("__str__"):
+        if type(self.value).__str__ is object.__str__ or self.inherits_base_slot(
+            "__str__"
+        ):
             return super().tp_str_impl(tx)
         return self.SLOT0(tx, "__str__")
 
@@ -3834,6 +3846,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Step 6: __getattr__ fallback.
         result = self.call_getattr_fallback(tx, name)
         if result is not None:
+            if (
+                self.source
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                # A pending deletion in the traced code can reach here with the
+                # name still in the live dict; guarding absence then would fail
+                # on the frame it was created.
+                install_not_in_instance_dict_guard(self.source, name)
             return result
 
         # Step 7: AttributeError.
@@ -5094,32 +5116,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             return f"{type(self.value).__name__}({{{contents}}})"
         return super().debug_repr()
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L748-L757
-        if self.inherits_base_slot("__repr__"):
-            return super().tp_repr_impl(tx)
-        if type(self.value).__repr__ is collections.Counter.__repr__:
-            base_vt = cast(ConstDictVariable, self)
-            items = list(base_vt.items.items())
-            try:
-                items = sorted(
-                    items,
-                    key=lambda item: item[1].as_python_constant(),
-                    reverse=True,
-                )
-            except (NotImplementedError, TypeError):
-                pass
-            if not items:
-                return VariableTracker.build(tx, f"{type(self.value).__name__}()")
-            contents = ", ".join(
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in items
-            )
-            return VariableTracker.build(
-                tx, f"{type(self.value).__name__}({{{contents}}})"
-            )
-        return super().tp_repr_impl(tx)
-
 
 class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariable):
     """
@@ -5183,6 +5179,7 @@ class DefaultDictVariable(ConstDictVariable):
                 variables.BaseBuiltinVariable,
                 variables.functions.BaseUserFunctionVariable,
                 variables.functions.PolyfilledFunctionVariable,
+                variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
                 variables.UserDefinedClassVariable,
             ),
         )
@@ -5211,13 +5208,13 @@ class DefaultDictVariable(ConstDictVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2373-L2405
-        # defdict_repr calls PyDict_Type.tp_repr directly, so use the base impl
-        # instead of generic_repr: the cycle guard already holds this object and
-        # would report a false cycle.
+        # defdict_repr calls PyDict_Type.tp_repr directly and guards only the
+        # default_factory repr.
         base = super().tp_repr_impl(tx).as_python_constant()
+        with repr_guard(self.default_factory) as recursive:
+            factory = "..." if recursive else tracked_repr(tx, self.default_factory)
         return VariableTracker.build(
-            tx,
-            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, {base})",
+            tx, f"{self.python_type_name()}({factory}, {base})"
         )
 
     def _set_default_factory(
@@ -5985,9 +5982,6 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         cls = type(self.value)
         return "namespace" if cls is types.SimpleNamespace else cls.__name__
 
-    def repr_recursive_sentinel(self) -> str:
-        return f"{self._repr_name()}(...)"
-
     def _merge_args(
         self,
         tx: "InstructionTranslatorBase",
@@ -6099,12 +6093,19 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        repr_slot = types.SimpleNamespace.__repr__
-        if self._maybe_get_baseclass_method("__repr__") is not repr_slot:
+        if (
+            self._maybe_get_baseclass_method("__repr__")
+            is not types.SimpleNamespace.__repr__
+        ):
             return super().tp_repr_impl(tx)
-        contents = ", ".join(
-            f"{attr}={tracked_repr(tx, value)}" for attr, value in self._attr_items(tx)
-        )
+        # https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c#L72-L143
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, f"{self._repr_name()}(...)")
+            contents = ", ".join(
+                f"{attr}={tracked_repr(tx, value)}"
+                for attr, value in self._attr_items(tx)
+            )
         return VariableTracker.build(tx, f"{self._repr_name()}({contents})")
 
     def tp_richcompare_impl(
