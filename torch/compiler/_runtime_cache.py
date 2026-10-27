@@ -524,14 +524,15 @@ def _freeze_untuned_backward(
             ]
             if not static:
                 continue
-            chosen = next(
+            chosen_launcher, chosen = next(
                 (
-                    result
+                    (launcher, result)
                     for launcher, result in static
                     if not kernel._skips_for_spilling(launcher)
                 ),
-                static[0][1],
+                static[0],
             )
+            spills = kernel._skips_for_spilling(chosen_launcher)
             saved, saved_result = _detached_for_freeze(kernel, chosen)
             kernel_name = kernel.inductor_meta.get("kernel_name")
             compile_id = getattr(kernel, "compile_id", None)
@@ -551,6 +552,8 @@ def _freeze_untuned_backward(
             "compile_id": str(compile_id) if compile_id is not None else None,
             "direction": "backward",
             "static_config_count": len(static),
+            # Every config spilled past the autotuning threshold, so it froze one too.
+            "spills": spills,
         }
     return None
 
@@ -816,9 +819,10 @@ def _report_untuned_triton_kernels(untuned: list[dict[str, object]]) -> None:
     log.warning(
         "precompile: %d backward Triton kernel(s) that no captured step ran, or "
         "that were loaded from a record frozen untuned, are frozen untuned, each "
-        "with the first of its static configs that does not spill registers past "
-        "the autotuning threshold: %s. The "
-        "precompile_triton_untuned_kernels artifact lists them all.",
+        "with the first of its static configs that autotuning would not skip for "
+        "spilling registers (the first, if all spill): %s. The "
+        "precompile_triton_untuned_kernels artifact lists them all, and which "
+        "spill.",
         len(names),
         ", ".join(names[:5]) + (", ..." if len(names) > 5 else ""),
     )
@@ -855,8 +859,8 @@ def freeze_runtime_cache(
     kernel that cannot be frozen raises, since precompile.load could not serve
     it without compiling. The exception, unless ``require_tuned_backward``, is a
     backward kernel no instance ever launched: it is frozen untuned, with its
-    first loaded static config that does not spill past the autotuning threshold,
-    and reported. So is, launched or not, a backward kernel loaded in this process
+    first loaded static config that autotuning would not skip for spilling
+    registers (the first, if all spill), and reported. So is, launched or not, a backward kernel loaded in this process
     from an artifact that froze it untuned, which running it cannot tune.
     The caller must stop compiling before calling this: a kernel compiled on
     another thread meanwhile is neither waited on nor frozen.
