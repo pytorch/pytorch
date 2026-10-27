@@ -2863,7 +2863,7 @@ DEFINE_DISPATCH(linalg_eig_stub);
 
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
   // The MPS impl only operates on complex inputs
-  if (input.is_mps() && !input.is_complex()) {
+  if (input.is_mps() && input.scalar_type() == c10::kFloat) {
     return linalg_eig_out_info(input.to(toComplexType(input.scalar_type())), values, vectors, infos, compute_eigenvectors);
   }
 
