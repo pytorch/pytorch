@@ -1966,6 +1966,56 @@ class TestFX(JitTestCase):
             [node.target for node in graph.nodes if node.op == "call_module"], ["sub"]
         )
 
+    def test_lazy_import_can_run_a_compiled_function(self):
+        compiled = torch.compile(lambda t: t + 1, backend="eager")
+
+        def m_forward(self, x):
+            return self.sub(x)
+
+        # With Dynamo refusing to compile under an FX trace (the default), and with
+        # it compiling anyway, reverting FX's patches itself.
+        for force in (False, True):
+            unresolved = object()
+            results = []
+
+            class Globals(dict):
+                def __getitem__(self, name):
+                    value = dict.__getitem__(self, name)
+                    if value is unresolved:
+                        # A module body that runs a compiled function at import.
+                        results.append(compiled(torch.ones(1)))
+                        value = object()
+                        dict.__setitem__(self, name, value)
+                    return value
+
+            class M(torch.nn.Module):
+                forward = types.FunctionType(
+                    m_forward.__code__,
+                    Globals(__builtins__=builtins, helper=unresolved),
+                    "forward",
+                )
+
+                def __init__(self):
+                    super().__init__()
+                    self.sub = torch.nn.ReLU()
+
+            torch._dynamo.reset()
+            with (
+                self.subTest(force_compile_during_fx_trace=force),
+                torch._dynamo.config.patch(force_compile_during_fx_trace=force),
+                unittest.mock.patch.object(
+                    importlib,
+                    "is_lazy_import",
+                    lambda d, name: dict.__getitem__(d, name) is unresolved,
+                    create=True,
+                ),
+            ):
+                graph = torch.fx.Tracer().trace(M())
+                self.assertEqual(results, [torch.full((1,), 2.0)])
+                self.assertEqual(
+                    [n.target for n in graph.nodes if n.op == "call_module"], ["sub"]
+                )
+
     def test_autowrap_under_a_lazy_import_runtime(self):
         # -L alone is not enough: torch imports under lazy imports only on a runtime
         # set up for them (e.g. a Cinder target with lazy imports enabled), which

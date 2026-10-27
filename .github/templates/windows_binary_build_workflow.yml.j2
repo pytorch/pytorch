@@ -93,7 +93,7 @@ jobs:
       matrix:
         include:
         {%- for config in build_configs %}
-          - desired_python: "!{{ config['python_version'] | default('3.10') }}"
+          - desired_python: "!{{ config['python_version'] | default('3.11') }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
             gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
@@ -217,7 +217,7 @@ jobs:
             {%- set _runs_on = "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge.nonephemeral" %}
           {%- endif %}
         {%- endif %}
-          - desired_python: "!{{ config['python_version'] | default('3.10') }}"
+          - desired_python: "!{{ config['python_version'] | default('3.11') }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
             gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
@@ -306,7 +306,7 @@ jobs:
       matrix:
         include:
         {%- for config in build_configs %}
-          - desired_python: "!{{ config['python_version'] | default('3.10') }}"
+          - desired_python: "!{{ config['python_version'] | default('3.11') }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
             gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
