@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -320,6 +321,9 @@ class TestSparseCompressedDevice(TestCase):
         device_type = torch.device(device).type
         if device_type == 'mps':
             # TODO: remove when _validate_compressed_sparse_indices supports MPS
+            idx = torch.zeros(2, dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(NotImplementedError, "_validate_compressed_sparse_indices"):
+                torch._validate_compressed_sparse_indices(True, idx, idx[:0], 1, 1, 0)
             torch.sparse.check_sparse_tensor_invariants.disable()
 
         if input_kind == 'list' and shape_and_device_inference:
@@ -737,10 +741,11 @@ class TestSparseCompressedDevice(TestCase):
                     lambda: torch.empty_like(sparse, layout=layout2)
                 )
 
-    @skipMPS
+    @expectedFailureMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types())
     def test_validate(self, layout, device, dtype):
         def make_zero_batched(t):
             return torch.empty(*((0,) + t.shape), dtype=t.dtype, device=t.device)
@@ -992,7 +997,7 @@ class TestSparseCompressedDevice(TestCase):
                    shape((2, 3)),
                    rf'Expected all tensors to be on the same device, but found at least two devices, {device_type}:0 and {device_type}:1!')
 
-    @skipMPS
+    @expectedFailureMPS
     @skipMeta
     @all_sparse_compressed_layouts()
     @parametrize('target', [subtest('validate_sparse_compressed_tensor_args'),
@@ -1119,6 +1124,9 @@ class TestSparseCompressedDevice(TestCase):
     def test_to_device(self, layout, device, index_dtype):
         if torch.device(device).type == 'mps':
             # TODO: remove when _validate_compressed_sparse_indices supports MPS
+            idx = torch.zeros(2, dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(NotImplementedError, "_validate_compressed_sparse_indices"):
+                torch._validate_compressed_sparse_indices(True, idx, idx[:0], 1, 1, 0)
             torch.sparse.check_sparse_tensor_invariants.disable()
         for expected in self.generate_simple_inputs(layout, dtype=torch.float32, index_dtype=index_dtype):
             sparse = expected.to(device)
