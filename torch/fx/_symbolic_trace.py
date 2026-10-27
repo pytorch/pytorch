@@ -1309,8 +1309,8 @@ def _resolve_lazy_imports(
     in, reverted.
 
     Reading an unresolved lazy import runs its module body, which must not see the
-    globals FX patches mid-trace or FX's tracing flag. ``importlib.is_lazy_import`` exists only on PEP
-    690-style lazy-import runtimes (e.g. Cinder).
+    globals FX patches mid-trace or FX's tracing flag. ``importlib.is_lazy_import``
+    exists only on PEP 690-style lazy-import runtimes (e.g. Cinder).
     """
     is_lazy_import = getattr(importlib, "is_lazy_import", None)
     if is_lazy_import is None:
