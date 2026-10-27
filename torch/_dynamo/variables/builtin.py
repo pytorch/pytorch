@@ -3988,15 +3988,10 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     input_node = obj.as_proxy().node
                     if input_node.op == "placeholder":
                         ev = input_node.meta.get("example_value")
-                        from torch._subclasses.fake_tensor import (
-                            is_fake_tensor,
-                            maybe_get_fake_mode,
-                        )
-
-                        if is_fake_tensor(ev):
+                        if ev is not None and hasattr(ev, "fake_mode"):
                             from torch._subclasses.fake_impls import fast_detach
 
-                            snapshot = fast_detach(maybe_get_fake_mode(ev), ev)
+                            snapshot = fast_detach(ev.fake_mode, ev)
                             tx.output._shallow_copy_placeholder_snapshots.setdefault(
                                 input_node, snapshot
                             )
