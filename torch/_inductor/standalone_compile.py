@@ -527,6 +527,7 @@ STANDALONE_PYTHON_PINS: dict[str, Any] = {
     "benchmark_harness": False,
     "cpp_wrapper": False,
     "freezing": False,
+    "fx_wrapper": False,
     "triton.autotune_at_compile_time": True,
 }
 
