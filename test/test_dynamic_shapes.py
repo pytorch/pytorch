@@ -4297,6 +4297,48 @@ class TestUnbacked(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"zuf\d+ >= 5\.5"):
                 func(torch.tensor([100]), torch.tensor([1.5]))
 
+    # https://github.com/pytorch/pytorch/issues/198070
+    # Sympy folds zuf0 != zuf0 to False (and zuf0 - zuf0 to 0, etc.), which is
+    # only valid when zuf0 is not NaN, so we assert that at runtime.
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_unbacked_symfloat_not_nan_assert(self, backend):
+        def step(loss, param):
+            v = loss.item()
+            if v != v:
+                return param
+            return param - 0.1 * v
+
+        func = torch.compile(step, fullgraph=True, backend=backend)
+        param = torch.ones(2)
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor(1.5), param), step(torch.tensor(1.5), param)
+            )
+            with self.assertRaisesRegex(RuntimeError, r"IsNaN\(zuf\d+\)"):
+                func(torch.tensor(float("nan")), param)
+
+    def test_isnan_sympy(self):
+        from torch.utils._sympy.functions import IsNaN
+
+        zuf0 = sympy.Symbol("zuf0")
+        u0 = sympy.Symbol("u0", integer=True)
+        self.assertEqual(IsNaN(sympy.nan), sympy.true)
+        self.assertEqual(IsNaN(sympy.Float(1.5)), sympy.false)
+        self.assertEqual(IsNaN(u0), sympy.false)
+        # Must stay opaque: not folded away by sympy logic simplification.
+        self.assertEqual(sympy.simplify(sympy.Not(IsNaN(zuf0))), sympy.Not(IsNaN(zuf0)))
+        self.assertFalse(torch._sym_isnan(1.0))
+        self.assertTrue(torch._sym_isnan(float("nan")))
+
+        shape_env = ShapeEnv()
+        f = shape_env.create_unbacked_symfloat()
+        self.assertIsInstance(torch._sym_isnan(f), torch.SymBool)
+        self.assertIn(
+            sympy.Not(IsNaN(f.node.expr)),
+            [ra.expr for ra in shape_env.deferred_runtime_asserts[f.node.expr]],
+        )
+
     # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
     # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)

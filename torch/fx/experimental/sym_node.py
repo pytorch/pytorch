@@ -429,6 +429,9 @@ class SymNode:
     def is_integer(self) -> SymNode:
         return self._is_integer()  # type: ignore[attr-defined]
 
+    def sym_isnan(self) -> SymNode:
+        return self._sym_isnan()  # type: ignore[attr-defined]
+
     def sym_float(self) -> SymNode:
         return self._sym_float()  # type: ignore[attr-defined]
 
@@ -764,6 +767,7 @@ METHOD_TO_OPERATOR = {
     "sym_max": sym_max,
     "sym_min": sym_min,
     "sym_not": sym_not,
+    "sym_isnan": torch._sym_isnan,  # type: ignore[attr-defined]
     "float_truediv": operator.truediv,
     "int_truediv": operator.truediv,
     "xor": operator.xor,
@@ -779,6 +783,7 @@ unary_magic_methods = {
     "sym_not",
     "pos",
     "trunc",
+    "sym_isnan",
 }
 
 
@@ -832,7 +837,7 @@ also_bool_magic_methods = {"eq", "ne"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 # Methods that are only for float
-only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
+only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2", "sym_isnan"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
@@ -861,6 +866,7 @@ always_bool_magic_methods = {
     "sym_not",
     "is_non_overlapping_and_dense",
     "is_integer",
+    "sym_isnan",
 }
 
 # Methods that have a `__foo__` as well as `__rfoo__`
@@ -1239,6 +1245,12 @@ def _sympy_is_integer(a: sympy.Basic) -> sympy.Basic:
     return sympy.Eq(ToFloat(sympy.floor(a)), a)
 
 
+def _sympy_isnan(a: sympy.Basic) -> sympy.Basic:
+    from torch.utils._sympy.functions import IsNaN
+
+    return IsNaN(a)
+
+
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": operator.invert,
@@ -1260,6 +1272,7 @@ magic_methods = {
     "abs": _sympy_abs,
     "round": _sympy_round,
     "is_integer": _sympy_is_integer,
+    "sym_isnan": _sympy_isnan,
 }
 
 

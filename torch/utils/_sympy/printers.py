@@ -332,6 +332,12 @@ class PythonPrinter(ExprPrinter):
         # pyrefly: ignore [missing-attribute]
         return f"math.log2({self._print(expr.args[0])})"
 
+    def _print_IsNaN(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 1:
+            raise AssertionError("IsNaN expects exactly one argument")
+        # pyrefly: ignore [missing-attribute]
+        return f"math.isnan({self._print(expr.args[0])})"
+
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError("RoundToInt expects exactly one argument")
@@ -633,6 +639,10 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         # pyrefly: ignore [missing-attribute]
         return f"std::log2({self._print(expr.args[0])})"
+
+    def _print_IsNaN(self, expr: sympy.Expr) -> str:
+        # pyrefly: ignore [missing-attribute]
+        return f"std::isnan({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:

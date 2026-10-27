@@ -3219,7 +3219,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
+        # 4 ops + 3 for the runtime assert that the unbacked float is not NaN
+        # (_sym_isnan, sym_not, _assert_scalar).
+        self.assertEqual(cnts.op_count, 7)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):

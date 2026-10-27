@@ -1052,6 +1052,9 @@ class SymFloat(_SymTypingMagic[builtins.float, "SymFloat", _Never]):
     def __sym_log2__(self) -> "SymFloat":
         raise TypeError("type stub not overridden")
 
+    def __sym_isnan__(self) -> "SymBool":
+        raise TypeError("type stub not overridden")
+
     def is_integer(self) -> builtins.bool:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
@@ -1397,6 +1400,7 @@ for __name in (
     "acos",
     "atan",
     "log2",
+    "isnan",
 ):
     __sym_name = f"_sym_{__name}"
     __fn = _get_sym_math_fn(__name)
