@@ -7679,13 +7679,17 @@ class TestPrecompileRuntimeCache(TestCase):
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("first_spills", (False, True))
-    def test_static_export_freezes_a_never_run_kernel(self, first_spills):
+    @parametrize("custom_kernel", (False, True))
+    def test_static_export_freezes_a_never_run_kernel(
+        self, first_spills, custom_kernel
+    ):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
         kernel = _never_run_kernel(32, 64)
+        # Autotuning skips a spilling config, except in a user-written kernel.
+        kernel.custom_kernel = custom_kernel
         if first_spills:
-            # Autotuning would skip the first config, so the second is frozen.
             kernel.launchers[0].n_spills = 1000
         kernel.inductor_meta["coordinate_descent_tuning"] = True
         kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
@@ -7694,7 +7698,7 @@ class TestPrecompileRuntimeCache(TestCase):
         with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
             payload, untuned = _freeze_triton_kernel("source", [kernel])
         saved = pickle.loads(payload).kernel
-        block = 64 if first_spills else 32
+        block = 64 if first_spills and not custom_kernel else 32
         self.assertEqual(saved.compile_results[0].config.kwargs, {"XBLOCK": block})
         self.assertFalse(saved.inductor_meta["coordinate_descent_tuning"])
         self.assertIsNone(saved.inductor_meta["combo_tuning_groups"])
@@ -7703,18 +7707,32 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(kernel.inductor_meta, live_meta)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    def test_static_export_refuses_a_never_run_forward_kernel(self):
+    @parametrize("failure", ("forward", "non_static", "cubin_unavailable"))
+    def test_static_export_refuses_a_never_run_kernel_it_cannot_freeze(self, failure):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler._runtime_cache import (
             _freeze_triton_kernel,
             _UnresolvedTritonExport,
         )
 
         kernel = _never_run_kernel(32, 64)
-        kernel.is_backward = False
-        with self.assertRaises(_UnresolvedTritonExport) as failure:
+        reasons = ["launcher_count_not_one"]
+        reload_cubin = mock.patch.object(StaticTritonCompileResult, "reload_cubin_path")
+        if failure == "forward":
+            kernel.is_backward = False
+        elif failure == "non_static":
+            for launcher in kernel.launchers:
+                launcher._compile_result = object()
+        else:
+            reload_cubin = mock.patch(
+                "torch.compiler._runtime_cache._retain_cubin",
+                side_effect=OSError("missing binary"),
+            )
+            reasons.append("cubin_unavailable")
+        with reload_cubin, self.assertRaises(_UnresolvedTritonExport) as failed:
             _freeze_triton_kernel("source", [kernel])
-        (rejected,) = failure.exception.sources[0]["instances"]
-        self.assertEqual(rejected["reason"], "launcher_count_not_one")
+        rejected = failed.exception.sources[0]["instances"]
+        self.assertEqual([r["reason"] for r in rejected], reasons)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_refuses_a_never_run_kernel_beside_another_rejection(self):
@@ -7754,7 +7772,7 @@ class TestPrecompileRuntimeCache(TestCase):
             payload = _runtime_cache._freeze_triton_kernels(kernels)
         self.assertEqual(len(pickle.loads(payload)), 8)
         (message,) = logs.output
-        self.assertIn("froze 7 Triton kernels", message)
+        self.assertIn("froze 7 backward Triton kernels", message)
         self.assertIn("kernel_0, kernel_1, kernel_2, kernel_3, kernel_4, ...", message)
         self.assertNotIn("kernel_5", message)
 
