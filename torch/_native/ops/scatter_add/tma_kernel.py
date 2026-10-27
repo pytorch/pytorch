@@ -62,6 +62,7 @@ import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._ptx import cvta_smem, make_bulk_reduce_add
+from .cutedsl_impl import _SRC_ALIGN_BYTES, _TMA_DST_ALIGN_BYTES
 
 
 _MAX_CHUNK_BYTES = 512
@@ -354,15 +355,15 @@ def _compile_tma_scatter(torch_dtype: torch.dtype):
     # 16B-aligned src/out pointers and row strides, 16B-multiple rows.
     div = min_d_divisor_for(torch_dtype)
 
-    def fake_2d():
+    def fake_2d(align):
         return cute.runtime.make_fake_tensor(
             dtype,
             (cute.sym_int(), cute.sym_int(divisibility=div)),
             stride=(cute.sym_int64(divisibility=div), 1),
-            assumed_align=16,
+            assumed_align=align,
         )
 
-    mSrc_fake, mOut_fake = fake_2d(), fake_2d()
+    mSrc_fake, mOut_fake = fake_2d(_SRC_ALIGN_BYTES), fake_2d(_TMA_DST_ALIGN_BYTES)
     # Index is guaranteed contiguous by _flatten_for_expanded_1d; fix
     # stride=1 so `mIndex[i]` doesn't emit a runtime stride multiply.
     mIndex_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
@@ -393,7 +394,7 @@ def min_d_divisor_for(dtype: torch.dtype) -> int:
     i.e. ``D % (16 / sizeof(dtype)) == 0``. fp32: %4, bf16/fp16: %8.
     Supported dtypes' itemsize divides 16, so plain // suffices.
     """
-    return 16 // dtype.itemsize
+    return _TMA_DST_ALIGN_BYTES // dtype.itemsize
 
 
 def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
@@ -406,7 +407,7 @@ def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
     16-aligned). Rows that aren't multiples of ``chunk_elems`` are
     handled via the TMA descriptor's OOB-clamp-to-zero behavior.
     """
-    return (N * dtype.itemsize) % 16 == 0
+    return (N * dtype.itemsize) % _TMA_DST_ALIGN_BYTES == 0
 
 
 def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int]:

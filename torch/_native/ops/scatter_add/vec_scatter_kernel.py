@@ -27,6 +27,7 @@ import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._ptx import make_packed_half_atomic_add
+from .cutedsl_impl import _SRC_ALIGN_BYTES, _VEC_DST_ALIGN_BYTES
 
 
 _WARPS_PER_BLOCK = 8
@@ -208,17 +209,18 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, contig: bool):
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype,
         (cute.sym_int(), cute.sym_int(divisibility=vec_elems)),
-        stride=(cute.sym_int64(divisibility=vec_elems), 1),
-        assumed_align=_VEC_BYTES,
+        stride=(cute.sym_int64(divisibility=_SRC_ALIGN_BYTES // elem_bytes), 1),
+        assumed_align=_SRC_ALIGN_BYTES,
     )
     # Index is contiguous (see _flatten_for_expanded_1d); fix stride=1
     # so `mIndex[i]` doesn't emit a runtime stride multiply.
     mIndex_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
+    dst_div = max(1, _VEC_DST_ALIGN_BYTES // elem_bytes)
     mOut_fake = cute.runtime.make_fake_tensor(
         dtype,
         (cute.sym_int(), cute.sym_int(divisibility=vec_elems)),
-        stride=(cute.sym_int64(divisibility=max(1, 4 // elem_bytes)), 1),
-        assumed_align=4,
+        stride=(cute.sym_int64(divisibility=dst_div), 1),
+        assumed_align=_VEC_DST_ALIGN_BYTES,
     )
     return cute.compile(
         launcher,
