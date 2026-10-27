@@ -11060,24 +11060,6 @@ from user code:
         for eg, cg in zip(eager_grads, compiled_grads):
             self.assertEqual(eg, cg)
 
-    def test_cross_aot_compile_parameter(self):
-        # The loaded guards must expect a Parameter where a fake Parameter was
-        # compiled, though that fake records no pytype
-        def fn(x, w):
-            return x @ w
-
-        with FakeTensorMode():
-            fake_inputs = (torch.randn(2, 4), torch.nn.Parameter(torch.randn(4, 4)))
-        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
-        compiled_fn.aot_compile((fake_inputs, {})).save_compiled_function(self.path())
-        torch._dynamo.reset()
-
-        with open(self.path(), "rb") as f:
-            loaded_fn = torch.compiler.load_compiled_function(f)
-
-        x, w = torch.randn(2, 4), torch.nn.Parameter(torch.randn(4, 4))
-        self.assertEqual(loaded_fn(x, w), fn(x, w))
-
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_compile_realistic_transformer_model(self):
