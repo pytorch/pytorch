@@ -60,6 +60,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -300,6 +301,7 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
+        track_fake_tensor_for_export(obj)
     elif isinstance(obj, (_AnyScriptObject)) or is_custom_class_obj(obj):
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
