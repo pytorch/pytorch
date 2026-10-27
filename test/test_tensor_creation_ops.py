@@ -113,6 +113,52 @@ class TestTensorCreation(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
+    @onlyCPU
+    @dtypes(torch.uint8, torch.uint16, torch.uint32)
+    def test_unsigned_scalar_ingestion_wrapping(self, device, dtype):
+        maximum = torch.iinfo(dtype).max
+        for value, wrapped in ((-1, maximum), (-maximum, 1), (0, 0), (maximum, maximum)):
+            expected = torch.tensor([wrapped], dtype=dtype, device=device)
+            self.assertEqual(torch.tensor([value], dtype=dtype, device=device), expected)
+            assigned = torch.zeros(1, dtype=dtype, device=device)
+            assigned[0] = value
+            self.assertEqual(assigned, expected)
+            self.assertEqual(torch.full((1,), value, dtype=dtype, device=device), expected)
+
+    @onlyCPU
+    @dtypes(torch.uint8, torch.uint16, torch.uint32)
+    @parametrize("negative", [False, True])
+    def test_unsigned_scalar_ingestion_overflow(self, device, dtype, negative):
+        value = torch.iinfo(dtype).max + 1
+        if negative:
+            value = -value
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.tensor([value], dtype=dtype, device=device)
+        assigned = torch.zeros(1, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            assigned[0] = value
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.full((1,), value, dtype=dtype, device=device)
+
+    @onlyCPU
+    def test_uint64_scalar_assignment_rejects_negative(self, device):
+        assigned = torch.zeros(1, dtype=torch.uint64, device=device)
+        with self.assertRaisesRegex(OverflowError, "negative.*unsigned"):
+            assigned[0] = -1
+        self.assertEqual(assigned, torch.zeros_like(assigned))
+
+    @onlyCPU
+    def test_uint64_scalar_full_preserves_wrapping(self, device):
+        expected = torch.tensor(
+            [torch.iinfo(torch.uint64).max], dtype=torch.uint64, device=device)
+        self.assertEqual(
+            torch.full((1,), -1, dtype=torch.uint64, device=device), expected)
+
+    @onlyCPU
+    def test_uint64_scalar_constructor_rejects_negative(self, device):
+        with self.assertRaisesRegex(OverflowError, "negative.*unsigned"):
+            torch.tensor([-1], dtype=torch.uint64, device=device)
+
     @dtypes(torch.float)
     def test_diag_embed(self, device, dtype):
         x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
