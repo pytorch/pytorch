@@ -1437,6 +1437,7 @@ def _build_render_stages(
     # parent and must keep its full extent -- so it is excluded). Clamp each op's end to the next
     # op's start on the same (gpu, stream) lane.
     ann_iid = next(i for ks, i, _n, _c in _RENDER_STAGES if ks == "gpu_annotation")
+    raw_dur = dur
     end = ts + dur
     sub = np.nonzero(stage != ann_iid)[0]
     # A lane is (gpu, stream), never a bare stream: the same stream id on two devices is two
@@ -1452,6 +1453,9 @@ def _build_render_stages(
         cap = np.where(same, nxt_ts, np.iinfo(np.int64).max)
         end[order] = np.maximum(ts[order], np.minimum(end[order], cap))
         dur = end - ts
+    # The clamp is display-only: keep each clamped op's CUPTI duration so consumers can
+    # recover the exact timing the chrome export reports (0 = not clamped, skipped).
+    unclamped_dur = np.where(dur != raw_dur, raw_dur, 0)
     # One lane per (gpu, stream); lanes are split per gpu_id by Perfetto from
     # (gpu_id, stream_iid). Interning on the same (gpu, stream) key keeps each device's names
     # its own -- the iid table is global, so interning on the bare stream would let one device's
@@ -1519,6 +1523,7 @@ def _build_render_stages(
         event_wait,
     )
     extra = [(k, np.concatenate(extra_p[k]), s) for k, _g, s in _RENDER_EXTRA]
+    extra.append(("unclamped duration ns", unclamped_dur, True))
     dims = tuple(np.concatenate(dim_p[k]) for k in _LAUNCH_DIMS)
     launch_args = [
         (iid, np.concatenate(arg_p[iid]), True) for iid, _n, _g in _COMPUTE_ARGS
@@ -2339,6 +2344,12 @@ def _window_to_pftrace(
         render,
         counters,
         compression_level,
+        # The chrome export's top-level fields (distributedInfo, deviceProperties, ...).
+        [
+            (key, json.dumps(value))
+            for key, value in cpu_data.items()
+            if key not in ("traceEvents", "traceName")
+        ],
     )
     with open(output_path, "wb") as f:
         f.write(out)

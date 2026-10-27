@@ -2328,6 +2328,154 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertEqual(extra["dtype"], "bf16")
         self.assertEqual(extra["In msg nelems"], "1024")
 
+    def test_pftrace_keeps_unclamped_duration_and_chrome_metadata(self):
+        # The .pftrace export keeps what the chrome export of the same window carries: a GPU
+        # render stage clamped to the next op's start on its lane keeps its CUPTI duration as
+        # "unclamped duration ns" extra_data (only when clamped), and the chrome JSON's
+        # top-level fields are written as ChromeMetadata (name + json_value). Runs the REAL
+        # native encoder, gunzips, decodes the protobuf. No CUDA. Field numbers (perfetto.h):
+        # TracePacket.chrome_events=5, gpu_render_stage_event=53; ChromeEventBundle.metadata=2;
+        # ChromeMetadata.name=1, json_value=5; GpuRenderStageEvent.event_id=1, extra_data=6;
+        # ExtraData.name=1, ExtraData.value=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # Two eager kernels on one (gpu, stream) lane: A [1000, 3000) overlaps B [2000, 2500),
+        # so A is clamped to end at 2000 (its 2000ns CUPTI duration must survive); B is not.
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 2000),
+                "end_ns": i64(3000, 2500),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 51),
+                "graph_id": i64(0, 0),
+                "graph_node_id": i64(0, 0),
+                "name": np.array(["k_a", "k_b"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "metadata": np.array([None, None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        distributed_info = {"backend": "nccl", "rank": 3, "world_size": 8}
+
+        # Decode the protobuf varint at b[i] (7 bits per byte, LSB group first, high bit set
+        # on every byte but the last); return (value, offset past it).
+        def rv(b, i):
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        # Split one protobuf message into [(field_no, wire_type, value)]. Each field is a
+        # varint key (field_no << 3 | wire_type) then its value: varints (wt 0) are decoded,
+        # length-delimited fields (wt 2: strings, bytes, nested messages) are returned as raw
+        # bytes for the caller to decode or recurse into, and fixed32/fixed64 (wt 5/1) are
+        # skipped.
+        def flds(b):
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "baseTimeNanoseconds": 0,
+                            "distributedInfo": distributed_info,
+                            "traceName": "cpu.json",
+                            "traceEvents": [],
+                        }
+                    ).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        per_stage: dict[int, dict] = {}
+        chrome_md: dict[str, str] = {}
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn == 53:
+                    event_id = 0
+                    pairs: dict = {}
+                    for sfn, _swt, sv in flds(v):
+                        if sfn == 1:
+                            event_id = sv
+                        elif sfn == 6:
+                            name = value = None
+                            for efn, _ewt, ev in flds(sv):
+                                if efn == 1:
+                                    name = bytes(ev).decode()
+                                elif efn == 2:
+                                    value = bytes(ev).decode()
+                            if name is not None:
+                                pairs[name] = value
+                    per_stage[event_id] = pairs
+                elif fn == 5:
+                    for bfn, _bwt, bv in flds(v):
+                        if bfn != 2:
+                            continue
+                        name = json_value = None
+                        for mfn, _mwt, mv in flds(bv):
+                            if mfn == 1:
+                                name = bytes(mv).decode()
+                            elif mfn == 5:
+                                json_value = bytes(mv).decode()
+                        chrome_md[name] = json_value
+
+        # Row order is stable: row 0 (A) == event_id 1, row 1 (B) == event_id 2.
+        self.assertEqual(per_stage[1]["unclamped duration ns"], "2000")
+        self.assertNotIn("unclamped duration ns", per_stage[2])
+
+        self.assertEqual(json.loads(chrome_md["distributedInfo"]), distributed_info)
+        self.assertEqual(json.loads(chrome_md["baseTimeNanoseconds"]), 0)
+        self.assertNotIn("traceEvents", chrome_md)
+        self.assertNotIn("traceName", chrome_md)
+
     def test_pftrace_render_stage_spreads_graph_annotation(self):
         # A graph-node annotation (mark_kernels region -- e.g. a collective's process-group
         # name recorded at capture via annotate_barrier) is spread onto the GPU render stage as
