@@ -82,6 +82,32 @@ class TaxonomyPattern:
     owners: tuple[str, ...] | None = None
 
 
+@dataclass(frozen=True)
+class LabelBlock:
+    """A `# label:` line and the `# owner:` line directly below it, if any."""
+
+    line_number: int
+    labels: tuple[str, ...]
+    # Handles on the owner line; () for `none`; None when no owner line follows.
+    owners: tuple[str, ...] | None
+
+
+@dataclass(frozen=True)
+class OwnerLine:
+    line_number: int
+    text: str
+    # False when the line isn't directly below a `# label:` line.
+    follows_label: bool
+
+
+@dataclass(frozen=True)
+class ParsedCodeowners:
+    patterns: list[TaxonomyPattern]
+    section_groups: list[str]
+    label_blocks: list[LabelBlock]
+    owner_lines: list[OwnerLine]
+
+
 @dataclass
 class Report:
     tracked: int
@@ -133,6 +159,24 @@ def is_valid_owner(owner: str) -> bool:
 
 def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     """Parse grouped rules while preserving their actual CODEOWNERS order."""
+    parsed = parse_codeowners(codeowners)
+    return parsed.patterns, parsed.section_groups
+
+
+def owner_handles(owner_line: str) -> tuple[str, ...]:
+    """Handles on an `# owner:` line; `none` means an empty list."""
+    handles = tuple(owner_line.removeprefix(OWNER_PREFIX).split())
+    return () if handles == ("none",) else handles
+
+
+def has_valid_handles(owner_line: str) -> bool:
+    """An `# owner:` line names valid handles, or `none` on its own."""
+    handles = owner_line.removeprefix(OWNER_PREFIX).split()
+    return handles == ["none"] or (bool(handles) and all(map(is_valid_owner, handles)))
+
+
+def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
+    """Parse grouped rules, label blocks and owner lines in one pass."""
     lines = codeowners.read_text().splitlines()
     try:
         marker = lines.index(SECTION_MARKER)
@@ -148,11 +192,23 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     start = marker + 1
     patterns = []
     section_groups = []
+    label_blocks = []
+    owner_lines = []
     group = None
     labels: tuple[str, ...] = ()
     block_owners: tuple[str, ...] | None = None
+    previous = ""
     for line_number, raw_line in enumerate(lines[start:], start=start + 1):
         line = raw_line.strip()
+        if previous.startswith(LABEL_PREFIX):
+            label_blocks.append(
+                LabelBlock(
+                    line_number - 1,
+                    labels,
+                    owner_handles(line) if line.startswith(OWNER_PREFIX) else None,
+                )
+            )
+        previous = line
         if line.startswith(GROUP_PREFIX) and line.endswith("]"):
             group = line[len(GROUP_PREFIX) : -1]
             labels = ()
@@ -165,8 +221,9 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
             labels = tuple(label.strip() for label in label_names)
             block_owners = None
         elif line.startswith(OWNER_PREFIX):
-            handles = tuple(line.removeprefix(OWNER_PREFIX).split())
-            block_owners = () if handles == ("none",) else handles
+            follows_label = lines[line_number - 2].strip().startswith(LABEL_PREFIX)
+            owner_lines.append(OwnerLine(line_number, line, follows_label))
+            block_owners = owner_handles(line)
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -197,42 +254,38 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
+    if previous.startswith(LABEL_PREFIX):
+        label_blocks.append(LabelBlock(len(lines), labels, None))
     if not patterns:
         raise ValueError("taxonomy section contains no patterns")
-    return patterns, section_groups
+    return ParsedCodeowners(patterns, section_groups, label_blocks, owner_lines)
 
 
-def find_ownership_errors(
-    codeowners: Path, patterns: list[TaxonomyPattern]
-) -> dict[str, list[str]]:
+def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
     """Check that every label block names exactly one owner list."""
-    lines = codeowners.read_text().splitlines()
-    start = lines.index(SECTION_MARKER) + 1
-    missing_owner_lines = []
-    misplaced_owner_lines = []
-    invalid_handles = []
-    for index in range(start, len(lines)):
-        line = lines[index].strip()
-        location = f"CODEOWNERS:{index + 1}"
-        if line.startswith(LABEL_PREFIX):
-            following = lines[index + 1].strip() if index + 1 < len(lines) else ""
-            if not following.startswith(OWNER_PREFIX):
-                missing_owner_lines.append(f"{location} {line}")
-        elif line.startswith(OWNER_PREFIX):
-            if not lines[index - 1].strip().startswith(LABEL_PREFIX):
-                misplaced_owner_lines.append(f"{location} {line}")
-            handles = line.removeprefix(OWNER_PREFIX).split()
-            if handles != ["none"] and (
-                not handles or not all(is_valid_owner(handle) for handle in handles)
-            ):
-                invalid_handles.append(f"{location} {line}")
+    missing_owner_lines = [
+        f"CODEOWNERS:{block.line_number} {LABEL_PREFIX} {', '.join(block.labels)}"
+        for block in parsed.label_blocks
+        if block.owners is None
+    ]
+    misplaced_owner_lines = [
+        f"CODEOWNERS:{line.line_number} {line.text}"
+        for line in parsed.owner_lines
+        if not line.follows_label
+    ]
+    invalid_handles = [
+        f"CODEOWNERS:{line.line_number} {line.text}"
+        for line in parsed.owner_lines
+        if not has_valid_handles(line.text)
+    ]
 
     # GitHub handles are case-insensitive and owner order carries no meaning.
+    # Label blocks are compared even when no path follows them.
     owner_lists = defaultdict(set)
-    for pattern in patterns:
-        if pattern.labels and pattern.owners is not None:
-            owners = frozenset(owner.casefold() for owner in pattern.owners)
-            owner_lists[pattern.labels].add(owners)
+    for block in parsed.label_blocks:
+        if block.owners is not None:
+            owners = frozenset(owner.casefold() for owner in block.owners)
+            owner_lists[block.labels].add(owners)
     conflicting_lists = [
         f"{', '.join(labels)}: "
         + " | ".join(" ".join(owners) or "none" for owners in sorted(map(sorted, lists)))
@@ -473,9 +526,11 @@ def main() -> int:
     try:
         codeowners = repo / "CODEOWNERS"
         declared_groups = parse_declared_groups(codeowners)
-        patterns, section_groups = parse_patterns(codeowners)
+        parsed = parse_codeowners(codeowners)
+        patterns = parsed.patterns
+        section_groups = parsed.section_groups
         report = analyze(tracked_paths(repo), patterns)
-        ownership_errors = find_ownership_errors(codeowners, patterns)
+        ownership_errors = find_ownership_errors(parsed)
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(

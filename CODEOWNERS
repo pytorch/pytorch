@@ -8,10 +8,10 @@
 # - Active rules name who gets review requests. A commented rule adds no
 #   notification of its own; the path follows the last matching active rule,
 #   if there is one. Commenting a rule says nothing about ownership.
-# - An "# owner:" line records the group meant to own the paths below it, up
-#   to the next "# owner:" or "# label:" line or the end of the section. These
-#   lines are informational: nothing consumes them yet, and they don't change
-#   who is notified. "none" means no owning group is recorded yet.
+# - The "# owner:" line directly below a "# label:" line records the group
+#   meant to own every path in that label block. These lines are
+#   informational: nothing consumes them yet, and they don't change who is
+#   notified. "none" means no owning group is recorded yet.
 # - Sections are ordered from broad defaults to narrower overrides.
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
