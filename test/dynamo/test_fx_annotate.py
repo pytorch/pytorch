@@ -30,6 +30,34 @@ def checkpoint_wrapper(fn):
 
 
 class AnnotateTests(torch._dynamo.test_case.TestCase):
+    def test_empty_hooks_preserve_input_annotation(self):
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.child(x)
+
+        module = Parent()
+        for name, child in module.named_modules():
+            child.forward = fx_traceback.annotate_fn({"module_path": name})(
+                child.forward
+            )
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(module, backend=backend, fullgraph=True)
+        x = torch.randn(1, 2)
+        self.assertEqual(compiled(x), module(x))
+        nodes = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.op in ("placeholder", "call_function")
+        ]
+        self.assertEqual(len(nodes), 4)
+        for node in nodes:
+            self.assertEqual(node.meta.get("custom"), {"module_path": "child"})
+
     def test_annotations(self):
         class Mod(torch.nn.Module):
             def forward(self, x):

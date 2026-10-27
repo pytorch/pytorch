@@ -1624,7 +1624,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
-                    if self.source and name.startswith("_forward_"):
+                    if (
+                        self.source
+                        and isinstance(hooks_dict, collections.OrderedDict)
+                        and name.startswith("_forward_")
+                    ):
                         hooks_vt_cls = variables.NNModuleHooksDictVariable
                     return hooks_vt_cls({}, source=hooks_source)
 
@@ -1656,8 +1660,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 source_key = ConstDictKeySource(hooks_dict_source, i)
                 # Hash existing keys without specializing their sourced values;
                 # hashing a key in user code must still realize and guard it.
-                key = HashableTracker(VariableTracker.build(tx, k))
-                key.vt = LazyVariableTracker.create(k, source_key, tx=tx)
+                key = HashableTracker(
+                    LazyVariableTracker.create(k, source_key, tx=tx),
+                    precomputed_hash=hash(k) if type(k) is int else None,
+                )
 
                 # Access values by storage position too, so equivalent modules
                 # can share a graph despite having different hook IDs.
