@@ -3866,6 +3866,14 @@ def cached_autotune(
     if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
         kernel = thunk()
         return lambda fn: kernel
+    if size_hints is not None and heuristic_type in (
+        HeuristicType.REDUCTION,
+        HeuristicType.PERSISTENT_REDUCTION,
+    ):
+        configs = _enforce_reduction_config_block_minimums(
+            configs, size_hints, inductor_meta
+        )
+    configs = unique_configs(configs)
     shared = {
         "filename": filename,
         "custom_kernel": custom_kernel,
@@ -3933,14 +3941,6 @@ def _cached_autotune(
     debug_autotuner_cls: type[DebugAutotuner],
     skip_cache_read: bool = False,
 ):
-    if size_hints is not None and heuristic_type in (
-        HeuristicType.REDUCTION,
-        HeuristicType.PERSISTENT_REDUCTION,
-    ):
-        configs = _enforce_reduction_config_block_minimums(
-            configs, size_hints, inductor_meta
-        )
-    configs = unique_configs(configs)
     if len(configs) != 1 and not filename:
         raise AssertionError("filename required when multiple configs are provided")
 
