@@ -1457,6 +1457,13 @@ def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, 
     return tuple(positions[id(key)] for key in collections.OrderedDict.keys(value))
 
 
+def _nn_module_hook_membership(
+    module: Any, hooks_name: str, flags_name: str
+) -> tuple[bool, ...]:
+    flags = getattr(module, flags_name)
+    return tuple(key in flags for key in dict.keys(getattr(module, hooks_name)))
+
+
 def _ordered_dict_key_signature(
     value: collections.OrderedDict[Any, Any],
 ) -> list[tuple[type[Any] | None, Any]]:
@@ -3783,6 +3790,7 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=lambda value, order: _ordered_dict_order(value) == order,
     )
     def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        self.get_guard_manager(guard)
         order = _ordered_dict_order(self.get(guard))
 
         def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
@@ -3795,6 +3803,50 @@ class GuardBuilder(GuardBuilderBase):
             _get_closure_vars() | {"___check_order": guard_fn},
         )
         self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "hooks_name"),
+            _guard_create_fn_keyword(guard, "flags_name"),
+            _nn_module_hook_membership(
+                value,
+                _guard_create_fn_keyword(guard, "hooks_name"),
+                _guard_create_fn_keyword(guard, "flags_name"),
+            ),
+        ),
+        eval_fn=lambda value, metadata: _nn_module_hook_membership(
+            value, metadata[0], metadata[1]
+        )
+        == metadata[2],
+    )
+    def NN_MODULE_HOOKS_DICT_CONTAINS(
+        self, guard: Guard, hooks_name: str, flags_name: str
+    ) -> None:
+        code = (
+            f"___check_hook_membership({self.arg_ref(guard)}, "
+            f"{hooks_name!r}, {flags_name!r})"
+        )
+        if code in self.already_added_code_parts:
+            return
+        # Keep both dictionaries available when rebuilding serialized guards.
+        for name in (hooks_name, flags_name):
+            self.get_guard_manager_from_source(
+                AttrSource(guard.originating_source, name)
+            )
+        membership = _nn_module_hook_membership(self.get(guard), hooks_name, flags_name)
+
+        def guard_fn(module: Any, hooks_name: str, flags_name: str) -> bool:
+            return (
+                _nn_module_hook_membership(module, hooks_name, flags_name) == membership
+            )
+
+        self.add_python_lambda_leaf_guard_to_root(
+            [code],
+            get_verbose_code_parts([code], guard),
+            _get_closure_vars() | {"___check_hook_membership": guard_fn},
+        )
+        self._set_guard_export_info(guard, [code])
+        self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
