@@ -1066,20 +1066,6 @@ class TestScatterAddOverrideConds(TestCase):
             self.assertFalse(self.impl._tma_cond(self_t, 0, idx, src))
             self.assertFalse(self.impl._vs_cond(self_t, 0, idx, src))
 
-    @parametrize("base_rows", [0, 100])
-    def test_rejects_empty_self(self, base_rows):
-        # self.shape[0] == 0 with a non-empty src would have every index
-        # out of range. Cond must reject so aten raises the index error
-        # instead of our kernel silently writing OOB. A zero-row view of a
-        # larger buffer shares the bare tensor's cache key, so clear it.
-        self.impl._ELIGIBILITY_CACHE.clear()
-        self_t = torch.zeros(base_rows, 128, device="cuda", dtype=torch.float32)[:0]
-        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
-        idx = _expanded_idx(
-            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
-        )
-        self.assertEqual(self._conds(self_t, idx, src), (False, False))
-
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
 @skipIfNoCuteDSL
@@ -1372,6 +1358,22 @@ class TestScatterAddOverrideCorrectness(TestCase):
         self.assertFalse(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
         with self.assertRaisesRegex(RuntimeError, "Expected index"):
             self_t.scatter_add_(0, idx, src)
+
+    @parametrize("base_rows", [0, 100])
+    def test_rejects_empty_self(self, base_rows):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        # self.shape[0] == 0 with a non-empty src would have every index
+        # out of range. Cond must reject so aten raises the index error
+        # instead of our kernel silently writing OOB. A zero-row view of a
+        # larger buffer shares the bare tensor's cache key, so clear it.
+        cutedsl_impl._ELIGIBILITY_CACHE.clear()
+        self_t = torch.zeros(base_rows, 128, device="cuda", dtype=torch.float32)[:0]
+        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
+        idx = _expanded_idx(
+            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertFalse(cutedsl_impl._is_tma_supported(self_t, 0, idx, src))
+        self.assertFalse(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
 
     def test_cache_eviction_keeps_results_correct(self):
         from torch._native.ops.scatter_add import cutedsl_impl
