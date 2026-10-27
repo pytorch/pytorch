@@ -5,10 +5,10 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/env.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <optional>
+#include <thread>
 
 namespace {
 
@@ -32,21 +32,21 @@ class AOTICudaGraphTest : public ::testing::Test {
     }
   }
 
-  // Captures fn's work on the capture stream and returns its result.
+  // Captures fn's work into graph (default graph_) on the capture stream and
+  // returns its result.
   template <typename Fn>
-  at::Tensor capture(Fn fn) {
+  at::Tensor capture(Fn fn, CUDAGraphHandle graph = nullptr) {
+    graph = graph != nullptr ? graph : graph_;
     EXPECT_EQ(
         aoti_torch_cuda_graph_capture_begin(
-            graph_, pool_, capture_stream_->stream()),
+            graph, pool_, capture_stream_->stream()),
         AOTI_TORCH_SUCCESS);
     at::Tensor out;
     {
       at::cuda::CUDAStreamGuard guard(*capture_stream_);
       out = fn();
     }
-    EXPECT_EQ(
-        aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/true),
-        AOTI_TORCH_SUCCESS);
+    EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph), AOTI_TORCH_SUCCESS);
     return out;
   }
 
@@ -57,13 +57,12 @@ class AOTICudaGraphTest : public ::testing::Test {
     return status != cudaStreamCaptureStatusNone;
   }
 
-  // Checks that the stream and the allocator are left fit for a new capture.
+  // Checks that the stream, the allocator and pool_ are left fit for a new
+  // capture.
   void expect_new_capture_works() {
     if (graph_ != nullptr) {
       ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
     }
-    ASSERT_EQ(aoti_torch_delete_cuda_mem_pool(pool_), AOTI_TORCH_SUCCESS);
-    ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool_), AOTI_TORCH_SUCCESS);
     ASSERT_EQ(aoti_torch_create_cuda_graph(&graph_), AOTI_TORCH_SUCCESS);
     auto x = at::zeros({8}, at::kCUDA);
     auto y = capture([&] { return x + 1; });
@@ -72,9 +71,10 @@ class AOTICudaGraphTest : public ::testing::Test {
     EXPECT_TRUE(y.equal(at::full({8}, 3.0, at::kCUDA)));
   }
 
-  AOTITorchError replay() {
+  AOTITorchError replay(CUDAGraphHandle graph = nullptr) {
     return aoti_torch_cuda_graph_replay(
-        graph_, at::cuda::getCurrentCUDAStream().stream());
+        graph != nullptr ? graph : graph_,
+        at::cuda::getCurrentCUDAStream().stream());
   }
 
   CUDAMemPoolHandle pool_ = nullptr;
@@ -110,25 +110,56 @@ TEST_F(AOTICudaGraphTest, GraphKeepsDeletedPoolsMemory) {
   EXPECT_TRUE(y.equal(at::full({8}, 4.0, at::kCUDA)));
 }
 
-TEST_F(AOTICudaGraphTest, DiscardedCaptureCannotReplay) {
-  auto x = at::zeros({8}, at::kCUDA);
+TEST_F(AOTICudaGraphTest, GraphsShareAPool) {
+  for (bool delete_first_graph_first : {true, false}) {
+    ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(aoti_torch_create_cuda_graph(&graph_), AOTI_TORCH_SUCCESS);
+    CUDAGraphHandle second = nullptr;
+    ASSERT_EQ(aoti_torch_create_cuda_graph(&second), AOTI_TORCH_SUCCESS);
+    auto x = at::zeros({8}, at::kCUDA);
+    auto y1 = capture([&] { return x + 1; });
+    auto y2 = capture([&] { return x * 2; }, second);
+    x.fill_(3);
+    ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(replay(second), AOTI_TORCH_SUCCESS);
+    EXPECT_TRUE(y1.equal(at::full({8}, 4.0, at::kCUDA)));
+    EXPECT_TRUE(y2.equal(at::full({8}, 6.0, at::kCUDA)));
+
+    y1.reset();
+    y2.reset();
+    auto* last = second;
+    if (delete_first_graph_first) {
+      ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
+    } else {
+      ASSERT_EQ(aoti_torch_delete_cuda_graph(second), AOTI_TORCH_SUCCESS);
+      last = graph_;
+    }
+    x.fill_(5);
+    ASSERT_EQ(replay(last), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(aoti_torch_delete_cuda_graph(last), AOTI_TORCH_SUCCESS);
+    graph_ = nullptr;
+    // Every graph on pool_ is gone; it must still take new captures.
+    expect_new_capture_works();
+  }
+}
+
+TEST_F(AOTICudaGraphTest, CaptureEndsOnlyOnItsThread) {
   ASSERT_EQ(
       aoti_torch_cuda_graph_capture_begin(
           graph_, pool_, capture_stream_->stream()),
       AOTI_TORCH_SUCCESS);
-  {
-    at::cuda::CUDAStreamGuard guard(*capture_stream_);
-    x.add_(1);
-  }
-  ASSERT_EQ(
-      aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/false),
-      AOTI_TORCH_SUCCESS);
-
+  std::thread([&] {
+    EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph_), AOTI_TORCH_FAILURE);
+    EXPECT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_FAILURE);
+  }).join();
+  EXPECT_TRUE(stream_is_capturing());
+  ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
+  graph_ = nullptr;
   EXPECT_FALSE(stream_is_capturing());
-  EXPECT_EQ(replay(), AOTI_TORCH_FAILURE);
+  expect_new_capture_works();
 }
 
-TEST_F(AOTICudaGraphTest, DiscardingInvalidatedCaptureSucceeds) {
+TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
   ASSERT_EQ(
       aoti_torch_cuda_graph_capture_begin(
           graph_, pool_, capture_stream_->stream()),
@@ -136,25 +167,22 @@ TEST_F(AOTICudaGraphTest, DiscardingInvalidatedCaptureSucceeds) {
   // Synchronizing a capturing stream is illegal and invalidates the capture.
   EXPECT_NE(cudaStreamSynchronize(capture_stream_->stream()), cudaSuccess);
   (void)cudaGetLastError();
-  EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/false),
-      AOTI_TORCH_SUCCESS);
+  EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph_), AOTI_TORCH_FAILURE);
   EXPECT_FALSE(stream_is_capturing());
+  EXPECT_EQ(replay(), AOTI_TORCH_FAILURE);
   expect_new_capture_works();
 }
 
-TEST_F(AOTICudaGraphTest, StrictDiscardReportsInvalidatedCapture) {
-  c10::utils::set_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH", "1");
+TEST_F(AOTICudaGraphTest, DeletingInvalidatedCaptureEndsIt) {
   ASSERT_EQ(
       aoti_torch_cuda_graph_capture_begin(
           graph_, pool_, capture_stream_->stream()),
       AOTI_TORCH_SUCCESS);
   EXPECT_NE(cudaStreamSynchronize(capture_stream_->stream()), cudaSuccess);
   (void)cudaGetLastError();
-  EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/false),
-      AOTI_TORCH_FAILURE);
-  c10::utils::unset_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH");
+  // Reports the capture's error, but deletes the graph.
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_FAILURE);
+  graph_ = nullptr;
   EXPECT_FALSE(stream_is_capturing());
   expect_new_capture_works();
 }
@@ -176,8 +204,6 @@ TEST_F(AOTICudaGraphTest, DeletingDuringCaptureEndsIt) {
 }
 
 TEST_F(AOTICudaGraphTest, OutOfOrderCallsFail) {
-  EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_end(graph_, /*instantiate=*/true),
-      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph_), AOTI_TORCH_FAILURE);
   EXPECT_EQ(replay(), AOTI_TORCH_FAILURE);
 }
