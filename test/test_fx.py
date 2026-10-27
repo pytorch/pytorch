@@ -2034,6 +2034,95 @@ class TestFX(JitTestCase):
         )
         self.assertIs(helper.leaf, leaf)
 
+    def test_a_lazily_imported_module_registers_wrapped_functions_for_every_trace(
+        self,
+    ):
+        from torch.fx import _symbolic_trace
+
+        helper = types.ModuleType("lazy_fx_nested_helper")
+        exec("def leaf(x):\n    return x + 1\n", helper.__dict__)
+        unresolved = object()
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    # What the module body's torch.fx.wrap("leaf") registers.
+                    key = (id(helper.__dict__), "leaf")
+                    _symbolic_trace._wrapped_fns_to_patch[key] = helper.__dict__
+                    value = helper
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def inner_forward(self, x):
+            return x * 2
+
+        class Inner(torch.nn.Module):
+            forward = types.FunctionType(
+                inner_forward.__code__,
+                Globals(__builtins__=builtins, lazy_fx_nested_helper=unresolved),
+                "forward",
+            )
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                # A trace nested in this one resolves the import.
+                torch.fx.Tracer().trace(Inner())
+                return helper.leaf(x)
+
+        leaf = helper.leaf
+        with (
+            unittest.mock.patch.dict(_symbolic_trace._wrapped_fns_to_patch),
+            unittest.mock.patch.object(
+                importlib,
+                "is_lazy_import",
+                lambda d, name: dict.__getitem__(d, name) is unresolved,
+                create=True,
+            ),
+        ):
+            graph = torch.fx.Tracer().trace(Outer())
+        # A leaf of the outer trace too, as when the module is imported first.
+        self.assertIn(
+            leaf, [n.target for n in graph.nodes if n.op == "call_function"]
+        )
+        self.assertIs(helper.leaf, leaf)
+
+    def test_lazy_imports_a_module_body_adds_are_resolved_too(self):
+        unresolved = object()
+        original_call = torch.nn.Module.__call__
+        saw_original = {}
+
+        class Globals(dict):
+            def __getitem__(self, name):
+                value = dict.__getitem__(self, name)
+                if value is unresolved:
+                    saw_original[name] = torch.nn.Module.__call__ is original_call
+                    if name == "pkg":
+                        # Importing a submodule binds it, lazily, on its package.
+                        dict.__setitem__(self, "submodule", unresolved)
+                    value = object()
+                    dict.__setitem__(self, name, value)
+                return value
+
+        def m_forward(self, x):
+            return x + 1
+
+        class M(torch.nn.Module):
+            forward = types.FunctionType(
+                m_forward.__code__,
+                Globals(__builtins__=builtins, pkg=unresolved),
+                "forward",
+            )
+
+        with unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: dict.__getitem__(d, name) is unresolved,
+            create=True,
+        ):
+            torch.fx.Tracer().trace(M())
+        self.assertEqual(saw_original, {"pkg": True, "submodule": True})
+
     def test_lazy_import_runs_outside_pre_dispatch_tracing(self):
         from torch.fx.experimental.proxy_tensor import make_fx
 
