@@ -93,7 +93,7 @@ def get_flex_flash_fwd_configs(
     score_mod_vec_size = select_score_mod_vec_size(
         has_score_mod=has_score_mod,
         has_aux_tensors=has_aux_tensors,
-        is_sm100_or_later=cuda_major is not None and cuda_major >= 10,
+        supports_score_mod_vec=cuda_major in (10, 11),
         graph_module=score_mod_graph_module,
         other_buffers=score_mod_other_buffers,
     )
