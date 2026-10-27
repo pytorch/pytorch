@@ -5586,6 +5586,15 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    def test_triton_op_function_is_the_users(self):
+        @torch.library.triton_op("_torch_testing::triton_module", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        # Not torch._library.triton's wrapper, so precompile imports this module.
+        self.assertEqual(f._init_fn.__module__, __name__)
+        self.assertEqual(f._init_fn.__qualname__, f._init_fn.__wrapped__.__qualname__)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
         @torch.library.custom_op(
