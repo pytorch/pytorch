@@ -137,7 +137,7 @@ class RuntimeEstimator(TorchDispatchMode):
                 if cls.fake_mode.is_our_fake(e):
                     fake_device = maybe_get_fake_device(e)
                     if fake_device is None:
-                        raise AssertionError("Expected a fake tensor device")
+                        raise AssertionError("expected a fake tensor device")
                     if e.dtype in _FLOAT_TYPES:
                         out = torch.rand_like(e, device=fake_device)
                     else:
