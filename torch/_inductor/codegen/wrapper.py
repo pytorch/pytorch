@@ -3386,7 +3386,9 @@ class PythonWrapperCodegen(CodeGen):
                 wrapper_name = kernel
             self.writeline(f"{wrapper_name}({', '.join(args)})")
 
-    def _tma_descriptor_tensor_ref(self, desc, in_autotune_block):
+    def _tma_descriptor_tensor_ref(
+        self, desc, in_autotune_block, tensor_ref: str | None = None
+    ):
         """Reference to the descriptor's source tensor.
 
         The compile-time autotune block is Python even when the wrapper emits C++,
@@ -3394,18 +3396,22 @@ class PythonWrapperCodegen(CodeGen):
         own layout. Referring to that buffer by name keeps the block valid Python;
         codegen_reference() would emit a C++ reinterpret (e.g. a `0L` literal).
         """
+        if tensor_ref is not None:
+            return tensor_ref
         if in_autotune_block:
             return desc.get_tensor().get_name()
         return desc.tensor.codegen_reference()
 
-    def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_experimental(
+        self, desc, apply_size_hints=False, tensor_ref: str | None = None
+    ):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = V.graph.sizevars.optimization_hint(dims)
+            dims = V.graph.sizevars.optimization_hints(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
-        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
+        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints, tensor_ref)}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
         dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
         block_dims = ", ".join(
@@ -3418,7 +3424,9 @@ class PythonWrapperCodegen(CodeGen):
         call = f"{fn}({args})"
         return call
 
-    def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_stable(
+        self, desc, apply_size_hints=False, tensor_ref: str | None = None
+    ):
         block_shape = desc.block_shape
         if apply_size_hints:
             block_shape = V.graph.sizevars.optimization_hints(block_shape)
@@ -3430,20 +3438,26 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(import_line)
         prefix = f"{desc.descriptor_module}.{desc.descriptor_class}"
         fn = f"{prefix}.from_tensor"
-        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
-        args = f"{tensor_ref}, {block_shape}"
+        source_tensor = self._tma_descriptor_tensor_ref(
+            desc, apply_size_hints, tensor_ref
+        )
+        args = f"{source_tensor}, {block_shape}"
         call = f"{fn}({args})"
         return call
 
-    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call(
+        self, desc, apply_size_hints=False, tensor_ref: str | None = None
+    ):
         if isinstance(desc, ir.TMADescriptorExperimental):
             return self._generate_tma_descriptor_call_experimental(
-                desc, apply_size_hints
+                desc, apply_size_hints, tensor_ref
             )
         else:
             if not isinstance(desc, ir.TMADescriptorStable):
                 raise AssertionError(f"expected TMADescriptorStable, got {type(desc)}")
-            return self._generate_tma_descriptor_call_stable(desc, apply_size_hints)
+            return self._generate_tma_descriptor_call_stable(
+                desc, apply_size_hints, tensor_ref
+            )
 
     def generate_tma_descriptor(self, desc):
         call = self._generate_tma_descriptor_call(desc)
@@ -5670,6 +5684,12 @@ class PythonWrapperCodegen(CodeGen):
 
                 if triton_input:
                     arg_str = triton_input
+                    if isinstance(raw_arg, ir.TMADescriptor):
+                        arg_str = self._generate_tma_descriptor_call(
+                            raw_arg,
+                            apply_size_hints=True,
+                            tensor_ref=triton_input,
+                        )
                     if not isinstance(arg_type, torch_dtype) and (
                         issubclass(arg_type, sympy.Basic)
                         or isinstance(arg, SymbolicCallArg)
