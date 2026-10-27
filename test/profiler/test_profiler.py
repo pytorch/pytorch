@@ -1006,39 +1006,36 @@ class TestProfiler(TestCase):
         self.assertEqual(trace[0]["name"], tricky_name)
 
     def test_experimental_config_pickle(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", BytesWarning)
+        # Test with default values
+        config = _ExperimentalConfig()
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
 
-            # Test with default values
-            config = _ExperimentalConfig()
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Alternate the flags in pickled order so that a flag read from a
+        # neighboring slot gets the wrong value.
+        config = _ExperimentalConfig(
+            verbose=True,
+            performance_events=["event1", "event2"],
+            enable_cuda_sync_events=False,
+            disable_external_correlation=True,
+            profile_all_threads=False,
+            capture_overload_names=True,
+            record_python_gc_info=False,
+            expose_kineto_event_metadata=True,
+            custom_profiler_config="custom_config",
+            adjust_timestamps=False,
+            trace_only=True,
+        )
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
+        self.assertEqual(unpickled.__getstate__(), config.__getstate__())
 
-            # Alternate the flags in pickled order so that a flag read from a
-            # neighboring slot gets the wrong value.
-            config = _ExperimentalConfig(
-                verbose=True,
-                performance_events=["event1", "event2"],
-                enable_cuda_sync_events=False,
-                disable_external_correlation=True,
-                profile_all_threads=False,
-                capture_overload_names=True,
-                record_python_gc_info=False,
-                expose_kineto_event_metadata=True,
-                custom_profiler_config="custom_config",
-                adjust_timestamps=False,
-                trace_only=True,
-            )
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
-            self.assertEqual(unpickled.__getstate__(), config.__getstate__())
-
-            # Test deepcopy (which uses pickle internally)
-            copied = copy.deepcopy(config)
-            self.assertIsInstance(copied, _ExperimentalConfig)
-            self.assertEqual(copied.__getstate__(), config.__getstate__())
+        # Test deepcopy (which uses pickle internally)
+        copied = copy.deepcopy(config)
+        self.assertIsInstance(copied, _ExperimentalConfig)
+        self.assertEqual(copied.__getstate__(), config.__getstate__())
 
     def test_experimental_config_rejects_old_pickle_state(self):
         # Pickles from before PyTorch 2.16 use a different layout, with more,
