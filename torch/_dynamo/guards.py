@@ -25,6 +25,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import gc
 import hashlib
 import importlib
 import inspect
@@ -170,6 +171,7 @@ from .source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -335,6 +337,11 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
         and value.__self__ is expected.receiver
         and value == getattr(expected.receiver, expected.name)
     )
+
+
+def _mapping_proxy_mapping(value: object) -> object:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return gc.get_referents(value)[0]
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -2245,6 +2252,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, AttrProxySource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2970,18 +2987,20 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        def hooks_ids_fn(
-            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
-            if not are_inline_hooks(hooks):
-                return None
-
-            return tuple(map(id, hooks))
-
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                get_hooks()
+                hooks
             )
 
         code = [

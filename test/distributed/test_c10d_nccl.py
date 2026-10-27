@@ -88,6 +88,7 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_SANDCASTLE,
@@ -238,6 +239,8 @@ _log_configure(level=logging.INFO, force=True)
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @retry_on_connect_failures
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -346,6 +349,8 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @retry_on_connect_failures
     @skip_but_pass_in_sandcastle_if(
@@ -356,6 +361,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
@@ -379,6 +385,8 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
 
 
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -428,6 +436,8 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
@@ -2227,7 +2237,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         """
         if self.rank in ranks_to_exclude:
             if shrink_flags & NCCL_SHRINK_ABORT:
-                pg._get_backend(torch.device(device)).abort()
+                dist.get_backend_impl(pg, torch.device(device)).abort()
             else:
                 c10d.destroy_process_group(pg)
             return
@@ -2334,7 +2344,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
             # Survivors shrink with NCCL_SHRINK_ABORT and abort the parent, so
             # the excluded rank must abort too; destroy here would hang.
-            pg1._get_backend(torch.device(device)).abort()
+            dist.get_backend_impl(pg1, torch.device(device)).abort()
             return
 
         # Performance analysis (only for participating ranks)
@@ -2475,6 +2485,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -4159,6 +4171,8 @@ class DistributedDataParallelTest(
 
 @xfailIf(TEST_XPU)  # XCCL lacks registerOnCompletionHook: #torch-xpu-ops/5382
 class WorkHookTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -4383,6 +4397,8 @@ class WorkHookTest(MultiProcessTestCase):
 
 @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
 class NcclErrorHandlingTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -4697,6 +4713,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 @xfailIf(TEST_XPU)  # needs NCCL_ALGO/NCCL_DEBUG log scraping: #torch-xpu-ops/5385
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
@@ -4837,6 +4855,8 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def device(self):
         return f"{device_type}:{self.rank}"
@@ -5536,6 +5556,8 @@ class SetDeviceMethod(Enum):
 class NcclProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # The common helpers pick the tensor device from "nccl"/"xccl", not "nccl-legacy".
     backend = dist.get_default_backend_for_device(device_type)
 
@@ -5597,6 +5619,8 @@ instantiate_parametrized_tests(NcclProcessGroupWithDispatchedCollectivesTests)
 
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -6050,6 +6074,8 @@ instantiate_parametrized_tests(LargeCommTest)
 
 
 class SparseCollective(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
@@ -6125,6 +6151,8 @@ class SparseCollective(MultiProcessTestCase):
 
 
 class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
@@ -6289,6 +6317,8 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
 
 class NCCLTraceTest(NCCLTraceTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.10")
@@ -7722,6 +7752,8 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
@@ -7774,6 +7806,8 @@ instantiate_parametrized_tests(NCCLTraceTest)
 
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @check_if_test_is_skipped
     def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
@@ -7829,6 +7863,8 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 @skip_but_pass_in_sandcastle
 @xfailIf(TEST_XPU)  # XCCL has no TORCH_XCCL_HEARTBEAT_TIMEOUT_SEC: #torch-xpu-ops/5385
 class NcclErrorDumpTest(NCCLTraceTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _wait_process(self, rank, timeout):
         try:
             self.processes[rank].join(timeout)
@@ -7888,6 +7924,8 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
 # tests that needs to be run with a larger world size
 @xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
 class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
@@ -8063,6 +8101,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
 
 @unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
 class CollectiveAnnotationTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 2
 
     @classmethod
