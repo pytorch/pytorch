@@ -45,7 +45,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -55,6 +55,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     getRocmVersion,
+    HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
     isRocmArchAnyOf,
@@ -683,33 +684,8 @@ FBCODE_BATCH_INVARIANCE_XFAILS = {
     },
 }
 
-FBCODE_UNARY_NUMERICAL_XFAILS = {
-    "inductor_default": {
-        "sqrt": {bf16, fp32},
-    },
-    "inductor_numerics": {
-        "exp2": {bf16, fp32},
-        "expm1": {bf16, fp32},
-        "log1p": {fp32},
-        "reciprocal": {bf16, fp32},
-        "rsqrt": {bf16, fp32},
-        "sin": {fp32},
-        "sqrt": {bf16, fp32},
-        "tan": {bf16, fp32},
-        "tanh": {fp32},
-    },
-}
-
-FBCODE_BINARY_NUMERICAL_XFAILS = {
-    "inductor_numerics": {
-        "fmod": {bf16, fp32},
-    },
-}
-
 FBCODE_XFAIL_DICTS = {
     "batch_invariance": FBCODE_BATCH_INVARIANCE_XFAILS,
-    "unary_numerical": FBCODE_UNARY_NUMERICAL_XFAILS,
-    "binary_numerical": FBCODE_BINARY_NUMERICAL_XFAILS,
 }
 
 if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
@@ -718,9 +694,115 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
     del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
 
 
+# XPU compiled-vs-eager numerics differ from CUDA/ROCm; tracked in
+# https://github.com/intel/torch-xpu-ops/issues/5168. Like ROCm, XPU does not
+# apply the CUDA-only split-k / cuBLASLt knobs that test_batch_invariance relies
+# on, so nn.functional.linear is not batch invariant on XPU and is xfailed below.
+XPU_EAGER_EQUIV_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.linear": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+    "inductor_default": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "expm1": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "sub": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.linear": {fp32},
+        "nn.functional.rms_norm": {fp32},
+        "nn.functional.silu": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+    "inductor_numerics": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "expm1": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "sub": {ALL},
+        "tan": {fp32},
+        "tanh": {fp32},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.linear": {fp32},
+        "nn.functional.silu": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+}
+
+# XPU compiled-path numerics differ from CUDA, so the determinism and numerical
+# property tests need XPU-specific xfail lists.
+XPU_DETERMINISM_XFAILS = {}
+
+XPU_UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+    },
+    "inductor_numerics": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+    },
+}
+
+XPU_BINARY_NUMERICAL_XFAILS = {}
+
+# XPU, like ROCm, does not apply the CUDA-only split-k / cuBLASLt knobs that
+# test_batch_invariance relies on, so nn.functional.linear is not batch
+# invariant across batch sizes on XPU. Tracked in
+# https://github.com/intel/torch-xpu-ops/issues/5168.
+XPU_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_default": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_numerics": {
+        "nn.functional.linear": {ALL},
+    },
+}
+
+XPU_XFAIL_DICTS = {
+    "eager_equivalence": XPU_EAGER_EQUIV_XFAILS,
+    "determinism": XPU_DETERMINISM_XFAILS,
+    "unary_numerical": XPU_UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": XPU_BINARY_NUMERICAL_XFAILS,
+    "batch_invariance": XPU_BATCH_INVARIANCE_XFAILS,
+}
+
+
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
-    xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
+    if device_type == "xpu":
+        xfail_dicts = XPU_XFAIL_DICTS
+    elif torch.version.hip is not None:
+        xfail_dicts = ROCM_XFAIL_DICTS
+    else:
+        xfail_dicts = XFAIL_DICTS
     xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
     # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
     # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
@@ -749,7 +831,9 @@ def compile_fn(fn, backend):
 @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
 @unittest.skipIf(not HAS_GPU, "Requires GPU")
 class TestOpInfoProperties(TestCase):
-    """Test op properties under various inductor modes using OpInfo on CUDA."""
+    """Test op properties under various inductor modes using OpInfo on each accelerator."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -837,7 +921,7 @@ class TestOpInfoProperties(TestCase):
     # Batch Invariance Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -877,27 +961,34 @@ class TestOpInfoProperties(TestCase):
         # Disable split-k accumulation in GEMM to ensure batch-invariant results.
         # Split-k can produce different rounding based on how work is partitioned.
         # Disabling split-k requires the cuBLASLt backend, so we set it first.
-        prev_blas_library = torch.backends.cuda.preferred_blas_library()
-        torch.backends.cuda.preferred_blas_library("cublaslt")
+        # CUDA-only on purpose: ROCM_BATCH_INVARIANCE_XFAILS already expects
+        # nn.functional.linear to stay non-batch-invariant on ROCm, so applying
+        # hipBLASLt knobs there could XPASS those (strict) xfails.
+        prev_blas_library = None
+        prev_fp16 = None
+        prev_bf16 = None
+        if device_type == "cuda" and torch.version.hip is None:
+            prev_blas_library = torch.backends.cuda.preferred_blas_library()
+            torch.backends.cuda.preferred_blas_library("cublaslt")
 
-        # We need to save both the reduced precision and split_k settings.
-        prev_fp16 = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
-        )
-        prev_bf16 = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
-        )
-        # Disable both reduced precision and split-k
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            False,
-            False,
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            False,
-            False,
-        )
+            # We need to save both the reduced precision and split_k settings.
+            prev_fp16 = (
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
+            )
+            prev_bf16 = (
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
+            )
+            # Disable both reduced precision and split-k
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                False,
+                False,
+            )
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                False,
+                False,
+            )
 
         def run_test():
             tested_any = False
@@ -971,19 +1062,20 @@ class TestOpInfoProperties(TestCase):
                 device_type, op.name, backend, "batch_invariance", dtype, run_test
             )
         finally:
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-                prev_fp16
-            )
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-                prev_bf16
-            )
-            torch.backends.cuda.preferred_blas_library(prev_blas_library)
+            if prev_fp16 is not None:
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                    prev_fp16
+                )
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                    prev_bf16
+                )
+                torch.backends.cuda.preferred_blas_library(prev_blas_library)
 
     # =========================================================================
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1055,7 +1147,7 @@ class TestOpInfoProperties(TestCase):
     # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1099,7 +1191,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1154,7 +1246,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1196,7 +1288,9 @@ class TestOpInfoProperties(TestCase):
         )
 
 
-instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"])
+instantiate_device_type_tests(
+    TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

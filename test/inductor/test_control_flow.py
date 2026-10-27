@@ -404,6 +404,41 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_cond_backward_does_not_reuse_donated_subgraph_input(self):
+        # bw_donated_idxs index the top-level backward's placeholders. A backward
+        # cond branch that inherited them would donate (and overwrite) its own
+        # unrelated inputs, corrupting gradients. See SubgraphLowering.__init__.
+        device = GPU_TYPE
+
+        def model(x, w):
+            h = torch.matmul(x, w)
+
+            def true_fn(a):
+                return a.sigmoid() * a
+
+            def false_fn(a):
+                return a.relu() * a
+
+            r = torch.cond(h.sum() > 0, true_fn, false_fn, (h,))
+            return ((h + r) * 3.0).sum()
+
+        def make():
+            return (
+                torch.randn(64, 64, device=device, requires_grad=True),
+                torch.randn(64, 64, device=device, requires_grad=True),
+            )
+
+        torch.manual_seed(0)
+        xe, we = make()
+        model(xe, we).backward()
+        torch.manual_seed(0)
+        xc, wc = make()
+        torch.compile(model, fullgraph=True, backend="inductor")(xc, wc).backward()
+        self.assertEqual(xc.grad, xe.grad)
+        self.assertEqual(wc.grad, we.grad)
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_simple_with_int_closure(self, device):
         self._run_test(
