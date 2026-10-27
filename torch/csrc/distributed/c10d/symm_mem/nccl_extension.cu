@@ -160,15 +160,24 @@ __global__ void nccl_wait_for_signal_kernel(
         }
     }
 }
+
+// "0" is WORLD's name under the default init_process_group.
+static std::string group_or_default(
+    const std::optional<std::string>& group_name) {
+  return group_name.value_or("0");
+}
 #endif
 
-void nccl_put(at::Tensor& tensor, const int64_t peer) {
+void nccl_put(
+    at::Tensor& tensor,
+    const int64_t peer,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
-  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, group);
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;
   c10::cuda::CUDAGuard guard(tensor.device());
@@ -186,12 +195,16 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
-void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
+void nccl_wait_for_signal(
+    at::Tensor& sigpad,
+    int64_t signal,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-  auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
-  GroupStreamGuard stream_guard("0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, group);
+  GroupStreamGuard stream_guard(symm_mem->get_group_name());
 
   // Always use device-side kernel because this function waits for a SPECIFIC signal value.
   // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
@@ -207,15 +220,19 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
 #endif
 }
 
-void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
+void nccl_put_with_signal(
+    at::Tensor& tensor,
+    int64_t signal,
+    int64_t peer,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
-  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, group);
   c10::cuda::CUDAGuard guard(tensor.device());
-  GroupStreamGuard stream_guard("0");
+  GroupStreamGuard stream_guard(symm_mem->get_group_name());
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Always use device-side kernel because this function writes a SPECIFIC signal value.
@@ -264,13 +281,16 @@ __global__ void lsa_get_kernel(
 }
 #endif
 
-void nccl_get(at::Tensor& tensor, const int64_t peer) {
+void nccl_get(
+    at::Tensor& tensor,
+    const int64_t peer,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
-  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, group);
   c10::cuda::CUDAGuard guard(tensor.device());
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;

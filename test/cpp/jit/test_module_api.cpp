@@ -245,6 +245,17 @@ TEST(ModuleAPITest, DeepCopy) {
   ASSERT_TRUE(t1.equal(t3));
 }
 
+TEST(ModuleAPITest, DeepCopyWithSameDevice) {
+  Module module("module");
+  module.register_attribute("tensor", TensorType::get(), at::randn(5));
+
+  Module copied = module.deepcopy(at::kCPU);
+
+  ASSERT_FALSE(IValue(copied._ivalue()).overlaps(IValue(module._ivalue())));
+  ASSERT_TRUE(
+      copied.attr("tensor").toTensor().equal(module.attr("tensor").toTensor()));
+}
+
 TEST(ModuleAPITest, DeepCopyString) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
