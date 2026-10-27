@@ -1150,55 +1150,8 @@ static bool isRDNA4(int index) {
 }
 
 
-// f16 vector types
-struct __align__(2) f16x1 {
-  __half vals[1];
-};
-
-struct __align__(4) f16x2 {
-  __half vals[2];
-};
-
-struct __align__(8) f16x4 {
-  __half vals[4];
-};
-
-struct __align__(16) f16x8 {
-  __half vals[8];
-};
-
-// bf16 vector types
-struct __align__(2) bf16x1 {
-  __hip_bfloat16 vals[1];
-};
-
-struct __align__(4) bf16x2 {
-  __hip_bfloat16 vals[2];
-};
-
-struct __align__(8) bf16x4 {
-  __hip_bfloat16 vals[4];
-};
-
-struct __align__(16) bf16x8 {
-  __hip_bfloat16 vals[8];
-};
-
-// bf162 vector types
-struct __align__(4) bf16x2x1 {
-  __hip_bfloat162 vals[1];
-};
-
-struct __align__(8) bf16x2x2 {
-  __hip_bfloat162 vals[2];
-};
-
 struct __align__(16) bf16x2x4_u32 {
   VecT<short, 4> val[2];
-};
-
-struct __align__(4) bf16x2x1_u32 {
-  uint32_t vals[1];
 };
 
 // Matrix-core traits, one struct per ROCm architecture family. Each describes
@@ -1443,11 +1396,6 @@ using RocmMma = RocmMmaCdna;
 constexpr int32_t kWarpSize = RocmMma::kWarpSize;
 constexpr int32_t kTileLanes = RocmMma::kTileLanes;
 
-template <typename T, int N>
-struct __align__(sizeof(T) * N) VectorType {
-  T vals[N];
-};
-
 // Spreads the 8 int4 values q of a packed word into 8 bf16 of value 128 + q:
 // q becomes the low mantissa bits of bf16 128 (from
 // https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h).
@@ -1499,9 +1447,6 @@ struct ALayout_RM {
     const auto mLane = mTile * kMTileSize + (laneId % kMTileSize);
     const auto kLane = kTileStart * kKTileSize + (laneId / kMTileSize) * kAValuesPerLane;
 
-    // access
-    // [mTile * kMTileSize + (laneId / 4)]
-    // [kTileStart * kKTileSize + (laneId % 4) * 2]
     auto aPtr = reinterpret_cast<const __hip_bfloat16*>(A) + mLane * k + kLane;
     bool m0InBounds = mLane < m;
 
@@ -1601,20 +1546,12 @@ struct BLayout_TC_int4 {
       }
 
       if constexpr (kInt32PerLane == 2) {
-        // asm volatile("ld.global.cs.v2.u32 {%0, %1}, [%2];\n"
-        //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1])
-        //              : "l"(bPtrCur));
-
         int2 load8 = reinterpret_cast<const int2*>(bPtrCur)[0];
         b_int4[i][0] = load8.x;
         b_int4[i][1] = load8.y;
       }
 
       if constexpr (kInt32PerLane >= 4) {
-        // asm volatile("ld.global.cs.v4.u32 {%0, %1, %2, %3}, [%4];\n"
-        //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1]),
-        //              "=r"(b_int4[i][2]), "=r"(b_int4[i][3]) : "l"(bPtrCur));
-
 #pragma unroll
         for (int l = 0; l < kInt32PerLane / 4; ++l) {
           int4 load16 = reinterpret_cast<const int4*>(bPtrCur)[l];
@@ -1887,9 +1824,6 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
   //
   __shared__ RocmMma::ReduceAccum smem_sum[Warps][kWarpSize];
 
-  // FIXME: this likely doesn't need to be a true reduction tree, can just be a
-  // serial sum, maybe (unless nvcc/ptxas goes back to its old ways)
-  // smem_sum[warpId][laneId] = TreeReduce4<KTilesPerIteration>::reduce(c);
   RocmMma::storeReduce(smem_sum[warpId][laneId], c);
 
   __syncthreads();
@@ -2234,8 +2168,6 @@ at::Tensor _weight_int4pack_mm_cuda(
 #undef RUN_GEMM
 
   return C_final;
-  TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
-  return C_final;
 }
 
 // input is [n][k / 2] (uint8 dtype)
@@ -2304,8 +2236,6 @@ at::Tensor _convert_weight_to_int4pack_cuda(
         out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
   }
 
-  return out;
-  TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not available for build.")
   return out;
 }
 #endif // USE_ROCM
