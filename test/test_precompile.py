@@ -9604,6 +9604,36 @@ class TestPrecompileCustomOpRecording(TestCase):
             },
         )
 
+    def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
+        served, served_name = self._op("served")
+        unserved, unserved_name = self._op("unserved")
+        modules = {}
+        for op in (served, unserved):
+            module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+            module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+            op._init_fn.__module__ = module.__name__
+            modules[module.__name__] = module
+        self.enterContext(mock.patch.dict(sys.modules, modules))
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = os.path.join(directory, "artifact.py")
+            with capture(
+                _no_compilation_single_graph,
+                artifact_path=artifact,
+                cache_path=os.path.join(directory, "artifact.cache"),
+                tracer=DynamoTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(4))
+                op_names = cap._session._package.op_names
+                (served_ops,) = op_names.values()
+                served_ops.add((served_name, ""))
+                # As a compile bypass_current_compile drops: recorded, never served.
+                op_names["__compiled_fn_unserved"] = {(unserved_name, "")}
+            with open(artifact) as f:
+                python_code = f.read()
+        expected = (served._init_fn.__module__,)
+        self.assertIn(f"CUSTOM_OP_MODULES = {expected!r}", python_code)
+
 
 if __name__ == "__main__":
     run_tests()
