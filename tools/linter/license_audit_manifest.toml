@@ -136,6 +136,7 @@ paths = [
   'third_party/composable_kernel/LICENSE',
   'third_party/cpp-httplib/LICENSE',
   'third_party/cudnn_frontend/LICENSE-MIT.txt',
+  'third_party/dynolog_headers/LICENSE',
   'third_party/fbgemm/external/composable_kernel/LICENSE',
   'third_party/flash-attention/csrc/composable_kernel/LICENSE',
   'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/LICENSE',
@@ -149,7 +150,6 @@ paths = [
   'third_party/nlohmann/LICENSE.MIT',
   'third_party/psimd/LICENSE',
   'third_party/tensorpipe/third_party/libuv/LICENSE',
-  'torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE',
 ]
 
 [[spdx]]
