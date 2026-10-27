@@ -636,6 +636,7 @@
 # label: module: cuda
 /aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
+# /test/test_cow.py
 # /test/test_cuda.py
 # /test/test_cuda_compatibility.py
 # /test/test_cuda_expandable_segments.py
@@ -1048,6 +1049,8 @@
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
+# label: oncall: profiler, module: third_party
+/third_party/dynolog_headers/ @scotts @ryanzhang22
 # label: module: third_party, module: xpu
 /third_party/xpu.txt @EikanWang @gujinghui
 #
