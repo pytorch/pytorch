@@ -277,7 +277,75 @@ class TestFlopsFx(TestCase):
         self.assertEqual(shape_env.replacements, replacements)
 
 
+@instantiate_parametrized_tests
 class TestCUDAGraphUtils(TestCase):
+    def test_initial_mempool_allocation_uses_backend_device(self):
+        from torch._inductor import cudagraph_trees, graph_tree_backend as backend
+
+        prime_gb = 1 / 1024
+        graph_interface = mock.Mock()
+        graph_interface.capture.return_value = mock.MagicMock()
+        with (
+            inductor_config.patch(
+                "triton.cudagraph_initial_mempool_allocation_gb", prime_gb
+            ),
+            mock.patch.object(
+                backend, "get_graph_interface", return_value=graph_interface
+            ),
+            mock.patch.object(backend, "get_device_type", return_value="xpu"),
+            mock.patch.object(
+                torch.accelerator, "device_index", return_value=mock.MagicMock()
+            ),
+            mock.patch.object(torch.accelerator, "synchronize"),
+            mock.patch.object(torch.accelerator, "current_stream"),
+            mock.patch.object(torch._C, "_set_cached_tensors_enabled"),
+            mock.patch.object(torch, "empty") as empty,
+        ):
+            cudagraph_trees.CUDAGraphTreeManager(2)
+
+        empty.assert_called_once_with(
+            1 << 20, dtype=torch.uint8, device=torch.device("xpu", 2)
+        )
+
+    @parametrize("strict", (False, True))
+    def test_graph_partition_runtime_cudagraph_fallback(self, strict):
+        from torch._dynamo.utils import counters
+        from torch._inductor.output_code import (
+            cudagraph_partition_post_compile as partition_post_compile,
+        )
+        from torch._inductor.utils import BoxedBool
+
+        compiled_graph = mock.Mock()
+        compiled_graph.cudagraph_info.cudagraph_fail_reasons = []
+        compiled_graph.fx_kwargs = {"is_backward": False}
+        original_callable = compiled_graph.current_callable
+        cudagraphs = BoxedBool(True)
+        counters.clear()
+
+        with (
+            inductor_config.patch(
+                {
+                    "graph_partition": True,
+                    "triton.cudagraph_or_error": strict,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.output_code._get_runtime_cudagraph_fail_reason",
+                return_value="no Graph Trees backend registered",
+            ),
+        ):
+            if strict:
+                with self.assertRaisesRegex(
+                    RuntimeError, "no Graph Trees backend registered"
+                ):
+                    partition_post_compile([], compiled_graph, cudagraphs, {}, None)
+            else:
+                partition_post_compile([], compiled_graph, cudagraphs, {}, None)
+
+        self.assertFalse(cudagraphs.value)
+        self.assertIs(compiled_graph.current_callable, original_callable)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
     def test_accelerator_mismatch_fallback(self):
         from torch._inductor.cudagraph_utils import (
             check_current_accelerator_for_cudagraphs,

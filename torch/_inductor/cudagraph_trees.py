@@ -2483,9 +2483,8 @@ class CUDAGraphTreeManager:
                 if prime_gb:
                     # Freed immediately, but cached in the pool for later recordings.
                     nbytes = int(prime_gb * (1 << 30))
-                    torch.empty(
-                        nbytes, dtype=torch.uint8, device=f"cuda:{device_index}"
-                    )
+                    device = torch.device(tree_backend.get_device_type(), device_index)
+                    torch.empty(nbytes, dtype=torch.uint8, device=device)
 
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)

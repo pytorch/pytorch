@@ -391,7 +391,8 @@ def cudagraph_partition_post_compile(
     if compiled_graph.cudagraph_info is None:
         raise AssertionError("compiled_graph.cudagraph_info must not be None")
     cudagraph_fail_reasons = list(compiled_graph.cudagraph_info.cudagraph_fail_reasons)
-    if runtime_reason := _get_runtime_cudagraph_fail_reason(compiled_graph):
+    runtime_reason = _get_runtime_cudagraph_fail_reason(compiled_graph)
+    if runtime_reason:
         cudagraph_fail_reasons.append(runtime_reason)
 
     if (
@@ -402,6 +403,8 @@ def cudagraph_partition_post_compile(
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        if runtime_reason:
+            log_cudagraph_skip_and_bump_counter(runtime_reason)
         return
 
     if compiled_graph.current_callable is None:
