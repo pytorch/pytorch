@@ -1584,7 +1584,28 @@ inline long4 ternary_offsets(
             p2 * int(strides3[2])));
   }
   int idx = int(thread_pos.z);
-  for (uint i = 2; i < ndim; ++i) {
+  // Dim 2 is peeled out of the loop and dim 3 takes the remainder directly:
+  // four dims (a per-channel operand keeps batch and channel apart) then pay
+  // one mod/div instead of two, and keeping this straight-line rather than a
+  // separate four-dim block leaves the three-dim path's register use alone.
+  const int sz2 = int(sizes[2]);
+  const int p2 = idx % sz2;
+  idx /= sz2;
+  offs += int4(
+      p2 * int(strides0[2]),
+      p2 * int(strides1[2]),
+      p2 * int(strides2[2]),
+      p2 * int(strides3[2]));
+  if (ndim == 4) {
+    return long4(
+        offs +
+        int4(
+            idx * int(strides0[3]),
+            idx * int(strides1[3]),
+            idx * int(strides2[3]),
+            idx * int(strides3[3])));
+  }
+  for (uint i = 3; i < ndim; ++i) {
     const int sz = int(sizes[i]);
     const int p = idx % sz;
     idx /= sz;
