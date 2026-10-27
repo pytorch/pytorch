@@ -1609,6 +1609,14 @@ torch.{device_type}.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @largeTensorTest("5GB")
+    def test_max_pool3d_64bit_indices(self, device):
+        # Zero-stride input that needs 64-bit indexing, MPS reads it without materializing
+        x = torch.zeros(1, dtype=torch.half, device=device).expand(1, 1, 32769, 65536)
+        out, idx = F.max_pool3d(x, (1, 1, 3), (1, 32768, 65533), return_indices=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(idx.flatten().tolist(), [0, 65533, 2**31, 2**31 + 65533])
+
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
