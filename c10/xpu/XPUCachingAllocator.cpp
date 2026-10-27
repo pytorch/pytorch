@@ -316,6 +316,9 @@ struct ExpandableSegment {
         "IPC share header describes an empty expandable segment");
     auto segment = std::make_unique<ExpandableSegment>(
         device, std::nullopt, header.segment_size);
+    TORCH_CHECK(
+        header.num_handles <= segment->max_handles_,
+        "The shared expandable segment is larger than the virtual address range reserved by the importing process.");
 
     for (const auto i : c10::irange(header.num_handles)) {
       std::vector<std::byte> data(header.handle_size);
