@@ -24,9 +24,8 @@ cd magma_cuda%CUVER_NODOT%
 
 if not exist magma (
   :: MAGMA 2.5.4 from http://icl.utk.edu/projectsfiles/magma/downloads/ with applied patches from our magma folder
-  git init -q magma || exit /b 1
-  git -C magma fetch -q --depth 1 https://github.com/ptrblck/magma_win.git 03c96c558111279c2cadff87e2d797b4e6804a5f || (rmdir /S /Q magma & exit /b 1)
-  git -C magma checkout -q FETCH_HEAD || (rmdir /S /Q magma & exit /b 1)
+  git clone https://github.com/ptrblck/magma_win.git magma
+  if errorlevel 1 exit /b 1
 ) else (
   rmdir /S /Q magma\build
   rmdir /S /Q magma\install

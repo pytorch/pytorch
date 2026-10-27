@@ -1335,6 +1335,7 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
+  # better-benchmark pin is a main commit (untagged); bump by hand, its consumer is schedule-only
   git -C "${benchmark_dir}" init -q
   git -C "${benchmark_dir}" fetch -q --depth 1 https://github.com/eellison/better-benchmark.git "$(get_pinned_commit better-benchmark)"
   git -C "${benchmark_dir}" checkout -q FETCH_HEAD
@@ -2610,6 +2611,7 @@ test_attention_microbenchmark() {
 
   # Install attention-gym dependency
   echo "Installing attention-gym..."
+  # attention-gym pin is a main commit (untagged); bump by hand, its consumer is schedule-only
   python -m pip install "git+https://github.com/meta-pytorch/attention-gym.git@$(get_pinned_commit attention-gym)"
   pip show triton
 
