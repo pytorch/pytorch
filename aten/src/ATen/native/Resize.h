@@ -90,6 +90,14 @@ inline int64_t subByteElementPerByte(const caffe2::TypeMeta& data_type) {
   }
 }
 
+// Why the storage is unusable (e.g. freed by FSDP), if its owner set a
+// data-pointer access message. Only built when the bounds check fails.
+inline std::string invalidStorageMsgSuffix(const Storage& storage) {
+  const auto* impl = storage.unsafeGetStorageImpl();
+  const std::string* msg = impl ? impl->data_ptr_access_msg() : nullptr;
+  return msg ? ". " + *msg : std::string();
+}
+
 template <typename T>
 inline void checkInBoundsForStorage(
     ArrayRef<T> size,
@@ -138,7 +146,8 @@ inline void checkInBoundsForStorage(
       " requiring a storage size of ",
       storage_size_plus_offset_bytes,
       " are out of bounds for storage of size ",
-      new_storage_size_bytes);
+      new_storage_size_bytes,
+      invalidStorageMsgSuffix(new_storage));
 }
 
 template <typename T>

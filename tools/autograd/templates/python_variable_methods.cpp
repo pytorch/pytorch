@@ -172,6 +172,15 @@ static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "data_ptr", args);
   }
   auto& self = THPVariable_Unpack(self_);
+  // Storage freed with a warn-on-access message (as FSDP's reshard does) has no
+  // data: return null without warning so "was it freed" checks stay quiet.
+  if (self.has_storage()) {
+    const auto& storage = self.storage();
+    if (storage.unsafeGetStorageImpl()->warn_on_data_ptr_access() &&
+        storage.nbytes() == 0) {
+      return wrap(static_cast<void*>(nullptr));
+    }
+  }
   return wrap(self.data_ptr());
   END_HANDLE_TH_ERRORS
 }

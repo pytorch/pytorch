@@ -348,6 +348,30 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(raises_on_data_ptr(s2))
 
     @onlyNativeDeviceTypes
+    def test_storage_warns_on_data_ptr_access(self, device):
+        t = torch.ones(4, device=device)
+        storage = t.untyped_storage()
+        torch._C._set_storage_data_ptr_access_warn_msg(storage._cdata, "stale storage")
+        # Kernels that read the storage warn and still run
+        with self.assertWarnsRegex(UserWarning, "stale storage"):
+            self.assertEqual(t.sum().item(), 4)
+        torch._C._clear_storage_data_ptr_access_error_msg(storage._cdata)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            t.sum()
+
+        # Freed storage: data_ptr() returns 0 without warning, and rebuilding a
+        # view adds the message to the out-of-bounds error
+        storage.resize_(0)
+        torch._C._set_storage_data_ptr_access_warn_msg(storage._cdata, "stale storage")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            self.assertEqual(t.data_ptr(), 0)
+            self.assertEqual(storage.data_ptr(), 0)
+        with self.assertRaisesRegex(RuntimeError, "storage of size 0. stale storage"):
+            t.as_strided(t.size(), t.stride())
+
+    @onlyNativeDeviceTypes
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5377
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
