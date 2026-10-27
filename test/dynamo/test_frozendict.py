@@ -40,6 +40,58 @@ parametrize_pytree_module = parametrize(
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("construct", [False, True])
+    @parametrize("empty", [False, True])
+    def test_repr_and_str(self, construct, empty):
+        def fn(x, mapping):
+            if construct:
+                mapping = builtins.frozendict(mapping)
+            return x + 1, repr(mapping), str(mapping), mapping.__repr__()
+
+        contents = {} if empty else {"b": [1, 2], 3: "a'b\\c"}
+        mapping = contents if construct else builtins.frozendict(contents)
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    @parametrize("construct", [False, True])
+    def test_repr_recursive(self, construct):
+        def fn(x, mapping):
+            if construct:
+                values = []
+                mapping = builtins.frozendict(a=values)
+                values.append(mapping)
+            return x + 1, repr(mapping), str(mapping)
+
+        values = []
+        mapping = builtins.frozendict(a=values)
+        values.append(mapping)
+        x = torch.ones(1)
+        expected = fn(x, mapping)
+        self.assertEqual(expected[1], "frozendict({'a': [frozendict({...})]})")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
+        )
+
+    def test_repr_custom_children(self):
+        class Child:
+            def __repr__(self):
+                return "child"
+
+        def fn(x):
+            child = Child()
+            mapping = builtins.frozendict({child: builtins.frozendict(a=child)})
+            return x + 1, repr(mapping), str(mapping)
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1], "frozendict({child: frozendict({'a': child})})")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
     @parametrize("mapping_input", [False, True])
     @parametrize("key_error", ["unhashable", "custom", "subclass"])
     def test_constructor_key_type_errors(self, mapping_input, key_error):
