@@ -1419,8 +1419,7 @@ def cholesky_inverse(self: Tensor, upper: bool = False) -> Tensor:
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
-@register_meta([aten.linalg_cholesky_ex.default, aten.linalg_cholesky_ex.L])
-@out_wrapper("L", "info", exact_dtype=True)
+@register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
     squareCheckInputs(A, "linalg.cholesky")
     checkFloatingOrComplex(A, "linalg.cholesky")
@@ -1436,6 +1435,25 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     # infos
     infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
     return L, infos
+
+
+@register_meta(aten.linalg_cholesky_ex.L)
+def linalg_cholesky_ex_out(
+    A: Tensor,
+    upper: bool = False,
+    check_errors: bool = False,
+    *,
+    L: Tensor,
+    info: Tensor,
+) -> tuple[Tensor, Tensor]:
+    L_res, info_res = linalg_cholesky_ex(A, upper, check_errors)
+    # Like the structured kernel, a resized L gets the F-contiguous strides of the result
+    if _resize_output_check(L, L_res.shape):
+        L.resize_(L_res.mT.shape).transpose_(-2, -1)
+    _safe_copy_out(copy_from=L_res, copy_to=L, exact_dtype=True)
+    _maybe_resize_out(info, info_res.shape)
+    _safe_copy_out(copy_from=info_res, copy_to=info, exact_dtype=True)
+    return L, info
 
 
 @register_meta(
