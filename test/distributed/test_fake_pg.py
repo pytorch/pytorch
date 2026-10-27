@@ -90,33 +90,34 @@ class TestFakePG(TestCase):
             pg = dynamo_distributed.get_compile_sync_pg()
             self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
 
-    def test_compile_sync_backend_needs_every_device_backend_fake(self):
+    @parametrize(
+        "config,gloo_available,expected",
+        [
+            ("cuda:fake", True, "fake"),
+            ("cuda:fake", False, "fake"),
+            ("cpu:fake,cuda:fake", True, "fake"),
+            ("cpu:fake,cuda:fake", False, "fake"),
+            # One real device backend means real peers: sync over gloo.
+            ("cpu:gloo,cuda:fake", True, "gloo"),
+            ("cpu:gloo,cuda:fake", False, None),
+            ("cpu:fake,cuda:nccl", True, "gloo"),
+            ("cpu:fake,cuda:nccl", False, None),
+        ],
+    )
+    def test_compile_sync_backend_needs_every_device_backend_fake(
+        self, config, gloo_available, expected
+    ):
         from torch._dynamo import distributed as dynamo_distributed
 
-        fake, gloo = dist.Backend.FAKE, dist.Backend.GLOO
-        # The backend with gloo available, then without it.
-        cases = {
-            "cuda:fake": (fake, fake),
-            "cpu:fake,cuda:fake": (fake, fake),
-            # One real device backend means real peers: sync over gloo.
-            "cpu:gloo,cuda:fake": (gloo, None),
-            "cpu:fake,cuda:nccl": (gloo, None),
-        }
-        for config, expected in cases.items():
-            for gloo_available, backend in zip((True, False), expected):
-                with (
-                    self.subTest(config=config, gloo=gloo_available),
-                    unittest.mock.patch.object(
-                        dist, "get_backend_config", return_value=config
-                    ),
-                    unittest.mock.patch.object(
-                        dist, "is_gloo_available", return_value=gloo_available
-                    ),
-                ):
-                    backends = dynamo_distributed._default_device_backends()
-                    self.assertEqual(
-                        dynamo_distributed._compile_sync_backend(backends), backend
-                    )
+        with (
+            unittest.mock.patch.object(dist, "get_backend_config", return_value=config),
+            unittest.mock.patch.object(
+                dist, "is_gloo_available", return_value=gloo_available
+            ),
+        ):
+            backends = dynamo_distributed._default_device_backends()
+            backend = dynamo_distributed._compile_sync_backend(backends)
+        self.assertEqual(backend, expected)
 
     @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
     @parametrize("fake_options", [False, True])
