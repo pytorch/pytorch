@@ -1060,6 +1060,7 @@ def _check_arg_device(x: torch.Tensor | None) -> bool:
             "cpu",
             "cuda",
             torch.utils.backend_registration._privateuse1_backend_name,
+            "xpu",
         ]
     return True
 
