@@ -2836,6 +2836,16 @@
       ]
     }
   ],
+  "GB4682": [
+    {
+      "Gb_type": "Delete of an unmodeled C member",
+      "Context": "del {obj}.{name}",
+      "Explanation": "Dynamo does not model deleting the C struct member '{name}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7637": [
     {
       "Gb_type": "non-string key in object __dict__",
