@@ -182,10 +182,10 @@ class TestInnerTreeOrder(TestCase):
                     torch.full((m,), bits, device="cuda", dtype=torch.int32),
                 )
 
-    def test_staged_split_preserves_reduction_trees(self):
+    # B200 is the only profile that stages split batches; force it on every SM90+ device.
+    @mock.patch.object(rt, "_itree_arch", return_value=rt._ITREE_ARCH[(10, 0)])
+    def test_staged_split_preserves_reduction_trees(self, _):
         """Ensure split staging keeps the same tree as the corresponding direct fold."""
-        if not rt._itree_arch(torch.device("cuda")).split_stage_rows:
-            self.skipTest("split staging is disabled on this architecture")
         m, n = 3, 1 << 18
         x = torch.randn(m, n, device="cuda")
         self.assertEqual(rt.itree_plan(n + 1, m, 4, device=x.device).stage_e, 0)
@@ -434,7 +434,7 @@ class TestInnerTreeOrder(TestCase):
             self.assertEqual(got, x.sum(dim=1, dtype=dtype))
 
     def test_ragged_plan_fusion_is_trait_aware(self):
-        """Select ragged fusion from trait precision so low-precision sums stay accurate."""
+        """Select ragged fusion per trait; kchunk changes register cost, not the tree."""
         n, m = 4097, 4096
         default = rt.itree_plan(n, m, 2)
         lowp = rt.trait_itree_plan(T.SumOps(), n, m, 2)

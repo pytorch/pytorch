@@ -173,6 +173,69 @@ class TestKernelColTile(TestCase):
                 for g, e in zip(got, expected[name]):
                     torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
 
+    def test_batched_two_output_columns(self):
+        # Two-output batched views fold both outputs in stage two; cover both combines.
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        f32 = [torch.float32, torch.float32]
+        for columns in (256, ct._C_THREAD_STAGE2):
+            x = torch.randn(3, 515, columns, device="cuda")
+            with torch.backends.python_native.cutedsl.disabled():
+                expected = torch.var_mean(x, dim=1)
+            with self.subTest(pc=3 * columns >= ct._C_THREAD_STAGE2):
+                got = ct._reduce_col_tile(
+                    trait, "batched_var_mean", x, f32, 2, None, 4, None
+                )
+                for g, e in zip(got, expected):
+                    torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
+
+    def test_batched_column_route_gate(self):
+        # Middle-axis reductions use the batched kernel only where it measured faster.
+        f32 = torch.float32
+        one = T.SumOps(acc=cutlass.Float32)
+        two = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        cases = (
+            ((4, 64, 2), 1, True),
+            ((4, 1024, 2), 1, False),
+            ((4, 1024, 16), 1, True),
+            ((4, 64, 16), 2, True),
+            ((4, 1024, 16), 2, False),
+            ((4, 1024, 2048), 2, True),
+        )
+        for shape, nouts, routed in cases:
+            x = torch.randn(shape, device="cuda")
+            with torch.backends.python_native.cutedsl.disabled():
+                expected = (x.sum(dim=1),) if nouts == 1 else torch.var_mean(x, dim=1)
+            real = ct.reduce_batched_col_tile
+            with (
+                self.subTest(shape=shape, nouts=nouts),
+                mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served,
+            ):
+                if nouts == 1:
+                    got = (kg.reduce_dim(one, "gate", x, 1, f32),)
+                else:
+                    got = kg.reduce_dim2(two, "gate_2out", x, 1, [f32, f32])
+                self.assertEqual(served.call_count, int(routed))
+                for g, e in zip(got, expected):
+                    torch.testing.assert_close(g, e, atol=1e-3, rtol=1e-4)
+
+    def test_two_output_columns_route_to_coltile(self):
+        # Dense dim-0 and transposed two-output reductions reach the column kernel.
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        f32 = [torch.float32, torch.float32]
+        base = torch.randn(4096, 256, device="cuda")
+        for name, x, dim in (("dim0", base, 0), ("transposed", base.t(), 1)):
+            with torch.backends.python_native.cutedsl.disabled():
+                expected = torch.var_mean(x, dim=dim)
+            real = ct.reduce_col_tile_2out
+            with (
+                self.subTest(layout=name),
+                mock.patch.object(ct, "reduce_col_tile_2out", wraps=real) as served,
+            ):
+                got = kg.reduce_dim2(trait, f"var_mean_{name}", x, dim, f32)
+                self.assertEqual(served.call_count, 1)
+                for g, e in zip(got, expected):
+                    torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
+
     def test_transposed_dense_columns_route_to_coltile(self):
         # A transposed view whose kept axis is dense is served by the column kernel.
         x = torch.randn(256, 4096, device="cuda").t()
@@ -251,9 +314,9 @@ class TestOrderedColHost(TestCase):
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         trait = T.SumOps(acc=cutlass.Float32)
-        plan = rt.trait_itree_plan(
-            trait, 32768, 132, 4, stage=False, arch=rt._ITREE_ARCH["default"]
-        )
+        default = rt._ITREE_ARCH["default"]
+        with mock.patch.object(rt, "_itree_arch", return_value=default):
+            plan = rt.trait_itree_plan(trait, 32768, 132, 4, stage=False)
         kwargs = dict(R=32768, C=132, B=1, nouts=1)
         kwargs.update(updates)
         with self.assertRaises(ValueError):
