@@ -61,6 +61,11 @@ install_torchbench
 install_huggingface
 install_timm
 
+# TorchBench's requirements.txt pulls in an unpinned pytest. pytest 9.2.0
+# breaks the LogXMLReruns junitxml override in test/conftest.py (KeyError on
+# any rerun), so pin the last known-good version.
+pip_install 'pytest==9.1.1'
+
 # Clean up
 # NS: It's very important to uninstall some of the system dependencies
 # Otherwise torchnbench test might start to fail with hard to detect errors
