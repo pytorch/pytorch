@@ -729,16 +729,16 @@ struct AvgPoolIterBounds {
   T count;
 };
 
-template <int32_t dim, typename idx_t>
+template <int32_t dim, typename idx_t = int32_t>
 AvgPoolIterBounds<int32_t> get_avg_pool_input_iter_bounds(
     constant int32_t* input_sizes,
-    constant int32_t* output_sizes,
     thread int32_t (&pooling_dim_indices)[3],
     constant int32_t* kernel_size,
     constant int32_t* stride,
     constant int32_t* padding,
     bool count_include_pad,
-    bool adaptive) {
+    bool adaptive = false,
+    constant int32_t* output_sizes = nullptr) {
   if (adaptive) {
     auto bounds = get_adaptive_input_iter_bounds<dim, idx_t>(
         input_sizes, output_sizes, pooling_dim_indices);
@@ -773,31 +773,31 @@ void avg_pool_3d_input_iter(
     int32_t divisor_override) {
   auto bounds0 = get_avg_pool_input_iter_bounds<0, idx_t>(
       input_sizes,
-      output_sizes,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
       count_include_pad,
-      adaptive);
+      adaptive,
+      output_sizes);
   auto bounds1 = get_avg_pool_input_iter_bounds<1, idx_t>(
       input_sizes,
-      output_sizes,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
       count_include_pad,
-      adaptive);
+      adaptive,
+      output_sizes);
   auto bounds2 = get_avg_pool_input_iter_bounds<2, idx_t>(
       input_sizes,
-      output_sizes,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
       count_include_pad,
-      adaptive);
+      adaptive,
+      output_sizes);
 
   opmath_t<T> value_sum = 0;
   opmath_t<T> divisor = has_divisor_override
@@ -839,22 +839,22 @@ void avg_pool_2d_input_iter(
     int32_t divisor_override) {
   auto bounds0 = get_avg_pool_input_iter_bounds<0, idx_t>(
       input_sizes,
-      output_sizes,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
       count_include_pad,
-      adaptive);
+      adaptive,
+      output_sizes);
   auto bounds1 = get_avg_pool_input_iter_bounds<1, idx_t>(
       input_sizes,
-      output_sizes,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
       count_include_pad,
-      adaptive);
+      adaptive,
+      output_sizes);
 
   opmath_t<T> value_sum = 0;
   opmath_t<T> divisor = has_divisor_override
@@ -887,33 +887,27 @@ void avg_pool_backward_3d_input_iter(
     bool count_include_pad,
     bool has_divisor_override,
     int32_t divisor_override) {
-  auto bounds0 = get_avg_pool_input_iter_bounds<0, int32_t>(
+  auto bounds0 = get_avg_pool_input_iter_bounds<0>(
       grad_input_sizes,
-      /*output_sizes=*/nullptr,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
-      count_include_pad,
-      /*adaptive=*/false);
-  auto bounds1 = get_avg_pool_input_iter_bounds<1, int32_t>(
+      count_include_pad);
+  auto bounds1 = get_avg_pool_input_iter_bounds<1>(
       grad_input_sizes,
-      /*output_sizes=*/nullptr,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
-      count_include_pad,
-      /*adaptive=*/false);
-  auto bounds2 = get_avg_pool_input_iter_bounds<2, int32_t>(
+      count_include_pad);
+  auto bounds2 = get_avg_pool_input_iter_bounds<2>(
       grad_input_sizes,
-      /*output_sizes=*/nullptr,
       pooling_dim_indices,
       kernel_size,
       stride,
       padding,
-      count_include_pad,
-      /*adaptive=*/false);
+      count_include_pad);
 
   auto divisor = has_divisor_override
       ? divisor_override
@@ -1207,13 +1201,20 @@ kernel void avg_pool_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],                  \
       uint tid [[thread_position_in_grid]]);
 
-#define REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(DTYPE, IDX, SUFFIX)     \
+#define REGISTER_ADAPTIVE_AVG_POOL_BACKWARD(DTYPE, IDX_T, SUFFIX)      \
   template [[host_name("adaptive_avg_pool_backward_" #DTYPE #SUFFIX)]] \
-  kernel void adaptive_avg_pool_backward<DTYPE, IDX>(                  \
+  kernel void adaptive_avg_pool_backward<DTYPE, IDX_T>(                \
       device DTYPE * grad_input [[buffer(0)]],                         \
       device const DTYPE* grad_output [[buffer(1)]],                   \
       constant AvgPoolingParams<5>& params [[buffer(2)]],              \
       uint tid [[thread_position_in_grid]])
+
+// Adaptive avg pooling supports floating types only, and is the only user of
+// the 64-bit avg_pool variant
+#define REGISTER_ADAPTIVE_AVG_POOL_OP(DTYPE)                 \
+  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")                  \
+  REGISTER_ADAPTIVE_AVG_POOL_BACKWARD(DTYPE, int32_t, _i32); \
+  REGISTER_ADAPTIVE_AVG_POOL_BACKWARD(DTYPE, int64_t, _i64)
 
 REGISTER_POOL_OP(float);
 REGISTER_POOL_OP(half);
@@ -1230,15 +1231,6 @@ REGISTER_POOL_BACKWARD_OP_SERIAL(half, false);
 REGISTER_POOL_BACKWARD_OP_SERIAL(bfloat, false);
 REGISTER_POOL_BACKWARD_OP_SERIAL(float, true);
 
-// 64-bit adaptive window bounds, adaptive avg pooling supports floating types
-// only
-REGISTER_AVG_POOL(float, int64_t, "_i64");
-REGISTER_AVG_POOL(half, int64_t, "_i64");
-REGISTER_AVG_POOL(bfloat, int64_t, "_i64");
-
-REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(float, int, _i32);
-REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(float, long, _i64);
-REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(half, int, _i32);
-REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(half, long, _i64);
-REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(bfloat, int, _i32);
-REGISTER_ADAPTIVE_AVG_POOL_BACKWARD_OP(bfloat, long, _i64);
+REGISTER_ADAPTIVE_AVG_POOL_OP(float);
+REGISTER_ADAPTIVE_AVG_POOL_OP(half);
+REGISTER_ADAPTIVE_AVG_POOL_OP(bfloat);
