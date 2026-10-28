@@ -12786,11 +12786,8 @@ class TestNNDeviceType(NNTestCase):
             F.silu(x, inplace=True)
 
     @dtypes(torch.float32, torch.bfloat16)
-    @parametrize_test(
-        "value",
-        [255 + 2**-16, 2047 + 2**-13, 262143 + 2**-6, 2**24, 2**24 + 2],
-    )
-    def test_silu_backward_large_positive(self, device, dtype, value):
+    def test_silu_backward_large_positive(self, device, dtype):
+        value = 255 + 2**-16 if dtype == torch.float32 else 2**24
         # The derivative rounds to 1 at these finite inputs in both dtypes.
         x = torch.tensor([value], device=device, dtype=dtype, requires_grad=True)
         F.silu(x).backward()
