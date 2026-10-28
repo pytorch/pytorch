@@ -854,6 +854,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_autocast_enabled(at::kCPU) ||
       at::autocast::is_autocast_enabled(at::kCUDA) ||
+      at::autocast::is_autocast_enabled(at::kMPS) ||
       at::autocast::is_autocast_enabled(at::kXPU) ||
       at::autocast::is_autocast_enabled(at::kIPU) ||
       at::autocast::is_autocast_enabled(at::kXLA) ||
