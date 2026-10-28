@@ -62,10 +62,12 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_Z3,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -4279,7 +4281,9 @@ class TestUnbacked(TestCase):
             self.assertEqual(
                 func(torch.tensor([100]), torch.tensor([5.5])), torch.tensor([55.0])
             )
-            with self.assertRaisesRegex(RuntimeError, r"Eq\(2\.0\*zuf\d+, 11\.0\)"):
+            with self.assertRaisesRegex(
+                RuntimeError, r"Eq\(FloatMul\(zuf\d+, 2\.0\), 11\.0\)"
+            ):
                 func(torch.tensor([5]), torch.tensor([1.8]))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4296,6 +4300,157 @@ class TestUnbacked(TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, r"zuf\d+ >= 5\.5"):
                 func(torch.tensor([100]), torch.tensor([1.5]))
+
+    # https://github.com/pytorch/pytorch/issues/198070
+    # Unbacked float symbols may be NaN or inf, so x != x, x - x, x * 0 and
+    # comparisons on them must not be folded with real-number identities.
+    # (crossref loses locals when resuming after an .item() graph break.)
+    @skipIfCrossRef
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_unbacked_symfloat_ieee_semantics(self, backend):
+        def step(loss, param):
+            v = loss.item()
+            if v != v:
+                return param
+            return param - 0.1 * v
+
+        def arith(loss, param):
+            v = loss.item()
+            return param * (v - v), param * (v * 0)
+
+        def compare(loss, param):
+            v = loss.item()
+            out = param
+            if v * 0 == 0:
+                out = out + 1
+            if v <= float("inf"):
+                out = out + 2
+            return out
+
+        def checked(loss, param):
+            v = loss.item()
+            torch._check(v * 2.0 == v * 2.0)  # i.e. not NaN
+            return param * v
+
+        param = torch.ones(2)
+        for fn in (step, arith, compare):
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend=backend)
+            for val in (1.5, float("nan"), float("inf")):
+                loss = torch.tensor(val)
+                self.assertEqual(compiled(loss, param), fn(loss, param), equal_nan=True)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(checked, backend=backend, fullgraph=True)
+        loss = torch.tensor(1.5)
+        self.assertEqual(compiled(loss, param), checked(loss, param))
+        with self.assertRaises(RuntimeError):
+            compiled(torch.tensor(float("nan")), param)
+
+    def test_float_symbol_sympy_semantics(self):
+        from torch.fx.experimental.sym_node import _maybe_ieee_float_op
+        from torch.fx.experimental.symbolic_shapes import canonicalize_bool_expr
+        from torch.utils._sympy.functions import FloatAdd, FloatMul, IsNaN, IsNotNaN
+        from torch.utils._sympy.printers import CppPrinter, PythonPrinter
+        from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
+        zuf0 = sympy.Symbol("zuf0")
+        zf0 = sympy.Symbol("zf0")
+        u0 = sympy.Symbol("u0", integer=True)
+        self.assertEqual(IsNaN(sympy.nan), sympy.true)
+        self.assertEqual(IsNaN(sympy.Float(1.5)), sympy.false)
+        self.assertEqual(IsNaN(u0), sympy.false)
+        self.assertEqual(~IsNaN(zuf0), IsNotNaN(zuf0))
+        # Must stay opaque: not folded by sympy simplification.
+        self.assertEqual(sympy.simplify(IsNotNaN(zuf0)), IsNotNaN(zuf0))
+        self.assertNotEqual(FloatAdd(zuf0, -zuf0), 0)
+        # Constants fold with IEEE doubles: overflow to inf, underflow to 0.
+        self.assertEqual(FloatAdd(sympy.Float(1e308), sympy.Float(1e308)), sympy.oo)
+        self.assertEqual(
+            FloatMul(sympy.Float(1e-308), sympy.Float(1e-308)), sympy.Float(0.0)
+        )
+        # x * 1.0 is x, but x + 0.0 is not (x may be -0.0).
+        self.assertEqual(FloatMul(zuf0, sympy.Float(1.0)), zuf0)
+        self.assertNotEqual(FloatAdd(zuf0, sympy.Float(0.0)), zuf0)
+        self.assertFalse(torch._sym_isnan(1.0))
+        self.assertTrue(torch._sym_isnan(float("nan")))
+        # Backed float symbols keep regular sympy semantics.
+        self.assertIsNone(_maybe_ieee_float_op("sub", zf0, zf0))
+
+        # Negating IsNaN of a compound expression must not break to_cnf.
+        e = IsNaN(FloatMul(zuf0, sympy.Float(2.0)))
+        self.assertEqual(canonicalize_bool_expr(sympy.Not(e)), ~e)
+        r = canonicalize_bool_expr(sympy.Not(sympy.And(e, sympy.Lt(zuf0, 5.0))))
+        self.assertTrue(r.has(IsNotNaN))
+
+        # An unrefined unbacked float may be NaN, so comparisons on it are
+        # undecided; a range refined by torch._check rules NaN out.
+        unknown = {zuf0: ValueRanges.unknown()}
+        refined = {zuf0: ValueRanges(0.0, 1.0)}
+        le_inf = sympy.Le(zuf0, sympy.oo)
+        self.assertEqual(bound_sympy(le_inf, unknown), ValueRanges.unknown_bool())
+        self.assertEqual(
+            bound_sympy(sympy.Eq(FloatMul(zuf0, 0), 0), unknown),
+            ValueRanges.unknown_bool(),
+        )
+        self.assertEqual(bound_sympy(le_inf, refined), ValueRanges.wrap(sympy.true))
+
+        # Printers: guards use torch._sym_isnan (see _helper_sqrt).
+        self.assertEqual(PythonPrinter().doprint(IsNaN(zuf0)), "torch._sym_isnan(zuf0)")
+        self.assertRegex(
+            PythonPrinter().doprint(FloatAdd(zuf0, 1.0)), r"^\(zuf0 \+ 1\.0+\)$"
+        )
+        self.assertEqual(CppPrinter().doprint(IsNotNaN(zuf0)), "(!std::isnan(zuf0))")
+
+        shape_env = ShapeEnv()
+        f = shape_env.create_unbacked_symfloat()
+        z = f.node.expr
+        self.assertEqual((f - f).node.expr, FloatAdd(z, -z))
+        self.assertEqual((f != f).node.expr, IsNaN(z))
+        self.assertEqual((f == f).node.expr, IsNotNaN(z))
+        self.assertIsInstance(torch._sym_isnan(f), torch.SymBool)
+        # No runtime assert is needed: nothing assumes f is not NaN.
+        self.assertEqual(shape_env.deferred_runtime_asserts, {})
+        # Int arithmetic is unaffected.
+        i = shape_env.create_unbacked_symint()
+        self.assertEqual(i - i, 0)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_symfloat_export_roundtrip(self):
+        import io
+
+        class M(torch.nn.Module):
+            def forward(self, t):
+                v = t.item()
+                torch._check(v * 2.0 == v * 2.0)
+                return torch.ones(2) * (v - v)
+
+        ep = torch.export.export(M(), (torch.tensor(1.5),))
+        buf = io.BytesIO()
+        torch.export.save(ep, buf)
+        buf.seek(0)
+        loaded = torch.export.load(buf)
+        t = torch.tensor(1.5)
+        self.assertEqual(loaded.module()(t), M()(t))
+
+    @unittest.skipIf(not TEST_Z3, "z3 not installed")
+    def test_float_symbol_translation_validation(self):
+        import z3
+
+        from torch.fx.experimental.validator import TranslationValidator
+        from torch.utils._sympy.functions import FloatAdd, IsNaN, IsNotNaN
+
+        validator = TranslationValidator()
+        zuf0 = sympy.Symbol("zuf0")
+        validator.add_var(zuf0, float)
+        to_z3 = validator.to_z3_boolean_expr
+        # Floats are modeled as z3 Reals, which are never NaN.
+        self.assertTrue(z3.is_false(z3.simplify(to_z3(IsNaN(zuf0)))))
+        self.assertTrue(z3.is_true(z3.simplify(to_z3(IsNotNaN(zuf0)))))
+        # x - x is exactly 0 over the Reals.
+        eq = to_z3(sympy.Eq(FloatAdd(zuf0, -zuf0), 0))
+        self.assertTrue(z3.is_true(z3.simplify(eq)))
 
     # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
     # later on to a constant.

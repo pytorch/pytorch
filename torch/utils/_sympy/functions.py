@@ -100,6 +100,10 @@ __all__ = [
     "RoundToInt",
     "RoundDecimal",
     "ToFloat",
+    "IsNaN",
+    "IsNotNaN",
+    "FloatAdd",
+    "FloatMul",
     "FloatPow",
     "PowByNatural",
     "Identity",
@@ -1392,6 +1396,115 @@ class ToFloat(sympy.Function):
     def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         number = printer._print(self.args[0])
         return f"(double)({number})"
+
+
+class IsNaN(sympy.Function, sympy.logic.boolalg.Boolean):
+    """
+    Boolean ``math.isnan(x)``. Opaque to sympy so that it is never simplified
+    using real-number identities. ``x != x`` on a float expression is traced
+    as ``IsNaN(x)`` (and ``x == x`` as ``IsNotNaN(x)``), since sympy would
+    otherwise fold it to False, which is wrong for NaN.
+    """
+
+    nargs = (1,)
+
+    @classmethod
+    def eval(cls, x: sympy.Expr) -> sympy.Basic | None:
+        if x is sympy.nan:
+            return sympy.true
+        # Integers (and infinities) are never NaN.
+        if x.is_integer or x.is_number:
+            return sympy.false
+        return None
+
+    def __invert__(self) -> sympy.Basic:
+        return IsNotNaN(self.args[0])
+
+
+class IsNotNaN(sympy.Function, sympy.logic.boolalg.Boolean):
+    """
+    Boolean ``not math.isnan(x)``, the negation of IsNaN. A separate function
+    rather than Not(IsNaN(x)), so that it is an atom that Inductor and the rest
+    of the symbolic machinery handle the same way as IsNaN.
+    """
+
+    nargs = (1,)
+
+    @classmethod
+    def eval(cls, x: sympy.Expr) -> sympy.Basic | None:
+        r = IsNaN(x)
+        if r in (sympy.true, sympy.false):
+            return sympy.Not(r)
+        return None
+
+    def __invert__(self) -> sympy.Basic:
+        return IsNaN(self.args[0])
+
+
+class _OpaqueFloatBinOp(sympy.Function):
+    """
+    IEEE float + / * on expressions involving float symbols. Sympy's Add / Mul
+    use real-number identities (x - x = 0, x + x = 2*x, 0 * x = 0, ...) that
+    are wrong when x is NaN or inf, so float arithmetic is kept opaque: any
+    comparison involving it stays data-dependent instead of being folded.
+    See https://github.com/pytorch/pytorch/issues/198070
+    """
+
+    nargs = (2,)
+    _op_str: str
+
+    @classmethod
+    def eval(cls, a: sympy.Expr, b: sympy.Expr) -> sympy.Basic | None:
+        if a.is_number and b.is_number:
+            # Fold with IEEE doubles (overflow to inf, NaN propagation), not
+            # with sympy's arbitrary-precision arithmetic.
+            try:
+                return sympy.Float(cls._fold(float(a), float(b)))
+            except TypeError:  # e.g. complex numbers
+                return None
+        if cls._is_identity(a):
+            return b
+        if cls._is_identity(b):
+            return a
+        return None
+
+    @staticmethod
+    def _fold(a: float, b: float) -> float:
+        raise NotImplementedError
+
+    @staticmethod
+    def _is_identity(v: sympy.Expr) -> bool:
+        return False
+
+    def _torch_sympystr(self, printer: sympy.printing.StrPrinter) -> str:
+        # Infix for codegen / guards (ExprPrinter and subclasses). Plain str()
+        # keeps the default FloatAdd(a, b) form so that export serde can parse
+        # it back without sympy folding it.
+        a, b = (printer._print(arg) for arg in self.args)
+        return f"({a} {self._op_str} {b})"
+
+
+class FloatAdd(_OpaqueFloatBinOp):
+    # No identity: x + 0.0 is not x for x = -0.0.
+    _op_str = "+"
+
+    @staticmethod
+    def _fold(a: float, b: float) -> float:
+        return a + b
+
+
+class FloatMul(_OpaqueFloatBinOp):
+    _op_str = "*"
+
+    @staticmethod
+    def _fold(a: float, b: float) -> float:
+        return a * b
+
+    @staticmethod
+    def _is_identity(v: sympy.Expr) -> bool:
+        # x * 1.0 == x for every float, including NaN, inf and -0.0. Note that
+        # sympy.Float(1.0) != sympy.Integer(1), so check both.
+        return v in (sympy.S.One, sympy.Float(1.0))
 
 
 class Identity(sympy.Function):

@@ -47,6 +47,7 @@ _TORCH_SYM_OPS: set[Callable] = {
     torch.sym_min,
     torch.sym_not,
     torch.sym_sqrt,
+    torch._sym_isnan,  # type: ignore[attr-defined]
 }
 
 

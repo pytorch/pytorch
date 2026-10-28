@@ -429,6 +429,9 @@ class SymNode:
     def is_integer(self) -> SymNode:
         return self._is_integer()  # type: ignore[attr-defined]
 
+    def sym_isnan(self) -> SymNode:
+        return self._sym_isnan()  # type: ignore[attr-defined]
+
     def sym_float(self) -> SymNode:
         return self._sym_float()  # type: ignore[attr-defined]
 
@@ -764,6 +767,7 @@ METHOD_TO_OPERATOR = {
     "sym_max": sym_max,
     "sym_min": sym_min,
     "sym_not": sym_not,
+    "sym_isnan": torch._sym_isnan,  # type: ignore[attr-defined]
     "float_truediv": operator.truediv,
     "int_truediv": operator.truediv,
     "xor": operator.xor,
@@ -779,6 +783,7 @@ unary_magic_methods = {
     "sym_not",
     "pos",
     "trunc",
+    "sym_isnan",
 }
 
 
@@ -832,7 +837,7 @@ also_bool_magic_methods = {"eq", "ne"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 # Methods that are only for float
-only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
+only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2", "sym_isnan"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
@@ -861,6 +866,7 @@ always_bool_magic_methods = {
     "sym_not",
     "is_non_overlapping_and_dense",
     "is_integer",
+    "sym_isnan",
 }
 
 # Methods that have a `__foo__` as well as `__rfoo__`
@@ -1167,6 +1173,70 @@ def _sympy_ge(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
     return sympy.Ge(a, b)
 
 
+_FLOAT_SYMBOL_SENSITIVE_METHODS = frozenset(
+    {"add", "sub", "mul", "eq", "ne", "le", "ge", "lt", "gt"}
+)
+
+
+def _has_unbacked_float_symbol(e: sympy.Basic) -> bool:
+    try:
+        return _has_unbacked_float_symbol_cached(e)
+    except RecursionError:
+        from torch.utils._sympy.symbol import free_symbol_is_type, SymT
+
+        return free_symbol_is_type(e, SymT.UNBACKED_FLOAT)
+
+
+@functools.lru_cache(4096)
+def _has_unbacked_float_symbol_cached(e: sympy.Basic) -> bool:
+    # Recursive and cached, so a long chain of float ops costs O(1) per op
+    # instead of re-walking the free symbols of the whole expression.
+    if e.is_Symbol:
+        from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+        return symbol_is_type(e, SymT.UNBACKED_FLOAT)
+    return any(_has_unbacked_float_symbol_cached(a) for a in e.args)
+
+
+def _maybe_ieee_float_op(
+    method: str, a: sympy.Basic, b: sympy.Basic
+) -> sympy.Basic | None:
+    """
+    Build float +, -, * and comparisons with IEEE semantics when an operand
+    involves an unbacked float symbol (e.g. from .item(), which may be NaN or
+    inf). Sympy's Add / Mul and relationals assume real numbers and would fold
+    x - x to 0 or x != x to False. Returns None when the regular sympy
+    construction is fine.
+
+    Backed float symbols are not handled here: Dynamo specializes NaN / inf
+    float inputs and guards against NaN, so they keep sympy's simplifications.
+    See https://github.com/pytorch/pytorch/issues/198070
+    """
+    if not (_has_unbacked_float_symbol(a) or _has_unbacked_float_symbol(b)):
+        return None
+
+    import sympy
+
+    from torch.utils._sympy.functions import FloatAdd, FloatMul, IsNaN, IsNotNaN
+
+    if method == "add":
+        return FloatAdd(a, b)
+    if method == "sub":
+        # Negation is exact for every float, so a - b == a + (-b).
+        return FloatAdd(a, -b)
+    if method == "mul":
+        return FloatMul(a, b)
+    if a == b:
+        # x == x, x <= x, x >= x are False only for NaN; x != x only for NaN;
+        # x < x and x > x are always False.
+        if method in ("eq", "le", "ge"):
+            return IsNotNaN(a)
+        if method == "ne":
+            return IsNaN(a)
+        return sympy.false
+    return None
+
+
 def _sympy_min(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
     from torch.utils._sympy.functions import Min
 
@@ -1239,6 +1309,12 @@ def _sympy_is_integer(a: sympy.Basic) -> sympy.Basic:
     return sympy.Eq(ToFloat(sympy.floor(a)), a)
 
 
+def _sympy_isnan(a: sympy.Basic) -> sympy.Basic:
+    from torch.utils._sympy.functions import IsNaN
+
+    return IsNaN(a)
+
+
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": operator.invert,
@@ -1260,6 +1336,7 @@ magic_methods = {
     "abs": _sympy_abs,
     "round": _sympy_round,
     "is_integer": _sympy_is_integer,
+    "sym_isnan": _sympy_isnan,
 }
 
 
@@ -1564,7 +1641,15 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
 
         optimized_summation = False
         try:
-            if method == "mod":
+            # See _maybe_ieee_float_op: unbacked floats may be NaN / inf.
+            out = None
+            if (
+                self.pytype is float or other.pytype is float
+            ) and method in _FLOAT_SYMBOL_SENSITIVE_METHODS:
+                out = _maybe_ieee_float_op(method, self.expr, other.expr)
+            if out is not None:
+                pass
+            elif method == "mod":
                 from torch.utils._sympy.functions import Mod, PythonMod
 
                 # Special handling for mod that requires access to the value

@@ -1172,6 +1172,20 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         # pyrefly: ignore [missing-attribute]
         return f"libdevice.log2(({self._print(expr.args[0])}).to(tl.float32))"
 
+    def _print_IsNaN(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
+        # pyrefly: ignore [missing-attribute]
+        x = self._print(expr.args[0])
+        return f"libdevice.isnan(({x}).to(tl.float32)).to(tl.int1)"
+
+    def _print_IsNotNaN(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
+        # pyrefly: ignore [missing-attribute]
+        x = self._print(expr.args[0])
+        return f"(libdevice.isnan(({x}).to(tl.float32)) == 0)"
+
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")

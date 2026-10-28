@@ -3039,7 +3039,15 @@ class SymNodeVariable(VariableTracker):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
         if "example_value" in proxy.node.meta:
-            if proxy.node.meta["example_value"] != sym_num:
+            example_value = proxy.node.meta["example_value"]
+            # Compare SymFloats structurally first: for an unbacked float,
+            # x != x is IsNaN(x), which is data-dependent.
+            same_float_expr = (
+                isinstance(example_value, torch.SymFloat)
+                and isinstance(sym_num, torch.SymFloat)
+                and example_value.node.expr == sym_num.node.expr
+            )
+            if not same_float_expr and example_value != sym_num:
                 raise AssertionError(
                     f"proxy example_value {proxy.node.meta['example_value']} != {sym_num}"
                 )

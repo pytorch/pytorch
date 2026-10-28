@@ -1177,6 +1177,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch._sym_asin: lambda input: -1,
         torch._sym_acos: lambda input: -1,
         torch._sym_atan: lambda input: -1,
+        torch._sym_isnan: lambda input: -1,
         torch.nansum: lambda input, dim=None: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,

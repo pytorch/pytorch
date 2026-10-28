@@ -244,6 +244,7 @@ def check_node_safe(node: Node) -> None:
         "torch.Tensor",
         "torch.sym_int",
         "torch._sym_sqrt",
+        "torch._sym_isnan",
         "torch.sym_float",
         "torch.sym_sum",
         "torch.autograd.grad",

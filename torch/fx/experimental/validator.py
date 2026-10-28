@@ -340,6 +340,8 @@ try:
             torch.sym_sum: lift(ops.sym_sum),
             torch.sym_ite: lift(lambda b, t, f: z3.If(b, t, f)),
             torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
+            # Floats are modeled as z3 Reals, which are never NaN.
+            torch._sym_isnan: lift(lambda x: z3.BoolVal(False)),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
             torch._assert: torch._assert,
@@ -472,6 +474,9 @@ try:
                 "ceil": self._ops.ceil,
                 "minimum": self._ops.min,
                 "maximum": self._ops.max,
+                # Floats are modeled as z3 Reals, which are never NaN.
+                "isnan": lambda x: z3.BoolVal(False),
+                "isnotnan": lambda x: z3.BoolVal(True),
             }
 
             if name in REPLACEMENT:
