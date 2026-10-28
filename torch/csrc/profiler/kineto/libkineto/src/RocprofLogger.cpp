@@ -853,8 +853,9 @@ void RocprofLogger::dispatch_callback(
       record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER) {
     return;
   }
-  auto* data = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(
-      record.payload);
+  auto* data =
+      static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(
+          record.payload);
   auto& dis = singleton();
   std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
   dis.pendingDispatches_.insert(data->dispatch_info.dispatch_id);
@@ -1058,7 +1059,7 @@ void RocprofLogger::stopLogging() {
     ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
     pending = pendingCount();
   }
-  if (pending > 0) {
+  if (pending > 0 && dispatchRecordWait_.count() > 0) {
     LOG_FIRST_N(WARNING, 10)
         << "Stopped waiting for " << pending
         << " kernel dispatch record(s) after " << dispatchRecordWait_.count()
