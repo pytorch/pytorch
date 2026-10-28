@@ -60,7 +60,6 @@ class _ExperimentalConfig:
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
-        adjust_profiler_step: bool = ...,
         disable_external_correlation: bool = ...,
         profile_all_threads: bool = ...,
         capture_overload_names: bool = ...,
@@ -71,8 +70,6 @@ class _ExperimentalConfig:
         trace_only: bool = ...,
     ) -> None: ...
     trace_only: bool
-    # Deprecated no-op; retained only so the Python layer can detect and warn.
-    adjust_profiler_step: bool
 
 class ProfilerConfig:
     def __init__(
