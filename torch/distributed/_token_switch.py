@@ -403,8 +403,10 @@ class TokenSwitchNCCL(TokenSwitch):
         *,
         layout: str,
     ) -> Routing:
-        """Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
+        r"""Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
 
+        ``topk_idx`` must have dtype ``torch.int32`` or ``torch.int64``.
+        The NCCL EP handle retains an int64 copy of int32 indices.
         ``layout`` (required) controls the dispatch output memory layout:
         ``"flat"`` or ``"expert_major"``.
         """
