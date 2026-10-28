@@ -9380,6 +9380,24 @@ def _composite_op_fn(x):
     return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
 
 
+class _UserContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _eager_fallback_op_fn(x):
+    x = x.sin()
+    torch._dynamo.graph_break()
+    # Dynamo cannot graph-break under a user context manager, so it falls back
+    # to eager on the resume frame, which serving then runs eagerly.
+    with _UserContext():
+        x = torch.ops.precompile_no_fake.op.default(x)
+    return x + 1
+
+
 def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
 
 
@@ -9704,6 +9722,27 @@ class TestPrecompileCustomOpRecording(TestCase):
             ("precompile_no_fake::composite", ""),
             ("precompile_no_fake::op", ""),
         )
+        self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
+
+    def test_an_op_in_a_frame_dynamo_falls_back_on_is_checked(self):
+        from torch.library import _scoped_library
+
+        lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
+        lib.define("op(Tensor x) -> Tensor")
+        lib.impl("op", torch.Tensor.clone, "CPU")
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = os.path.join(directory, "artifact.py")
+            with capture(
+                _eager_fallback_op_fn,
+                artifact_path=artifact,
+                cache_path=os.path.join(directory, "artifact.cache"),
+                tracer=DynamoTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(4))
+            with open(artifact) as f:
+                python_code = f.read()
+        expected = (("precompile_no_fake::op", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
     def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
