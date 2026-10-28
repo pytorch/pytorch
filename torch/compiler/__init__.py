@@ -798,7 +798,7 @@ def __getattr__(name: str) -> Any:
     # The flags above were module globals for several releases; forward the
     # old names so downstream readers keep working (reads only - writing the
     # old module attribute shadows the shim instead of setting the flag).
-    if flag := _LEGACY_FLAG_NAMES.get(name) is not None:
+    if (flag := _LEGACY_FLAG_NAMES.get(name)) is not None:
         return getattr(_current_flags(), flag)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -1044,6 +1044,7 @@ def nested_compile_region(
 
 
 if nested_compile_region.__doc__:
+    # pyrefly: ignore [missing-attribute]
     nested_compile_region.__doc__ = nested_compile_region.__doc__.format(
         supported_config_keys=", ".join(
             f"``{key}``"
