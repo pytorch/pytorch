@@ -6317,19 +6317,35 @@ class PropertyVariable(VariableTracker):
 
     tp_members = {
         "fget": Member(
-            getset_load_or_build(lambda s: s.descriptor.fget, "fget"),
+            getset_load_or_build(
+                lambda s: s.descriptor.fget,
+                "fget",
+                lambda s: s.source and AttrSource(s.source, "fget"),
+            ),
             readonly_setter,
         ),
         "fset": Member(
-            getset_load_or_build(lambda s: s.descriptor.fset, "fset"),
+            getset_load_or_build(
+                lambda s: s.descriptor.fset,
+                "fset",
+                lambda s: s.source and AttrSource(s.source, "fset"),
+            ),
             readonly_setter,
         ),
         "fdel": Member(
-            getset_load_or_build(lambda s: s.descriptor.fdel, "fdel"),
+            getset_load_or_build(
+                lambda s: s.descriptor.fdel,
+                "fdel",
+                lambda s: s.source and AttrSource(s.source, "fdel"),
+            ),
             readonly_setter,
         ),
         "__doc__": Member(
-            getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
+            getset_load_or_build(
+                lambda s: s.descriptor.__doc__,
+                "__doc__",
+                lambda s: s.source and AttrSource(s.source, "__doc__"),
+            ),
             getset_set("__doc__"),
         ),
     }
