@@ -8235,6 +8235,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
 
+    @parametrize("wrap", [staticmethod, classmethod])
+    def test_descriptor_on_new_instance_sees_func_write(self, wrap):
+        def m(*args):
+            pass
+
+        class A:
+            pass
+
+        A.m = wrap(m)
+
+        def fn(t):
+            m.k = 5
+            f = A().m
+            return t + (f.k if wrap is staticmethod else f.__func__.k)
+
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        m.k = 0
+        self.assertEqual(res, fn(t))
+
     def test_str_handler_for_user_defined_object(self):
         """
         Confirms handler behaviour for `str` is the same between eager and dynamo.
