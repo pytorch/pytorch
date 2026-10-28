@@ -31,6 +31,17 @@ from greenlight_guard import (
     GuardVerdict,
 )
 from greenlight_identity import normalize_login
+from mergebot_status import (
+    MERGE_FAILURE,
+    MERGE_SUCCESS,
+    parse_status,
+    parse_tag,
+    REVERT_FAILURE,
+    REVERT_SUCCESS,
+    Status,
+    Tag,
+    with_status,
+)
 from native_stack import (
     _landed_in,
     build_native_stack_commits,
@@ -80,8 +91,10 @@ from trymerge import (
     is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
+    LandedError,
     main as trymerge_main,
     MandatoryChecksMissingError,
+    manually_close_merged_pr,
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
@@ -2590,7 +2603,9 @@ class TestGreenlightGuardCallSite(TestCase):
             GitHubPR.merge_into(
                 pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True
             )
-        mock_post.assert_called_once_with("pytorch", "pytorch", 1, "hold tight", True)
+        mock_post.assert_called_once_with(
+            "pytorch", "pytorch", 1, "hold tight", dry_run=True
+        )
 
     @mock.patch("trymerge.gh_post_pr_comment")
     @mock.patch("trymerge.evaluate_greenlight_guard")
@@ -3280,6 +3295,37 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         with self.assertRaisesRegex(RuntimeError, "stop after gates"):
             self.merge_into(**kwargs)
 
+    def test_a_failure_after_landing_is_a_landed_error(self) -> None:
+        for failing in (self.repo.rev_parse, self.close):
+            with self.subTest(failing=failing):
+                failing.side_effect = RuntimeError("failed after landing")
+                with self.assertRaises(LandedError) as raised:
+                    self.merge_into()
+                failing.side_effect = None
+                self.assertEqual(
+                    str(raised.exception.__cause__), "failed after landing"
+                )
+
+    def test_a_label_failure_after_landing_keeps_the_merge_record(self) -> None:
+        for pr in (self.top, self.lower):
+            with self.subTest(pr=pr.pr_num):
+                self.record.reset_mock()
+                pr.add_numbered_label.side_effect = RuntimeError("label failed")
+                with self.assertRaises(LandedError):
+                    self.merge_into()
+                pr.add_numbered_label.side_effect = None
+                self.record.assert_called_once()
+                self.assertEqual(
+                    self.record.call_args.kwargs["merge_commit_sha"], "merged-sha"
+                )
+                self.assertFalse(self.record.call_args.kwargs["is_failed"])
+
+    def test_a_dry_run_lands_nothing(self) -> None:
+        self.close.side_effect = RuntimeError("close failed")
+        with self.assertRaisesRegex(RuntimeError, "close failed") as raised:
+            self.merge_into(dry_run=True)
+        self.assertNotIsInstance(raised.exception, LandedError)
+
     def test_gates_lower_prs_before_landing(self) -> None:
         waivers = {(1001, "red")}
         self.assertStopsBeforeLanding(ignore_current_checks=waivers)
@@ -3334,6 +3380,7 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             pr=self.top,
             additional_merged_prs=[self.lower, self.top],
             merge_commit_sha="merged-sha",
+            comment_id=1,
             dry_run=False,
         )
         self.assertEqual(self.record.call_args.kwargs["merge_commit_sha"], "merged-sha")
@@ -3391,11 +3438,17 @@ class TestStartingMergeComment(NoNetworkTestCase):
         post = self.patch("trymerge.gh_post_pr_comment")
         explainer = mock.MagicMock()
         explainer.get_merge_message.return_value = "Merge started"
-        post_starting_merge_comment(top, [lower, top], explainer, True)
+        post_starting_merge_comment(top, [lower, top], explainer, 7, True)
         self.assertEqual(
             post.call_args_list,
             [
-                mock.call("pytorch", "pytorch", 1002, "Merge started", dry_run=True),
+                mock.call(
+                    "pytorch",
+                    "pytorch",
+                    1002,
+                    with_status("Merge started", MERGE_SUCCESS, 7),
+                    dry_run=True,
+                ),
                 mock.call(
                     "pytorch",
                     "pytorch",
@@ -3405,6 +3458,38 @@ class TestStartingMergeComment(NoNetworkTestCase):
                 ),
             ],
         )
+
+
+class TestManuallyCloseMergedPr(NoNetworkTestCase):
+    def test_only_the_pr_asked_to_merge_gets_a_tag(self) -> None:
+        lower, top = stacked_pr(1001), stacked_pr(1002)
+        prs = {1001: lower, 1002: top}
+        self.patch("trymerge.GitHubPR", side_effect=lambda _o, _p, n: prs[n])
+        post = self.patch("trymerge.gh_post_pr_comment")
+        close = self.patch("trymerge.gh_close_pr")
+        # A native stack passes every PR it merged, the asked one included
+        manually_close_merged_pr(top, [lower, top], "sha", 7, True)
+        self.assertEqual(
+            [(c.args[2], parse_tag(c.args[3])) for c in post.call_args_list],
+            [(1002, Tag(MERGE_SUCCESS, 7)), (1001, None)],
+        )
+        self.assertEqual(
+            close.call_args_list,
+            [
+                mock.call("pytorch", "pytorch", 1002, True),
+                mock.call("pytorch", "pytorch", 1001, True),
+            ],
+        )
+
+    def test_closed_prs_get_nothing(self) -> None:
+        top = stacked_pr(1002)
+        top.is_closed.return_value = True
+        self.patch("trymerge.GitHubPR", return_value=top)
+        post = self.patch("trymerge.gh_post_pr_comment")
+        close = self.patch("trymerge.gh_close_pr")
+        manually_close_merged_pr(top, [], "sha", 7, True)
+        post.assert_not_called()
+        close.assert_not_called()
 
 
 class TestNativeStackMergePlumbing(NoNetworkTestCase):
@@ -3479,10 +3564,22 @@ class TestNativeStackMain(NoNetworkTestCase):
             "trymerge.get_native_stack", return_value=NATIVE_STACK
         )
 
-    def assertRefused(self, refusal: str = TARGETS_ANOTHER_BRANCH) -> None:
+    def assertRefused(
+        self,
+        refusal: str = TARGETS_ANOTHER_BRANCH,
+        status: Status | None = MERGE_FAILURE,
+    ) -> None:
         self.assertEqual(
             self.post.call_args_list,
-            [mock.call("pytorch", "pytorch", 1002, refusal, dry_run=True)],
+            [
+                mock.call(
+                    "pytorch",
+                    "pytorch",
+                    1002,
+                    with_status(refusal, status, self.args.comment_id),
+                    dry_run=True,
+                )
+            ],
         )
         self.merge.assert_not_called()
 
@@ -3526,7 +3623,8 @@ class TestNativeStackMain(NoNetworkTestCase):
         self.args.check_mergeability = True
         trymerge_main()
         self.get_stack.assert_not_called()
-        self.assertRefused()
+        # No merge command was issued, so the refusal carries no tag
+        self.assertRefused(status=None)
 
     def test_fork_pr_does_not_read_the_stack(self) -> None:
         self.info.return_value = {**stacked_pr_info(), "isCrossRepository": True}
@@ -3637,7 +3735,14 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.assertEqual(
             [(call.args[2], call.args[3]) for call in comments],
             [
-                (1000, "@author1000 your PR has been successfully reverted."),
+                (
+                    1000,
+                    with_status(
+                        "@author1000 your PR has been successfully reverted.",
+                        REVERT_SUCCESS,
+                    ),
+                ),
+                # Reverted along with #1000: the outcome is reported there
                 (1001, f"@author1001 {stacked}"),
                 (1002, f"@author1002 {stacked}"),
             ],
@@ -3657,6 +3762,45 @@ class TestNativeStackRevert(NoNetworkTestCase):
         for pr in self.prs.values():
             pr.add_numbered_label.assert_called_once_with("reverted", False)
             pr.add_label.assert_called_once_with("ci-no-td", False)
+
+    def test_the_revert_reply_names_its_command(self) -> None:
+        for ghstack in (False, True):
+            with self.subTest(ghstack=ghstack):
+                self.calls.reset_mock()
+                self.bottom.is_ghstack_pr.return_value = ghstack
+                self.ghstack.return_value = [("sha-1000", self.bottom)]
+                try_revert(self.repo, self.bottom, comment_id=42)
+                [reply] = [
+                    call.args[3]
+                    for call in self.calls_to("gh_post_pr_comment")
+                    if call.args[2] == 1000
+                ]
+                self.assertIn("has been successfully reverted", reply)
+                self.assertEqual(parse_tag(reply), Tag(REVERT_SUCCESS, 42))
+
+    def test_a_failure_after_the_push_is_a_landed_error(self) -> None:
+        for ghstack in (False, True):
+            with self.subTest(ghstack=ghstack):
+                self.calls.reset_mock()
+                self.bottom.is_ghstack_pr.return_value = ghstack
+                self.ghstack.return_value = [("sha-1000", self.bottom)]
+                self.calls.reopen.side_effect = RuntimeError("reopen failed")
+                with self.assertRaises(LandedError) as raised:
+                    self.revert()
+                self.assertEqual(len(self.calls_to("repo.push")), 1)
+                self.assertEqual(str(raised.exception.__cause__), "reopen failed")
+                # Nothing lands in a dry run
+                comment = self.calls.gh_post_pr_comment
+                comment.side_effect = RuntimeError("comment failed")
+                with self.assertRaisesRegex(RuntimeError, "comment failed") as raised:
+                    self.revert(dry_run=True)
+                comment.side_effect = None
+                self.assertNotIsInstance(raised.exception, LandedError)
+
+    def test_a_failed_refresh_after_the_push_is_a_landed_error(self) -> None:
+        self.patch("trymerge.refresh_reverted_branches", side_effect=OSError("boom"))
+        with self.assertRaises(LandedError):
+            self.revert()
 
     def test_pr_without_dependents_is_reverted_alone(self) -> None:
         self.validate.return_value = ("reverter", "sha-validated")
@@ -3881,6 +4025,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             pr=self.prs[103],
             additional_merged_prs=list(self.prs.values()),
             merge_commit_sha=landed[-1],
+            comment_id=1,
             dry_run=False,
         )
 
@@ -4068,6 +4213,159 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.move_trunk()
         self.rebase_stack(self.stack, 103)
         self.assertLandsOwnChanges(self.merge(103), 101, 102, 103)
+
+
+class TestMainStatusTags(NoNetworkTestCase):
+    """main()'s replies to a merge or revert command carry their outcome."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.args = mock_parse_args()
+        self.patch("trymerge.parse_args", return_value=self.args)
+        self.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+        self.info = self.patch(
+            "trymerge.gh_get_pr_info", return_value=stacked_pr_info(base="main")
+        )
+        self.post = self.patch("trymerge.gh_post_pr_comment")
+        self.merge = self.patch("trymerge.merge")
+        self.patch("trymerge.gh_remove_label")
+        self.record = self.patch("trymerge.save_merge_record")
+        self.patch("trymerge.GitHubPR.get_merge_base", return_value="base-sha")
+        self.patch("trymerge.GitHubPR.get_author", return_value="author")
+        self.patch("trymerge.GitHubPR.last_commit_sha", return_value="head-sha")
+
+    def statuses(self) -> list[Status | None]:
+        return [parse_status(call.args[3]) for call in self.post.call_args_list]
+
+    def test_failed_merge_is_tagged_failure(self) -> None:
+        self.merge.side_effect = RuntimeError("boom")
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(self.post.call_args.args[3].startswith("## Merge failed"))
+        self.record.assert_called_once()
+        self.assertTrue(self.record.call_args.kwargs["is_failed"])
+
+    def test_closed_pr_is_tagged_failure(self) -> None:
+        self.info.return_value = {**stacked_pr_info(base="main"), "closed": True}
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.merge.assert_not_called()
+
+    @staticmethod
+    def landed(message: str) -> LandedError:
+        try:
+            raise LandedError(message) from RuntimeError(message)
+        except LandedError as e:
+            return e
+
+    def test_failure_after_a_merge_landed_is_untagged(self) -> None:
+        self.merge.side_effect = self.landed("close failed")
+        trymerge_main()
+        self.assertEqual(self.statuses(), [None])
+        body = self.post.call_args.args[3]
+        self.assertTrue(
+            body.startswith("## The merge landed, but a step after it failed\n")
+        )
+        self.assertIn("**Reason**: close failed", body)
+        # The record merge_into saved for the landed merge is not overwritten
+        self.record.assert_not_called()
+
+    def test_failure_after_a_revert_landed_is_untagged(self) -> None:
+        self.args.revert = True
+        self.patch("trymerge.try_revert", side_effect=self.landed("reopen failed"))
+        trymerge_main()
+        self.assertEqual(self.statuses(), [REVERT_SUCCESS, None])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "## The revert landed, but a step after it failed\n"
+            )
+        )
+
+    def test_revert_start_and_failure_are_tagged(self) -> None:
+        self.args.revert = True
+        revert = self.patch("trymerge.try_revert", side_effect=RuntimeError("boom"))
+        trymerge_main()
+        revert.assert_called_once()
+        self.assertEqual(self.statuses(), [REVERT_SUCCESS, REVERT_FAILURE])
+        self.assertIn(
+            "successfully started a revert job", self.post.call_args_list[0].args[3]
+        )
+
+    def test_refused_revert_is_tagged_failure(self) -> None:
+        self.args.revert = True
+        self.patch(
+            "trymerge.validate_revert", side_effect=PostCommentError("not merged")
+        )
+        trymerge_main()
+        tags = [parse_tag(call.args[3]) for call in self.post.call_args_list]
+        self.assertEqual(tags, [Tag(REVERT_SUCCESS, 12345), Tag(REVERT_FAILURE, 12345)])
+        self.assertTrue(self.post.call_args.args[3].startswith("not merged"))
+
+    def test_cross_repo_ghstack_merge_is_tagged_failure(self) -> None:
+        self.patch("trymerge.GitHubPR.is_cross_repo", return_value=True)
+        self.patch("trymerge.GitHubPR.is_ghstack_pr", return_value=True)
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "Cross-repo ghstack merges are not supported"
+            )
+        )
+        self.merge.assert_not_called()
+
+    def test_check_mergeability_refusals_are_untagged(self) -> None:
+        # check_mergeability_ghstack.yml runs this on PRs nobody asked to merge,
+        # with no comment id
+        self.args.check_mergeability = True
+        self.args.comment_id = None
+        local = self.patch("trymerge.GitHubPR.merge_changes_locally")
+        cases = {
+            "PR targets user/1001 rather than main": stacked_pr_info(),
+            "Can't merge closed PR": {**stacked_pr_info(base="main"), "closed": True},
+        }
+        for refusal, info in cases.items():
+            with self.subTest(refusal):
+                self.post.reset_mock()
+                self.info.return_value = info
+                trymerge_main()
+                self.assertEqual(self.statuses(), [None])
+                self.assertTrue(self.post.call_args.args[3].startswith(refusal))
+        with self.subTest("cross-repo ghstack"):
+            self.post.reset_mock()
+            self.info.return_value = stacked_pr_info(base="main")
+            with (
+                mock.patch("trymerge.GitHubPR.is_cross_repo", return_value=True),
+                mock.patch("trymerge.GitHubPR.is_ghstack_pr", return_value=True),
+            ):
+                trymerge_main()
+            self.assertEqual(self.statuses(), [None])
+        local.assert_not_called()
+        self.merge.assert_not_called()
+        # The same refusal answering a merge command is tagged
+        self.args.check_mergeability = False
+        self.args.comment_id = 12345
+        self.post.reset_mock()
+        self.info.return_value = stacked_pr_info()
+        self.patch("trymerge.get_native_stack", return_value=None)
+        trymerge_main()
+        self.assertEqual(
+            [parse_tag(call.args[3]) for call in self.post.call_args_list],
+            [Tag(MERGE_FAILURE, 12345)],
+        )
+
+    def test_submodule_update_refusal_is_tagged_failure(self) -> None:
+        self.patch("trymerge.GitHubPR.has_invalid_submodule_updates", return_value=True)
+        self.patch(
+            "trymerge.GitHubPR.get_changed_submodules", return_value=["third_party/x"]
+        )
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "This PR updates submodules third_party/x"
+            )
+        )
+        self.merge.assert_not_called()
 
 
 if __name__ == "__main__":
