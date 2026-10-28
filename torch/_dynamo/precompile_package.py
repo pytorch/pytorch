@@ -110,6 +110,8 @@ def _capture_config() -> Iterator[None]:
     anyway. Each kernel's synthetic arguments are allocated while the captured
     forward's tensors are still live, so peak device memory during capture
     grows by roughly the backward's working set.
+    Under ``cpp_wrapper`` the forced flag also turns off
+    ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``).
     The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
     bundle per compile context, left open on a remote-cache miss until the
     first compiled call, but eager lowering compiles the forward and the
@@ -154,9 +156,10 @@ def _capture_config() -> Iterator[None]:
     import torch._inductor.config as inductor_config
 
     if inductor_config.triton.autotune_at_compile_time is False:
-        log.info(
+        torch._logging.warning_once(
+            log,
             "precompile capture overrides triton.autotune_at_compile_time=False: "
-            "a frozen artifact needs every kernel tuned before replay"
+            "a frozen artifact needs every kernel tuned before replay",
         )
     # TODO: drop the bundled_autotune_remote_cache patch once
     # AutotuneCacheBundler keeps one bundle per compiled module rather than one
@@ -1621,6 +1624,9 @@ class _CapturePackage(CompilePackage):
         # op's backward formula), are not recorded.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
+        # The current compile's graph-break ops, kept only if it records a guarded
+        # code, so a bypassed compile's ops are dropped like its backend graphs.
+        self._compile_graph_break_op_names: set[tuple[str, str]] = set()
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1638,7 +1644,22 @@ class _CapturePackage(CompilePackage):
         self.op_names[backend_id] = _op_names(gm)
 
     def add_graph_break_op(self, op: torch._ops.OpOverload) -> None:
-        self.graph_break_op_names.add((op._schema.name, op._schema.overload_name))
+        name = (op._schema.name, op._schema.overload_name)
+        self._compile_graph_break_op_names.add(name)
+
+    @contextlib.contextmanager
+    def code_context(
+        self, code: types.CodeType, global_scope: dict[str, object] | None = None
+    ) -> Iterator[None]:
+        self._compile_graph_break_op_names = set()
+        with super().code_context(code, global_scope):
+            yield
+
+    def add_guarded_code(
+        self, guards_state: bytes, dynamo_code: types.CodeType
+    ) -> None:
+        super().add_guarded_code(guards_state, dynamo_code)
+        self.graph_break_op_names |= self._compile_graph_break_op_names
 
     def add_resume_function(
         self,
