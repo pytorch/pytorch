@@ -1856,13 +1856,11 @@ class TestFX(JitTestCase):
         self.assertEqual(resolved, [2.0, 2.0])
         self.assertEqual(gm(torch.ones(1)), torch.full((1,), 3.0))
 
+    @unittest.skipIf(not hasattr(importlib, "is_lazy_import"), "needs a lazy-import runtime")
     def test_symbolic_trace_on_a_real_lazy_import_runtime(self):
         # Same scenario as test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper
         # with real lazy imports: lazy_body resolves from the root forward's globals,
         # lazy_body2 from the globals of a child forward defined in another file.
-        is_enabled = getattr(importlib, "is_lazy_imports_enabled", None)
-        if not callable(is_enabled):
-            self.skipTest("lazy imports are unavailable")
         from fx import lazy_wrap_helper
 
         helper_src = inspect.getsource(lazy_wrap_helper)
