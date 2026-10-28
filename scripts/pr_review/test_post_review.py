@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -84,8 +85,10 @@ class FakeGitHub(GitHub):
         reviews=(),
         refuse_inline=False,
         comments=None,
+        files=(),
     ):
         super().__init__("token", "o/r")
+        self.files = list(files)
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
@@ -114,6 +117,8 @@ class FakeGitHub(GitHub):
             return {}
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
             return [dict(c) for c in self.comments] if page(path) == 1 else []
+        if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+            return self.files if page(path) == 1 else []
         if method == "DELETE" and path.startswith("/repos/o/r/pulls/comments/"):
             cid = int(path.split("/")[-1])
             if not any(c["id"] == cid for c in self.comments):
@@ -293,6 +298,51 @@ class TestWhatIsPosted(unittest.TestCase):
         (c,) = body["comments"]
         self.assertEqual((c["path"], c["line"], c["side"]), ("torch/x.py", 3, "RIGHT"))
         self.assertIn("Off by one.", c["body"])
+
+    def test_a_finding_on_a_deleted_file_is_posted_on_the_left_side(self):
+        findings = [
+            {"path": "gone.py", "line": 7, "severity": "major", "message": "Used."},
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "Off."},
+            {"path": "gone.py", "line": 9, "severity": "minor", "message": "Nit."},
+        ]
+        files = [
+            {"filename": "gone.py", "status": "removed"},
+            {"filename": "torch/x.py", "status": "modified"},
+        ]
+        gh = FakeGitHub(files=files)
+        go(gh, row(findings=findings))
+        (body,) = gh.posted()
+        sides = {(c["path"], c["line"]): c["side"] for c in body["comments"]}
+        self.assertEqual(sides, {("gone.py", 7): "LEFT", ("torch/x.py", 3): "RIGHT"})
+        # The folded one links the diff line: the file has no blob at the head.
+        digest = hashlib.sha256(b"gone.py").hexdigest()
+        link = f"https://github.com/o/r/pull/1/files#diff-{digest}L9"
+        self.assertIn(link, body["body"])
+        self.assertNotIn(f"/blob/{SHA}/gone.py", body["body"])
+
+    def test_a_discussion_on_the_other_side_is_not_this_finding(self):
+        # A replied-to LEFT thread from when the file was deleted says nothing
+        # about a RIGHT finding at the same number once the file is back.
+        left = {**comment(50, 5, line=3), "side": "LEFT"}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[left, comment(51, 9, author="t", reply_to=50)],
+        )
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual((c["line"], c["side"]), (3, "RIGHT"))
+
+    def test_an_unlisted_file_set_posts_on_the_right_as_before(self):
+        class NoFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NoFiles(files=[{"filename": "torch/x.py", "status": "removed"}])
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual(c["side"], "RIGHT")
 
     def test_inline_path_is_the_real_file_name(self):
         path = neutralize_path("node_modules/@babel/x_y.py")
