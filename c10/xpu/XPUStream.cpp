@@ -370,7 +370,8 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  *     queue) when a device-wide wait interleaves with XPUGraph capture; see
  *     https://github.com/pytorch/pytorch/issues/187277.
  *     The fast path is limited to:
- *     On Windows, it additionally requires BMG and newer. See  https://github.com/pytorch/pytorch/issues/197520.
+ *     On Windows, it additionally requires BMG and newer. See
+ *     https://github.com/pytorch/pytorch/issues/197520.
  *     On Linux, it is unrestricted.
  *  2. Legacy path (otherwise): walk every reserved queue in each priority
  *     pool and `wait()` on it. This only drains queues we own; SYCL queues
