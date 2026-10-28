@@ -758,7 +758,6 @@ class TestPoolingNNDevice(NNTestCase):
         expected = torch.full_like(sample, 1 / (width // output_width))
         self.assertEqual(sample, expected)
 
-    @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
         inp = torch.ones(0, 10, dtype=dtype, device=device)
@@ -2067,7 +2066,6 @@ torch.{device_type}.synchronize()
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @expectedFailureMPS  # Exception not raise
     @expectedFailureXLA
     @gcIfJetson
     def test_max_pool_nan_inf(self, device, dtype):
@@ -2076,33 +2074,40 @@ torch.{device_type}.synchronize()
                 fn_name = f"{adaptive}max_pool{num_dim}d"
                 fn = getattr(F, fn_name)
 
-                x = torch.full(
-                    [1, 1] + num_dim * [3],
-                    nan,
-                    device=device,
-                    dtype=dtype,
-                    requires_grad=True,
+                # adaptive_max_pool3d is not implemented for MPS
+                ctx = (
+                    self.assertRaises(NotImplementedError)
+                    if device.startswith("mps") and adaptive and num_dim == 3
+                    else contextlib.nullcontext()
                 )
-                res = fn(x, 1 if adaptive else 3)
-                res.backward(torch.randn_like(res))
-                self.assertTrue(math.isnan(res.item()))
-                x.requires_grad_(False)
-                res = fn(x, 1 if adaptive else 3)
-                self.assertTrue(math.isnan(res.item()))
+                with ctx:
+                    x = torch.full(
+                        [1, 1] + num_dim * [3],
+                        nan,
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=True,
+                    )
+                    res = fn(x, 1 if adaptive else 3)
+                    res.backward(torch.randn_like(res))
+                    self.assertTrue(math.isnan(res.item()))
+                    x.requires_grad_(False)
+                    res = fn(x, 1 if adaptive else 3)
+                    self.assertTrue(math.isnan(res.item()))
 
-                x2 = torch.full(
-                    [1, 1] + num_dim * [3],
-                    -inf,
-                    device=device,
-                    dtype=dtype,
-                    requires_grad=True,
-                )
-                res2 = fn(x2, 1 if adaptive else 3)
-                res2.backward(torch.randn_like(res2))
-                self.assertTrue(math.isinf(res2.item()))
-                x2.requires_grad_(False)
-                res2 = fn(x2, 1 if adaptive else 3)
-                self.assertTrue(math.isinf(res2.item()))
+                    x2 = torch.full(
+                        [1, 1] + num_dim * [3],
+                        -inf,
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=True,
+                    )
+                    res2 = fn(x2, 1 if adaptive else 3)
+                    res2.backward(torch.randn_like(res2))
+                    self.assertTrue(math.isinf(res2.item()))
+                    x2.requires_grad_(False)
+                    res2 = fn(x2, 1 if adaptive else 3)
+                    self.assertTrue(math.isinf(res2.item()))
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
@@ -2488,7 +2493,9 @@ class TestPoolingNNMpsOnly(NNTestCase):
         self.assertEqual(out, expected)
 
 
-instantiate_device_type_tests(TestAvgPoolDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestAvgPoolDevice, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(
     TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
