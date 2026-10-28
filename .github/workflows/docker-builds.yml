@@ -166,7 +166,28 @@ jobs:
           echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
           echo "docker-image=${DOCKER_IMAGE}" >> "${GITHUB_OUTPUT}"
 
+      # The tag is the .ci/docker tree hash, so an existing tag already holds a
+      # build of these sources. Rebuilding it (the cron, a revert that restores
+      # an old tree, a push that only touches this workflow, a ciflow/docker PR
+      # that leaves .ci/docker alone) re-resolves every unpinned package and
+      # silently changes the image under jobs already using the tag. To pick up
+      # newer packages, change a file under .ci/docker so the tag changes. Linter
+      # images are exempt: they bake in `lintrunner init` for .lintrunner.toml,
+      # which is outside .ci/docker.
+      - name: Check whether the image already exists
+        id: exists
+        if: ${{ !contains(matrix.docker-image-name, 'linter') }}
+        env:
+          DOCKER_IMAGE: ${{ steps.tag.outputs.docker-image }}
+        shell: bash
+        run: |
+          if docker buildx imagetools inspect "${DOCKER_IMAGE}" > /dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::${DOCKER_IMAGE} already exists, not rebuilding it"
+          fi
+
       - name: Build and push to ECR
+        if: steps.exists.outputs.exists != 'true'
         env:
           REMOTE_BUILDKIT: "1"
           CI: "1"
