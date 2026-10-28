@@ -3199,6 +3199,14 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
 
     _cpython_type = types.FunctionType
 
+    def raise_if_readonly_slot(
+        self, tx: "InstructionTranslatorBase", name: object
+    ) -> None:
+        # The wrapped object (e.g. a functools.lru_cache wrapper) is not a
+        # FunctionType: it has no read-only __closure__/__globals__ descriptors
+        # and stores these names in its __dict__, so there is nothing to raise.
+        return
+
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.wrapper_obj = wrapper_obj

@@ -3040,6 +3040,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(g_res.foo, 1)
         self.assertEqual(g_res.__annotations__, {"x": int})
 
+    def test_setattr_readonly_names_on_lru_cache_wrapper(self):
+        @functools.lru_cache
+        def g():
+            return 1
+
+        def fn(x):
+            g.__closure__ = None
+            return x + 1
+
+        x = torch.ones(1)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(res, x + 1)
+        # Only checks that tracing no longer raises: replaying the write onto the
+        # wrapper's __dict__ is a separate gap that also exists on main.
+
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
     # and turns a failure to trace the comparison into a silent fall back to
