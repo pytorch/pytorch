@@ -50,7 +50,7 @@ class TestColumnConfig(TestCase):
         return ct.select_col_config(**args)
 
     def test_default_geometry(self):
-        """Keep unmeasured architectures on conservative column geometry."""
+        """Size column geometry from the reduced and column extents by default."""
         cfg = self.select(size=16, columns=256)
         self.assertEqual(cfg.rule, "default")
         self.assertEqual(cfg.threads_per_block, 32)
@@ -67,14 +67,6 @@ class TestColumnConfig(TestCase):
             self.assertEqual(getattr(cfg, key), value)
         self.assertEqual(cfg.partial_layout, "column")
         self.assertEqual(cfg.combine_columns, 0)
-
-    def test_inner_tree_never_selects_unordered_plan(self):
-        """Never satisfy an ordered request with an unordered column plan."""
-        self.assertIsNone(self.select(order="inner_tree"))
-        with self.assertRaisesRegex(ValueError, "unknown reduction order"):
-            self.select(order="linear")
-        with self.assertRaisesRegex(ValueError, "requires unordered"):
-            ct.reduce_col_tile(None, "sum", None, torch.float32, order="inner_tree")
 
 
 class TestColumnCombine(TestCase):
@@ -108,9 +100,7 @@ class TestColumnCombine(TestCase):
         trait = traits[op](acc=cutlass.Float32, **kw)
         nouts = 2 if op == "var_mean" else 1
         odt = torch.int64 if op == "argmax" else torch.float32
-        cfg = ct.ColConfig(
-            "unordered", "test_tiled", 64, 7, 4, "partition", tile_columns
-        )
+        cfg = ct.ColConfig("test_tiled", 64, 7, 4, "partition", tile_columns)
 
         def reference():
             with (
