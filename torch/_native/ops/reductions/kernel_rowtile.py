@@ -394,6 +394,7 @@ def _launch_itree(
     operands: tuple[Sequence[Any], Sequence[Any]],
     N: int,
     tag: str,
+    device: torch.device,
     nouts: int = 1,
     dsts: Sequence[torch.dtype] = (),
     align: int = 0,
@@ -441,6 +442,7 @@ def _launch_itree(
         align,
         compact,
         tuple(strided_outs),
+        str(device),
     ) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
@@ -506,6 +508,7 @@ def _run_itree(
             ([_L.read_only(x)], list(outs)),
             N,
             "rowitree",
+            x.device,
             nouts,
             tuple(o.dtype for o in outs),
             align,
@@ -528,6 +531,7 @@ def _run_itree(
         ([_L.read_only(x)], list(parts)),
         N,
         "rowitree1",
+        x.device,
         nouts,
         tuple(p.dtype for p in parts),
         align,
@@ -547,6 +551,7 @@ def _run_itree(
         ([_L.read_only(p) for p in parts], list(outs)),
         N,
         "rowitree2",
+        x.device,
         nouts,
         tuple(o.dtype for o in outs),
         align,
@@ -707,7 +712,14 @@ def reduce_row_tile(
 
     # Pointer-dependent alignment is compiled, so include it in the key.
     dts = tuple(out_dtypes[:ndst])
-    key = ("rowtile", trait_key, x.dtype, dts, align) + op.cache_sig
+    key = (
+        "rowtile",
+        trait_key,
+        x.dtype,
+        dts,
+        align,
+        str(x.device),
+    ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     # read_only avoids COW materialization; None omits unused-axis arguments.

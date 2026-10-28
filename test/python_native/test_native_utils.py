@@ -133,6 +133,36 @@ class TestNativeUtils(TestCase):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
             self.assertTrue(cap.device_ok(x, (11,)), "the (9,10,12) answer was reused")
 
+    def test_cuda_device_guard(self):
+        # Mocked so the device-switch branch runs on single-GPU and CPU-only machines.
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+
+        from torch._native.utils import capability as cap
+
+        calls = []
+
+        def fn(self, *args, **kwargs):
+            calls.append((self, args, kwargs))
+            return "result"
+
+        guarded = cap.cuda_device_guard(fn)
+        x = SimpleNamespace(device=torch.device("cuda", 1))
+        for current, switched in ((1, False), (0, True)):
+            calls.clear()
+            device = MagicMock()
+            with (
+                patch.object(torch.cuda, "current_device", return_value=current),
+                patch.object(torch.cuda, "device", device),
+            ):
+                self.assertEqual(guarded(x, 2, k=3), "result")
+            self.assertEqual(calls, [(x, (2,), {"k": 3})])
+            if switched:
+                device.assert_called_once_with(1)
+                device.return_value.__enter__.assert_called_once()
+            else:
+                device.assert_not_called()
+
     def test_device_ok_never_raises_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
         # The condition must return False to preserve the dispatcher's fallback.
