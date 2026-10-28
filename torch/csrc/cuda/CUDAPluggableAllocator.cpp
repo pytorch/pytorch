@@ -365,12 +365,8 @@ void CUDAPluggableAllocator::copy_data(
     void* dest,
     const void* src,
     std::size_t count) const {
-  C10_CUDA_CHECK(cudaMemcpyAsync(
-      dest,
-      src,
-      count,
-      cudaMemcpyDeviceToDevice,
-      c10::cuda::getCurrentCUDAStream()));
+  C10_CUDA_CHECK(
+      cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
 }
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>

@@ -10,7 +10,7 @@ Thread-safety
 -------------
 The correctness of this design hinges on the pre-existing PyTorch user
 requirement (and general default programming assumption) that users
-are responsible for guaranteeing that writes do not take place
+are responsible for guaranteeing that writes do not take places
 concurrently with reads and other writes.
 
 Lazily copied tensors add a complication to this programming model
@@ -20,75 +20,48 @@ tensors with distinct storages that share a copy-on-write data context
 may be given to different threads that may do whatever they wish to
 them, and the runtime is required to guarantee its safety.
 
-Lazy-clone is a host read; materialization and `cow::record_done` are host writes. Serialize either
-write with all host accesses through the same storage, including aliases. Distinct storages sharing
-a COW context may operate concurrently. Each holds its reference through copying, so a unique
-reference can steal the allocation safely. Concurrent CPU materializations may both copy.
+It turns out that this is not that difficult to protect because, due
+to the copy-on-write requirement, we just need to materialize a tensor
+upon writing. This could be done entirely without synchronization if
+we materialized each copy, however, we have a common-sense
+optimization to elide the copy for the last remaining reference. This
+requires waiting for any pending copies.
 
-CUDA streams and capture
-------------------------
-A lazy clone can share memory in eager execution or within one CUDA capture when
-created on the allocation stream, where its input must already be ready. The
-allocation stream remains the stream on which the allocator can reuse memory.
-Cloning on another stream or with unknown allocation metadata (cudaMallocAsync,
-pluggable allocators) immediately copies. Private-pool allocations, including
-MemPool allocations, immediately copy unless created in the current capture.
+### Thread-safety detailed design
+There are two operations that affect the copy-on-write details of a
+tensor:
 
-To materialize on operation stream B, allocate and copy on allocation stream A, then make B wait for
-A. Both allocations belong to A; the immutable source lets the copy overlap earlier reads on B.
-Events provide the same ordering in eager execution and capture, without host blocking or
-`recordStream`. Deferred copies can introduce later dependencies, so `_lazy_clone()` does not
-promise the stream dependencies of `clone()` at the original call site.
+1) lazy-clone (e.g. an explicit call or a hidden implementation detail
+   added through an operator like reshape)
+2) materialization (i.e. any write to the tensor)
 
-The caller must join ordinary side-stream uses back onto A before releasing a storage; COW's copy
-dependency does not cover them. `record_stream()` does not provide this lifetime guarantee for COW
-tensors. An external allocation stream must remain valid while COW may enqueue work on it.
+The key insight that we exploit is that lazy-clone is logically a read
+operation and materialization is logically a write operation. This
+means that, for a given set of tensors that share a storage, if
+materialization is taking place, no other read operation, including
+lazy-clone, can be concurrent with it.
 
-### Retention and explicit completion
+However, this insight only applies within a set of tensors that share
+a storage. We also have to be concerned with tensors with different
+storages that share a copy-on-write context. In this world,
+materialization can race with lazy-clone or even other
+materializations. _However_, in order for this to be the case, there
+must be _at least_ two references to the context. This means that the
+context _can not_ vanish out from under you if you are performing a
+lazy-clone, and hence, it only requires an atomic refcount bump.
 
-Finishing a materializing copy does not finish earlier asynchronous reads, including reads submitted
-before COW existed. Therefore materialization retains the old COW reference in
-`StorageExtraMeta::cow_retired_data`, preventing reuse or stealing until storage release or explicit
-completion. A materialized storage can keep twice its memory for its entire lifetime. While
-retaining that one old allocation, subsequent lazy clones use eager copies to bound retention. If
-both siblings materialize without completion, both may copy.
+The most complicated case is that all lazy-copies are concurrently
+materializing. In this case, because a write is occurring, there are
+no in-flight lazy-copies taking place. We must simply ensure that all
+lazy-copies are able to materialize (read the data) concurrently. If
+we didn't have the aforementioned optimization where the last copy
+steals the data, we could get away with no locking whatsoever: each
+makes a copy and decrements the refcount. However, because of the
+optimization, we require the loser of the materializing race wait for
+the pending copies to finish, and then steal the data without copying
+it.
 
-`torch._C._cow_record_done(x)` (C++: `cow::record_done(storage)`) records events on the current
-stream and releases the retained reference, enabling sharing of the new allocation again. It leaves
-current references, values, and pointers unchanged.
-
-Before completion, join **all earlier uses** onto the current stream, including uses through storage
-aliases, views, saved pointers, uses before the first lazy clone, and materializing copies.
-Serialize the call with all host access to that storage. These are caller obligations; violating
-them can corrupt data.
-
-Completion is final for each reference; repeated calls are no-ops. Subsequent data access or lazy
-cloning through a completed current reference raises, including access through storage aliases.
-Do not submit further work through saved pointers to that reference. Completing a retained reference
-leaves the materialized tensor usable on its new allocation. Lazy siblings remain independent.
-
-Each `DataPtr` owns a `COWReference` pointing to the shared `COWDeleterContext`. Release transfers
-its completion event to the context before decrementing the refcount. The last reference waits on
-these events before stealing, avoiding unrelated later work on A. If any departed reference was
-incomplete, it instead takes a fresh wait on A, relying on the ordinary lifetime contract.
-Completion also makes A wait immediately, protecting reuse without work in a deleter. One event per
-completed sibling remains until the context dies. Completion covers aliases, not lazy siblings.
-
-### Capture boundaries
-
-Shared COW materialization and completion require both streams to be outside capture or in the same
-capture. Events become graph dependencies and copies run on every replay.
-
-| Situation | Behavior |
-| --- | --- |
-| Existing COW tensor used as graph input | Reject even read-only access. Materialize before capture. |
-| External non-COW graph input lazily cloned during capture | Immediately copy on the capturing stream; the copy runs on every replay. |
-| Allocation and COW context created in this capture | Sharing, shared materialization, and completion are permitted within it. |
-| Shared COW output materialized after capture | Reject; materialize during capture or release other references (including retained ones) first. |
-| Unique COW output materialized after capture | Steal without changing the graph's address. Use a fresh stream wait, not captured completion events. The caller orders graph replay and external uses. |
-| Private-pool output lazily cloned after capture | Immediately copy. |
-
-Completion cannot cross the context's capture boundary, even for retained references. Raw-pointer
-writes, external registrations, or graphs using addresses saved before COW remain the caller's
-responsibility: resolve lazy copies before exposing a writable address and keep the allocation
-stable while it is used.
+We implement this by taking a shared lock when copying the data and
+taking an exclusive lock when stealing the data. The exclusive lock
+acquisition ensures that all pending shared locks are finished before
+we steal the data.
