@@ -440,9 +440,12 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
     return None
 
 
-def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
-    # The Python type of the real tensor a fake stands for; a fake without a
-    # recorded pytype is a Parameter if it carries the Parameter marker.
+def maybe_get_fake_pytype_for_serialization(x: object) -> type[Tensor] | None:
+    # The Python type of the real tensor a fake stands for, which serialized
+    # guards check the real input against; a fake without a recorded pytype is
+    # a Parameter if it carries the Parameter marker. Guards built from a live
+    # fake (TENSOR_MATCH, TYPE_MATCH) check the fake itself and must use
+    # type(value) instead.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         if x.pytype is not None:
             return x.pytype
