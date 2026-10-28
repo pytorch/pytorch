@@ -37,6 +37,14 @@ from torch._native.ops.reductions import (
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelColTile(TestCase):
+    def setUp(self):
+        super().setUp()
+        # The batched and two-output column routes are measured, and enabled, on B200 only.
+        current = (torch.cuda.get_device_capability(),)
+        patcher = mock.patch.object(kg, "_BATCHED_COL_CCS", current)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_reduce_col_tile_single_stage(self):
         # A misaligned input needs an element-aligned descriptor.
         raw = torch.randn(32 * 512 + 1, device="cuda")
@@ -219,11 +227,18 @@ class TestKernelColTile(TestCase):
                     torch.testing.assert_close(g, e, atol=1e-3, rtol=1e-4)
 
     def test_two_output_columns_route_to_coltile(self):
-        # Dense dim-0 and transposed two-output reductions reach the column kernel.
+        # Dense dim-0 and transposed two-output reductions reach the column kernel when
+        # they pass the batched gate as B == 1; narrow columns stay on the general kernel.
         trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
         f32 = [torch.float32, torch.float32]
-        base = torch.randn(4096, 256, device="cuda")
-        for name, x, dim in (("dim0", base, 0), ("transposed", base.t(), 1)):
+        wide = torch.randn(1100, 8192, device="cuda")
+        narrow = torch.randn(4096, 256, device="cuda")
+        cases = (
+            ("dim0", wide, 0, True),
+            ("transposed", wide.t(), 1, True),
+            ("narrow", narrow, 0, False),
+        )
+        for name, x, dim, routed in cases:
             with torch.backends.python_native.cutedsl.disabled():
                 expected = torch.var_mean(x, dim=dim)
             real = ct.reduce_col_tile_2out
@@ -232,7 +247,7 @@ class TestKernelColTile(TestCase):
                 mock.patch.object(ct, "reduce_col_tile_2out", wraps=real) as served,
             ):
                 got = kg.reduce_dim2(trait, f"var_mean_{name}", x, dim, f32)
-                self.assertEqual(served.call_count, 1)
+                self.assertEqual(served.call_count, int(routed))
                 for g, e in zip(got, expected):
                     torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
 
