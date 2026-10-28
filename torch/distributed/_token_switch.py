@@ -138,10 +138,19 @@ class _DispatchAutograd(torch.autograd.Function):
         grad_out_tokens: torch.Tensor,
         grad_out_topk_weights: torch.Tensor | None,
         grad_out_topk_idx: torch.Tensor | None,
-    ) -> tuple[None, None, torch.Tensor, None, None]:
+    ) -> tuple[None, None, torch.Tensor, torch.Tensor | None, None]:
         grad_tokens = grad_out_tokens.new_zeros(ctx.tokens_shape)
-        ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
-        return None, None, grad_tokens, None, None
+        grad_weights = None
+        if ctx.needs_input_grad[3] and grad_out_topk_weights is not None:
+            grad_weights = ctx.ts._dispatch_backward(
+                ctx.routing,
+                grad_out_tokens.contiguous(),
+                grad_out_topk_weights.contiguous(),
+                grad_tokens,
+            )
+        else:
+            ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
+        return None, None, grad_tokens, grad_weights, None
 
 
 class _CombineAutograd(torch.autograd.Function):
@@ -227,6 +236,11 @@ class TokenSwitch(abc.ABC):
       token comes back multiplied by its number of destination ranks.
     - Rows of the dispatch outputs past the number of received slots are
       unspecified.
+
+    Optional: a backend that implements :meth:`_dispatch_backward` gives
+    ``topk_weights`` a gradient. Entry ``[n, k]`` is the gradient of the received
+    weight that carries token ``n``'s ``k``-th expert. Gradients of padding entries
+    (local id -1) are dropped.
     """
 
     @property
@@ -286,6 +300,22 @@ class TokenSwitch(abc.ABC):
     ) -> None:
         raise NotImplementedError
 
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_expert_tokens: torch.Tensor,
+        grad_recv_topk_weights: torch.Tensor,
+        out_tokens: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """Backward of :meth:`dispatch`: return the gradients to the source ranks.
+
+        Write the token gradient to ``out_tokens``. Return the ``[N, K]``
+        ``topk_weights`` gradient, or ``None`` (the default) if the backend does not
+        support it.
+        """
+        self._combine(routing, grad_expert_tokens, out_tokens)
+        return None
+
     def dispatch(
         self,
         routing: Routing,
@@ -306,7 +336,10 @@ class TokenSwitch(abc.ABC):
         provided buffers and returns them; no autograd support.
         Without ``out``: allocates output buffers and returns the tuple with
         autograd support.  ``max_recv_tokens`` is required when ``out`` is not
-        provided.  ``topk_weights`` receives no gradient (routing metadata).
+        provided.  ``topk_weights`` receives a gradient only if the backend
+        implements :meth:`_dispatch_backward`. Pass ``topk_weights`` with the same
+        ``requires_grad`` on every rank: the backward runs different collectives
+        with and without the weight gradient.
         """
         if out is not None:
             self._dispatch(routing, tokens, topk_weights, *out)
