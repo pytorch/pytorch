@@ -28,7 +28,9 @@ from torch._functorch._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_wrapper_mutation
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
@@ -2974,8 +2976,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target in (
         torch.ops.higher_order.auto_functionalized,
         torch.ops.higher_order.auto_functionalized_v2,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
+    ) or is_user_kernel_functional_hop(node.target):
         return False
 
     # Custom fallback lowering
@@ -9373,6 +9374,38 @@ def triton_kernel_wrap_(
         tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
         launch_kwargs=() if launch_kwargs is None else launch_kwargs,
+    )
+    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+
+@register_lowering(cutedsl_kernel_wrapper_mutation)
+def cutedsl_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    kwargs,
+):
+    from torch._higher_order_ops.cutedsl_kernel_wrap import (
+        cutedsl_kernel_side_table,
+        get_cutedsl_mutated_tensors,
+    )
+
+    # The write set is decided on the FX node's (fake) values, as when the node was
+    # functionalized.
+    fx_kwargs = V.graph.current_node.kwargs["kwargs"]
+    mutated = get_cutedsl_mutated_tensors(
+        kernel_idx,
+        constant_args_idx,
+        {
+            k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
+            for k, v in fx_kwargs.items()  # type: ignore[union-attr]
+        },
+    )
+    constant_args = cutedsl_kernel_side_table.get_constant_args(constant_args_idx)
+    ir.UserDefinedCuteDSLKernel(
+        kernel_idx=kernel_idx,
+        kernel_args={**kwargs, **constant_args},
+        mutated_arg_names=mutated,
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
