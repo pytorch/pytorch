@@ -2105,17 +2105,13 @@ test_libtorch_agnostic_targetting() {
     popd
 
     # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
+    create_venv_over_image venv_pytorch_2_9
     # shellcheck disable=SC1091
     . venv_pytorch_2_9/bin/activate
 
     # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
+    echo "Clearing PYTHONPATH so the development PyTorch is not imported..."
     unset PYTHONPATH
-
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
     pip --version
 
     echo "Installing PyTorch 2.9..."
@@ -2327,7 +2323,7 @@ EOF
 
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
-  python -m venv venv
+  create_venv_over_image venv
   # shellcheck disable=SC1091
   . venv/bin/activate
 
