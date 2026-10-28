@@ -2,6 +2,7 @@
 #include <c10/metal/atomic.h>
 #include <c10/metal/error.h>
 #include <c10/metal/indexing.h>
+#include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
@@ -79,6 +80,131 @@ kernel void nllnd_loss_forward(
   const T w = params.has_weight ? weight[target_index] : T(1);
   output[index] = -input[input_index] * w;
   sample_weights[index] = w;
+}
+
+// L = -(y ln(x) + (1 - y) ln(1 - x)), with each log clamped to -100.
+// Out of range values report an error and contribute 0.
+inline float bce_loss_element(
+    float x,
+    float y,
+    device ErrorMessages* error_buf) {
+  if (!(x >= 0 && x <= 1)) {
+    TORCH_REPORT_ERROR(
+        error_buf, "all elements of input should be between 0 and 1");
+    return 0;
+  }
+  if (!(y >= 0 && y <= 1)) {
+    TORCH_REPORT_ERROR(
+        error_buf, "all elements of target should be between 0 and 1");
+    return 0;
+  }
+  const float log_x = max(log(x), -100.0f);
+  const float log_1mx = max(log(1.0f - x), -100.0f);
+  return (y - 1) * log_1mx - y * log_x;
+}
+
+template <typename T>
+kernel void bce_loss_forward(
+    device const T* input [[buffer(0)]],
+    device const T* target [[buffer(1)]],
+    device T* loss [[buffer(2)]],
+    constant long& tid_offset [[buffer(3)]],
+    device ErrorMessages* error_buf [[buffer(4)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long index = static_cast<long>(thread_index) + tid_offset;
+  loss[index] = static_cast<T>(bce_loss_element(
+      static_cast<float>(input[index]),
+      static_cast<float>(target[index]),
+      error_buf));
+}
+
+template <typename T>
+inline float bce_loss_at(
+    device const T* input,
+    device const T* target,
+    device const T* weight,
+    constant BCELossReduceParams& params,
+    long i,
+    device ErrorMessages* error_buf) {
+  const float l = bce_loss_element(
+      static_cast<float>(input[i]), static_cast<float>(target[i]), error_buf);
+  return params.has_weight ? l * static_cast<float>(weight[i]) : l;
+}
+
+// Each threadgroup sums the (weighted) losses of its elements into one partial
+// sum, so the per-element losses never have to be written to memory. Each step
+// consumes 4 adjacent elements and kBCEReduceNumChains independent accumulators
+// hide the latency of the adds.
+template <typename T>
+kernel void bce_loss_forward_reduce(
+    device const T* input [[buffer(0)]],
+    device const T* target [[buffer(1)]],
+    device const T* weight [[buffer(2)]],
+    device float* partial_sums [[buffer(3)]],
+    constant BCELossReduceParams& params [[buffer(4)]],
+    device ErrorMessages* error_buf [[buffer(5)]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint num_tg [[threadgroups_per_grid]]) {
+  const long num_threads = static_cast<long>(num_tg) * tptg;
+  const long thread_id = static_cast<long>(tgid) * tptg + tid;
+  const long num_quads = params.numel / 4;
+
+  float acc[kBCEReduceNumChains] = {0};
+  long q = thread_id;
+  for (; q + (kBCEReduceNumChains - 1) * num_threads < num_quads;
+       q += kBCEReduceNumChains * num_threads) {
+    for (uint j = 0; j < kBCEReduceNumChains; j++) {
+      const long base = (q + j * num_threads) * 4;
+#pragma unroll
+      for (uint k = 0; k < 4; k++) {
+        acc[j] +=
+            bce_loss_at(input, target, weight, params, base + k, error_buf);
+      }
+    }
+  }
+  for (; q < num_quads; q += num_threads) {
+#pragma unroll
+    for (uint k = 0; k < 4; k++) {
+      acc[0] +=
+          bce_loss_at(input, target, weight, params, q * 4 + k, error_buf);
+    }
+  }
+  for (long i = num_quads * 4 + thread_id; i < params.numel; i += num_threads) {
+    acc[0] += bce_loss_at(input, target, weight, params, i, error_buf);
+  }
+
+  float partial_sum = acc[0];
+  for (uint j = 1; j < kBCEReduceNumChains; j++) {
+    partial_sum += acc[j];
+  }
+  threadgroup float local_sums[simdgroup_size];
+  const float sum = threadgroup_sum(local_sums, partial_sum, tid, tptg);
+  if (tid == 0) {
+    partial_sums[tgid] = sum;
+  }
+}
+
+// Runs as a single threadgroup: adds up the partial sums and writes the final
+// loss, divided by numel for mean or by 1 for sum.
+template <typename T>
+kernel void bce_loss_forward_finalize(
+    device const float* partial_sums [[buffer(0)]],
+    device T* loss [[buffer(1)]],
+    constant uint& num_partials [[buffer(2)]],
+    constant float& divisor [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]]) {
+  float partial_sum = 0;
+  for (uint i = tid; i < num_partials; i += tptg) {
+    partial_sum += partial_sums[i];
+  }
+  threadgroup float local_sums[simdgroup_size];
+  const float sum = threadgroup_sum(local_sums, partial_sum, tid, tptg);
+  if (tid == 0) {
+    loss[0] = static_cast<T>(sum / divisor);
+  }
 }
 
 // Augmented target lookup: l'[idx] is BLANK for even idx, l[idx/2] for odd.
@@ -518,3 +644,49 @@ REGISTER_BINARY_OP(mse, bfloat, bfloat);
 REGISTER_BINARY_CASTOUT_OP(mse, float, float);
 REGISTER_BINARY_CASTOUT_OP(mse, half, half);
 REGISTER_BINARY_CASTOUT_OP(mse, bfloat, bfloat);
+
+#define INSTANTIATE_BCE_LOSS_FORWARD(T)                      \
+  template [[host_name("bce_loss_forward_" #T)]] kernel void \
+  bce_loss_forward<T>(                                       \
+      device const T*,                                       \
+      device const T*,                                       \
+      device T*,                                             \
+      constant long&,                                        \
+      device ErrorMessages*,                                 \
+      uint);
+
+INSTANTIATE_BCE_LOSS_FORWARD(float);
+INSTANTIATE_BCE_LOSS_FORWARD(bfloat);
+INSTANTIATE_BCE_LOSS_FORWARD(half);
+
+#define INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(T)                      \
+  template [[host_name("bce_loss_forward_reduce_" #T)]] kernel void \
+  bce_loss_forward_reduce<T>(                                       \
+      device const T*,                                              \
+      device const T*,                                              \
+      device const T*,                                              \
+      device float*,                                                \
+      constant BCELossReduceParams&,                                \
+      device ErrorMessages*,                                        \
+      uint,                                                         \
+      uint,                                                         \
+      uint,                                                         \
+      uint);
+
+INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(float);
+INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(bfloat);
+INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(half);
+
+#define INSTANTIATE_BCE_LOSS_FORWARD_FINALIZE(T)                      \
+  template [[host_name("bce_loss_forward_finalize_" #T)]] kernel void \
+  bce_loss_forward_finalize<T>(                                       \
+      device const float*,                                            \
+      device T*,                                                      \
+      constant uint&,                                                 \
+      constant float&,                                                \
+      uint,                                                           \
+      uint);
+
+INSTANTIATE_BCE_LOSS_FORWARD_FINALIZE(float);
+INSTANTIATE_BCE_LOSS_FORWARD_FINALIZE(bfloat);
+INSTANTIATE_BCE_LOSS_FORWARD_FINALIZE(half);
