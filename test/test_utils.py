@@ -976,10 +976,16 @@ class TestStandaloneCPPJIT(TestCase):
             )
 
             for shell in [True, False]:
+                # GPU init setenv()s ROCPROFILER_REGISTER_LIBRARY. os.environ
+                # never sees it, but this binary inherits it and aborts before
+                # main(). Rebuilding from os.environ drops it.
+                env = os.environ.copy()
+                env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
                 r = subprocess.run(
                     [exec_path],
                     shell=shell,
                     stdout=subprocess.PIPE,
+                    env=env,
                 )
                 self.assertEqual(r.returncode, 0)
                 self.assertEqual(
