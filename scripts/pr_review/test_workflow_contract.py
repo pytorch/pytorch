@@ -1650,7 +1650,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
     def test_the_skill_reference_lint_fails_and_passes_where_it_should(self):
         """The lint on a fake tree with skill `a` installed and `other` not."""
         bad = [
-            ("x.md", "[s](../other/SKILL.md)"),
+            ("x.md", "[s](../other/SKILL.md)"),  # @lint-ignore
             ("x.md", "`../other/SKILL.md`"),
             ("sub/x.md", "see `../../other/x`."),
             ("x.md", "../a/../other/x"),
