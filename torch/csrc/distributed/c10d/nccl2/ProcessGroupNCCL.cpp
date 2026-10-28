@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
 
 #include <ATen/Context.h>
@@ -41,6 +42,13 @@ void checkSameDtype(
   for (const auto& tensor : tensors) {
     checkSameDtype(reference, tensor);
   }
+}
+
+// Stock ProcessGroupNCCL's "<pg_desc>:<pg_uid>"; NCCLX telemetry joins on it.
+[[maybe_unused]] std::string defaultCommName(
+    const std::string& desc,
+    const std::string& name) {
+  return desc.empty() ? name : c10::str(desc, ':', name);
 }
 
 } // namespace
@@ -105,8 +113,14 @@ void waitForNcclChildComm(
         deadline - now);
   };
   try {
+    // A nonblocking split/shrink returns ncclSuccess while the child is still
+    // initializing; its failure is only reported via the parent's async error.
     waitForNcclCompletion(
-        nccl_api, parent_comm, status, remaining(), operation);
+        nccl_api,
+        parent_comm,
+        status == ncclSuccess ? ncclInProgress : status,
+        remaining(),
+        operation);
     if (!expect_child) {
       return;
     }
@@ -152,7 +166,35 @@ void ProcessGroupNCCL::waitForNcclOperation(
     ncclResult_t status,
     std::chrono::milliseconds timeout,
     std::string_view operation) {
-  waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
+  // A launch that returned ncclInProgress and then failed or timed out has no
+  // Work for the watchdog to track, and may still enqueue its kernel later.
+  // Revoke so that kernel cannot block the stream forever and getError()
+  // reports the failure. Immediate errors (e.g. invalid arguments) leave the
+  // comm usable. Without reconfigure or blocking wait the watchdog owns
+  // teardown, so leave the comm to it.
+  const bool revokeOnFailure = status == ncclInProgress &&
+      (options_c10d_->enable_reconfigure || blocking_wait_);
+  const int64_t uuid = reconfigure_uuid_;
+  auto onFailure = [&](WorkNCCL::WorkStatus workStatus) {
+    if (!revokeOnFailure) {
+      return;
+    }
+    try {
+      handleBlockingWaitFailure(workStatus, uuid);
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "Failed to tear down after " << operation
+                          << " launch failure: " << e.what();
+    }
+  };
+  try {
+    waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
+  } catch (const NCCLException&) {
+    onFailure(WorkNCCL::WorkStatus::ERROR);
+    throw;
+  } catch (const c10::DistBackendError&) {
+    onFailure(WorkNCCL::WorkStatus::TIMEDOUT);
+    throw;
+  }
 }
 
 ncclResult_t NCCLException::getResult() const noexcept {
@@ -243,7 +285,7 @@ void ProcessGroupNCCL::init(at::Device device) {
     device_ = bootstrap->getDevice();
 
     if (nccl_comm_ == nullptr) {
-      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->config);
+      nccl_comm_ = bootstrap->createNcclComm(name_, commConfig());
     }
   }
 
@@ -253,6 +295,20 @@ void ProcessGroupNCCL::init(at::Device device) {
   TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized for rank: " << rank_;
+}
+
+ncclConfig_t ProcessGroupNCCL::commConfig() {
+  ncclConfig_t config = options_c10d_->config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (config.commName != nullptr) {
+    return config;
+  }
+  if (comm_name_.empty()) {
+    comm_name_ = defaultCommName(getGroupDesc(), name_);
+  }
+  config.commName = comm_name_.c_str();
+#endif
+  return config;
 }
 
 void ProcessGroupNCCL::initNcclResources() {
@@ -363,11 +419,17 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
     newRank = static_cast<int>(std::distance(ranks.begin(), it));
   }
 
-  const std::string& name = ncclOpts->group_name;
   ncclConfig_t config =
       newRank == -1 ? ncclOpts->config : cloneNcclConfig(ncclOpts->config);
+  [[maybe_unused]] bool defaultName = false;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name.c_str();
+  if (newRank != -1 && config.commName == nullptr) {
+    // NCCL keeps the pointer for the child comm's lifetime, so leak it as the
+    // NCCLConfig pybind setter does.
+    config.commName = strdup(
+        defaultCommName(ncclOpts->group_desc, ncclOpts->group_name).c_str());
+    defaultName = true;
+  }
 #endif
 
   // Collective on the parent comm: every parent rank calls commSplit exactly
@@ -400,16 +462,15 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (defaultName) {
+    // Keep the default out of the child's Options: splitGroup and shrink clone
+    // them, and a grandchild must compute its own name, not inherit this one.
+    childOpts->config.commName = nullptr;
+  }
+#endif
   // Do not inherit enable_reconfigure: reconfigure() performs blocking
   // rendezvous on this shared Store connection.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  // commName above borrows `name`, which belongs to the Options handed to
-  // split() -- a clone that dies with the caller's frame. Every consumer of a
-  // stored config assigns commName from a live string before passing it to
-  // NCCL (createNcclComm, reconfigure(), this function), so store no pointer
-  // rather than one that outlives its string.
-  childOpts->config.commName = nullptr;
-#endif
   childOpts->group_name = ncclOpts->group_name;
   childOpts->group_desc = ncclOpts->group_desc;
 
@@ -523,6 +584,7 @@ void ProcessGroupNCCL::finalize() {
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
+  drainRetiredGraphWork();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
@@ -631,6 +693,13 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
+  const auto waitMs =
+      getCvarInt(::c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000);
+  TC_LOG(ERROR, this)
+      << "Waiting " << waitMs
+      << "ms for health check and flight recorder dump before aborting";
+  // NOLINTNEXTLINE(facebook-hte-BadCall-sleep_for)
+  std::this_thread::sleep_for(std::chrono::milliseconds(waitMs));
   ::abort();
 }
 
@@ -672,6 +741,7 @@ void ProcessGroupNCCL::handleBlockingWaitFailure(
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
+    runAbortHooks();
     abortNcclComm();
   }
 }
@@ -681,6 +751,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   // observe the same timeout and attempt a revoke. Run the teardown (abort
   // hooks, memory hook detach, commRevoke) at most once per communicator
   // generation. revoked_ is reset on reconfigure.
+  std::lock_guard revokeLock(revoke_mutex_);
   if (revoked_.exchange(true)) {
     return;
   }
@@ -689,10 +760,19 @@ void ProcessGroupNCCL::revokeNcclComm() {
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
-    // Best-effort: this may run on the timeout watchdog thread, so log instead
-    // of throwing on failure (the communicator is already being torn down).
-    NCCL_CHECK_IGNORE(
-        nccl_api_, nccl_api_->commRevoke(nccl_comm_), "NCCL Revoke failed");
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm_,
+          nccl_api_->commRevoke(nccl_comm_),
+          options_c10d_->timeout,
+          "NCCL Revoke failed");
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "commRevoke failed or did not complete within "
+                          << options_c10d_->timeout.count() << "ms on rank "
+                          << rank_ << "; continuing teardown (best-effort): "
+                          << e.what();
+    }
   }
 }
 
@@ -923,7 +1003,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
     at::Tensor& tensor,
     int root,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
@@ -948,7 +1029,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
           getNcclDataType(tensor),
           root,
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL Broadcast failed");
 
@@ -965,7 +1047,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
     at::Tensor& tensor,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
@@ -991,7 +1074,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           dataType,
           getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL AllReduce failed");
 
@@ -1009,7 +1093,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
     int root,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
@@ -1036,7 +1121,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           getNcclReduceOp(op, nccl_comm_, tensor),
           root,
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL Reduce failed");
 
@@ -1053,7 +1139,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
     const std::vector<at::Tensor>& tensor_list,
     const at::Tensor& tensor,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   TORCH_CHECK(
@@ -1132,7 +1219,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
               getNcclDataType(local_outputs[i]),
               i,
               nccl_comm_,
-              stream),
+              stream,
+              native_config),
           "NCCL Broadcast failed in all_gather");
     }
   } catch (...) {
@@ -1163,7 +1251,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1199,7 +1288,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
           input.numel(),
           getNcclDataType(input),
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL AllGather failed");
 
@@ -1216,7 +1306,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
     const std::vector<at::Tensor>& input_list,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1273,7 +1364,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 getNcclReduceOp(op, nccl_comm_, input_list[i]),
                 i,
                 nccl_comm_,
-                stream),
+                stream,
+                native_config),
             "NCCL Reduce failed in reduce_scatter");
       } else {
         // Other ranks contribute to the reduction
@@ -1288,7 +1380,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 getNcclReduceOp(op, nccl_comm_, input_list[i]),
                 i,
                 nccl_comm_,
-                stream),
+                stream,
+                native_config),
             "NCCL Reduce failed in reduce_scatter");
       }
     }
@@ -1312,7 +1405,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
     const at::Tensor& input,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1351,7 +1445,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           dataType,
           getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL ReduceScatter failed");
 
@@ -1368,7 +1463,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1413,7 +1509,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
           chunk_size,
           data_type,
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL AllToAll failed");
 #else
@@ -1855,7 +1952,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     const at::Tensor& input_tensor,
     int root,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    bool contiguous_output,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(input_tensor);
@@ -1897,6 +1996,30 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
 
   // Record start event before NCCL operations
   work->recordStart("gather");
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+  if (contiguous_output) {
+    void* recvbuff =
+        rank_ == root ? output_tensor_list.front().data_ptr() : nullptr;
+    waitForNcclOperation(
+        nccl_api_->gather(
+            input_tensor.data_ptr(),
+            recvbuff,
+            input_tensor.numel(),
+            getNcclDataType(input_tensor),
+            root,
+            nccl_comm_,
+            stream,
+            native_config),
+        timeout,
+        "NCCL Gather failed");
+    work->recordEnd();
+    enqueueWork(work, stream);
+    return work;
+  }
+#else
+  std::ignore = std::tie(contiguous_output, native_config);
+#endif
 
   if (rank_ == root) {
     // Root receives from all ranks (except itself)

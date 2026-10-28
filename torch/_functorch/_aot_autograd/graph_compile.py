@@ -62,10 +62,11 @@ from .autograd_cache import (
     should_use_remote_autograd_cache,
 )
 from .codegen import aggregate_runtime_wrapper_sources
-from .descriptors import AOTOutput, PlainAOTOutput
+from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
+    _should_disable_saved_tensors_hooks,
     AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -93,8 +94,13 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
-from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
+from .subclass_utils import (
+    compute_inner_input_info_from_subclass_meta,
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+)
 from .utils import (
+    _get_inner_meta,
+    _is_primal,
     contain_metadata_mutation_ops,
     get_default_generator,
     make_boxed_func,
@@ -317,18 +323,6 @@ def aot_stage2_export(
             f"expected compiled_fn to be GraphModule, got {type(compiled_fn)}"
         )
     return compiled_fn, aot_state.fw_metadata
-
-
-def _get_inner_meta(
-    maybe_subclass_meta: SubclassMeta | None,
-    fw_metadata: ViewAndMutationMeta,
-) -> ViewAndMutationMeta:
-    """
-    Util to get view and mutation metadata.
-    """
-    return (
-        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
-    )
 
 
 def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
@@ -1986,11 +1980,36 @@ def _partition_joint_graph_into_fw_bw(
         # pyrefly: ignore [bad-assignment]
         fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
+    # The joint trace clones data-mutated grad inputs so backward sees their
+    # pre-mutation values. When the mutation is replayed by the runtime epilogue,
+    # the input placeholder is not a valid saved activation because it will be
+    # mutated after the AOT forward returns.
+    primals = [
+        node
+        for node in fx_g.graph.nodes
+        if _is_primal(node)
+        and not isinstance(node.meta.get("desc"), ForwardTokenAOTInput)
+    ]
+    # Subclass components do not carry the outer tensor's requires_grad, so
+    # take the info from the outer metadata expanded onto the inner inputs.
+    inner_input_info = compute_inner_input_info_from_subclass_meta(
+        fw_metadata, inner_meta
+    )
+    for node, info in zip(primals, inner_input_info):
+        if (
+            info.requires_grad
+            and info.mutates_data
+            and info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+        ):
+            node.meta["aot_runtime_epilogue_input_mutation"] = True
+
+    # fx_g's primals are the unwrapped inputs, whose static positions are in
+    # inner_meta.
     fw_module, bw_module = partition_fn(
         fx_g,
         joint_inputs,
         num_fwd_outputs=num_inner_fwd_outputs,
-        static_lifetime_input_indices=fw_metadata.static_input_indices,
+        static_lifetime_input_indices=inner_meta.static_input_indices,
     )
 
     rng_states = [
@@ -2017,6 +2036,7 @@ def _maybe_unlift_partitioned_effect_tokens(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    inner_meta: ViewAndMutationMeta,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     num_inner_fwd_outputs: int,
@@ -2027,7 +2047,9 @@ def _maybe_unlift_partitioned_effect_tokens(
     if config.unlift_effect_tokens and (
         num_tokens > 0 or fw_metadata.num_backward_tokens > 0
     ):
-        unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
+        unlift_tokens(
+            fw_module, fw_metadata, aot_config, bw_module, inner_meta=inner_meta
+        )
         num_inner_fwd_outputs -= num_tokens
         if isinstance(joint_inputs, tuple):
             joint_inputs = (
@@ -2274,19 +2296,23 @@ def _aot_stage2a_partition(
                     fw_module,
                     bw_module,
                     joint_inputs,
+                    inner_meta,
                     fw_metadata,
                     aot_config,
                     num_inner_fwd_outputs,
                 )
             )
 
+            fw_metadata.disable_saved_tensors_hooks = (
+                _should_disable_saved_tensors_hooks()
+            )
             maybe_inline_graph_saved_tensors_hooks(
                 fw_module,
                 bw_module,
                 num_inner_fwd_outputs,
                 inner_meta,
                 aot_config,
-                fw_metadata.static_input_indices,
+                inner_meta.static_input_indices,
             )
             num_fw_outs_saved_for_bw, num_symints_saved_for_bw = (
                 _categorize_saved_tensors_for_backward(

@@ -47,7 +47,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: lf
+      opt_out_experiments: lf
 
   # Computes the manylinux builder image tag suffix + registry host at runtime,
   # feeding the job-level `container:` directives (resolved before any step runs):
@@ -204,37 +204,37 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_11-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_12-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_13-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14t-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15t-cpu-aarch64
           if-no-files-found: error
@@ -259,7 +259,7 @@ jobs:
       DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_0"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -288,37 +288,37 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_11-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_12-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_13-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14t-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15t-cuda-aarch64-13_0
           if-no-files-found: error
@@ -343,7 +343,7 @@ jobs:
       DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_2"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -372,37 +372,37 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_11-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_12-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_13-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14t-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15t-cuda-aarch64-13_2
           if-no-files-found: error
@@ -427,7 +427,7 @@ jobs:
       DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_4"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | nvidia-cublas>=13.7.0.27,<=13.8.1.7; platform_system == 'Linux' | nvidia-cusolver==12.3.2.15; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -456,37 +456,37 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_11-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_12-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_13-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_14t-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: manywheel-py3_15t-cuda-aarch64-13_4
           if-no-files-found: error

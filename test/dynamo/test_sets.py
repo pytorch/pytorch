@@ -1718,9 +1718,10 @@ class OrderedSetHierarchyTests(torch._dynamo.test_case.TestCase):
 class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
     """`dict_keys` is not a `set`.
 
-    A `dict_keys` passed into the compiled region is traced by
-    `DictKeySetVariable`. Its CPython surface is the `collections.abc.Set` one,
-    `isdisjoint` plus the operator slots, not `set`'s named methods.
+    A `dict_keys` passed into the compiled region is traced as a
+    `DictKeysVariable` over its owning dict. Its CPython surface is the
+    `collections.abc.Set` one, `isdisjoint` plus the operator slots, not
+    `set`'s named methods.
     """
 
     # dir(set) - dir(dict.keys()), i.e. everything a dict_keys must not have.
@@ -1846,10 +1847,7 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(compiled(self.keys()), fn(self.keys()))
 
     def test_dict_view_operands_match_eager(self):
-        """A view built inside the region is a DictKeysVariable, not this VT.
-
-        Comparing against one must fall through to the reflected operation.
-        """
+        """Operands that are dict views built inside the region."""
         ops = {
             "eq_keys": lambda k: k == {1: 9, 2: 9}.keys(),
             "le_keys": lambda k: k <= {1: 9, 2: 9, 3: 0}.keys(),
@@ -1864,6 +1862,32 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.reset()
                 compiled = torch.compile(fn, backend="eager", fullgraph=True)
                 self.assertEqual(compiled(self.keys()), fn(self.keys()))
+
+    def test_owning_dict_mutation_is_visible(self):
+        d = {1: 0}
+        k = d.keys()
+
+        def fn(x):
+            d[2] = 0
+            return x + 1, list(k)
+
+        x = torch.ones(1)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        del d[2]
+        self.assertEqual(got, fn(x))
+
+    def test_identity_of_distinct_dict_keys(self):
+        ops = {
+            "is": lambda x, a, b: (x + 1, a is b),
+            "is_not": lambda x, a, b: (x + 1, a is not b),
+        }
+        d = {1: 0}
+        a, b = d.keys(), d.keys()
+        x = torch.ones(1)
+        for name, fn in ops.items():
+            with self.subTest(op=name):
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(compiled(x, a, b), fn(x, a, b))
 
     def test_dict_keys_is_not_a_set_variable(self):
         """Structural guard against the classes being merged again."""
@@ -1883,6 +1907,48 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled({1, 2}), fn({1, 2}))
+
+
+class SetSubclassSideEffectTests(torch._dynamo.test_case.TestCase):
+    def test_set_subclass_input_mutation(self):
+        def fn(s, x):
+            s.add(9)
+            s.discard(1)
+            s.attr = len(s)
+            return x * len(s)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = SetSubclass([1, 2]), SetSubclass([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(ref, res)
+        self.assertEqual(sorted(res), [2, 9])
+        self.assertEqual(res.attr, ref.attr)
+
+    def test_set_subclass_replay_skips_overridden_methods(self):
+        # The replay must reach the builtin set slots, not whatever the subclass
+        # put in front of them.
+        calls = []
+
+        class LoudSet(set):
+            def update(self, *args):
+                calls.append("update")
+                return super().update(*args)
+
+            def clear(self):
+                calls.append("clear")
+                return super().clear()
+
+        def fn(s, x):
+            s.add(9)
+            return x * len(s)
+
+        x = torch.randn(4)
+        res = LoudSet([1, 2])
+        torch.compile(fn, backend="eager", fullgraph=True)(res, x)
+        self.assertEqual(sorted(res), [1, 2, 9])
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

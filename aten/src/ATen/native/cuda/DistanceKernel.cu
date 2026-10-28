@@ -143,15 +143,15 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 template <typename scalar_t, typename F>
 __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist,
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
-  const int y = (blockIdx.y * gridDim.z + blockIdx.z) * blockDim.y + threadIdx.y;
+  const int64_t y = (static_cast<int64_t>(blockIdx.y) * gridDim.z + blockIdx.z) * blockDim.y + threadIdx.y;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
   if (y >= count || init >= m) {
     return;
   }
-  const int l = y / r_size;
-  const int k = y % r_size;
+  const int64_t l = y / r_size;
+  const int64_t k = y % r_size;
   const int stride = blockDim.x * gridDim.x;
-  const int l_size = r_size * m;
+  const int64_t l_size = r_size * m;
 
   int64_t i = k / r2;
   int64_t j = k % r2;

@@ -55,7 +55,7 @@ struct MagmaInitializer {
 
 namespace at::native {
 
-void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos);
+void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -79,16 +79,6 @@ void magmaLdlHermitian(
       "LDL decomposition is not available.",
       "Please rebuild with MAGMA 2.5.4+.");
 }
-
-template<class scalar_t>
-void magmaLuNoPiv(
-    magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* info);
-
-template<class scalar_t>
-void magmaLuNoPivBatched(
-    magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 #if defined(USE_ROCM)
 template<class scalar_t>
@@ -165,74 +155,6 @@ void magmaLdlHermitian<c10::complex<float>>(
 }
 
 #endif // AT_MAGMA_VERSION >= 20504
-
-template<>
-void magmaLuNoPiv<double>(
-    magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dgetrf_nopiv_gpu(m, n, dA, ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPiv<float>(
-    magma_int_t m, magma_int_t n, float* dA, magma_int_t ldda,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_sgetrf_nopiv_gpu(m, n, dA, ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPiv<c10::complex<double>>(
-    magma_int_t m, magma_int_t n, c10::complex<double>* dA, magma_int_t ldda,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zgetrf_nopiv_gpu(m, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPiv<c10::complex<float>>(
-    magma_int_t m, magma_int_t n, c10::complex<float>* dA, magma_int_t ldda,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cgetrf_nopiv_gpu(m, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPivBatched<double>(
-    magma_int_t m, magma_int_t n, double** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_dgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPivBatched<float>(
-    magma_int_t m, magma_int_t n, float** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_sgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPivBatched<c10::complex<double>>(
-    magma_int_t m, magma_int_t n, c10::complex<double>** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_zgetrf_nopiv_batched(m, n, reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuNoPivBatched<c10::complex<float>>(
-    magma_int_t m, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_cgetrf_nopiv_batched(m, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
 
 #if defined(USE_ROCM)
 template<>
@@ -631,115 +553,6 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-  Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
-  This is an in-place routine, content of 'input' and 'infos' is overwritten.
-  This is a "looped" variant for calling single input MAGMA function on batched input.
-
-  Args:
-  * `input` - [in] the input matrix for LU decomposition
-              [out] the LU decomposition
-  * `infos` - [out] error codes, positive values indicate singular matrices
-
-  For further details, please see the MAGMA documentation for magma_dgetrf_nopiv_gpu.
-*/
-template <typename scalar_t>
-static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& infos) {
-#if !AT_MAGMA_ENABLED()
-  // This should never be thrown if the calling functions are correct.
-  TORCH_CHECK(false, "linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
-#else
-  // magmaLuNoPiv require infos tensor to be on CPU
-  // the data is later copied back to the appropriate output tensor
-  Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto infos_data = infos_cpu.mutable_data_ptr<magma_int_t>();
-  auto input_matrix_stride = matrixStride(input);
-  auto batch_size = batchCount(input);
-  magma_int_t m = magma_int_cast(input.size(-2), "m");
-  magma_int_t n = magma_int_cast(input.size(-1), "n");
-  auto leading_dimension = std::max<magma_int_t>(1, m);
-
-  for (decltype(batch_size) i = 0; i < batch_size; i++) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-    int* infos_working_ptr = &infos_data[i];
-    magmaLuNoPiv<scalar_t>(m, n, input_working_ptr, leading_dimension, infos_working_ptr);
-  }
-  infos.copy_(infos_cpu);
-#endif
-}
-
-/*
-  Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
-  This is an in-place routine, content of 'input' and 'infos' is overwritten.
-  This is a specialized batched variant, it is expected to be faster than the "looped" version only for small inputs.
-
-  Args:
-  * `input` - [in] the input matrix for LU decomposition
-              [out] the LU decomposition
-  * `infos` - [out] error codes, positive values indicate singular matrices
-
-  For further details, please see the MAGMA documentation for magma_dgetrf_nopiv_batched.
-*/
-template <typename scalar_t>
-static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& infos) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling linalg.lu_factor on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. Please rebuild with MAGMA.");
-#else
-  // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
-  // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-  std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
-  magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
-  const bool magma_batched_buggy = version < std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2);
-  TORCH_CHECK(!magma_batched_buggy, "linalg.lu_factor has buggs on MAGMA < 2.5.2. Please update your MAGMA version to a newer one.");
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<magma_int_t>();
-  auto input_matrix_stride = matrixStride(input);
-  magma_int_t batch_size = magma_int_cast(batchCount(input), "batchCount");
-
-  magma_int_t m = magma_int_cast(input.size(-2), "m");
-  magma_int_t n = magma_int_cast(input.size(-1), "n");
-  auto leading_dimension = std::max<magma_int_t>(1, m);
-
-  scalar_t** input_array;
-  ALLOCATE_ARRAY(input_array, scalar_t*, batch_size);
-
-  // Set up array of pointers to matrices
-  for (int64_t i = 0; i < batch_size; i++) {
-    input_array[i] = &input_data[i * input_matrix_stride];
-  }
-
-  // needed to run lu tests in parallel, see https://github.com/pytorch/pytorch/issues/82894 for examples
-  // of failures
-  c10::cuda::device_synchronize();
-  MAGMAQueue magma_queue(input.get_device());
-
-  magmaLuNoPivBatched<scalar_t>(m, n, input_array, leading_dimension, infos_data, batch_size, magma_queue);
-
-  // block CPU until all operations on the queue are finished
-  // this explicit sync prevents garbage results from the subsequent magmaLuSolveBatched call from a different queue
-  magma_queue_sync(magma_queue.get_queue());
-#endif
-}
-
-static void lu_factor_looped_magma(const Tensor& input, const Tensor& infos) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_looped", [&]{
-    apply_lu_factor_looped_magma<scalar_t>(input, infos);
-  });
-}
-
-static void lu_factor_batched_magma(const Tensor& input, const Tensor& infos) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_batched", [&]{
-    apply_lu_factor_batched_magma<scalar_t>(input, infos);
-  });
-}
-
-#ifdef USE_LINALG_SOLVER
 enum class SolverBackend : char {
   CUSOLVER,
   CUBLAS,
@@ -754,9 +567,10 @@ namespace {
   // - with batch dims in the range 2^i, with i in 0-8;
   // - square matrices of dim 2^i and (2^{i+1} + 2^i)/2, with 2^k <= 8192;
   // - square matrices of dim 2^i-/+1;
-  // Rule: use cuSOLVER when n*n > threshold, where threshold depends on
+  // Rule: use cuSOLVER when n * n > threshold, where threshold depends on
   // batch size and dtype.
 
+  // === Pivoted LU (compute_pivots=true) ===
   // batch <= 2:
   //   threshold = T * batch
   //   float32/complex64: T = 8400
@@ -784,10 +598,26 @@ namespace {
   // NOTE: additionally validated on Blackwell CUDA 13.2 with FP64 emulation
   // on/off for cuSOLVER (on by default for cuBLAS).
   // No severe mispredictions observed.
+  //
+  // === No-pivot LU (compute_pivots=false) ===
+  // Based on benchmarks across A100, H100, GB200 (~540 points).
+  //
+  // batch <= 4: cuSOLVER
+  // batch 5-16: threshold = 4096 * batch (all dtypes)
+  // batch > 16:
+  //   float32/complex64: threshold = 4096 * batch
+  //   complex128:        threshold = 9216 * batch
+  //   float64:           threshold = 16384 * batch
+  //
+  // Unlike pivoted LU, no super-linear (batch^1.5) scaling is needed because
+  // cuSOLVER's nopiv algorithm has lower per-matrix overhead, keeping the
+  // crossover n^2/batch roughly constant across batch sizes.
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
-    // Select a custom pivoted LU factorization kernel over cuSOLVER/cuBLAS.
+    // Select a custom (pivoted) LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if (compute_pivots && (m == n) && (4 <= batch && batch <= 65535) && m >= 256) {
+    if (m == n && batch <= 65535 && m >= 256
+      && ((compute_pivots && batch >= 4) || (!compute_pivots && batch >= 16 && m <= 1024))
+    ) {
       return SolverBackend::CUSTOM;
     }
 
@@ -796,16 +626,40 @@ namespace {
       return SolverBackend::CUSOLVER;
     }
 
-    if (batch == 1) {
-      // cuBLAS is optimized for batched inputs.
-      return SolverBackend::CUSOLVER;
-    } else {
-      int64_t threshold = 0;
+    int64_t threshold = 0;
+    if (!compute_pivots) {
+      // Batch regimes:
+      // batch <= 4 - cuSOLVER
+      // batch 5-16 (cuBLAS batching advantage is modest) and batch > 16
+      // (cuBLAS batching advantage is substantial, dtype-dependent).
+      if (batch <= 4) {
+        return SolverBackend::CUSOLVER;
+      }
+      else if (batch <= 16) {
+        threshold = 4096 * batch;
+      } else {
+        switch (dtype) {
+          case ScalarType::Float:
+          case ScalarType::ComplexFloat:
+            threshold = 4096 * batch;
+            break;
+          case ScalarType::ComplexDouble:
+            threshold = 9216 * batch;
+            break;
+          default:
+            // i.e. Double
+            threshold = 16384 * batch;
+        }
+      }
+    } else { // pivoted LU
+      if (batch == 1) {
+        // cuBLAS is optimized for batched inputs; at batch=1 it has no advantage.
+        return SolverBackend::CUSOLVER;
+      }
       if (batch == 2) {
-        // batch <= 2:  n * n > T_small * batch
-        // At batch=2, cuBLAS has minimal batching advantage - kernel launch overhead
-        // dominates. cuSOLVER is competitive at much smaller N, so lower thresholds
-        // suffice. Only two groups needed: float32/complex64 vs float64/complex128.
+        // Pivoted LU, batch <= 2: cuBLAS has minimal batching advantage - kernel
+        // launch overhead dominates. cuSOLVER is competitive at much smaller N,
+        // so lower thresholds suffice.
         switch (dtype) {
           case ScalarType::Float:
           case ScalarType::ComplexFloat:
@@ -816,10 +670,10 @@ namespace {
             threshold = 2200 * batch;
         }
       } else {
-        // batch > 2:
-        // At larger batch, cuBLAS's batching advantage kicks in. For float64/complex128
-        // this advantage grows super-linearly (cuBLAS stays flat while cuSOLVER scales
-        // linearly), captured by the batch * isqrt(batch) term.
+        // Pivoted LU, batch > 2: cuBLAS's batching advantage kicks in.
+        // For float64/complex128 this advantage grows super-linearly (cuBLAS
+        // stays flat while cuSOLVER scales linearly), captured by the
+        // batch * isqrt(batch) term.
         switch (dtype) {
           case ScalarType::Float:
           case ScalarType::ComplexFloat:
@@ -833,13 +687,12 @@ namespace {
             threshold = 5200 * batch * static_cast<int64_t>(std::sqrt(batch));
         }
       }
-
-      return n * n > threshold ? SolverBackend::CUSOLVER : SolverBackend::CUBLAS;
     }
+
+    return n * n > threshold ? SolverBackend::CUSOLVER : SolverBackend::CUBLAS;
   }
 
 }
-#endif
 #endif
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
@@ -849,14 +702,6 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   (void) batch_size; // Silence unused warning in some builds
   auto m = input.size(-2);
   auto n = input.size(-1);
-
-  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& infos) {
-    if (batch_size == 1) {
-      lu_factor_looped_magma(input, infos);
-    } else {
-      lu_factor_batched_magma(input, infos);
-    }
-  };
 
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #ifdef USE_ROCM
@@ -876,18 +721,14 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
         lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
         break;
       case SolverBackend::CUSTOM:
-        ::at::native::lu_batched_blas3_kernel(input, pivots, infos);
+        ::at::native::lu_batched_blas3_kernel(input, pivots, infos, compute_pivots);
         break;
     }
 #endif
   };
 
-  const auto preferred_linalg_backend = at::globalContext().linalgPreferredBackend();
-  if (preferred_linalg_backend == at::LinalgBackend::Magma && !compute_pivots) {
-    lu_factor_magma(input, infos);
-  } else { // default and cusolver
-    lu_factor_cusolver(input, pivots, infos, compute_pivots);
-  }
+  // cusolver backend by default
+  lu_factor_cusolver(input, pivots, infos, compute_pivots);
 
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
   if (!compute_pivots) {

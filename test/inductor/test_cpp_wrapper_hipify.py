@@ -88,6 +88,9 @@ class TestCppWrapperHipify(TestCase):
                         sharedMemBytes
                     ))
                 }
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
+                }
                 return func;
             }
 
@@ -109,6 +112,9 @@ class TestCppWrapperHipify(TestCase):
                         hipFuncAttributeMaxDynamicSharedMemorySize,
                         sharedMemBytes
                     ))
+                }
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
                 }
                 return func;
             }

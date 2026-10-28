@@ -60,6 +60,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -300,6 +301,7 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
+        track_fake_tensor_for_export(obj)
     elif isinstance(obj, (_AnyScriptObject)) or is_custom_class_obj(obj):
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
@@ -1277,9 +1279,9 @@ def _coor_current_device_index_impl() -> int:
 def _coor_current_device_index_fake() -> torch.SymInt:
     from torch.fx.experimental.symbolic_shapes import constrain_range
 
-    # Unbacked, but not a size, so not ctx.new_dynamic_size(): that files the
-    # symbol under ShapeEnv.size_like, whose size-oblivious reasoning assumes a
-    # value is never 0 or 1 -- here, that this rank is never cuda:0 or cuda:1.
+    # Allocate directly so device-index reads work even when
+    # allow_dynamic_output_shape_ops is disabled; ctx.new_dynamic_size()
+    # requires that permission.
     ctx = torch.library.get_ctx()
     index = ctx._shape_env.create_unbacked_symint()
     constrain_range(index, min=0)  # an accelerator index is non-negative
@@ -2518,11 +2520,18 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         )
 
     def run_node(self, n: fx.Node) -> Any:
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
+
         if self.should_decompose(n):
             with decompose(self.decomposition_table):
                 result = super().run_node(n)
         else:
             result = super().run_node(n)
+        # Retracing allocates fresh unbacked symbols; tie them back to the
+        # originals, which deferred runtime asserts are keyed on.
+        if (fake_mode := detect_fake_mode()) is not None:
+            rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 
@@ -2534,6 +2543,12 @@ def selective_decompose(
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
+    from torch._guards import detect_fake_mode
+
+    # rebind_unbacked (in _SelectiveDecomposeInterpreter.run_node) requires that
+    # the retrace not hit fake tensor memos from the original trace.
+    if (fake_mode := detect_fake_mode(args)) is not None:
+        fake_mode.epoch += 1
 
     if trace_joint_graph:
         # the arg name, primals and tangents, are important.
@@ -2767,7 +2782,10 @@ class _ModuleStackTracer(PythonKeyTracer):
         # In non-strict export, we don't have dynamo's side effect
         # tracking logic which makes some cases hard to detect.
         # In general, our detecting strategy is:
-        #  (1) We instrument fake tensor creation to log all the fake tensors created during export.
+        #  (1) We log the fake tensors created during export: FakeTensor.__init__ records
+        #      Python fakes, and set_proxy_slot records every fake registered with the tracer,
+        #      which also covers C++ fakes (no Python __init__) and fakes created before
+        #      export started (parameters of nn.Module inputs).
         #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT))
         #  (3) Filter out fake tensors that are logged during (1):
         #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)
@@ -2777,8 +2795,20 @@ class _ModuleStackTracer(PythonKeyTracer):
         global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
         _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
 
-        for key, val in self.tensor_tracker.items():
-            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+        # Only step (2) of the strategy above, and only the consumers gated on
+        # detect_non_strict_fake_tensor_leaks ever read this. Populating it
+        # regardless kept a node per traced tensor in a module-level dict, and
+        # through them the graph, its owning module, and every parameter -- for
+        # the life of the process, long after the trace returned.
+        # Imported here rather than at module level on purpose: importing
+        # torch._export.config runs torch/_export/__init__.py, which does
+        # `from torch.fx.experimental.proxy_tensor import make_fx` -- a cycle
+        # back into this module while it is still initialising.
+        import torch._export.config as _export_config
+
+        if _export_config.detect_non_strict_fake_tensor_leaks:
+            for key, val in self.tensor_tracker.items():
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
 
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly

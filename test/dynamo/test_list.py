@@ -13,7 +13,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
 )
 
 
@@ -28,6 +30,10 @@ class AlwaysEqualForListRemove:
 class NeverEqualForListRemove:
     def __eq__(self, other):
         return False
+
+
+class DequeSubclassForRemove(collections.deque):
+    pass
 
 
 class IndexForListPop:
@@ -642,6 +648,134 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
         self._check(fn)
 
 
+class RemoveTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # list and deque share BaseListVariable.list_remove, which must delete in
+    # place rather than call the public pop (deque.pop takes no index, see
+    # https://github.com/pytorch/pytorch/issues/198682). deque wraps it to bump
+    # the iterator mutation counter. The ValueError text differs from index():
+    # list never reprs the value, deque does until 3.14.
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_deque(self):
+        def fn(x):
+            d = collections.deque([1, 2, 2, 3])
+            d.remove(2)
+            return x + 1, list(d)
+
+        self._check(fn)
+
+    def test_deque_input(self):
+        def fn(x, d):
+            d.remove(2)
+            return x + 1, list(d)
+
+        x = torch.ones(2)
+        d1 = collections.deque([1, 2, 3, 2])
+        d2 = d1.copy()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, d2), fn(x, d1))
+        self.assertEqual(d1, d2)
+
+    def test_deque_not_found(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return str(e), list(d)
+
+        self._check(fn)
+
+    def test_deque_not_found_nonconst(self):
+        def fn(x):
+            d = collections.deque([NeverEqualForListRemove()])
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return str(e), len(d)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        # Opaque items take the polyfills.index path; identity matches first.
+        def fn(x):
+            d = collections.deque([NeverEqualForListRemove(), x, x + 1])
+            d.remove(x)
+            return len(d), d[1]
+
+        self._check(fn)
+
+    def test_deque_subclass(self):
+        def fn(x):
+            d = DequeSubclassForRemove([1, 2, 3])
+            d.remove(2)
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return x + 1, list(d), str(e)
+
+        self._check(fn)
+
+    def test_deque_iterator_sees_mutation(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            it = iter(d)
+            first = next(it)
+            d.remove(2)
+            try:
+                return first, next(it)
+            except RuntimeError as e:
+                return first, str(e)
+
+        self._check(fn)
+
+    def test_deque_maxlen(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3], maxlen=3)
+            d.remove(2)
+            d.append(4)
+            d.append(5)
+            return x + 1, list(d), d.maxlen
+
+        self._check(fn)
+
+    def test_deque_wrong_arity(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            msgs = []
+            for args in [(), (1, 2)]:
+                try:
+                    d.remove(*args)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return msgs, list(d)
+
+        self._check(fn)
+
+    def test_list_not_found(self):
+        def fn(x):
+            try:
+                [1, 2, 3].remove("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_not_found_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].remove("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+
 class SymIntIndexTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -699,6 +833,85 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
         with self.assertRaises(torch._dynamo.exc.UserError):
             compiled(torch.ones(3, dtype=torch.int64))
+
+
+class ListSubclass(list):
+    pass
+
+
+class DequeSubclass(collections.deque):
+    pass
+
+
+@instantiate_parametrized_tests
+class SubclassSideEffectTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # A container subclass input can mutate on two axes at once: the builtin
+    # contents and the instance __dict__. Both must be replayed on the caller's
+    # object.
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_append(self, cls):
+        def fn(lst, x):
+            lst.append(5)
+            lst.attr = len(lst)
+            for v in lst:
+                x = x * v
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 5])
+        self.assertEqual(res.attr, ref.attr)
+
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_pop(self, cls):
+        def fn(lst, x):
+            lst.pop()
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2, 3]), cls([1, 2, 3])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2])
+
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_iadd_ignores_rhs_radd(self, cls):
+        # A list/deque subclass inherits nb_inplace_add = list_inplace_concat,
+        # so `+=` must extend in place and never consult the rhs __radd__.
+        class Rhs(cls):
+            def __radd__(self, other):
+                return "radd"
+
+        def fn(lst, x):
+            lst += Rhs([3])
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 3])
+
+    def test_list_subclass_input_read_only(self):
+        def fn(lst, x):
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = ListSubclass([1, 2]), ListSubclass([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(res), [1, 2])
 
 
 if __name__ == "__main__":
