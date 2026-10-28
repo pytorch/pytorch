@@ -469,10 +469,7 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_qualname(self) -> str:
-        if sys.version_info >= (3, 11):
-            return self.get_code().co_qualname
-        else:
-            return self.get_name()
+        return self.get_code().co_qualname
 
     def get_doc(self) -> str | None:
         # stored in code.co_consts[0]
@@ -1236,8 +1233,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     return None
                 collected.extend(flat)
             return collected
-        union_type = getattr(types, "UnionType", None)
-        if union_type is not None and isinstance(value, union_type):
+        if isinstance(value, types.UnionType):
             collected = []
             for entry in typing.get_args(value):
                 flat = self._flatten_type_spec(entry)
@@ -1809,8 +1805,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
 
-        if sys.version_info >= (3, 11):
-            inline_tracer.inline_call_()
+        inline_tracer.inline_call_()
         # calling a generator returns a generator object
         return self.generator_cls(
             code,
@@ -2100,7 +2095,7 @@ class UserMethodVariable(BaseUserFunctionVariable):
         owner: VariableTracker,
     ) -> VariableTracker:
         # method_descr_get: a bound method does not re-bind. Only reached where
-        # method has tp_descr_get (3.10 and 3.13+); see tp_getset below.
+        # method has tp_descr_get (3.13+); see tp_getset below.
         return self
 
     # __self__ / __func__ are read-only members on method objects.

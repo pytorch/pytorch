@@ -1387,26 +1387,18 @@ class PropertyVariable(VariableTracker):
         if fn is None:
             display_name = getattr(self.descriptor, "__name__", None)
             kind = "setter" if value is not None else "deleter"
-            if sys.version_info >= (3, 11):
-                # property_descr_set formats %R of the owner's *type*, whose
-                # repr is its bare __qualname__ (no module prefix) -- unlike
-                # python_qualified_name(), which mirrors the module-qualified
-                # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
-                try:
-                    cls_name = obj.python_type().__qualname__
-                except NotImplementedError:
-                    cls_name = obj.python_type_name()
-                if display_name is not None:
-                    msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
-                else:
-                    msg = f"property of '{cls_name}' object has no {kind}"
+            # property_descr_set formats %R of the owner's *type*, whose
+            # repr is its bare __qualname__ (no module prefix) -- unlike
+            # python_qualified_name(), which mirrors the module-qualified
+            # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
+            try:
+                cls_name = obj.python_type().__qualname__
+            except NotImplementedError:
+                cls_name = obj.python_type_name()
+            if display_name is not None:
+                msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
             else:
-                # < 3.11: no owner/property-name in the message at all.
-                verb = "set" if value is not None else "delete"
-                if display_name is not None:
-                    msg = f"can't {verb} attribute '{display_name}'"
-                else:
-                    msg = f"can't {verb} attribute"
+                msg = f"property of '{cls_name}' object has no {kind}"
             raise_attribute_error(tx, msg)
 
         args = [obj] if value is None else [obj, value]
