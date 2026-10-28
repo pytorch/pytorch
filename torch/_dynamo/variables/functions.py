@@ -103,6 +103,8 @@ from .base import (
     getset_load_or_build,
     getset_read,
     getset_set,
+    load_pending_mutation,
+    maybe_get_python_type,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -206,16 +208,24 @@ class FunctionSpec:
         off += 1 if self.varargs_name else 0
         self.varkw_name = vn[off] if code.co_flags & CO_VARKEYWORDS else None
 
-    def update_defaults(self, func: FunctionType) -> None:
+    def update_defaults(
+        self,
+        func: FunctionType,
+        defaults: tuple[object, ...],
+        kwdefaults: dict[str, object],
+    ) -> None:
         # Defaults can change from function call to function call. So re-update
         # them on every call.
-        self.defaults = func.__defaults__ or ()
-        self.kwdefaults = func.__kwdefaults__ or {}
+        self.defaults = defaults
+        self.kwdefaults = kwdefaults
 
-        # Map positional-default names → their index in self.defaults
-        self.pos_default_map = dict(
-            zip(self.all_pos_names[-len(self.defaults) :], range(len(self.defaults)))
-        )
+        # Map positional-default names to their index in self.defaults. As in
+        # CPython, parameter i takes defaults[i - first]; leading extra defaults
+        # (more defaults than parameters) are never used.
+        first = len(self.all_pos_names) - len(self.defaults)
+        self.pos_default_map = {
+            name: i - first for i, name in enumerate(self.all_pos_names) if i >= first
+        }
 
 
 def _get_spec(func: FunctionType) -> FunctionSpec:
@@ -231,18 +241,40 @@ class BindArgsTypeError(TypeError):
 
 
 def bind_args_cached(
+    vt: VariableTracker,
     func: FunctionType,
     tx: "InstructionTranslatorBase",
     fn_source: Source | None,
-    args: Sequence[Any],
-    kwargs: dict[str, Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
+
+    se = tx.output.side_effects
+    has_pending_defaults = se.has_pending_mutation_of_attr(vt, "__defaults__")
+    has_pending_kwdefaults = se.has_pending_mutation_of_attr(vt, "__kwdefaults__")
+    pending_defaults: tuple[object, ...] = func.__defaults__ or ()
+    pending_kwdefaults: dict[str, object] = func.__kwdefaults__ or {}
+
+    if has_pending_defaults:
+        d = vt.tp_getattro_impl(tx, "__defaults__")
+        pending_defaults = (
+            tuple(d.items) if isinstance(d, variables.TupleVariable) else ()
+        )
+    if has_pending_kwdefaults:
+        kd = vt.tp_getattro_impl(tx, "__kwdefaults__")
+        pending_kwdefaults = (
+            {key.vt.as_python_constant(): val for key, val in kd.items.items()}
+            if isinstance(kd, variables.ConstDictVariable)
+            else {}
+        )
 
     # Fast path: simple positional-only, no defaults, no varargs/varkw
     # This is the common case for small utility functions called repeatedly.
     if (
-        len(args) == spec.arg_count
+        not has_pending_defaults
+        and not has_pending_kwdefaults
+        and len(args) == spec.arg_count
         and not func.__defaults__
         and not kwargs
         and not spec.varargs_name
@@ -255,7 +287,7 @@ def bind_args_cached(
         }
 
     # Full path with all features
-    spec.update_defaults(func)
+    spec.update_defaults(func, pending_defaults, pending_kwdefaults)
     ba = {}
     rem_kw = dict(kwargs)
     guarded_pos_defaults_len = False
@@ -276,7 +308,7 @@ def bind_args_cached(
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
-            if fn_source and not guarded_pos_defaults_len:
+            if fn_source and not has_pending_defaults and not guarded_pos_defaults_len:
                 # The parameter-to-default mapping depends on __defaults__
                 # length; guard it without wrapping every default value.
                 install_guard(
@@ -286,9 +318,13 @@ def bind_args_cached(
                 )
                 guarded_pos_defaults_len = True
             default_source = None
-            if fn_source and not (
-                ConstantVariable.is_literal(spec.defaults[idx])
-                and config.skip_guards_on_constant_func_defaults
+            if (
+                fn_source
+                and not has_pending_defaults
+                and not (
+                    ConstantVariable.is_literal(spec.defaults[idx])
+                    and config.skip_guards_on_constant_func_defaults
+                )
             ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
@@ -310,7 +346,7 @@ def bind_args_cached(
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.kwdefaults:
             kwdefault_source = None
-            if fn_source:
+            if fn_source and not has_pending_kwdefaults:
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
@@ -410,6 +446,28 @@ fn_known_dunder_attrs = {
 }
 
 
+# GetSet setters for the function slots whose write is the same for every
+# function VT: the value goes to the side effects table, keyed on the VT.
+def _set_name(
+    vt: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    value: "VariableTracker | None",
+) -> None:
+    if value is None or not issubclass(maybe_get_python_type(value), str):
+        raise_type_error(tx, "__name__ must be set to a string object")
+    store_attr_mutation(tx, vt, "__name__", value)
+
+
+def _set_qualname(
+    vt: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    value: "VariableTracker | None",
+) -> None:
+    if value is None or not issubclass(maybe_get_python_type(value), str):
+        raise_type_error(tx, "__qualname__ must be set to a string object")
+    store_attr_mutation(tx, vt, "__qualname__", value)
+
+
 class BaseUserFunctionVariable(VariableTracker):
     # funcobject.c func_defaults/func_kwdefaults/func_closure/func_annotations:
     # dedicated slots, NOT __dict__ entries. Only a VT that synthesizes a
@@ -443,18 +501,17 @@ class BaseUserFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = args[1]
-                return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(
-                tx, "__setitem__", list(args), kwargs
-            )
-        elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = None
-                return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
+        if name in ("__setattr__", "__delattr__"):
+            # Data descriptors from tp_getset/tp_members win over the instance
+            # dict, as in PyObject_GenericSetAttr.
+            value = args[1] if name == "__setattr__" else None
+            if args[0].is_python_constant():
+                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
+                if entry is not None:
+                    out = entry.setter(self, tx, value)
+                    return out if out is not None else ConstantVariable.create(None)
+            dict_method = "__setitem__" if value is not None else "__delitem__"
+            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
     def _set_annotations(
@@ -465,7 +522,7 @@ class BaseUserFunctionVariable(VariableTracker):
         # TypeError.
         if value is not None and value.is_constant_match(None):
             value = None
-        if value is not None and not issubclass(value.python_type(), dict):
+        if value is not None and not issubclass(maybe_get_python_type(value), dict):
             raise_type_error(tx, "__annotations__ must be set to a dict object")
         self.annotations = value
         return ConstantVariable.create(None)
@@ -527,8 +584,8 @@ class BaseUserFunctionVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
-    ) -> None:
-        if value is not None and not issubclass(value.python_type(), tuple):
+    ) -> "VariableTracker | None":
+        if value is not None and not issubclass(maybe_get_python_type(value), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple object")
         store_attr_mutation(tx, self, "__type_params__", value)
 
@@ -849,7 +906,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         root_tx = parent.output.root_tx
 
         source = self.get_source()
-        result = bind_args_cached(fn, root_tx, source, args, kwargs)  # type: ignore[arg-type]
+        result = bind_args_cached(self, fn, root_tx, source, args, kwargs)
 
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
@@ -916,8 +973,117 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             tx, getattr(self.fn, name), self.source and AttrSource(self.source, name)
         )
 
+    # These slots live on a real pre-existing function, so a write goes to the
+    # side effects table to be replayed onto it after the graph.
+
+    def _set_defaults(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_defaults accepts None as well as a tuple; del is the same as None.
+        if value is None:
+            value = ConstantVariable.create(None)
+        if not value.is_constant_match(None) and not issubclass(
+            maybe_get_python_type(value), tuple
+        ):
+            raise_type_error(tx, "__defaults__ must be set to a tuple object")
+        store_attr_mutation(tx, self, "__defaults__", value)
+        return ConstantVariable.create(None)
+
+    def _set_kwdefaults(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_kwdefaults accepts None as well as a dict; del is the same as None.
+        if value is None:
+            value = ConstantVariable.create(None)
+        if not value.is_constant_match(None) and not issubclass(
+            maybe_get_python_type(value), dict
+        ):
+            raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
+        store_attr_mutation(tx, self, "__kwdefaults__", value)
+        return ConstantVariable.create(None)
+
+    def _set_type_params(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_type_params: del (NULL) is rejected too.
+        if value is None or not issubclass(maybe_get_python_type(value), tuple):
+            raise_type_error(tx, "__type_params__ must be set to a tuple")
+        store_attr_mutation(tx, self, "__type_params__", value)
+        return ConstantVariable.create(None)
+
+    def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        pending = load_pending_mutation(tx, self, "__annotations__")
+        if pending is not None:
+            return pending
+        return VariableTracker.build(
+            tx,
+            self.fn.__annotations__,
+            self.source and AttrSource(self.source, "__annotations__"),
+        )
+
+    def _set_annotations(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_annotations: deletion and None both clear the slot, so the
+        # next read lazily rebuilds an empty dict; any other non-dict is a
+        # TypeError.
+        if value is not None and value.is_constant_match(None):
+            value = None
+        if value is not None and not issubclass(maybe_get_python_type(value), dict):
+            raise_type_error(tx, "__annotations__ must be set to a dict object")
+        store_attr_mutation(tx, self, "__annotations__", value)
+        return ConstantVariable.create(None)
+
+    def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(
+            tx,
+            self.fn.__closure__,
+            self.source and AttrSource(self.source, "__closure__"),
+        )
+
+    tp_members = {
+        "__doc__": Member(
+            getset_load_or_build(lambda vt: vt.fn.__doc__, "__doc__"),
+            getset_set("__doc__"),
+        ),
+        "__module__": Member(
+            getset_load_or_build(lambda vt: vt.fn.__module__, "__module__"),
+            getset_set("__module__"),
+        ),
+        "__closure__": Member(_get_closure, readonly_setter),
+    }
+
     tp_getset = {
         "__get__": GetSet(_get_dunder_get, readonly_setter),
+        "__name__": GetSet(
+            getset_load_or_build(lambda vt: vt.fn.__name__, "__name__"),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(lambda vt: vt.fn.__qualname__, "__qualname__"),
+            _set_qualname,
+        ),
+        "__code__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
+            unmodeled_setter,
+        ),
+        "__dict__": GetSet(
+            lambda s, tx: s.get_dict_vt(tx),
+            unmodeled_setter,
+        ),
+        "__defaults__": GetSet(
+            getset_load_or_build(lambda vt: vt.fn.__defaults__, "__defaults__"),
+            _set_defaults,
+        ),
+        "__kwdefaults__": GetSet(
+            getset_load_or_build(lambda vt: vt.fn.__kwdefaults__, "__kwdefaults__"),
+            _set_kwdefaults,
+        ),
+        "__annotations__": GetSet(_get_annotations, _set_annotations),
+        "__type_params__": GetSet(
+            getset_load_or_build(lambda vt: vt.fn.__type_params__, "__type_params__"),
+            _set_type_params,
+        ),
     }
 
     def tp_descr_get_impl(
