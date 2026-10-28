@@ -142,7 +142,8 @@ class TextGenerationBenchmark(Benchmark):
 
 
 def load_tensor_parallel_model(model_name, dtype, tp_size):
-    text_config = AutoConfig.from_pretrained(model_name).get_text_config(decoder=True)
+    config = AutoConfig.from_pretrained(model_name)
+    text_config = config.get_text_config(decoder=True)
     num_heads = text_config.num_attention_heads
     num_kv_heads = getattr(text_config, "num_key_value_heads", None) or num_heads
     if num_heads % tp_size or num_kv_heads % tp_size:
@@ -150,10 +151,19 @@ def load_tensor_parallel_model(model_name, dtype, tp_size):
             f"--tp-size={tp_size} must divide {model_name}'s {num_heads} attention "
             f"heads and {num_kv_heads} KV heads"
         )
-    # tp_plan="auto" shards onto the already initialized process group and places
-    # each rank's shard on its LOCAL_RANK device; it rejects device_map.
+    with torch.device("meta"):
+        meta_model = AutoModelForCausalLM.from_config(config)
+    # A tied weight such as lm_head's is the replicated input embedding, so
+    # gathering the output of a module planned as sharded would duplicate it.
+    tp_plan = {
+        name: style
+        for name, style in meta_model.tp_plan.items()
+        if f"{name}.weight" not in meta_model.all_tied_weights_keys
+    }
+    # tp_plan shards onto the already initialized process group and places each
+    # rank's shard on its LOCAL_RANK device; it rejects device_map.
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype=dtype, tp_plan="auto", tp_size=tp_size
+        model_name, dtype=dtype, tp_plan=tp_plan, tp_size=tp_size
     )
     tp_module = "transformers.integrations.tensor_parallel"
     tp_forward_hooks = [
@@ -242,9 +252,10 @@ class TextGenerationPrefillModel(torch.nn.Module):
                             conv_states=conv_states, recurrent_states=recurrent_states
                         )
             if not all(
-                layer.is_conv_states_initialized
+                initialized
                 for layer, is_linear in zip(self.cache.layers, self.cache.is_linear)
                 if is_linear
+                for initialized in layer.is_conv_states_initialized.values()
             ):
                 raise RuntimeError(
                     f"cannot preallocate linear attention cache for {config.model_type}"
