@@ -653,11 +653,11 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(agent.registrations, [])
         self.assertEqual(calls, 3)
 
-    @parametrize("state", ["DONE", "ERR"])
-    def test_completed_work_does_not_require_native_lock(self, state):
+    @parametrize("state,length", [("DONE", None), ("ERR", None), ("DONE", 0)])
+    def test_completed_work_does_not_require_transport_lock(self, state, length):
         first, second, source, remote = self.registered_pair()
         with patch.object(first._agent, "transfer_state", state):
-            work = first.write(source.to_view(), remote, async_op=True)
+            work = first.write(source.to_view(length=length), remote, async_op=True)
             self.assertTrue(work.is_completed())
         future = work.get_future()
         error = work.exception()
@@ -687,11 +687,61 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                     future.wait()
             self.assertEqual(first._pending, {})
             self.assertEqual(first._transfers, {})
-            self.assertEqual(first._agent.released, 1)
+            self.assertEqual(first._agent.released, int(length != 0))
         finally:
             release.set()
             thread.join(5)
         self.assertFalse(thread.is_alive())
+
+    @parametrize("state", ["DONE", "ERR"])
+    def test_completion_publication_waits_for_pending_cleanup(self, state):
+        first, second, source, remote = self.registered_pair()
+        entered, release = threading.Event(), threading.Event()
+        results, errors = [], []
+
+        class PausedPending(dict):
+            def pop(self, key):
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError("pending cleanup was not released")
+                return super().pop(key)
+
+        with patch.object(first, "_pending", PausedPending()):
+            with patch.object(first._agent, "transfer_state", state):
+                work = first.write(source.to_view(), remote, async_op=True)
+
+            def complete():
+                try:
+                    results.append(work.is_completed())
+                except BaseException as error:
+                    errors.append(error)
+
+            thread = threading.Thread(target=complete)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                self.assertIn(id(work), first._pending)
+                self.assertEqual(first._agent.released, 1)
+                self.assertFalse(work.is_completed())
+                self.assertFalse(work._future.done())
+            finally:
+                release.set()
+                thread.join(5)
+                self.assertFalse(thread.is_alive())
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [True])
+            self.assertTrue(work.is_completed())
+            future = work.get_future()
+            self.assertTrue(future.done())
+            if state == "DONE":
+                self.assertEqual(future.wait(), [])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed: ERR"):
+                    future.wait()
+            self.assertEqual(first._pending, {})
+            self.assertEqual(first._transfers, {})
+            self.assertEqual(first._agent.released, 1)
 
     def test_async_poll_does_not_block_on_native_lock(self):
         first, second, source, remote = self.registered_pair()

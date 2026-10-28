@@ -151,7 +151,8 @@ class _NIXLWork(_PollingWork):
                 if self._error is None:
                     self._error = error
             transport._pending.pop(id(self))
-            # Publish completion after cleanup; completed Works are never reset.
+            # Lock-free readers use the recorded error and finalized bookkeeping.
+            # Publish completion last; completed Works are never reset.
             self._done = True
             # Completion ends this Work, not the lifetime of exposed registrations.
             # unregister_memory()/close() remove the transport's retention root.
