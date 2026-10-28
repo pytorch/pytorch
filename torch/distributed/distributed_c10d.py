@@ -237,22 +237,8 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
-def _resolve_torchcomms_backend(backend: str) -> str:
-    backend = backend.lower()
-    if (
-        backend == "nccl"
-        and torch.version.hip is not None
-        and (
-            _torchcomms_is_backend_registered("rccl")
-            or _torchcomms_is_backend_built("rccl")
-        )
-    ):
-        return "rccl"
-    return backend
-
-
 def _is_torchcomms_backend(backend: str) -> bool:
-    backend = _resolve_torchcomms_backend(backend)
+    backend = backend.lower()
     return _use_torchcomms_enabled() and (
         _torchcomms_is_backend_registered(backend)
         or _torchcomms_is_backend_built(backend)
@@ -284,7 +270,6 @@ def _torchcomms_handles_backend(backend) -> bool:
         name = part.split(":", 1)[1] if ":" in part else part
         if not name:
             continue
-        name = _resolve_torchcomms_backend(name)
         if not (
             _torchcomms_is_backend_registered(name)
             or _torchcomms_is_backend_built(name)
@@ -382,7 +367,7 @@ def _create_torchcomms_backend(
             if timeout is not None:
                 dynamic_options["timeout"] = timeout
         comm = new_comm(
-            _resolve_torchcomms_backend(backend),
+            backend.lower(),
             torch_device,
             name=group_name,
             store=store,
@@ -3088,7 +3073,7 @@ def _new_process_group_helper(
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
                 _resolve_torchcomms_device(device, device_id),
-                _resolve_torchcomms_backend(backend_str),
+                backend_str.lower(),
             )
             backend_class = _create_torchcomms_backend(
                 backend_str,

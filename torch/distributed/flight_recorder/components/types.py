@@ -438,8 +438,6 @@ class Op:
             "nccl-lazy",
             "xccl",
             "gloo",
-            "rccl",
-            "rcclx",
             "mccl",
             "hccl",
             # Fallback written by c10d's FlightRecorderHook when it cannot
