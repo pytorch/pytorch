@@ -1559,6 +1559,12 @@ _RAW_DESCRIPTORS = [
     list.count,
     dict.__dict__["fromkeys"],
 ]
+
+
+class _OrderedDictSubclass(collections.OrderedDict):
+    __slots__ = ("slot",)
+
+
 _generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
 if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
     _RAW_DESCRIPTORS.append(_generic_class_getitem)
@@ -1572,9 +1578,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
 
-    def test_ordered_dict_storage_order_and_aliases(self):
+    @parametrize("mapping_type", [collections.OrderedDict, _OrderedDictSubclass])
+    def test_ordered_dict_storage_order_and_aliases(self, mapping_type):
         shared = []
-        mapping = collections.OrderedDict(a=shared, b=shared)
+        mapping = mapping_type(a=shared, b=shared)
+        mapping.slot = shared
         mapping["self"] = mapping
         mapping.alias = mapping
         mapping.move_to_end("a")
@@ -1583,12 +1591,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             (mapping, vars(mapping))
         )
         loaded, attrs = load_guards_state(buf.getvalue())
+        self.assertIs(type(loaded), mapping_type)
         self.assertEqual(list(dict.keys(loaded)), ["a", "b", "self"])
         self.assertEqual(list(loaded), ["b", "self", "a"])
         self.assertIs(loaded["a"], loaded["b"])
+        self.assertIs(loaded.slot, loaded["a"])
         self.assertIs(loaded["self"], loaded)
         self.assertIs(loaded.alias, loaded)
         self.assertIs(loaded.__dict__, attrs)
+
+    def test_ordered_dict_registered_reducer(self):
+        mapping = _OrderedDictSubclass(a=1)
+        buf = io.BytesIO()
+        with mock.patch.dict(
+            copyreg.dispatch_table,
+            {_OrderedDictSubclass: lambda value: (dict, (dict(value),))},
+        ):
+            GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(mapping)
+        loaded = load_guards_state(buf.getvalue())
+        self.assertIs(type(loaded), dict)
+        self.assertEqual(loaded, {"a": 1})
 
     @parametrize("descriptor", _RAW_DESCRIPTORS)
     def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
@@ -4883,12 +4905,13 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
     @parametrize("reordered", [False, True])
-    def test_ordered_dict_iteration_order(self, reordered):
+    @parametrize("mapping_type", [collections.OrderedDict, _OrderedDictSubclass])
+    def test_ordered_dict_iteration_order(self, reordered, mapping_type):
         def fn(x, mapping):
             return x + sum(mapping.values())
 
         x = torch.ones(2)
-        mapping = collections.OrderedDict(a=1, b=2)
+        mapping = mapping_type(a=1, b=2)
         if reordered:
             mapping.move_to_end("a")
         ref, loaded = self._test_serialization(
@@ -5380,6 +5403,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": wider}, False)
         renamed = marked(min=2, max=8, shape_id="t")
         self._test_check_fn(ref, loaded, {"x": renamed}, False)
+
+        def refined_fn(x):
+            torch._check(x.shape[0] == 1)
+            return x + 1
+
+        def refined_marked(size, static_size=2):
+            t = torch.randn(size, static_size)
+            torch._dynamo.decorators.mark_unbacked(t, 0)
+            return t
+
+        x = refined_marked(1)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", refined_fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The runtime assertion, not either input guard, enforces the refinement.
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2, 3)}, False)
 
     def test_weak_and_strict_markings_round_trip(self):
         def fn(x):
