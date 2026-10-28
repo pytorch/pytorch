@@ -84,6 +84,8 @@ auto extract_copy_args =
 // extract kernel args
 struct kernel_args {
   // const char *stream;
+  const void* functionAddr{nullptr};
+  hipFunction_t function{nullptr};
   hipStream_t stream{nullptr};
   uint32_t privateSize{0};
   uint32_t groupSize{0};
@@ -94,7 +96,7 @@ struct kernel_args {
 };
 auto extract_kernel_args =
     []([[maybe_unused]] rocprofiler_callback_tracing_kind_t kind,
-       [[maybe_unused]] rocprofiler_tracing_operation_t operation,
+       rocprofiler_tracing_operation_t operation,
        [[maybe_unused]] uint32_t arg_num,
        const void* const arg_value_addr,
        [[maybe_unused]] int32_t indirection_count,
@@ -104,7 +106,19 @@ auto extract_kernel_args =
        [[maybe_unused]] int32_t dereference_count,
        void* cb_data) -> int {
   auto& args = *(static_cast<kernel_args*>(cb_data));
-  if (strcmp("stream", arg_name) == 0)
+  if (strcmp("function_address", arg_name) == 0)
+    args.functionAddr = *(reinterpret_cast<const void* const*>(arg_value_addr));
+  // "func" is a hipFunction_t only for module launches; the cooperative
+  // launch APIs use the same name for a host function pointer.
+  else if (
+      strcmp("func", arg_name) == 0 &&
+      (operation == ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleLaunchKernel ||
+       operation == ROCPROFILER_HIP_RUNTIME_API_ID_hipExtModuleLaunchKernel ||
+       operation == ROCPROFILER_HIP_RUNTIME_API_ID_hipHccModuleLaunchKernel ||
+       operation ==
+           ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleLaunchCooperativeKernel))
+    args.function = *(reinterpret_cast<const hipFunction_t*>(arg_value_addr));
+  else if (strcmp("stream", arg_name) == 0)
     args.stream = *(reinterpret_cast<const hipStream_t*>(arg_value_addr));
   else if (strcmp("numBlocks", arg_name) == 0)
     args.workgroupSize =
@@ -684,8 +698,8 @@ void RocprofLogger::api_callback(
             systemThreadId(),
             startTime,
             endTime,
-            nullptr,
-            nullptr,
+            args.functionAddr,
+            args.function,
             args.workgroupSize.x,
             args.workgroupSize.y,
             args.workgroupSize.z,
