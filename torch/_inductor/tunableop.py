@@ -53,7 +53,9 @@ def _mode() -> str:
     so a typo like "Tune" or "on" would otherwise disable both passes silently.
     """
     global _mode_warned
-    mode = config.cuda.aten_tunableop_mode
+    # Normalized here, not at the env read: this covers a value set directly on
+    # the config too, and "Tune" would otherwise disable both passes.
+    mode = config.cuda.aten_tunableop_mode.lower()
     if mode not in _valid_modes and not _mode_warned:
         _mode_warned = True
         log.warning(
@@ -285,16 +287,13 @@ def _get_worker_locked(key: tuple[int, str]) -> TuningProcess:
 
     Assumes _worker_lock is held.
 
-    Dedicated rather than Inductor's shared TuningProcessPool because TunableOp's
-    flags are process-global: a worker that also benchmarked triton candidates
-    would tune unrelated GEMMs into the results file. Reused across GEMMs because
-    startup dominates otherwise, and torn down only on a key change or at exit --
-    nothing marks the end of a compile -- so an idle child holds its CUDA/HIP
-    context until then.
+    Dedicated rather than the shared TuningProcessPool because TunableOp's flags
+    are process-global: a shared worker would tune unrelated GEMMs into the
+    results file. Reused across GEMMs because startup dominates, and torn down
+    only on a key change or at exit, so an idle child holds its context.
 
-    Keyed on (device, resolved results filename) because the file is per device
-    ordinal and is read once at startup, so a stale key would benchmark the wrong
-    GPU or keep appending to a previous compile's file.
+    Keyed on (device, resolved results filename): a restart is what releases the
+    old GPU's context and the results map the worker loaded at startup.
     """
     global _worker, _worker_key, _atexit_registered
     from .autotune_process import TuningProcess
@@ -338,14 +337,10 @@ def _reap(worker: TuningProcess) -> None:
 def _shutdown_locked(graceful: bool = True) -> None:
     """Assumes _worker_lock is held (_get_worker_locked calls it on key change).
 
-    graceful=False skips the exit sentinel and kills the child outright. Use it
-    when a GPU fault is suspected: the child may be stuck in device teardown, and
-    once the reference is dropped there is no handle left to kill it with.
-
-    Either way the child is signalled, waited on with a bound, and its pipes and
-    selector closed before the reference goes. shutdown(wait=False) on its own
-    leaves all three for GC, which is why TuningProcessPool.shutdown pairs it
-    with wait().
+    graceful=False kills outright, for a suspected GPU fault: once the
+    reference is dropped there is no handle left to kill the child with.
+    Either way it is signalled, waited on with a bound, and its pipes closed
+    before the reference goes.
     """
     global _worker, _worker_key
     if _worker is not None:
@@ -445,8 +440,8 @@ def snapshot_settings() -> dict[str, Any]:
 
     The worker is long-lived and keyed only on (device, filename), so it never
     sees settings changed after it starts; stamping per job keeps it in sync.
-    Best-effort per knob: a getter failure leaves that knob at the worker's
-    default rather than failing the submission.
+    Best-effort per knob: a getter failure skips it, leaving whatever the
+    previous job set, rather than failing the submission.
     """
     tunable = torch.cuda.tunable
     settings: dict[str, Any] = {}
@@ -460,23 +455,21 @@ def snapshot_settings() -> dict[str, Any]:
     return settings
 
 
-def resolve_filename() -> str:
-    """The file the parent's results manager uses, or would use once it initializes.
+def resolve_filename(device: int) -> str:
+    """The file the runtime's results manager will use for this job.
 
-    Deliberately not the job's device: filename_ is process-global and
-    SetFilename bakes in whichever device was current then, so the runtime
-    reads one file whatever device a GEMM runs on. Naming the worker's file
-    after the job's device would write somewhere nothing reads.
-
-    Resolved here rather than left to the worker so the worker key tracks
-    set_filename and env changes; get_filename() is "" until the manager
-    initializes, hence the mirror of its default rule.
+    Already initialized: that exact file, whatever device a GEMM runs on.
+    Not yet: the manager picks on first use (GetTuningResultsManager) and the
+    generated wrapper runs the graph under set_device, so the ordinal it bakes
+    in is the graph's device -- this one, not whichever is current at compile
+    time. Resolved here, not in the worker, so the key tracks set_filename and
+    env changes.
     """
     filename = torch.cuda.tunable.get_filename()
     if not filename:
         filename = _insert_device_ordinal(
             os.environ.get("PYTORCH_TUNABLEOP_FILENAME", "tunableop_results.csv"),
-            torch.cuda.current_device(),
+            device,
         )
     return filename
 
@@ -488,10 +481,10 @@ def _job_device(job: BenchmarkJob) -> int:
     graph bookkeeping, and compile_fx's CUDA guard covers post-grad passes
     rather than lowering, so a graph targeting cuda:1 can be autotuned while
     the process current device is 0. The child builds its tensors from these
-    metas, so this is the GPU it really tunes on. Mirrors
+    metas, so this is the GPU it really tunes on, and the ordinal an
+    uninitialized results manager will name its file for. Mirrors
     BenchmarkRequest._get_benchmark_device, including its fall back to the
-    current device when nothing carries one. The results filename follows the
-    parent's manager instead -- see resolve_filename.
+    current device when nothing carries one.
     """
     bmreq = job.bmreq
     metas = [getattr(bmreq, "output_tensor_meta", None)]
@@ -538,7 +531,9 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         device = _job_device(job)
         # The visibility mask is inherited unrewritten, so the same logical
         # ordinal names the same GPU in the worker.
-        stamped = _StampedJob(job, device, resolve_filename(), snapshot_settings())
+        stamped = _StampedJob(
+            job, device, resolve_filename(device), snapshot_settings()
+        )
     except Exception as e:  # resolve before the worker: no restart
         # Failed before the worker was involved (no device, no filename): report
         # without touching it. Shutting down here would kill a healthy worker

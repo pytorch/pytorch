@@ -233,10 +233,9 @@ class TunableOpWorkerTest(TestCase):
         ):
             tunableop.submit(job)
         self.assertEqual(self._stamped().device, 1)
-        # The file follows the parent's manager, not the job: filename_ is
-        # process-global, so the runtime reads one file whatever device a GEMM
-        # ran on.
-        self.assertEqual(self._stamped().filename, "tunableop_results0.csv")
+        # Nothing has set a filename, so the runtime manager will name its file
+        # when the graph's first GEMM runs under set_device(1).
+        self.assertEqual(self._stamped().filename, "tunableop_results1.csv")
 
     def test_a_set_parent_filename_wins_over_the_job_device(self):
         # The branch the empty-filename test cannot reach: SetFilename has
@@ -682,7 +681,7 @@ class TunableopModeValidationTest(TestCase):
     def test_invalid_mode_warns_and_disables(self):
         tunableop._mode_warned = False
         try:
-            with inductor_config.patch({"cuda.aten_tunableop_mode": "Tune"}):
+            with inductor_config.patch({"cuda.aten_tunableop_mode": "on"}):
                 with self.assertLogs(tunableop.log, level="WARNING") as logs:
                     self.assertFalse(tunableop.is_tune_mode())
                     self.assertFalse(tunableop.is_reuse_mode())
@@ -723,6 +722,18 @@ class TunableopModeValidationTest(TestCase):
                     self.assertNoLogs(tunableop.log, level="WARNING"),
                 ):
                     tunableop.is_tune_mode()
+
+    def test_mode_is_case_normalized(self):
+        # Without this "Tune" turns both passes off behind a one-time warning.
+        tunableop._mode_warned = False
+        self.addCleanup(setattr, tunableop, "_mode_warned", False)
+        with (
+            inductor_config.patch({"cuda.aten_tunableop_mode": "Tune"}),
+            mock.patch("torch.cuda.is_available", return_value=True),
+            self.assertNoLogs(tunableop.log, level="WARNING"),
+        ):
+            self.assertTrue(tunableop.is_tune_mode())
+            self.assertFalse(tunableop.is_reuse_mode())
 
     def test_valid_modes_do_not_warn(self):
         tunableop._mode_warned = False
@@ -906,11 +917,7 @@ class TunableOpRocmWorkerTest(TestCase):
             try:
                 torch.cuda.tunable.enable(False)
                 job = tunableop.BenchmarkJob(_TestTunableMatmulRequest(), tuning=True)
-                with mock.patch(
-                    "torch.cuda.current_device",
-                    return_value=torch.cuda.current_device(),
-                ):
-                    outcome = tunableop.submit(job, timeout=600.0)
+                outcome = tunableop.submit(job, timeout=600.0)
             finally:
                 torch.cuda.tunable.enable(was_enabled)
                 torch.cuda.tunable.set_filename(previous_filename, False)
