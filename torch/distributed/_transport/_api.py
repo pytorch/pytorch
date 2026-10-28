@@ -102,13 +102,18 @@ class Transport(ABC):
     enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
 
     Backends may support opaque byte notifications between mutually connected
-    endpoints. ``notification=payload`` sends a message to the peer after that
-    transfer succeeds. A WRITE notifies its destination; a READ notifies its
-    source. This orders only that transfer, not other operations or remote
-    application consumption. Timeouts do not suppress later notifications.
-    Receiving a notification does not establish CUDA stream ordering.
-    Captured transfers reuse their payload on every replay; receivers must
-    count replay completions to distinguish them.
+    endpoints. ``notification=payload`` attaches a message to a transfer; a
+    WRITE notifies its destination, a READ notifies its source. The peer
+    receives it once the initiator drives that transfer to completion -- by
+    waiting on or awaiting the returned Work, or at the latest when the
+    transport is closed -- not merely when the data lands. A fire-and-forget
+    ``async_op=True`` transfer whose Work is never driven and whose transport is
+    never closed may never deliver its notification. This orders only that
+    transfer, not other operations or remote application consumption. A
+    timed-out wait does not cancel the notification; it stays pending until the
+    Work is driven or the transport closes. Receiving a notification does not
+    establish CUDA stream ordering. Captured transfers reuse their payload on
+    every replay; receivers must count replay completions to distinguish them.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
@@ -218,7 +223,11 @@ class Transport(ABC):
         timeout: float | None = None,
         notification: bytes | None = None,
     ) -> int | Work:
-        """Write a local view; return Work for async_op=True, otherwise zero."""
+        """Write a local view; return Work for async_op=True, otherwise zero.
+
+        With ``async_op=True``, a notification is delivered only after the
+        returned Work is driven to completion.
+        """
 
     @abstractmethod
     def read(
@@ -230,7 +239,11 @@ class Transport(ABC):
         timeout: float | None = None,
         notification: bytes | None = None,
     ) -> int | Work:
-        """Read into a local view; return Work for async_op=True, otherwise zero."""
+        """Read into a local view; return Work for async_op=True, otherwise zero.
+
+        With ``async_op=True``, a notification is delivered only after the
+        returned Work is driven to completion.
+        """
 
     def write_stream(
         self,

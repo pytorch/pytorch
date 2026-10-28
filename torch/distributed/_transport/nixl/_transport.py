@@ -48,6 +48,12 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
+
+    For UCX, a transfer's notification is flushed only when the initiator polls
+    the transfer's completion (ai-dynamo/nixl#2439), so delivery follows the
+    transport's own completion polling; see :class:`Transport` for the delivery
+    contract. Standalone ``send_notification`` relies on the progress thread
+    (``enable_prog_thread``) or a later agent operation to go out.
     """
 
     def __init__(
