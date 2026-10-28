@@ -581,7 +581,7 @@ class NNModuleVariable(VariableTracker):
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
                     func_source = source and AttrSource(source, "__func__")
-                    fn_vt = variables.WrapperUserFunctionVariable(
+                    fn_vt = variables.FunctionWrapperVariable(
                         subobj, "_torchdynamo_inline", source=func_source
                     )
                     return variables.WrapperUserMethodVariable(

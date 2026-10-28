@@ -3368,9 +3368,11 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     attribute. For example, torch.jit.script/trace have the original function at
     their _torchdynamo_inline attribute. Similarly, functions with
     __script_if_tracing_wrapper have the original attr at "__original_fn".
-    """
 
-    _cpython_type = types.FunctionType
+    The VT stands for the wrapper, not the inline target: attributes resolve
+    through the wrapper's real type and instance __dict__, as in CPython.
+    get_function()/get_code() return the inline target, for Dynamo's own use.
+    """
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -3378,13 +3380,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         self.attr_to_trace = attr_to_trace
 
     def python_type(self) -> type:
-        return types.FunctionType
-
-    def get_module(self) -> str:
-        return self.wrapper_obj.__module__
-
-    def get_doc(self) -> str | None:
-        return self.wrapper_obj.__doc__
+        return type(self.wrapper_obj)
 
     def get_name(self) -> str:
         return self.wrapper_obj.__name__
@@ -3398,34 +3394,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_code(self) -> types.CodeType:
         return self.get_function().__code__
 
-    # The wrapper is not a function object, so these must not fall through to
-    # the function getsets the MRO walk would find (python_type() reports
-    # FunctionType). They read the wrapper via the get_* accessors above; the
-    # function-only slots (__defaults__ et al.) are deliberately absent.
-    tp_members = {
-        "__doc__": Member(
-            getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
-            getset_set("__doc__"),
-        ),
-        "__module__": Member(
-            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
-            getset_set("__module__"),
-        ),
-    }
-
     tp_getset = {
-        "__name__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
-            _set_name,
-        ),
-        "__qualname__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
-            _set_qualname,
-        ),
-        "__code__": GetSet(
-            getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
-            unmodeled_setter,
-        ),
         "__dict__": GetSet(
             lambda s, tx: s.get_dict_vt(tx),
             unmodeled_setter,
@@ -3443,6 +3412,14 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self):
         return getattr(self.wrapper_obj, self.attr_to_trace)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
+        return VariableTracker.build(tx, hasattr(self.wrapper_obj, name))
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3552,6 +3529,30 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         return self.wrapper_obj
 
 
+class FunctionWrapperVariable(WrapperUserFunctionVariable):
+    """A wrapper that is itself a function (torch.compile, script_if_tracing)."""
+
+    _cpython_type = types.FunctionType
+
+    tp_getset = {
+        "__name__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
+            _set_qualname,
+        ),
+    }
+
+
+class LruCacheWrapperVariable(WrapperUserFunctionVariable):
+    """functools.lru_cache wrapper: update_wrapper copies the function attrs
+    into its instance __dict__, and its type defines no other slot."""
+
+    _cpython_type = functools._lru_cache_wrapper
+
+
 class WrapperUserMethodVariable(BaseUserFunctionVariable):
     """
     Similar to WrapperUserFunctionVariable, but for methods. Sibling class
@@ -3577,9 +3578,6 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
 
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
-
-    def get_module(self) -> str:
-        return self.fn.get_module()
 
     def get_name(self) -> str:
         return self.fn.get_name()
