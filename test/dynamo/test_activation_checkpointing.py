@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
-    skipIfHpu,
     skipIfXpu,
     TEST_CUDA,
 )
@@ -1783,12 +1782,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
 
-class ActivationCheckpointingViaTagsGenericTests(
+class ActivationCheckpointingViaTagsCPUOnlyTests(
     ActivationCheckpointingViaTagsTestBase
 ):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
-    @skipIfHpu
     @torch._functorch.config.patch(recompute_views=True)
     @torch._inductor.config.patch(fx_graph_cache=False)
     def test_tags_must_save_tensor_that_has_backward_hook(self):
@@ -1872,6 +1870,12 @@ Expected additional saved tensors: {expected_additional_saved_tensors} but got: 
 Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
         )
+
+
+class ActivationCheckpointingViaTagsGenericTests(
+    ActivationCheckpointingViaTagsTestBase
+):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_sac_with_partial_context_fn(self):
         class CustomPolicy:
