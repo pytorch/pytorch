@@ -75,11 +75,14 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._sympy.functions import (
     CleanDiv,
+    FloatTrueDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
+    OpaqueUnaryFn_sqrt,
+    ToFloat,
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -638,6 +641,17 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s97)), 2.0)"""
+        )
+
+    def test_evaluate_expr_float_without_hint(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        scale = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        self.assertEqual(shape_env.guarding_hint_or_throw(scale), 0.125)
+        self.assertEqual(shape_env.evaluate_expr(scale), 0.125)
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s97))), 0.125)""",
         )
 
     def test_sym_floor(self):
