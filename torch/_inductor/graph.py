@@ -24,6 +24,10 @@ import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_mutation_hop,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     is_custom_class,
@@ -303,10 +307,7 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
-        if isinstance(
-            cur.target,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-        ):
+        if is_user_kernel_mutation_hop(cur.target):
             cur.meta["dislike_padding"] = True
             continue
 
@@ -1903,18 +1904,19 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        if is_user_kernel_mutation_hop(fx_node.target):
+            user_kernel_hop = get_user_kernel_hop_info(fx_node.target)
+            if user_kernel_hop is None:
+                raise AssertionError(f"{fx_node.target} is not a user-kernel HOP")
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
-            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
-                old_kwargs["kernel_idx"],
-                old_kwargs["constant_args_idx"],
+            mutated = user_kernel_hop.get_mutated_tensors(
+                old_kwargs,
                 {
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
-                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2101,7 +2103,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
+                and is_user_kernel_mutation_hop(n.target)
                 and config.triton_kernel_default_layout_constraint != "flexible_layout"
             ):
                 debug("user_defined_triton_kernel_layout_constraints")

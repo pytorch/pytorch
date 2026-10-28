@@ -9,8 +9,9 @@ cutedsl_kernel_wrap.py) add the parts that depend on the kernel object: how to l
 it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
+import dataclasses
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
@@ -106,6 +107,68 @@ def store_non_graphable_args(
     constant_args_idx = side_table.add_constant_args(non_graphable_args)
 
     return graphable_args, constant_args_idx
+
+
+###############################################################################
+# Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
+
+
+@dataclasses.dataclass(frozen=True)
+class UserKernelHOPInfo:
+    """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
+    the same way (reinplacing, the functional decomposition, Inductor's layout
+    constraint and mutation propagation, CSE, partitioning, ...).
+
+    Each DSL module registers one at import time; a pass looks a node's target up
+    with get_user_kernel_hop_info instead of comparing it with a DSL's HOP.
+    """
+
+    dsl: str
+    mutation: HigherOrderOperator
+    functional: HigherOrderOperator
+    # (HOP kwargs other than "kwargs", kernel kwargs) -> names of the tensor kernel
+    # kwargs the kernel writes. Kernel kwargs may be real, fake or FX meta values.
+    get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
+    # HOP kwargs -> kernel name, for logs and the reinplacing counters.
+    get_kernel_name: Callable[[Mapping[str, Any]], str]
+    # The functional HOP's dense impl: the post-grad decomposition traces it into
+    # clones plus the mutation HOP.
+    functional_dense: Callable[..., dict[str, Any]]
+    # Name of the torch._dynamo.utils.ReInplaceTrigger member counting this DSL's
+    # reinplacing decisions.
+    reinplace_trigger: str
+
+
+_user_kernel_hops: dict[HigherOrderOperator, UserKernelHOPInfo] = {}
+
+
+def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    for hop in (info.mutation, info.functional):
+        if _user_kernel_hops.get(hop, info) is not info:
+            raise AssertionError(f"{hop} is already registered as a user-kernel HOP")
+        _user_kernel_hops[hop] = info
+
+
+def get_user_kernel_hop_info(target: object) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``."""
+    if not isinstance(target, HigherOrderOperator):
+        return None
+    return _user_kernel_hops.get(target)
+
+
+def is_user_kernel_mutation_hop(target: object) -> bool:
+    info = get_user_kernel_hop_info(target)
+    return info is not None and target is info.mutation
+
+
+def is_user_kernel_functional_hop(target: object) -> bool:
+    info = get_user_kernel_hop_info(target)
+    return info is not None and target is info.functional
+
+
+def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
+    """Every registered DSL, in registration order."""
+    return list(dict.fromkeys(_user_kernel_hops.values()))
 
 
 ###############################################################################
