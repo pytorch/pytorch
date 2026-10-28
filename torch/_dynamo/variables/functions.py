@@ -2912,7 +2912,8 @@ class SkipFunctionVariable(VariableTracker):
                 # Re-run the trace rules under the patched config. Not
                 # SourcelessBuilder.create: it would return the VT side effects
                 # already track for this function, i.e. this skipped VT.
-                rule = trace_rules.lookup(self.value)
+                fn = cast(Callable[..., Any], self.value)
+                rule = trace_rules.lookup_callable(fn) or trace_rules.lookup(fn)
                 # if we still get SkipFunctionVariable, then we *really* should skip this function
                 if rule is not None and not issubclass(rule, SkipFunctionVariable):
                     # pyrefly: ignore[bad-argument-count]
