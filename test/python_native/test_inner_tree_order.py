@@ -450,6 +450,9 @@ class TestInnerTreeOrder(TestCase):
         lowp = rt.trait_itree_plan(T.SumOps(), n, m, 2)
         self.assertEqual(default.kchunk, 4)
         self.assertEqual(lowp.kchunk, 2)
+        # Rows up to _ITREE_LOWP_MIN_N measured slower with the retune, so they keep the default.
+        narrow = rt.trait_itree_plan(T.SumOps(), 1025, m, 2)
+        self.assertEqual(narrow.kchunk, rt.itree_plan(1025, m, 2).kchunk)
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
