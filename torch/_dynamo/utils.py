@@ -49,7 +49,6 @@ import weakref
 from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
-from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
@@ -2826,11 +2825,9 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 
 @contextmanager
 def preserve_rng_state() -> Generator[None, None, None]:
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
-
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
-    with disable_current_modes(), disable_functorch(), unset_fake_temporarily():
+    with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
@@ -2840,7 +2837,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
     try:
         yield
     finally:
-        with disable_current_modes(), unset_fake_temporarily():
+        with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
@@ -3009,17 +3006,6 @@ def timed(
 
 def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bool:
     return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
-
-
-@lru_cache(32)
-def rot_n_helper(n: int) -> Callable[..., Any]:
-    if n <= 1:
-        raise AssertionError(f"Expected n > 1, got {n}")
-    vars = [f"v{i}" for i in range(n)]
-    rotated = reversed(vars[-1:] + vars[:-1])
-    fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
-    fn.__name__ = f"rot_{n}_helper"
-    return fn
 
 
 common_constant_types: set[type] = {
@@ -4389,13 +4375,8 @@ def _get_fake_value_impl(
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
-        ) or (
-            isinstance(cause, RuntimeError)
-            and "Unsupported operator for C++ FakeTensor" in str(cause)
         ):
-            op = getattr(cause, "func", node.target)  # type: ignore[assignment]
-            if isinstance(op, torch._ops.OpOverloadPacket):
-                op = op.default
+            op = cause.func  # type: ignore[assignment]
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
@@ -4410,7 +4391,7 @@ def _get_fake_value_impl(
                     )
             unimplemented(
                 gb_type="Operator does not support running with fake tensors",
-                context=f"unsupported operator: {op}",
+                context=f"unsupported operator: {cause.func}",
                 explanation="",
                 hints=[
                     f"{import_suggestion}see "
@@ -4549,14 +4530,8 @@ def run_node(
     with set_current_node(node):
 
         def make_error_message(e: object) -> str:
-            try:
-                args_str = repr(args)
-                kwargs_str = repr(kwargs)
-            except Exception:
-                args_str = f"<{len(args)} args>"
-                kwargs_str = f"<{len(kwargs)} kwargs>"
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args_str}, **{kwargs_str}): got "
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
                 + repr(e)
             )
 
@@ -5250,9 +5225,6 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         - for indexing, the location of the brackets.
     `segment` is expected to be a valid Python expression
     """
-    if sys.version_info < (3, 11):
-        raise AssertionError(f"Python >= 3.11 required, got {sys.version_info}")
-
     import ast
 
     tree: Any | None = None
@@ -6051,12 +6023,6 @@ class FrameState(enum.Enum):
     FRAME_EXECUTING = 0
     FRAME_COMPLETED = 1
     FRAME_CLEARED = 4
-
-
-class PySendResult(enum.Enum):
-    PYGEN_RETURN = 0
-    PYGEN_ERROR = -1
-    PYGEN_NEXT = 1
 
 
 class CompileTimeInstructionCounter:

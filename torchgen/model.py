@@ -120,7 +120,6 @@ class DispatchKey(Enum):
     PreDispatch = auto()
     PythonDispatcher = auto()
     Python = auto()
-    Fake = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     Conjugate = auto()
@@ -400,6 +399,7 @@ class ScalarType(Enum):
     Float8_e4m3fn = auto()
     Float8_e4m3fnuz = auto()
     Float8_e8m0fnu = auto()
+    Float8_e5m3fnu = auto()
 
     def __str__(self) -> str:
         return self.name
