@@ -2700,6 +2700,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
         from torch._dynamo.precompile_package import _capture_config
 
         def flags():
@@ -2708,9 +2709,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 functorch_config.bypass_autograd_cache_key,
                 functorch_config.force_non_lazy_backward_lowering,
                 torch._dynamo.config.allow_empty_graphs,
+                inductor_config.triton.autotune_at_compile_time,
             )
 
-        ambient = (False, False, False, False)
+        ambient = (False,) * 5
         with (
             functorch_config.patch(
                 bundled_autograd_cache=False,
@@ -2718,10 +2720,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 force_non_lazy_backward_lowering=False,
             ),
             torch._dynamo.config.patch(allow_empty_graphs=False),
+            inductor_config.patch({"triton.autotune_at_compile_time": False}),
         ):
             self.assertEqual(flags(), ambient)
             with _capture_config():
-                self.assertEqual(flags(), (True, True, True, True))
+                self.assertEqual(flags(), (True,) * 5)
             self.assertEqual(flags(), ambient)
 
             with self.assertRaisesRegex(RuntimeError, "boom"):
@@ -2749,7 +2752,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             release.set()
             worker.join(10)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(seen[1], (True, True, True, True))
+            self.assertEqual(seen[1], (True,) * 5)
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
 
