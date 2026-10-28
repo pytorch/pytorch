@@ -1740,7 +1740,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "requires co_linetable")
     def test_exception_traceback_missing_line_table(self):
         def inner():
             raise ValueError("oops")
@@ -1759,9 +1758,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(1), (2, None, None))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(1), fn(1))
 
-    @unittest.skipIf(
-        sys.version_info < (3, 11), "frame.f_lineno needs instruction positions"
-    )
     def test_exception_traceback_frame_lineno(self):
         class ExitFails:
             def __enter__(self):
@@ -1899,10 +1895,17 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def make_gen():
             return gen()
 
+        def gen_one():
+            yield 1
+
+        def gen_empty():
+            return
+            yield
+
         def names(tb):
             out = []
             while tb:
-                out.append(tb.tb_frame.f_code.co_name)
+                out.append((tb.tb_frame.f_code.co_name, tb.tb_lineno))
                 tb = tb.tb_next
             return out
 
@@ -1912,6 +1915,23 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 next(g)
             except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        # A generator's return raises StopIteration in the resuming frame only.
+        def fn_exhausted(x):
+            g = gen_one()
+            next(g)
+            try:
+                next(g)
+            except StopIteration as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def fn_empty(x):
+            try:
+                next(gen_empty())
+            except StopIteration as e:
                 tb = e.__traceback__
             return x + 1, names(tb)
 
@@ -1930,7 +1950,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 tb = e.__traceback__
             return x + 1, names(tb)
 
-        for f in (fn, fn_cm):
+        for f in (fn, fn_exhausted, fn_empty, fn_cm):
             with self.subTest(fn=f.__name__):
                 torch._dynamo.reset()
                 x = torch.ones(2)

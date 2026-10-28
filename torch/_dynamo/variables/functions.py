@@ -1467,7 +1467,21 @@ class LocalGeneratorObjectVariable(VariableTracker):
             was_executing = tracer.frame_state == FrameState.FRAME_EXECUTING
             tracer.frame_state = FrameState.FRAME_COMPLETED
             tracer.freeze_frame_variable()
-            if sys.version_info < (3, 12) and was_executing:
+            if not was_executing:
+                # CPython raises the StopIteration for a return from gen_send_ex,
+                # so only the resuming frame is on its traceback.
+                stop = tracer.exn_vt_stack.get_raised_exception()
+                stop.call_method(
+                    tx,
+                    "__setattr__",
+                    [
+                        ConstantVariable.create("__traceback__"),
+                        ConstantVariable.create(None),
+                    ],
+                    {},
+                )
+                tx._attach_traceback_to_exception(stop)
+            elif sys.version_info < (3, 12):
                 # Match CPython's _PyErr_FormatFromCause: set __context__ and
                 # __cause__ directly rather than pushing onto the exception
                 # stack (which must stay balanced -- genobject.c pops the
