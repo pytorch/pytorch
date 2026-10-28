@@ -168,23 +168,58 @@ inline bool check_flash_attention_deterministic(
 }
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
-  constexpr auto constraints =
-      std::array<bool (*)(sdp_params const&, bool), 14>{
+  // Constraints shared by dense and nested inputs. The head-dim bounds also
+  // cover the nested fallback, which runs the dense kernel once per
+  // constituent.
+  constexpr auto general_constraints =
+      std::array<bool (*)(sdp_params const&, bool), 10>{
           is_flash_attention_available,
           check_flash_attention_hardware_support,
           check_for_attn_mask,
           check_for_dropout,
-          check_nested_tensor,
           check_tensor_shapes,
-          check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
-          check_nonzero_sequence_lengths_dense,
-          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>,
           check_flash_causal_non_square_seqlens,
           check_flash_attention_datatype,
           check_flash_attention_head_dim_size,
           check_flash_attention_layout,
           check_flash_attention_deterministic};
-  for (auto& constraint : constraints) {
+  for (auto& constraint : general_constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+
+  if (has_for_nested_inputs(params)) {
+    // The XPU nested flash fallback materializes the operands and runs the
+    // dense kernel per constituent, forward-only: it supports neither nested
+    // inputs that require grad nor causal masking over ragged sequence
+    // lengths.
+    constexpr auto nested_constraints =
+        std::array<bool (*)(sdp_params const&, bool), 3>{
+            check_requires_grad_and_nested,
+            check_batch_size_nested,
+            check_for_seq_len_0_nested_tensor};
+    for (auto& constraint : nested_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+    if (params.is_causal) {
+      if (debug) {
+        TORCH_WARN(
+            "Flash attention XPU nested fallback does not support the is_causal flag.");
+      }
+      return false;
+    }
+    return true;
+  }
+
+  constexpr auto dense_constraints =
+      std::array<bool (*)(sdp_params const&, bool), 3>{
+          check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
+          check_nonzero_sequence_lengths_dense,
+          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>};
+  for (auto& constraint : dense_constraints) {
     if (!constraint(params, debug)) {
       return false;
     }

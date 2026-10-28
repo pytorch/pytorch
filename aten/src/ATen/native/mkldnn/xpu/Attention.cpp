@@ -232,6 +232,13 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
       case sdp::SDPBackend::efficient_attention:
         if (ctx.userEnabledMemEfficientSDP() &&
             can_use_mem_efficient_attention(kernel_params, print_debug)) {
+          // Both XPU efficient-attention kernels are math fallbacks, but the
+          // nested one additionally broadcasts and materializes its operands,
+          // which the generic math backend refuses to do (it requires
+          // contiguous nested inputs of equal batch and num_heads).
+          if (has_for_nested_inputs(kernel_params)) {
+            return sdp::SDPBackend::efficient_attention;
+          }
           TORCH_WARN_ONCE(
               "SDPA Memory Efficient Attention backend is not supported on XPU, falling back to math backend.");
           return sdp::SDPBackend::math;

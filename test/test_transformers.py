@@ -7042,7 +7042,6 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("expand_q_num_heads", [True, False])
     @parametrize("expand_k_num_heads", [True, False])
     @parametrize("expand_v_num_heads", [True, False])
-    @skipIfXpu(msg="XPU SDPA dispatch lacks nested broadcasting kernels; tracked in torch-xpu-ops")
     def test_fused_kernels_nested_broadcasting(
         self,
         device,
