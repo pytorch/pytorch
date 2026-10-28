@@ -249,6 +249,39 @@ class TestKernelColTile(TestCase):
                 for g, e in zip(got, expected):
                     torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
 
+    def test_value_index_columns_keep_the_first_tie(self):
+        # max.dim/min.dim project a value and the first tied index through stage two.
+        f32, i32 = torch.float32, torch.int32
+        cases = (
+            ("max", T.MaxDimOps(acc=cutlass.Float32), 10.0),
+            ("min", T.MinDimOps(acc=cutlass.Float32), -10.0),
+        )
+        for name, trait, tie in cases:
+            for batches, columns in ((3, 256), (1, ct._C_THREAD_STAGE2)):
+                x = torch.randn(batches, 1100, columns, device="cuda")
+                x[:, 100] = tie
+                x[:, 900] = tie
+                with self.subTest(op=name, pc=batches * columns >= ct._C_THREAD_STAGE2):
+                    vals, idx = ct._reduce_col_tile(
+                        trait, f"{name}dim_batched", x, [f32, i32], 2, None, 4, None
+                    )
+                    self.assertEqual(vals, torch.full_like(vals, tie))
+                    self.assertEqual(idx, torch.full_like(idx, 100))
+            real = ct.reduce_batched_col_tile
+            for shape, dim in (((1100, 256), 0), ((2, 1100, 4096), 1)):
+                x = torch.randn(shape, device="cuda")
+                x.select(dim, 100).fill_(tie)
+                x.select(dim, 900).fill_(tie)
+                with (
+                    self.subTest(op=name, routed=shape),
+                    mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as bat,
+                ):
+                    key = f"{name}dim_route"
+                    vals, idx = kg.reduce_dim2(trait, key, x, dim, [f32, i32])
+                    self.assertEqual(bat.call_count, int(x.dim() == 3))
+                    self.assertEqual(vals, torch.full_like(vals, tie))
+                    self.assertEqual(idx, torch.full_like(idx, 100))
+
     def test_transposed_dense_columns_route_to_coltile(self):
         # A transposed view whose kept axis is dense is served by the column kernel.
         x = torch.randn(256, 4096, device="cuda").t()

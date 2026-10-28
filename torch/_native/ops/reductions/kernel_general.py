@@ -8,13 +8,13 @@ from collections.abc import Sequence
 from typing import Any, cast, Literal, NamedTuple
 
 import cutlass.cute as cute
-from cutlass import Float32, Float64, Int32, Int64
+from cutlass import Int32, Int64
 
 import torch
 from torch._tensor_iterator import reduce_op
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
 from .traits import WARP, welford_nouts
@@ -123,12 +123,6 @@ class ReduceBlock:
 _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
-_PART_TORCH = {
-    Float32: torch.float32,
-    Float64: torch.float64,
-    Int32: torch.int32,
-    Int64: torch.int64,
-}
 
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
@@ -513,7 +507,6 @@ def _try_fast_row(
     nouts: int,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
-    tune: bool = True,
 ) -> tuple[torch.Tensor, ...] | None:
     # Fast contiguous 2D last-dimension path. It needs no index remap, so index traits work.
     if x.dim() != 2 or x.stride(-1) != 1:
@@ -527,20 +520,18 @@ def _try_fast_row(
 
     M, itemsize = x.shape[0], x.element_size()
     order = rt.reduction_order(order)
-    kernel_order = "inner_tree" if order == "inner_tree" else "linear"
-    if tune:
-        kernel_order = rt.select_row_order(
-            _hw.caps(x.device).cc,
-            x.dtype,
-            trait_key,
-            N,
-            M,
-            order=order,
-            nfields=trait.nfields,
-            nouts=nouts,
-            acc_bits=max(dt.width for dt in trait.fdtypes),
-            alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
-        )
+    kernel_order = rt.select_row_order(
+        _hw.caps(x.device).cc,
+        x.dtype,
+        trait_key,
+        N,
+        M,
+        order=order,
+        nfields=trait.nfields,
+        nouts=nouts,
+        acc_bits=max(dt.width for dt in trait.fdtypes),
+        alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+    )
     # A tuned inner-tree choice for an unordered request falls back when no plan exists.
     if kernel_order == "inner_tree" and (
         order == "inner_tree"
@@ -550,8 +541,7 @@ def _try_fast_row(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
         )
     ragged_vector = (
-        tune
-        and order == "unordered"
+        order == "unordered"
         and _hw.caps(x.device).cc == (10, 0)
         and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and tile.vec_size(N, itemsize) == 1
@@ -678,7 +668,7 @@ def _two_stage_general(
         return None
     inner = count // E
     parts = [
-        torch.empty(num_o * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(num_o * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
@@ -763,7 +753,7 @@ def _try_indexed_itree(
         torch.empty(
             num_o * nbatch,
             device=x.device,
-            dtype=_PART_TORCH[trait.fdtypes[f]],
+            dtype=cute2torch[trait.fdtypes[f]],
         )
         for f in range(trait.nfields)
     ]
@@ -786,7 +776,7 @@ def _try_indexed_itree(
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
     combine = rt.itree_combine_plan(
         plan,
-        parts[0].element_size(),
+        max(p.element_size() for p in parts),
         x.device,
         nfields=trait.nfields,
         nrows=num_o,
@@ -838,11 +828,9 @@ def _reduce(
     explicit = order == "inner_tree"
     order = rt.reduction_order(order)
     tune = block is None
-    if order == "inner_tree":
+    if order == "inner_tree" and count > 0:
         ordered = None
-        if count == 0:
-            reason = "an empty reduction has no inner-tree order"
-        elif count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
+        if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
             reason = "inner-tree reduction requires 32-bit logical extents"
         else:
             reason = "inner-tree reduction cannot serve this geometry"
@@ -893,17 +881,18 @@ def _reduce(
         if explicit:
             raise ValueError(reason)
         rt.inner_tree_fallback(reason)
-        order = "unordered"
+    # Ordered requests returned, raised, or fell back above; an empty reduction's identity
+    # satisfies every order.
+    order = "unordered"
 
     # Route one-element outputs through the reduce-all split instead of one general block.
     if math.prod(out_shape) == 1 and x.is_contiguous():
-        all_block = None if tune else block
         if nouts == 1:
-            kwargs = {} if all_block is None else {"block": all_block}
-            out = reduce_all(trait, trait_key, x, out_dtypes[0], order=order, **kwargs)
+            out = reduce_all(
+                trait, trait_key, x, out_dtypes[0], block=block, order=order
+            )
             return (_as_shape(out, out_shape),)
-        kwargs = {} if all_block is None else {"block": all_block}
-        outs = reduce_all2(trait, trait_key, x, out_dtypes, order=order, **kwargs)
+        outs = reduce_all2(trait, trait_key, x, out_dtypes, block=block, order=order)
         return tuple(_as_shape(o, out_shape) for o in outs)
 
     red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
@@ -915,9 +904,7 @@ def _reduce(
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row" and x.is_contiguous():
             x2 = x.reshape(math.prod(out_shape), red_n)
-            fast = _try_fast_row(
-                trait, trait_key, x2, out_dtypes, nouts, order=order, tune=tune
-            )
+            fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts, order=order)
             if fast is not None:
                 return tuple(_as_shape(o, out_shape) for o in fast)
         col_view = _physical_col_view(x, red_axes, red_pairs, kept_pairs, red_n, num_o)
@@ -1118,8 +1105,8 @@ def _reduce_all(
     # Direct routing measured 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
 
-    if order == "inner_tree":
-        if 0 < L < _INT32_LIMIT:
+    if order == "inner_tree" and L > 0:
+        if L < _INT32_LIMIT:
             outs = rt.reduce_row_tile(
                 trait,
                 trait_key,
@@ -1129,14 +1116,12 @@ def _reduce_all(
                 order="inner_tree",
             )
             return tuple(_as_shape(o, ()) for o in outs)
-        if L == 0:
-            reason = "an empty reduction has no inner-tree order"
-        else:
-            reason = "inner-tree reduction requires 32-bit logical extents"
+        reason = "inner-tree reduction requires 32-bit logical extents"
         if requested == "inner_tree":
             raise ValueError(reason)
         rt.inner_tree_fallback(reason)
-        order = "unordered"
+    # As in _reduce, an empty reduction's identity satisfies every order.
+    order = "unordered"
     if _oneshot_ok(x2):
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
@@ -1178,7 +1163,7 @@ def _reduce_all(
     chunk = (L + G - 1) // G
 
     parts = [
-        torch.empty(G, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(G, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]
