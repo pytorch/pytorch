@@ -26,6 +26,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import gc
 import importlib.machinery
 import inspect
 import itertools
@@ -78,6 +79,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -154,6 +156,7 @@ from ..source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
@@ -233,7 +236,12 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
+from .dicts import (
+    ConstDictVariable,
+    DictKeysVariable,
+    MappingProxyVariable,
+    OrderedDictVariable,
+)
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -312,7 +320,6 @@ from .optimizer import OptimizerVariable
 from .script_object import CustomClassObjectVariable, CustomClassVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
-    DictKeySetVariable,
     FrozensetVariable,
     OrderedSetClassVariable,
     OrderedSetVariable,
@@ -1009,14 +1016,23 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
-            elif is_from_attr_proxy_source(self.source) or (
-                result.source is not None and is_from_attr_proxy_source(result.source)
+            elif (
+                is_from_attr_proxy_source(self.source)
+                or isinstance(self.source, MappingProxyMappingSource)
+                or (
+                    result.source is not None
+                    and (
+                        is_from_attr_proxy_source(result.source)
+                        or isinstance(result.source, MappingProxyMappingSource)
+                    )
+                )
             ):
                 if result.source is None:
-                    raise AssertionError("Tracked AttrProxy module must have a source")
+                    raise AssertionError("Tracked alias must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
                 # the tracker still requires both sources to resolve to the same
-                # base module, so pin each source to its compile-time object.
+                # object (a base module, or the mapping behind a mappingproxy), so
+                # pin each source to its compile-time object.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
@@ -1171,22 +1187,11 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: object, v: object
-        ) -> tuple[VariableTracker, VariableTracker]:
-            key = ConstantVariable.create(k)
-            source_key = k
-
-            source_value = GetItemSource(self.get_source(), source_key)
-            res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
-
-            return key, res_value
-
-        items = dict(build_key_value(k, v) for k, v in value.items())
-
-        # Create a dict_vt to be used in the mapping proxy variable
-        dict_vt = ConstDictVariable(items, source=None)
-        result = MappingProxyVariable(dict_vt, source=self.source)
+        mapping = gc.get_referents(value)[0]
+        mapping_vt = VariableBuilder(self.tx, MappingProxyMappingSource(self.source))(
+            mapping
+        )
+        result = MappingProxyVariable(mapping_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
@@ -2011,9 +2016,7 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=AttributeMutationExisting(),
             )
-        elif value is sys.exc_info or (
-            sys.version_info >= (3, 11) and value is sys.exception
-        ):
+        elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
@@ -2519,17 +2522,17 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
             if all(ConstantVariable.is_literal(k) for k in value):
-                # If the dict_keys object is passed from outside the compile region, it must either be passed along with
-                # the corresponding dict object or treated as a set (when only the keys are passed into the compiled region).
-                # - If it is passed along with the dict, the dict object itself is already guarded.
-                # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
-                #   to ensure it remains unchanged across multiple runs.
-                items = [SourcelessBuilder.create(self.tx, v) for v in value]
-                install_guard(
-                    self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
-                    self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
-                )
-                return DictKeySetVariable(items, source=self.source)
+                # Model the view over its owning dict (the view's only gc
+                # referent) so mutations of the dict are visible through it.
+                dict_source = MappingProxyMappingSource(self.source)
+                owner = gc.get_referents(value)[0]
+                dict_vt = VariableBuilder(self.tx, dict_source)(owner)
+                if not isinstance(dict_vt, ConstDictVariable):
+                    raise AssertionError(f"Expected a dict, got {dict_vt}")
+                # Same key guards as ConstDictVariable.dict_keys installs.
+                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+                self.tx.output.guard_on_key_order.add(dict_source)
+                return DictKeysVariable(dict_vt, source=self.source)
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",
@@ -3885,10 +3888,10 @@ class VariableBuilder:
             )
 
         fake_tensor_value = example_value
-        # type: ignore[attr-defined]
-        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+        fake_mode = maybe_get_fake_mode(fake_tensor_value)
+        if fake_mode is not self.tx.fake_mode:
             raise AssertionError(
-                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
                 "({self.tx.fake_mode}) from InstructionTranslator"
             )
 
@@ -3990,10 +3993,10 @@ class VariableBuilder:
                 )
 
             fake_tensor_value = example_value
-            # type: ignore[attr-defined]
-            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+            fake_mode = maybe_get_fake_mode(fake_tensor_value)
+            if fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
-                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                    f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
                     "({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
@@ -5463,11 +5466,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             )
         if tensor_spec is not None:
             _wire_tensor_spec_dims(tensor_spec, fake_e)
-        if (
-            source is not None
-            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            and (sym_val := fake_e.item_memo) is not None
-        ):
+        if source is not None and (sym_val := maybe_get_item_memo(fake_e)) is not None:
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
             # this, the tracked fake source name won't match source_to_var and
@@ -5476,6 +5475,8 @@ def _wrap_to_fake_tensor_and_record_impl(
                 item_source = source.base
             else:
                 item_source = CallMethodItemSource(source)
+            # Typed like FakeTensor.item_memo (SymNumberMemoDescriptor.__get__)
+            sym_val = cast(torch.SymInt | torch.SymFloat, sym_val)
             tx.output.tracked_fakes.append(
                 TrackedFake(sym_val, item_source, symbolic_context)
             )
@@ -5739,9 +5740,8 @@ class SourcelessBuilder:
             (
                 types.GenericAlias,
                 types.UnionType,
-                # `typing.Any | X` (and `typing.Union[...]`) evaluates to a
-                # `typing._UnionGenericAlias` on Python <= 3.10, not a
-                # `types.UnionType`
+                # `typing.Union[...]` evaluates to a `typing._UnionGenericAlias`
+                # on Python <= 3.13, not a `types.UnionType`
                 typing._UnionGenericAlias,  # type: ignore[attr-defined]
             ),
         ):
@@ -5843,10 +5843,7 @@ class SourcelessBuilder:
         # Sourceless MappingProxyType object can be encountered while tracing
         # type.__dict__["__dict__"].__get__
         handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
-            ConstDictVariable(
-                {create(tx, k): create(tx, v) for k, v in value.items()},
-                mutation_type=ValueMutationNew(),
-            ),
+            create(tx, gc.get_referents(value)[0])
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
