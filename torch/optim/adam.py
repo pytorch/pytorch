@@ -635,6 +635,11 @@ def _multi_tensor_adam(
         if isinstance(beta1, Tensor) and not beta1.is_cpu
         else None
     )
+    beta2_dict: DeviceDict | None = (  # type: ignore[attr-defined]
+        {beta2.device: beta2}
+        if isinstance(beta2, Tensor) and not beta2.is_cpu
+        else None
+    )
 
     for (
         device_params_,
@@ -653,8 +658,11 @@ def _multi_tensor_adam(
         device = device_params[0].device
         if beta1_dict is not None and device not in beta1_dict:
             beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
+        if beta2_dict is not None and device not in beta2_dict:
+            beta2_dict[device] = beta2.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
 
         device_beta1 = beta1_dict[device] if beta1_dict else beta1
+        device_beta2 = beta2_dict[device] if beta2_dict else beta2
 
         # Handle complex parameters
         if has_complex:
@@ -700,8 +708,7 @@ def _multi_tensor_adam(
                     )
 
         # Decay the first and second moment running average coefficient
-        # Use device beta1 if beta1 is a tensor to ensure all
-        # tensors are on the same device
+        # Use device betas to keep all tensors on the same device.
         if beta1_dict is not None:
             torch._foreach_lerp_(
                 device_exp_avgs,
@@ -713,18 +720,18 @@ def _multi_tensor_adam(
                 device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
             )
 
-        torch._foreach_mul_(device_exp_avg_sqs, beta2)
+        torch._foreach_mul_(device_exp_avg_sqs, device_beta2)
 
         # Due to the strictness of the _foreach_addcmul API, we can't have a single
         # tensor scalar as the scalar arg (only python number is supported there)
         # as a result, separate out the value mul
         # Filed https://github.com/pytorch/pytorch/issues/139795
-        if isinstance(beta2, torch.Tensor):
-            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
+        if isinstance(device_beta2, torch.Tensor):
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - device_beta2)  # type: ignore[assignment]
             value = 1.0
         else:
             scaled_device_grads = device_grads  # type: ignore[assignment]
-            value = 1 - beta2
+            value = 1 - device_beta2
 
         torch._foreach_addcmul_(
             device_exp_avg_sqs, scaled_device_grads, device_grads, value
@@ -746,9 +753,9 @@ def _multi_tensor_adam(
                 )
             else:
                 bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
-            if isinstance(beta2, Tensor) and not beta2.is_cpu:
+            if beta2_dict is not None:
                 bias_correction2 = torch._foreach_pow(
-                    [beta2] * len(device_state_steps), device_state_steps
+                    [beta2_dict[device]] * len(device_state_steps), device_state_steps
                 )
             else:
                 bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]

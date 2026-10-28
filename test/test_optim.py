@@ -900,15 +900,41 @@ class TestOptimRenewed(TestCase):
     def test_adam_foreach_device_betas_match_forloop(
         self, device, dtype, optim_info, foreach, beta_shape, amsgrad
     ):
+        self._test_adam_foreach_device_betas_match_forloop(
+            [device], dtype, optim_info, foreach, beta_shape, amsgrad
+        )
+
+    @onlyAccelerator
+    @skipMPS
+    @deviceCountAtLeast(2)
+    @parametrize("foreach", [None, True])
+    @parametrize("beta_shape", [(), (1,)])
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
+        dtypes=[torch.float32, torch.float64, torch.complex64],
+    )
+    def test_adam_foreach_device_betas_match_forloop_multigpu(
+        self, devices, dtype, optim_info, foreach, beta_shape, amsgrad
+    ):
+        self._test_adam_foreach_device_betas_match_forloop(
+            devices[:2], dtype, optim_info, foreach, beta_shape, amsgrad
+        )
+
+    def _test_adam_foreach_device_betas_match_forloop(
+        self, devices, dtype, optim_info, foreach, beta_shape, amsgrad
+    ):
         params = [
-            torch.randn(shape, device=device, dtype=dtype) for shape in ((3, 4), ())
+            torch.randn(shape, device=device, dtype=dtype)
+            for device in devices
+            for shape in ((3, 4), ())
         ]
         reference_params = [p.clone() for p in params]
         beta_values = (0.875, 0.9375)
         beta_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         betas = tuple(
             torch.tensor(b, device=device, dtype=beta_dtype).reshape(beta_shape)
-            for b in beta_values
+            for b, device in zip(beta_values, (devices[0], devices[-1]))
         )
         optimizer = optim_info.optim_cls(
             params, betas=betas, capturable=True, foreach=foreach, amsgrad=amsgrad
