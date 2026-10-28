@@ -7664,6 +7664,8 @@ class TestPrecompileRuntimeCache(TestCase):
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
 
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     def test_strict_replay_of_a_never_run_backward(self):
         from torch.compiler._runtime_cache import _triton_runtime_cache
 
