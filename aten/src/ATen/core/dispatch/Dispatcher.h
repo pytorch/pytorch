@@ -17,6 +17,7 @@
 
 #include <ATen/core/enum_tag.h>
 #include <ATen/core/grad_mode.h>
+#include <c10/util/irange.h>
 
 #ifndef NDEBUG
 #include <iostream>
@@ -754,7 +755,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(
           c10::ArrayRef<const c10::IValue>(
               reinterpret_cast<IValue*>(boxedArgs), num_boxed_args));
       boxedArgsPtr = reinterpret_cast<IValue*>(boxedArgs);
-      for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+      for (const auto ii : c10::irange(num_boxed_args)) {
         (boxedArgsPtr + ii)->~IValue();
       }
     } else {
