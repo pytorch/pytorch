@@ -1,10 +1,4 @@
-# Driver project that builds nccl-extensions/nccl_ep against a prebuilt NCCL
-# (the Makefile-built tree in NCCL_HOME). nccl_ep is written to be
-# add_subdirectory'd, so it has no project()/languages of its own and expects
-# CUDA_MAJOR/CUDA_MINOR (mirroring NCCL's root CMakeLists); this driver supplies
-# them. Invoked by the nccl_ep_external ExternalProject in
-# cmake/External/nccl_ep.cmake, which passes NCCL_HOME / NCCL_EP_BUILDDIR /
-# NCCL_EP_SOURCE_DIR via -D.
+# Build EP against PyTorch's selected NCCL and stage its runtime JIT headers.
 cmake_minimum_required(VERSION 3.18)
 project(nccl_ep LANGUAGES CXX CUDA)
 
@@ -14,4 +8,35 @@ string(REPLACE "." ";" __cuda_ver_parts "${CUDAToolkit_VERSION}")
 list(GET __cuda_ver_parts 0 CUDA_MAJOR)
 list(GET __cuda_ver_parts 1 CUDA_MINOR)
 
-add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep)
+foreach(header nccl.h nccl_device.h)
+  if(NOT EXISTS "${NCCL_INCLUDE_DIR}/${header}")
+    message(FATAL_ERROR "NCCL EP requires NCCL device headers: missing ${NCCL_INCLUDE_DIR}/${header}")
+  endif()
+endforeach()
+
+get_filename_component(nccl_home "${NCCL_INCLUDE_DIR}" DIRECTORY)
+set(NCCL_HOME "${nccl_home}" CACHE PATH "PyTorch NCCL prefix" FORCE)
+add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep EXCLUDE_FROM_ALL)
+
+# Core NCCL symbols resolve through torch_cuda, including for system NCCL.
+foreach(prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+  get_target_property(libs nccl_ep_static ${prop})
+  list(REMOVE_ITEM libs -lnccl)
+  set_property(TARGET nccl_ep_static PROPERTY ${prop} "${libs}")
+endforeach()
+set_target_properties(nccl_ep_static PROPERTIES
+  LINK_DIRECTORIES "" INTERFACE_LINK_DIRECTORIES "")
+target_include_directories(nccl_ep_static BEFORE PUBLIC
+  "${NCCL_EP_BUILDDIR}/include" "${NCCL_EP_BUILDDIR}/include/nccl_ep"
+  "${NCCL_INCLUDE_DIR}" "${NCCL_INCLUDE_DIR}/nccl_device")
+
+# Keep NCCL headers separate so an explicit NCCL_HOME overrides them at runtime.
+add_custom_target(nccl_ep_artifacts
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${NCCL_EP_BUILDDIR}/nccl/include"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${NCCL_INCLUDE_DIR}/nccl.h" "${NCCL_INCLUDE_DIR}/nccl_device.h"
+    "${NCCL_EP_BUILDDIR}/nccl/include/"
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory
+    "${NCCL_INCLUDE_DIR}/nccl_device" "${NCCL_EP_BUILDDIR}/nccl/include/nccl_device"
+  DEPENDS nccl_ep_static
+  VERBATIM)

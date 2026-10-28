@@ -1,8 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 
+import importlib.util
 import logging
+import os
+import unittest
 from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -22,10 +27,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TestCase,
 )
 
 
@@ -33,10 +40,9 @@ log = logging.getLogger(__name__)
 
 
 def _nccl_ep_available() -> bool:
-    # The torch._nccl_ep extension is built only with USE_NCCL_EP, and a
-    # USE_SYSTEM_NCCL=ON build additionally needs the nccl4py wheel at runtime.
+    # The torch._nccl_ep extension is built only with USE_NCCL_EP.
     # Actually importing it is the real check: find_spec would only locate the
-    # extension without dlopening it, so it would miss a missing libnccl_ep.so.
+    # extension without loading its native dependencies.
     if not torch.cuda.is_available():
         return False
     try:
@@ -50,8 +56,34 @@ def _nccl_ep_available() -> bool:
 def requires_nccl_ep():
     return skip_but_pass_in_sandcastle_if(
         not _nccl_ep_available(),
-        "Test requires a USE_NCCL_EP build (plus nccl4py for USE_SYSTEM_NCCL=ON)",
+        "Test requires a USE_NCCL_EP build",
     )
+
+
+@unittest.skipIf(
+    not torch.cuda.is_available() or importlib.util.find_spec("torch._nccl_ep") is None,
+    "Test requires CUDA and a USE_NCCL_EP build",
+)
+@instantiate_parametrized_tests
+class TokenSwitchNCCLLoadingTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize(
+        "home,header",
+        [
+            ("NCCL_EP_HOME", "nccl_ep.h"),
+            ("NCCL_EP_HOME", "nccl_ep/ep_enums.h"),
+            ("NCCL_EP_HOME", "nccl_ep/device/ht_ep.cuh"),
+            ("NCCL_HOME", "nccl.h"),
+            ("NCCL_HOME", "nccl_device.h"),
+            ("NCCL_HOME", "nccl_device/impl/core__types.h"),
+        ],
+    )
+    def test_native_jit_headers(self, home, header):
+        with patch.dict(os.environ, {"NCCL_EP_HOME": "", "NCCL_HOME": ""}):
+            _import_nccl_ep()
+            path = Path(os.environ[home]) / "include" / header
+            self.assertTrue(path.is_file(), str(path))
 
 
 NUM_TOKENS = 16
