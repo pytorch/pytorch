@@ -40,14 +40,15 @@ will eventually store the bolt profiles you collect. Building pytorch now
 will produce "bolt optimizable" binaries. Use these to collect bolt profiles
 on your workloads. Put those profiles in $LLVM_BOLT_PROFILES_DIR and rebuild.
 
-`tools/bolt/collect_profiles.sh` automates the collection for an installed
-wheel built this way. It instruments the libraries with `llvm-bolt -instrument`,
-runs `tools/bolt/synthetic_workload.py` on them, merges the per-process
-profiles with `merge-fdata`, converts them to YAML, validates them with a trial
-optimization, and packages them as a `torch.tar.zst` in the layout above. The
-"BOLT profile collection (GB300)" workflow
-(`.github/workflows/bolt-profile-gb300.yml`) runs the build and the collection
-on a GB300 runner and uploads the result as a workflow artifact.
+`tools/bolt/collect_profiles.sh` automates the collection for a wheel built
+this way: `instrument` instruments its libraries with `llvm-bolt -instrument`,
+`run` runs `tools/bolt/synthetic_workload.py` on them, and `finalize` merges
+the per-process profiles with `merge-fdata`, converts them to YAML, validates
+them with a trial optimization, and packages them as a `torch.tar.zst` in the
+layout above. The "BOLT profile collection (GB300)" workflow
+(`.github/workflows/bolt-profile-gb300.yml`) runs the workload on a GB300
+runner, the other steps on CPU runners, and uploads the result as a workflow
+artifact.
 
 ## How profiles are consumed
 

@@ -2,10 +2,11 @@
 
 # Collects LLVM BOLT profiles for the torch libraries on GB300. The build
 # produces BOLT-compatible but unoptimized libraries (USE_LLVM_BOLT=1 with an
-# empty LLVM_BOLT_PROFILES_DIR, see the *-bolt branch in .ci/pytorch/build.sh),
-# the profile job instruments them, runs tools/bolt/synthetic_workload.py and
-# uploads the merged and validated profiles, including a torch.tar.zst that
-# can replace cmake/bolt_profiles/torch.tar.zst.
+# empty LLVM_BOLT_PROFILES_DIR, see the *-bolt branch in .ci/pytorch/build.sh).
+# tools/bolt/collect_profiles.sh then instruments them on a CPU runner, runs
+# tools/bolt/synthetic_workload.py on them on GB300, and merges, converts and
+# validates the profiles on a CPU runner. The uploaded profiles include a
+# torch.tar.zst that can replace cmake/bolt_profiles/torch.tar.zst.
 
 name: BOLT profile collection (GB300)
 
@@ -25,7 +26,7 @@ on:
         description: synthetic_workload.py --steps
         required: false
         type: string
-        default: "20000"
+        default: "320000"
       llvm-bolt-version:
         description: LLVM release that provides llvm-bolt and merge-fdata
         required: false
@@ -41,6 +42,13 @@ permissions:
   contents: read
   actions: read
 
+env:
+  LLVM_BOLT_VERSION: ${{ inputs.llvm-bolt-version || '21.1.8' }}
+  BOLT_WORKLOAD_VARIANT: ${{ inputs.workload-variant || 'all' }}
+  BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '320000' }}
+  # Caps the workload well below the profile job's timeout.
+  BOLT_WORKLOAD_MAX_SECONDS: "7200"
+
 jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
@@ -53,7 +61,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
 
-  linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-build:
+  build:
     name: linux-jammy-aarch64-cuda13.4-py3.12-gcc13-bolt
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -73,21 +81,63 @@ jobs:
       cuda-version: "13.4"
     secrets: inherit
 
-  linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-profile:
-    name: linux-jammy-aarch64-cuda13.4-py3.12-gcc13-bolt
-    needs:
-      - linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-build
-      - get-label-type
+  instrument:
+    name: instrument
+    needs: [get-label-type, build]
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}l-arm64g4-16-62
+    container:
+      image: ${{ needs.build.outputs.docker-image }}
+    timeout-minutes: 120
+    steps:
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          python-version: "3.12"
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Download build artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ needs.build.outputs.build-environment }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
+
+      - name: Instrument the torch libraries
+        shell: bash
+        run: tools/bolt/collect_profiles.sh instrument dist/*.whl bolt-instrumented
+
+      - name: Upload instrumented libraries
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: bolt-instrumented-${{ needs.build.outputs.build-environment }}
+          path: bolt-instrumented/
+          if-no-files-found: error
+          retention-days: 3
+
+  profile:
+    name: profile (${{ matrix.config }}, ${{ matrix.runner }})
+    needs: [get-label-type, build, instrument]
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(needs.linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-build.outputs.test-matrix).include) != '[]'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(needs.build.outputs.test-matrix).include) != '[]'
     strategy:
-      matrix: ${{ fromJSON(needs.linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-build.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.build.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     container:
       image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
       options: "--gpus all"
-    timeout-minutes: 360
+    timeout-minutes: 240
     steps:
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
@@ -111,30 +161,82 @@ jobs:
       - name: Download build artifacts
         uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
         with:
-          name: ${{ needs.linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-build.outputs.build-environment }}
+          name: ${{ needs.build.outputs.build-environment }}
           use-gha: ${{ steps.aws-creds.outcome != 'success' }}
 
-      - name: Collect BOLT profiles
-        id: collect
-        timeout-minutes: 330
-        env:
-          LLVM_BOLT_VERSION: ${{ inputs.llvm-bolt-version || '21.1.8' }}
-          BOLT_WORKLOAD_VARIANT: ${{ inputs.workload-variant || 'all' }}
-          BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '20000' }}
-          # Leaves time for instrumentation, conversion and trial optimization.
-          BOLT_WORKLOAD_MAX_SECONDS: "7200"
+      - name: Download instrumented libraries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bolt-instrumented-${{ needs.build.outputs.build-environment }}
+          path: bolt-instrumented
+
+      - name: Run the workload on the instrumented libraries
+        id: run
+        timeout-minutes: 180
         shell: bash
         run: |
           set -x
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)
-          tools/bolt/collect_profiles.sh bolt-profiles
+          tools/bolt/collect_profiles.sh run bolt-instrumented bolt-run
 
-      - name: Upload BOLT profiles
-        if: always() && steps.collect.conclusion && steps.collect.conclusion != 'skipped'
+      - name: Upload raw profiles
+        if: always() && steps.run.conclusion && steps.run.conclusion != 'skipped'
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: bolt-profiles-${{ needs.linux-jammy-aarch64-cuda13_4-py3_12-gcc13-bolt-build.outputs.build-environment }}
+          name: bolt-run-${{ needs.build.outputs.build-environment }}
+          path: bolt-run/
+          if-no-files-found: warn
+          retention-days: 3
+
+  finalize:
+    name: finalize
+    needs: [get-label-type, build, profile]
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}l-arm64g4-16-62
+    container:
+      image: ${{ needs.build.outputs.docker-image }}
+    timeout-minutes: 120
+    steps:
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          python-version: "3.12"
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Download build artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ needs.build.outputs.build-environment }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
+
+      - name: Download raw profiles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bolt-run-${{ needs.build.outputs.build-environment }}
+          path: bolt-run
+
+      - name: Merge, convert and validate the profiles
+        id: finalize
+        shell: bash
+        run: tools/bolt/collect_profiles.sh finalize dist/*.whl bolt-run bolt-profiles
+
+      - name: Upload BOLT profiles
+        if: always() && steps.finalize.conclusion && steps.finalize.conclusion != 'skipped'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: bolt-profiles-${{ needs.build.outputs.build-environment }}
           path: bolt-profiles/
           if-no-files-found: warn
           retention-days: 14
