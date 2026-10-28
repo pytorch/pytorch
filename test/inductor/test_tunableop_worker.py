@@ -302,6 +302,7 @@ class TunableOpWorkerTest(TestCase):
         # The getter reports bytes; the setter takes MB. 13 MiB in bytes.
         tunable.get_rotating_buffer_size.return_value = 13 * 1024 * 1024
         tunable.get_cublaslt_requested_algo_count.return_value = 14
+        tunable.wildcard_fallback_is_enabled.return_value = True
         job = tunableop.BenchmarkJob(None, tuning=False)
         with (
             mock.patch("torch.cuda.current_device", return_value=0),
@@ -319,6 +320,7 @@ class TunableOpWorkerTest(TestCase):
                 "set_max_tuning_iterations": 12,
                 "set_rotating_buffer_size": 13,  # MB, converted from bytes
                 "set_cublaslt_requested_algo_count": 14,
+                "wildcard_fallback_enable": True,
             },
         )
 
