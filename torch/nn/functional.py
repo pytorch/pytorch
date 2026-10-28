@@ -7494,7 +7494,7 @@ def scaled_grouped_mm(
     shape ``(groups, values_per_group)``; a 2D operand concatenates the flattened group scales
     in offset order, covering only the groups selected by ``offs``. M and N must be multiples
     of 4. These recipes support bfloat16, float16, and float32 outputs and require
-    ``use_fast_accum=False``. Other scaling recipes require bfloat16 output.
+    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``. Other scaling recipes require bfloat16 output.
 
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
