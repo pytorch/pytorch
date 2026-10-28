@@ -1080,11 +1080,15 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_info(self, device: torch.device) -> None:
+    def add_device_info(self, device: torch.device, runs_work: bool = True) -> None:
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
-        if V.graph.current_node and device not in self.device_node_mapping:
+        if (
+            runs_work
+            and V.graph.current_node
+            and device not in self.device_node_mapping
+        ):
             self.device_node_mapping[device] = V.graph.current_node
 
     @property

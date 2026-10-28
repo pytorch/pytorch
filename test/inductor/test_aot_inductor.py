@@ -10367,12 +10367,26 @@ class AOTInductorTestsTemplate:
     def test_aot_cudagraphs_accepts_capturable_model(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
-        model = torch.nn.Sequential(torch.nn.Linear(16, 32), torch.nn.ReLU())
-        self.check_model(
-            model,
-            (torch.randn(4, 16, device=self.device),),
-            options={"aot_inductor.cudagraphs": True},
-        )
+
+        class CpuConstant(torch.nn.Module):
+            def forward(self, x):
+                # Folded into a CUDA constant at compile time.
+                return x + torch.tensor([1.0, 2.0, 3.0, 4.0]).to(x.device)
+
+        class UnusedCpuInput(torch.nn.Module):
+            def forward(self, x, unused):
+                return x.relu()
+
+        x = torch.randn(4, 4, device=self.device)
+        for model, inputs in (
+            (torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU()), (x,)),
+            (CpuConstant(), (x,)),
+            (UnusedCpuInput(), (x, torch.randn(4))),
+        ):
+            with self.subTest(type(model).__name__):
+                self.check_model(
+                    model, inputs, options={"aot_inductor.cudagraphs": True}
+                )
 
     def test_aot_cudagraphs_rejects_non_cuda_model(self):
         if self.device == "cuda":
