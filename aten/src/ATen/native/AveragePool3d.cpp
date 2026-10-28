@@ -181,15 +181,15 @@ void avg_pool3d_out_frame(
       /* local pointers. */
       const scalar_t *ip = input_p + k * itime * iwidth * iheight;
       scalar_t *op = output_p + k * otime * owidth * oheight;
-      for (int64_t i = 0; i < otime * oheight * owidth; ++i)
+      for (const auto i : c10::irange(otime * oheight * owidth))
         *(op + i) = 0;
 
       /* loop over output */
-      for (int64_t ti = 0; ti < otime; ti++)
+      for (const auto ti : c10::irange(otime))
       {
-        for (int64_t i = 0; i < oheight; i++)
+        for (const auto i : c10::irange(oheight))
         {
-          for (int64_t j = 0; j < owidth; j++)
+          for (const auto j : c10::irange(owidth))
           {
             /* compute pool range. */
             int64_t tstart = ti * dT - padT;
@@ -224,11 +224,11 @@ void avg_pool3d_out_frame(
 
             /* compute local sum: */
             scalar_t sum = 0.0;
-            for (int64_t z = tstart; z < tend; z++)
+            for (const auto z : c10::irange(tstart, tend))
             {
-              for (int64_t y = hstart; y < hend; y++)
+              for (const auto y : c10::irange(hstart, hend))
               {
-                for (int64_t x = wstart; x < wend; x++)
+                for (const auto x : c10::irange(wstart, wend))
                 {
                   sum +=  *(ip + z * iwidth * iheight + y * iwidth + x);
                 }
@@ -361,15 +361,15 @@ void avg_pool3d_backward_out_frame(
       /* local pointers */
       scalar_t *ip = gradInput_p + k * itime * iwidth * iheight;
       const scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
-      for (int64_t i = 0; i < itime*iwidth*iheight; i++)
+      for (const auto i : c10::irange(itime*iwidth*iheight))
         *(ip + i) = 0;
 
       /* loop over output */
-      for (int64_t ti = 0; ti < otime; ti++)
+      for (const auto ti : c10::irange(otime))
       {
-        for (int64_t i = 0; i < oheight; i++)
+        for (const auto i : c10::irange(oheight))
         {
-          for (int64_t j = 0; j < owidth; j++)
+          for (const auto j : c10::irange(owidth))
           {
             int64_t tstart = ti * dT - padT;
             int64_t hstart = i  * dH - padH;

@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/FusedAdam.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -48,7 +49,7 @@ void _fused_adam_kernel_cpu_(
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
   at::Tensor max_exp_avg_sq = at::Tensor();
-  for (size_t i = 0; i < n_tensors; i++){
+  for (const auto i : c10::irange(n_tensors)){
     if (amsgrad) max_exp_avg_sq = max_exp_avg_sqs[i];
     fused_adam_stub(
       kCPU,
@@ -124,7 +125,7 @@ void _fused_adamw_kernel_cpu_(
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
   at::Tensor max_exp_avg_sq = at::Tensor();
-  for (size_t i = 0; i < n_tensors; i++){
+  for (const auto i : c10::irange(n_tensors)){
     if (amsgrad) max_exp_avg_sq = max_exp_avg_sqs[i];
     fused_adam_stub(
       kCPU,
