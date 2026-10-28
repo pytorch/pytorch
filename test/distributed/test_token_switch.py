@@ -175,6 +175,31 @@ class _ReferenceTokenSwitch(TokenSwitch):
         rows = self._all_gather(padded).flatten(0, 1)[h.send_flat_slot]
         out_tokens.zero_().index_add_(0, h.send_token, rows)
 
+    def _combine_backward(self, routing, grad_tokens, out_expert_grads):
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        out_expert_grads[: len(r)].copy_(self._all_gather(grad_tokens)[r, t])
+
+    def _dispatch_backward(
+        self,
+        routing,
+        grad_recv_tokens,
+        grad_recv_topk_weights,
+        out_token_grads,
+        out_topk_weight_grads,
+    ):
+        self._combine(routing, grad_recv_tokens, out_token_grads)
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        epr = self._experts_per_rank
+        _, weights = _to_local(
+            h.topk_idx_all[r, t],
+            grad_recv_topk_weights[: len(r)],
+            self._rank * epr,
+            epr,
+        )
+        self._combine(routing, weights, out_topk_weight_grads)
+
 
 class _TokenSwitchContractTests:
     """Contract tests (see TokenSwitch's docstring) shared by every backend.
@@ -395,30 +420,60 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
     def _init(self):
         dist.barrier()
 
-    @parametrize("loss_target", ["tokens", "weights", "both"])
-    def test_dispatch_weight_gradient_fallback(self, loss_target):
+    def test_backend_requires_dispatch_backward(self):
+        class IncompleteTokenSwitch(_ReferenceTokenSwitch):
+            _dispatch_backward = TokenSwitch._dispatch_backward
+
+        with self.assertRaisesRegex(TypeError, "_dispatch_backward"):
+            IncompleteTokenSwitch(
+                None, self.world_size * CONTRACT_EXPERTS_PER_RANK, NUM_TOKENS
+            )
+
+    @parametrize("loss_target", ["tokens", "weights", "both", "tokens_frozen"])
+    def test_dispatch_weight_gradients(self, loss_target):
         self._init()
         ts = self.get_contract_token_switch()
         ids, weights, tokens, copies, _, _ = self._contract_inputs(seed=15)
-        tokens.requires_grad_()
+        tokens.requires_grad_(loss_target != "tokens_frozen")
         weights.requires_grad_()
         routing = ts.create_routing(ids, layout="flat")
         received, scores, _ = ts.dispatch(
             routing, tokens, weights, ts.max_recv_tokens_per_rank
         )
+        score_grads = scores.new_empty(scores.numel() * 2)[::2].view_as(scores)
+        score_grads.copy_(
+            2 * scores.detach()
+            + received[:, :1].detach() / 8
+            + received[:, 1:2].detach() / 16
+            + self.rank
+            + 1
+        )
+        self.assertFalse(score_grads.is_contiguous())
         loss = received.new_zeros(())
-        if loss_target != "weights":
+        if loss_target in ("tokens", "both"):
             loss = loss + received.sum()
         if loss_target != "tokens":
-            loss = loss + scores.sum()
+            loss = loss + (scores * score_grads).sum()
         loss.backward()
         expected = (
             torch.zeros_like(tokens)
             if loss_target == "weights"
             else copies.expand_as(tokens)
         )
-        self.assertEqual(tokens.grad, expected)
-        self.assertIsNone(weights.grad)
+        if loss_target == "tokens_frozen":
+            self.assertIsNone(tokens.grad)
+        else:
+            self.assertEqual(tokens.grad, expected)
+        expected_weights = (
+            2 * weights.detach()
+            + tokens[:, :1] / 8
+            + tokens[:, 1:2] / 16
+            + ids // CONTRACT_EXPERTS_PER_RANK
+            + 1
+        )
+        if loss_target == "tokens":
+            expected_weights.zero_()
+        self.assertEqual(weights.grad, expected_weights)
 
 
 instantiate_parametrized_tests(TokenSwitchReferenceTest)

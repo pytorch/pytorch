@@ -79,6 +79,11 @@ TORCH_API void nccl_ep_dispatch(
     std::optional<at::Tensor> out_topk_weights,
     std::optional<at::Tensor> out_topk_idx);
 
+TORCH_API void nccl_ep_dispatch_backward(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& grad_tokens,
+    at::Tensor& out_tokens);
+
 TORCH_API void nccl_ep_combine(
     const c10::intrusive_ptr<NcclEpHandle>& handle,
     const at::Tensor& expert_tokens,
