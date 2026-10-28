@@ -81,6 +81,10 @@ class RocprofLogger {
       rocprofiler_callback_tracing_record_t record,
       rocprofiler_user_data_t* user_data,
       void* callback_data);
+  static void dispatch_callback(
+      rocprofiler_callback_tracing_record_t record,
+      rocprofiler_user_data_t* user_data,
+      void* callback_data);
   static void buffer_callback(
       rocprofiler_context_id_t context,
       rocprofiler_buffer_id_t buffer_id,
@@ -113,8 +117,8 @@ class RocprofLogger {
 
   std::atomic<bool> externalCorrelationEnabled_{true};
 
-  // Internal correlation ids of kernel launches in this session whose dispatch
-  // record has not been delivered yet; stopLogging() waits for them.
+  // Dispatch ids of kernels enqueued in this session whose dispatch record has
+  // not been delivered yet; stopLogging() waits for them.
   std::unordered_set<uint64_t> pendingDispatches_;
   std::mutex pendingDispatchesMutex_;
   std::chrono::milliseconds dispatchRecordWait_{20};

@@ -430,6 +430,19 @@ int RocprofLogger::toolInit(
         api_callback,
         nullptr));
 
+    // Learn every kernel dispatch at enqueue (including each kernel of a graph
+    // launch and runtime-internal blits), so stopLogging() knows which
+    // dispatch records are still owed.
+    auto dispatch_ops = std::vector<rocprofiler_tracing_operation_t>{
+        ROCPROFILER_KERNEL_DISPATCH_ENQUEUE};
+    ROCPROF_CALL_THROW(rocprofiler_configure_callback_tracing_service(
+        globalContext.context,
+        ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+        dispatch_ops.data(),
+        dispatch_ops.size(),
+        dispatch_callback,
+        nullptr));
+
     // Collect async ops via buffers
     constexpr auto buffer_size_bytes = 0x40000;
     constexpr auto buffer_watermark_bytes = buffer_size_bytes / 2;
@@ -695,13 +708,6 @@ void RocprofLogger::api_callback(
   if (record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API) {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) {
       timestamps[record.correlation_id.internal] = getApproximateTime();
-      // Registered on entry: the dispatch record can be delivered before this
-      // call's exit callback runs.
-      if (isKernelApi(record.operation)) {
-        auto& dis = singleton();
-        std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
-        dis.pendingDispatches_.insert(record.correlation_id.internal);
-      }
     } // ROCPROFILER_CALLBACK_PHASE_ENTER
     else { // ROCPROFILER_CALLBACK_PHASE_EXIT
       uint64_t startTime = timestamps[record.correlation_id.internal];
@@ -710,15 +716,6 @@ void RocprofLogger::api_callback(
 
       // Kernel Launch Records
       if (isKernelApi(record.operation)) {
-        // A failed launch dispatches nothing, so no record will arrive.
-        auto* data = static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(
-            record.payload);
-        if (data->retval.hipError_t_retval != hipSuccess) {
-          auto& dis = singleton();
-          std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
-          dis.pendingDispatches_.erase(record.correlation_id.internal);
-        }
-
         kernel_args args;
         rocprofiler_iterate_callback_tracing_kind_operation_args(
             record,
@@ -845,6 +842,24 @@ void RocprofLogger::api_callback(
   } // ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API
 }
 
+void RocprofLogger::dispatch_callback(
+    rocprofiler_callback_tracing_record_t record,
+    [[maybe_unused]] rocprofiler_user_data_t* user_data,
+    [[maybe_unused]] void* callback_data) {
+  // Registered before the packet is submitted, so it always precedes the
+  // dispatch's buffer record.
+  if (record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH ||
+      record.operation != ROCPROFILER_KERNEL_DISPATCH_ENQUEUE ||
+      record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER) {
+    return;
+  }
+  auto* data = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(
+      record.payload);
+  auto& dis = singleton();
+  std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
+  dis.pendingDispatches_.insert(data->dispatch_info.dispatch_id);
+}
+
 void RocprofLogger::buffer_callback(
     [[maybe_unused]] rocprofiler_context_id_t context,
     [[maybe_unused]] rocprofiler_buffer_id_t buffer_id,
@@ -865,7 +880,7 @@ void RocprofLogger::buffer_callback(
         {
           auto& dis = singleton();
           std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
-          dis.pendingDispatches_.erase(record.correlation_id.internal);
+          dis.pendingDispatches_.erase(dispatch.dispatch_id);
         }
 
         // Safe access to agents map with default value
@@ -989,7 +1004,7 @@ void RocprofLogger::startLogging() {
 
   externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
   {
-    // Launches given up on by an earlier stop must not stall this session's.
+    // Dispatches given up on by an earlier stop must not stall this session.
     std::lock_guard<std::mutex> lock(pendingDispatchesMutex_);
     pendingDispatches_.clear();
   }
@@ -1028,8 +1043,8 @@ void RocprofLogger::stopLogging() {
   // can run after the application has already seen the kernel finish (e.g.
   // hipDeviceSynchronize returned). Such a record would miss the flush above
   // and be dropped as out of range in the next session, so re-flush until
-  // every launch of this session has its record. The wait is bounded because
-  // some launches never produce a usable one: a dispatch the SDK could not
+  // every dispatch of this session has its record. The wait is bounded because
+  // some dispatches never produce a usable one: a dispatch the SDK could not
   // time has no record, and a kernel still running at stop ends outside this
   // session's window, so its record is dropped even if the wait sees it.
   auto pendingCount = [this] {
