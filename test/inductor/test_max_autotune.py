@@ -24,7 +24,11 @@ from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._dynamo.testing import rand_strided, reset_rng_state
+from torch._dynamo.testing import (
+    CompileCounterWithBackend,
+    rand_strided,
+    reset_rng_state,
+)
 from torch._dynamo.utils import counters, identity, same
 from torch._inductor import config, ir
 from torch._inductor.autotune_process import (
@@ -547,7 +551,8 @@ class TestMaxAutotune(TestCase):
                 sizes = [(1024, 512), (1024, 513), (1024, 1000)]
             else:
                 # M is not a TMA requirement, so any M reuses the TMA graph.
-                fn = torch.compile(Mm())
+                cnt = CompileCounterWithBackend("inductor")
+                fn = torch.compile(Mm(), backend=cnt)
                 sizes = [(1024, 512), (777, 512), (33, 512)]
             for m, k in sizes:
                 a = torch.randn(m, k, dtype=torch.float16, device=GPU_TYPE)
@@ -556,6 +561,49 @@ class TestMaxAutotune(TestCase):
                 ref = a.double() @ b.double()
                 self.assertEqual(fn(a, b).double(), ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(offered and set(offered), {not aot})
+        if not aot:
+            self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    def test_max_autotune_persistent_tma_rejection_guards_only_failure(self):
+        # An aligned K passes before an unaligned N rejects TMA. Only the N
+        # requirement may be guarded: a later unaligned K gets the same non-TMA
+        # graph, so it must not recompile.
+        from torch._inductor import utils
+
+        can_use_tma, offered = utils.can_use_tma, []
+
+        def spy(*args, **kwargs):
+            offered.append(can_use_tma(*args, **kwargs))
+            return offered[-1]
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn = torch.compile(lambda a, b: a @ b, backend=cnt)
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.native_matmul": False,
+                    "triton.tlx_mode": None,
+                }
+            ),
+            mock.patch.object(utils, "can_use_tma", spy),
+        ):
+            for k, n in [(512, 257), (513, 259)]:
+                a = torch.randn(256, k, dtype=torch.float16, device=GPU_TYPE)
+                b = torch.randn(k, n, dtype=torch.float16, device=GPU_TYPE)
+                torch._dynamo.mark_dynamic(a, 1)
+                torch._dynamo.mark_dynamic(b, 0)
+                torch._dynamo.mark_dynamic(b, 1)
+                ref = a.double() @ b.double()
+                self.assertEqual(fn(a, b).double(), ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(offered and set(offered), {False})
+        self.assertEqual(cnt.frame_count, 1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))

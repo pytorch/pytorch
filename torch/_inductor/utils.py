@@ -2398,8 +2398,9 @@ def can_use_tma(
 
     Sizes are never specialized; only these requirements are checked. With
     ``add_guards=True``, a requirement that depends on a dynamic size is decided
-    from the example inputs and guarded either way, so an input on the other
-    side of the decision recompiles (an aligned size after an unaligned one gets
+    from the example inputs. Requirements that held are guarded only once TMA is
+    accepted; if one fails, only that failure is guarded, so an input on
+    the other side of it recompiles (an aligned size after an unaligned one gets
     TMA on the recompile). Under AOTI, where those guards are not checked at
     runtime, a requirement must instead be statically provable. With
     ``add_guards=False``, requirements are decided from size hints and nothing
@@ -2409,21 +2410,29 @@ def can_use_tma(
 
     from .virtualized import V
 
-    def _holds(requirement: sympy.Basic, add_guards: bool) -> bool:
-        sizevars = V.graph.sizevars
-        if not add_guards:
-            hints = {
-                s: sizevars.replace_backed_symbols_with_hints(s)
-                for s in requirement.free_symbols
-            }
-            return sizevars.statically_known_true(requirement.xreplace(hints))
-        # AOTI does not check Inductor's guards at runtime.
-        if V.graph.aot_mode:
-            return sizevars.statically_known_true(requirement)
-        return sizevars.guard_or_false(requirement)
+    # Requirements that held on the hints, guarded only once TMA is accepted.
+    # Guarding each as it passed would leave guards behind when a later
+    # requirement rejects TMA, recompiling inputs that get the same graph.
+    held: list[sympy.Basic] = []
 
-    def _aligned(expr_bytes: _IntLike, add_guards: bool) -> bool:
-        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0), add_guards)
+    def _holds(requirement: sympy.Basic) -> bool:
+        sizevars = V.graph.sizevars
+        # AOTI does not check Inductor's guards at runtime.
+        if add_guards and V.graph.aot_mode:
+            return sizevars.statically_known_true(requirement)
+        hints = {
+            s: sizevars.replace_backed_symbols_with_hints(s)
+            for s in requirement.free_symbols
+        }
+        if not sizevars.statically_known_true(requirement.xreplace(hints)):
+            # Guards the failure, so an input that meets it recompiles.
+            return add_guards and sizevars.guard_or_false(requirement)
+        if add_guards and requirement.free_symbols:
+            held.append(requirement)
+        return True
+
+    def _aligned(expr_bytes: _IntLike) -> bool:
+        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0))
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2433,7 +2442,7 @@ def can_use_tma(
         dtype = layout.dtype
 
         # Verify the output is 16-byte aligned
-        if not _aligned(layout.offset, add_guards):
+        if not _aligned(layout.offset):
             return False
 
         return _is_tma_compatible(sizes, strides, dtype)
@@ -2474,16 +2483,16 @@ def can_use_tma(
         for i, st in enumerate(strides):
             if i == inner_idx:
                 continue
-            if not _aligned(st * itemsize, add_guards):
+            if not _aligned(st * itemsize):
                 return False
 
         # Inner dim byte width must be a multiple of 16 B
         inner_dim = sizes[inner_idx]
-        if not _aligned(inner_dim * itemsize, add_guards):
+        if not _aligned(inner_dim * itemsize):
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32), add_guards):
+        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32)):
             return False
 
         return True
@@ -2510,11 +2519,15 @@ def can_use_tma(
 
         return True
 
-    return (
+    if not (
         has_triton_tma_device()
         and all(_is_tma_compatible_matrix(m) for m in matrices)
         and _is_tma_compatible_layout(output_layout)
-    )
+    ):
+        return False
+    # Guarded one by one rather than as a single And, so later static checks
+    # (e.g. statically_known_multiple_of) still see each fact.
+    return all(V.graph.sizevars.guard_or_false(r) for r in held)
 
 
 def _descriptor_shapes_fit_in_int32(

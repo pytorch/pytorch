@@ -2992,8 +2992,8 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             # TMA needs the contiguous dim last. Use the same inner-dim rule as
             # can_use_tma, which already accepted these operands -- deriving it
             # separately here is how a [1, K] operand ended up transposed.
-            # Resolve symbols the way can_use_tma does: tma_inner_dim compares
-            # against 1, and an unhinted backed symbol never compares equal.
+            # Resolve backed symbols to hints: tma_inner_dim compares against 1,
+            # and an unhinted backed symbol never compares equal.
             stride = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
                 for st in node.layout.stride
