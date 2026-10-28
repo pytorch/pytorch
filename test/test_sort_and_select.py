@@ -248,6 +248,21 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(vm, torch.arange(8192, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices, exact_dtype=False)
 
+    def test_sort_expanded_bool(self, device):
+        # https://github.com/pytorch/pytorch/issues/202005
+        # The short row takes the in-place small sort, the long one the segmented sort.
+        for n, descending, stable in product((68, 5000), (True, False), (True, False)):
+            row = torch.arange(n, device=device) % 7 == 0
+            x = row[None, :].expand(64, n)
+            values, indices = x.sort(dim=-1, descending=descending, stable=stable)
+            ref_values, ref_indices = x.cpu().sort(
+                dim=-1, descending=descending, stable=stable
+            )
+            self.assertEqual(values, ref_values)
+            self.assertEqual(x.gather(-1, indices), values)
+            if stable:
+                self.assertEqual(indices, ref_indices)
+
     @dtypes(torch.float32)
     def test_sort_restride(self, device, dtype):
         # Input: non-contiguous (stride: 5) 3-element array
