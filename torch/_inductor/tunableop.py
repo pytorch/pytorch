@@ -40,46 +40,51 @@ _mode_warned = False
 def _mode() -> str:
     """The configured mode, warning once on values that silently mean "off".
 
-    config.cuda.aten_tunableop_mode accepts any string from
-    TORCHINDUCTOR_ATEN_TUNABLEOP_MODE,
-    so a typo like "Tune" or "on" would otherwise disable both passes silently.
+    TORCHINDUCTOR_ATEN_TUNABLEOP_MODE is taken as given, so an unknown value
+    like "on" would otherwise disable both passes with no signal.
     """
     global _mode_warned
-    # Normalized here, not at the env read: this covers a value set directly on
-    # the config too, and "Tune" would otherwise disable both passes.
-    mode = config.cuda.aten_tunableop_mode.lower()
+    configured = config.cuda.aten_tunableop_mode
+    # Normalized here, not at the env read, so a value set on the config is
+    # covered too.
+    mode = configured.lower()
     if mode not in _valid_modes and not _mode_warned:
         _mode_warned = True
         log.warning(
             "Unknown TORCHINDUCTOR_ATEN_TUNABLEOP_MODE=%r (expected one of %s); "
             'treating as "off"',
-            mode,
+            configured,
             ", ".join(_valid_modes),
         )
     return mode
 
 
-# PYTORCH_TUNABLEOP_TUNING=0 and PYTORCH_TUNABLEOP_RECORD_UNTUNED=1 are read
-# through static env checks that win over the setters (Tunable.cpp), and the
-# worker inherits the parent's environment, so tune mode would benchmark every
-# GEMM, report success, and persist nothing.
-_BLOCKING_ENV = (
+# Read through static env checks that win over the setters (Tunable.cpp), and
+# the worker inherits the parent's environment, so neither pass can undo them.
+# Tune: either one stops AddAndMaybePersist writing a row.
+_TUNE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_TUNING", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
 )
+# Reuse: TUNING=0 is harmless -- it never tunes, and RecordBorrowed persists
+# regardless -- but RECORD_UNTUNED makes the manager skip ReadFile, leaving the
+# worker with an empty results map and nothing to borrow.
+_REUSE_BLOCKING_ENV = (("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),)
 _env_warned = False
 
 
-def _warn_if_env_blocks_recording() -> None:
+def _warn_if_env_blocks(
+    blocking_env: tuple[tuple[str, str], ...], consequence: str
+) -> None:
     global _env_warned
     if _env_warned:
         return
-    blocking = [name for name, bad in _BLOCKING_ENV if os.environ.get(name) == bad]
+    blocking = [name for name, bad in blocking_env if os.environ.get(name) == bad]
     if blocking:
         _env_warned = True
         log.warning(
-            "TunableOp tune mode will record nothing: %s overrides the tuning "
-            "flags the worker sets, so no result is written. Unset it to tune.",
+            "TunableOp %s: %s overrides the flags the worker sets. Unset it.",
+            consequence,
             " and ".join(blocking),
         )
 
@@ -88,13 +93,16 @@ def is_tune_mode() -> bool:
     """True while building the results file: tune GEMMs and record solutions."""
     if _mode() != "tune" or not torch.cuda.is_available():
         return False
-    _warn_if_env_blocks_recording()
+    _warn_if_env_blocks(_TUNE_BLOCKING_ENV, "tune mode will record nothing")
     return True
 
 
 def is_reuse_mode() -> bool:
     """True while consuming the results file: borrow and validate, never tune."""
-    return _mode() == "reuse" and torch.cuda.is_available()
+    if _mode() != "reuse" or not torch.cuda.is_available():
+        return False
+    _warn_if_env_blocks(_REUSE_BLOCKING_ENV, "reuse mode will find nothing to borrow")
+    return True
 
 
 def is_enabled() -> bool:
