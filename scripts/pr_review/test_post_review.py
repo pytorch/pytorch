@@ -563,11 +563,22 @@ class TestReportLinks(unittest.TestCase):
     def test_a_hostile_path_stays_inside_the_link(self):
         path = neutralize_path("a)[x](https://evil.example) @pytorchbot merge/<b>.py")
         url = post_review.report_url(
-            "o/r", 1, SHA, 5, {"path": path, "line": 3, "message": "m"}
+            "o/r", 1, SHA, RUN77, {"path": path, "line": 3, "message": "m"}
         )
         self.assertNotRegex(url, r"[()\s<>\[\]@]")
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
         self.assertTrue(q["finding"].endswith(".py:3"))
+
+    def test_the_body_fallback_keeps_one_review_link_and_no_finding_links(self):
+        gh = FakeGitHub(refuse_inline=True)
+        go(gh, dict(row(), review_run_id=77, review_run_attempt=2))
+        first, second = gh.posted()
+        self.assertIn("comments", first)
+        self.assertNotIn("comments", second)
+        (link,) = report_links(second["body"])
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["run"], RUN77)
+        self.assertNotIn("finding", q)
 
     def test_a_fenced_code_block_in_a_finding_is_posted_unchanged(self):
         message = "Use:\n\n```python\nx = a_b * c\n```"
