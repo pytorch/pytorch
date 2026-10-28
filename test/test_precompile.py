@@ -9256,11 +9256,10 @@ def dynamic_shape_fn(x):
     return torch.ops.{ns}.dynamic_shape.default(x.sin()) + 1
 
 
-# The artifact knows no module registering a Library.define op.
-lib = torch.library.Library("{ns}", "FRAGMENT")
-lib.define("entry_op(Tensor x) -> Tensor")
-lib.impl("entry_op", lambda x: x * 2, "CPU")
-lib.impl("entry_op", torch.empty_like, "Meta")
+# torch.library.define records itself, so the artifact knows no module for this op.
+torch.library.define("{ns}::entry_op", "(Tensor x) -> Tensor")
+torch.library.impl("{ns}::entry_op", "CPU", func=lambda x: x * 2)
+torch.library.impl("{ns}::entry_op", "Meta", func=torch.empty_like)
 
 
 def library_fn(x):
@@ -9461,11 +9460,10 @@ class TestPrecompileCustomOpModules(TestCase):
             # and its replay passes only because the forward op's module imports
             # the backward op's module.
             traced_bw = entry == "train_fn" and (tracer, backend) != ("dynamo", "eager")
-            # cpu_only and entry_op have no known module, so a Dynamo artifact
-            # imports its frames' modules before checking them.
-            unknown = entry in ("unfakeable_fn", "library_fn")
+            # entry_op has no known module, so a Dynamo artifact imports its frames'
+            # modules before checking it.
             modules = {module} | ({bwmod} if traced_bw else set())
-            modules |= {entries} if unknown else set()
+            modules |= {entries} if entry == "library_fn" else set()
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {tuple(sorted(modules))!r}")
             if traced_bw:
                 self.assertIn(repr((f"{bwns}::scale", "")), python_code)

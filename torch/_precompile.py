@@ -2130,7 +2130,8 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
             "importable module is known to register: defined in __main__, defined "
-            "with torch.library.define, or a C++ op without set_python_module. The artifact serves only where something else "
+            "with torch.library.define, or a C++ op without set_python_module. The "
+            "artifact serves only where something else "
             "registers them before it is loaded. Define a Python op with "
             "torch.library.custom_op in an importable module, and give a C++ op "
             "m.set_python_module; for a library's ops, import that library before "
