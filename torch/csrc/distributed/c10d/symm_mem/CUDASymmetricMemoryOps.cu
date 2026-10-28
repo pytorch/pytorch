@@ -21,6 +21,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
+#include <c10/util/irange.h>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -838,7 +839,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     }
     auto vec = load_and_reduce<T, alignment, k_world_size>(
         input_ptrs, rank, world_size, input_offset + start + i);
-    for (size_t step = 0; step < world_size; ++step) {
+    for (const auto step : c10::irange(world_size)) {
       size_t remote_rank = (rank + step) % world_size;
       at::native::memory::st_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + start + i, vec);

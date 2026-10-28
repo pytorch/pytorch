@@ -5504,9 +5504,8 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
   Tensor dgamma;
 
   std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
-  for (int i = 0;
-       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
-       ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(
+           std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0))) {
     rstd_view_shape.push_back(1);
   }
   Tensor rstd_broadcast = rstd.view(rstd_view_shape);
@@ -7926,7 +7925,7 @@ mkldnn_rnn_layer_differentiable_backward(
       seq_length);
   std::vector<std::tuple<Tensor, Tensor>> layer_states(seq_length + 1);
   layer_states[0] = std::make_tuple(hx_, cx_tmp);
-  for (int64_t seq = 1; seq < seq_length + 1; seq++) {
+  for (const auto seq : c10::irange(1, seq_length + 1)) {
     auto hx = hx_prev;
     auto cx = cx_prev;
     auto x_index = reverse ? seq_length - seq : seq - 1;
