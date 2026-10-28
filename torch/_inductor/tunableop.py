@@ -363,26 +363,23 @@ def snapshot_settings() -> dict[str, Any]:
     return settings
 
 
-def resolve_filename(device: int) -> str:
-    """The results filename the worker must use, resolved like the C++ manager.
+def resolve_filename() -> str:
+    """The file the parent's results manager uses, or would use once it initializes.
 
-    get_filename() returns "" until set_filename() is called or the results
-    manager initializes, which mirrors the C++ default rule (GetTuningResultsManager:
-    PYTORCH_TUNABLEOP_FILENAME env, else "tunableop_results.csv", then the device
-    ordinal inserted). Resolving it here -- rather than letting the worker lazily
-    re-derive it -- is what makes the worker key meaningful: without this, the key
-    stays "" across set_filename calls and env changes, so no restart happens and
-    the worker keeps appending to the first file.
+    Deliberately not the job's device: filename_ is process-global and
+    SetFilename bakes in whichever device was current then, so the runtime
+    reads one file whatever device a GEMM runs on. Naming the worker's file
+    after the job's device would write somewhere nothing reads.
 
-    The ordinal must be inserted here too: the worker re-enters the name with
-    insert_device_ordinal=False, so skipping it makes the worker write
-    "tunableop.csv" while the runtime manager reads "tunableop0.csv".
+    Resolved here rather than left to the worker so the worker key tracks
+    set_filename and env changes; get_filename() is "" until the manager
+    initializes, hence the mirror of its default rule.
     """
     filename = torch.cuda.tunable.get_filename()
     if not filename:
         filename = _insert_device_ordinal(
             os.environ.get("PYTORCH_TUNABLEOP_FILENAME", "tunableop_results.csv"),
-            device,
+            torch.cuda.current_device(),
         )
     return filename
 
@@ -394,9 +391,10 @@ def _job_device(job: BenchmarkJob) -> int:
     graph bookkeeping, and compile_fx's CUDA guard covers post-grad passes
     rather than lowering, so a graph targeting cuda:1 can be autotuned while
     the process current device is 0. The child builds its tensors from these
-    metas, so this is the GPU it really tunes on and the ordinal the results
-    file must be named for. Mirrors BenchmarkRequest._get_benchmark_device,
-    including its fall back to the current device when nothing carries one.
+    metas, so this is the GPU it really tunes on. Mirrors
+    BenchmarkRequest._get_benchmark_device, including its fall back to the
+    current device when nothing carries one. The results filename follows the
+    parent's manager instead -- see resolve_filename.
     """
     bmreq = job.bmreq
     metas = [getattr(bmreq, "output_tensor_meta", None)]
@@ -443,9 +441,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         device = _job_device(job)
         # The visibility mask is inherited unrewritten, so the same logical
         # ordinal names the same GPU in the worker.
-        stamped = _StampedJob(
-            job, device, resolve_filename(device), snapshot_settings()
-        )
+        stamped = _StampedJob(job, device, resolve_filename(), snapshot_settings())
     except Exception as e:  # resolve before the worker: no restart
         # Failed before the worker was involved (no device, no filename): report
         # without touching it. Shutting down here would kill a healthy worker
