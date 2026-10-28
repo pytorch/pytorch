@@ -476,7 +476,7 @@ class TestModuleContainers(JitTestCase):
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                value: ModuleInterface = self.d[key]
+                value = torch.jit.annotate(ModuleInterface, self.d[key])
                 return value.forward(x)
 
         m = Mod()
@@ -488,7 +488,7 @@ class TestModuleContainers(JitTestCase):
                 super().__init__({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                submodule: ModuleInterface = self[key]
+                submodule = torch.jit.annotate(ModuleInterface, self[key])
                 return submodule.forward(x)
 
         m = ModDict()
@@ -502,7 +502,7 @@ class TestModuleContainers(JitTestCase):
                 self.d = torch.nn.ModuleDict({"module": DoesNotImplementInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                submodule: ModuleInterface = self.d[key]
+                submodule = torch.jit.annotate(ModuleInterface, self.d[key])
                 return submodule.forward(x)
 
         with self.assertRaisesRegexWithHighlight(
@@ -539,7 +539,7 @@ class TestModuleContainers(JitTestCase):
                 self.l = torch.nn.ModuleList([ImplementsInterface()])
 
             def forward(self, x: torch.Tensor, idx: int) -> Any:
-                value: ModuleInterface = self.l[idx]
+                value = torch.jit.annotate(ModuleInterface, self.l[idx])
                 return value.forward(x)
 
         m = Mod()
@@ -551,7 +551,7 @@ class TestModuleContainers(JitTestCase):
                 super().__init__([ImplementsInterface()])
 
             def forward(self, x: torch.Tensor, idx: int) -> Any:
-                submodule: ModuleInterface = self[idx]
+                submodule = torch.jit.annotate(ModuleInterface, self[idx])
                 return submodule.forward(x)
 
         m = ModList()
@@ -565,7 +565,7 @@ class TestModuleContainers(JitTestCase):
                 self.l = torch.nn.ModuleList([DoesNotImplementInterface()])
 
             def forward(self, x: torch.Tensor, idx: int) -> Any:
-                submodule: ModuleInterface = self.l[idx]
+                submodule = torch.jit.annotate(ModuleInterface, self.l[idx])
                 return submodule.forward(x)
 
         with self.assertRaisesRegexWithHighlight(
