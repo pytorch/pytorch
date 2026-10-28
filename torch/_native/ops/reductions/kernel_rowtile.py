@@ -166,10 +166,11 @@ def _itree_arch(
 # Default per-thread width for the order, in elements (k*vec*eff live in registers at once).
 # Fusing adjacent chunks keeps a full warp, and therefore coalesced loads, on each.
 _ITREE_THREAD_ELEMS = 64
-# Per-thread width for ragged 16-bit sum-like rows (trait_itree_plan). B200 CUDA graphs,
-# 128 MiB fp16/bf16 sums: 1.6x faster at N=2049 and 4097, within 4% for N=3000-12289,
-# 0.65x at N=1025.
+# Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N
+# (trait_itree_plan). B200 CUDA graphs, 128 MiB fp16/bf16 sums: 1.6x faster at N=2049 and
+# 4097 and within 4% for N=3000-12289, but 0.65x at N=1025, so narrower rows keep the default.
 _ITREE_LOWP_THREAD_ELEMS = 32
+_ITREE_LOWP_MIN_N = 2048
 
 # Vector-width multiplier; each doubling costs ~2x. `bte`, not this, fixes the bits.
 _ITREE_VEC_MUL = 1
@@ -434,9 +435,12 @@ def trait_itree_plan(
         return plan
     from . import traits as T
 
-    if itemsize > 2 or not isinstance(
-        trait,
-        (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps),
+    if (
+        N <= _ITREE_LOWP_MIN_N
+        or itemsize > 2
+        or not isinstance(
+            trait, (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps)
+        )
     ):
         return plan
     return itree_plan(
