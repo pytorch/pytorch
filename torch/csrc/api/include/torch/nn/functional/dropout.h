@@ -52,7 +52,7 @@ inline Tensor _dropoutNd_helper(
     double p,
     bool training,
     bool inplace,
-    const char* fn_name) {
+    const char* /*fn_name*/) {
   TORCH_CHECK(
       p >= 0. && p <= 1.,
       "dropout probability has to be between 0 and 1, but got ",

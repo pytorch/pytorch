@@ -156,6 +156,12 @@ class Vectorized<double> {
     }
     return loadu(tmp);
   }
+  double reduce_add() const {
+    return svaddv_f64(ptrue, values);
+  }
+  double reduce_max() const {
+    return svmaxv_f64(ptrue, values);
+  }
   Vectorized<double> abs() const {
     return svabs_f64_x(ptrue, values);
   }
@@ -164,7 +170,8 @@ class Vectorized<double> {
     const auto nan_mask = svcmpuo_f64(ptrue, values, ZERO_F64);
     const auto pi = svdup_n_f64(c10::pi<double>);
 
-    const auto neg_mask = svcmplt_f64(ptrue, values, ZERO_F64);
+    const auto neg_mask =
+        svcmplt_n_s64(ptrue, svreinterpret_s64_f64(values), 0);
     auto angle = svsel_f64(neg_mask, pi, ZERO_F64);
     angle = svsel_f64(nan_mask, nan_vec, angle);
     return angle;

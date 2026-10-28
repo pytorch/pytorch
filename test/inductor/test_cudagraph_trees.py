@@ -725,6 +725,25 @@ if HAS_CUDA_AND_TRITON:
         def test_rng_non_trees(self):
             self.check_rng()
 
+            from torch._inductor.compile_fx import cudagraphify_impl
+
+            def fn(args):
+                x, *states = args
+                args.clear()
+                noise = sum(torch.rand(1, device=x.device, generator=g) for g in states)
+                return [x + noise]
+
+            x = torch.ones(1, device="cuda")
+            generators = [torch.Generator(device="cuda") for _ in range(9)]
+            with config.patch("size_asserts", True):
+                graphed = cudagraphify_impl(fn, [x, *generators], ())
+            for generator in generators:
+                generator.manual_seed(0)
+            expected = fn([x, *generators])
+            for generator in generators:
+                generator.manual_seed(0)
+            self.assertEqual(graphed([x, *generators]), expected)
+
         def test_mutation_reinplaced(self):
             import torch.nn as nn
 
@@ -2091,9 +2110,10 @@ if HAS_CUDA_AND_TRITON:
             def foo(args):
                 x = args[0]
                 args.clear()
-                return x + 1, x + 2
+                return x + torch.rand_like(x), x + 2
 
             inp = torch.rand([4], device="cuda")
+            original_input = inp
             inp_list = [inp]
             foo_cg = self.cudagraphify_impl(foo, inp_list, ())
             foo_cg(inp_list)
@@ -2121,6 +2141,13 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(all_live_block_count(), 1)
             del x
             self.assertEqual(all_live_block_count(), 0)
+
+            # Replay the original RNG graph after restoring its pool checkpoint.
+            torch.cuda.manual_seed(123)
+            expected = original_input + torch.rand_like(original_input)
+            torch.cuda.manual_seed(123)
+            actual, _ = self.replay_next_generation(foo_cg, [original_input])
+            self.assertEqual(actual, expected)
 
         def test_aliased_storage_single_weakref(self):
             @torch.compile(mode="reduce-overhead")
@@ -5380,6 +5407,31 @@ if HAS_CUDA_AND_TRITON:
             # index_put reads CPU indices, so it runs between two graphs.
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @config.patch("graph_partition", True)
+        @parametrize("dtype", (torch.complex64, torch.complex128))
+        @parametrize("copy_to_cpu", (False, True))
+        def test_graph_partition_index_put_output(self, dtype, copy_to_cpu):
+            def fn(x, index):
+                out = torch.zeros_like(x)
+                out[:, index] = x
+                return out.cpu() if copy_to_cpu else out
+
+            fn_c = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            index = torch.arange(16, device="cuda").flip(0)
+            for i in range(3):
+                x = torch.randn(4, 16, device="cuda", dtype=dtype)
+                if i == 0:
+                    actual, code = run_and_get_code(fn_c, x, index)
+                    self.assertIn(
+                        "= torch.ops.aten.index_put_.default(", "\n".join(code)
+                    )
+                    self.assertEqual(get_num_partitions(code), 1)
+                else:
+                    actual = fn_c(x, index)
+                self.assertEqual(actual, fn(x, index), exact_device=True)
+                del actual
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._inductor.config.patch("graph_partition", True)
         @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "needs flash attention")
         def test_graph_partition_sdpa_dropout_not_split(self):
@@ -6879,36 +6931,36 @@ if HAS_CUDA_AND_TRITON:
                 y2 = x2 + 1
                 return y1, y2
 
-            with config.patch(
-                "triton.autotune_at_compile_time", autotune_at_compile_time
-            ):
+            log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+            cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
+            with config.patch(cfg), ctx():
                 compiled_foo = torch.compile(foo)
                 x = torch.randn((20, 20), device="cuda")
                 eager_out = foo(x)
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                if autotune_at_compile_time:
-                    # auto-tuning block should only appear once. We generate auto-tuning code
-                    # for all the kernels no matter if they are defined in the main graph or
-                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
-                    FileCheck().check_count(
-                        "Compile-time auto-tuning block", 1, exactly=True
-                    ).run(code[0])
-                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
-                    # and then in the main code block
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 2, exactly=True
-                    ).run(code[0])
-                    # cpu kernel definition should only appence once, not in the auto-tuning block
-                    FileCheck().check_count(
-                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
-                    ).run(code[0])
-                else:
-                    # triton_poi_fused_add_ should appear once, because of kernel reuse
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 1, exactly=True
-                    ).run(code[0])
+            # Each kernel is defined once: partition 2 reuses partition 1's triton
+            # kernel, and the module has no compile-time autotune block.
+            module = code[0]
+            self.assertNotIn("Compile-time auto-tuning block", module)
+            self.assertEqual(module.count("def triton_poi_fused_add_"), 1)
+            self.assertEqual(module.count("cpp_fused__to_copy_add_1 = "), 1)
+            # The kernels of the root and of both partitions are tuned in one block,
+            # which runs once.
+            prefix = "Auto-tuning code written to "
+            paths = [
+                line.removeprefix(prefix)
+                for line in log_stream.getvalue().splitlines()
+                if line.startswith(prefix)
+            ]
+            self.assertEqual(len(paths), 1 if autotune_at_compile_time else 0, paths)
+            for path in paths:
+                with open(path) as f:
+                    src = f.read()
+                # The block reuses the kernel too, and tunes no CPU kernel.
+                self.assertEqual(src.count("def triton_poi_fused_add_"), 1)
+                self.assertNotIn("cpp_fused__to_copy_add_1", src)
 
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
@@ -6942,9 +6994,8 @@ if HAS_CUDA_AND_TRITON:
             eager_out = foo(x, y)
             compiled_out, code = run_and_get_code(compiled_foo, x, y)
             self.assertEqual(eager_out, compiled_out)
-            FileCheck().check_count(
-                "async_compile.triton('add_kernel',", 1, exactly=True
-            ).run(code[0])
+            defs = re.findall(r"^def add_kernel\w*\(", code[0], re.MULTILINE)
+            self.assertEqual(len(defs), 1, code[0])
 
         def test_meta_tensor(self):
             def foobar(x, y):
@@ -7632,7 +7683,10 @@ if HAS_CUDA_AND_TRITON:
         @config.patch("test_configs.graphsafe_rng_func_ignores_fallback_random", True)
         def _test_cudagraphs_aot_eager_compat_equal(self, device):
             def gn(x, y):
-                return torch.sigmoid(torch.rand_like(x) * y) * x
+                # Graphsafe RNG functionalization gives each recomputed RNG op its own state.
+                for _ in range(9):
+                    x = torch.sigmoid(torch.rand_like(x) * y) * x
+                return x
 
             def fn(x, y):
                 x = torch.sin(x)

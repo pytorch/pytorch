@@ -590,12 +590,13 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
+    if (ctx.qEngine() == at::QEngine::FBGEMM
 #if !defined(__aarch64__) && !defined(_M_ARM64)
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
-#endif
 #endif
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
@@ -623,7 +624,6 @@ class QLinearPackWeightFp16 final {
       std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-#if !defined(__aarch64__) && !defined(_M_ARM64)
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
     weight = weight.to(ScalarType::Float);
@@ -632,7 +632,6 @@ class QLinearPackWeightFp16 final {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
     }
-#endif // !aarch64: fall through to the explicit not-supported checks below
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
