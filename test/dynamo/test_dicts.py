@@ -648,6 +648,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x, d), fn(x, d))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_empty_dict_constant_fold_guards_keys(self):
+        def fn(x, d):
+            return x + len(operator.or_(d, {"b": 2}))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.zeros(1)
+        for d in ({}, {"a": 1}):
+            self.assertEqual(opt_fn(x, d), fn(x, d))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_dict_guard_on_keys_order2(self):
         d = {
             2: 4,
