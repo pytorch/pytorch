@@ -284,7 +284,9 @@ The apply step adds `bot-triaged` whenever the plan changes the issue. You do no
 
 ### 7) Mark triaged
 
-If not transferred/redirected and not flagged for review, add `triaged`.
+For a complete classification, use `decision: "label"`. The apply step adds `triaged`
+automatically unless the issue is redirected outside PT2, flagged for review, or awaiting
+information/reproduction. Other decisions do not receive automatic completion.
 
 ---
 
