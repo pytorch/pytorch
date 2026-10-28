@@ -32,7 +32,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
 )
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._library.cutedsl import wrap_cutedsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -345,6 +345,61 @@ if HAS_CUTEDSL:
         _select_k(mX, mOut, n, cutlass.Boolean(flag)).launch(
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
+
+    @cute.jit
+    def select_bool_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        flag: cutlass.Boolean,
+        stream: cuda.CUstream,
+    ):
+        _select_k(mX, mOut, n, flag).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    # A runtime Float16 scalar: out = x + h.
+    @cute.kernel
+    def _add_half_k(
+        gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32, h: cutlass.Float16
+    ):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        i = bidx * 128 + tidx
+        if i < n:
+            gOut[i] = gX[i] + cutlass.Float32(h)
+
+    @cute.jit
+    def add_half_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        h: cutlass.Float16,
+        stream: cuda.CUstream,
+    ):
+        _add_half_k(mX, mOut, n, h).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    # Host functions that differ only in a captured list: out = x * c[0] + c[1].
+    def make_affine_kernel(c):
+        @cute.kernel
+        def _affine_k(gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32):
+            tidx, _, _ = cute.arch.thread_idx()
+            bidx, _, _ = cute.arch.block_idx()
+            i = bidx * 128 + tidx
+            if i < n:
+                gOut[i] = gX[i] * c[0] + c[1]
+
+        @cute.jit
+        def affine_kernel(
+            mX: cute.Tensor, mOut: cute.Tensor, n: cutlass.Int32, stream: cuda.CUstream
+        ):
+            _affine_k(mX, mOut, n).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+        return affine_kernel
 
     # --- END CASE KERNELS ---
 
@@ -2628,10 +2683,320 @@ class CuteDSLInductorTests(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
 
+class _AddModule(torch.nn.Module):
+    def forward(self, x, y):
+        out = torch.empty_like(x)
+        add_w(x, y, out, x.numel())
+        return out
+
+
+class _ScaleModule(torch.nn.Module):
+    def forward(self, x):
+        y = x.clone()
+        scale_inplace_w(y, y.numel())
+        return y
+
+
+@requires_triton
+@requires_cutedsl
+class CuteDSLAOTITests(TestCase):
+    """AOTInductor: the kernel is compiled ahead of time (export_to_c) and launched
+    from the generated C++ through its cute_dsl_<prefix>_wrapper."""
+
+    def _package(self, model, args, dynamic_shapes=None, strict=False):
+        ep = torch.export.export(
+            model, args, dynamic_shapes=dynamic_shapes, strict=strict
+        )
+        return torch._inductor.aoti_compile_and_package(ep)
+
+    def _package_and_code(self, model, args, **kwargs):
+        # run_and_get_cpp_code starts with torch._dynamo.reset(), so the export has
+        # to happen inside it (see test_aoti_program_exported_before_reset).
+        return run_and_get_cpp_code(self._package, model, args, **kwargs)
+
+    def test_aoti_kernels_differing_in_closure_values(self):
+        # Two host functions from one factory get the same prefix (it cannot see a
+        # captured list); each still gets its own export.
+        ka = wrap_cutedsl(make_affine_kernel([2.0, 0.0]), mutates_args=["mOut"])
+        kb = wrap_cutedsl(make_affine_kernel([5.0, 1.0]), mutates_args=["mOut"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                ka(x, a, x.numel())
+                kb(x, b, x.numel())
+                return a, b
+
+        x = torch.arange(1000, device=DEVICE, dtype=torch.float32)
+        a, b = torch._inductor.aoti_load_package(self._package(M(), (x,)))(x)
+        self.assertEqual(a, 2 * x)
+        self.assertEqual(b, 5 * x + 1)
+
+    def test_aoti_exports_not_reused_from_disk(self):
+        # With the in-process registry empty (as in a new process) the kernel is
+        # exported again, into a fresh directory: nothing on disk is reused.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        with mock.patch.object(
+            user_kernel_aot,
+            "export_cutedsl_kernel",
+            wraps=user_kernel_aot.export_cutedsl_kernel,
+        ) as export:
+            for _ in range(2):
+                user_kernel_aot._exports.clear()
+                self._package(_AddModule(), (x, y))
+        dirs = [c.kwargs["out_dir"] for c in export.call_args_list]
+        self.assertEqual(len(dirs), 2)
+        self.assertNotEqual(dirs[0], dirs[1])
+
+    def test_aoti_call_sites_share_one_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                add_w(x, y, a, x.numel())
+                add_w(a, y, b, x.numel())
+                return b
+
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(M(), (x, y))
+        self.assertEqual(code.count("#define CUTEDSL_DECLARED_"), 1)
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + 2 * y)
+
+    def test_aoti_user_stream_region_uses_model_stream(self):
+        # In a user stream region the launch uses the stream of the Triton kernels
+        # around it (the model's), as a user Triton kernel's launch does.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                s = torch.cuda.Stream()
+                e = torch.cuda.Event()
+                with torch.cuda.stream(s):
+                    a = torch.sin(x) * 3
+                    out = torch.empty_like(a)
+                    add_w(a, y, out, a.numel())
+                    z = out * 2
+                    e.record()
+                torch.cuda.current_stream().wait_event(e)
+                return z + 1
+
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(M(), (x, y), strict=True)
+        calls = re.findall(
+            r"\bcall_cutedsl_add_kernel\w*\((.*)\);", _strip_comments(code)
+        )
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertEqual(call.split(",")[-1].strip(), "stream", call)
+        run = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(run(x, y), (torch.sin(x) * 3 + y) * 2 + 1)
+
+    def test_aoti_boolean_and_half_scalars(self):
+        # A Boolean takes the truthiness of its value (x.shape[0] % 3 can be 2), as
+        # in eager; a Float16 scalar compiles and is converted from double.
+        w = wrap_cutedsl(select_bool_kernel, mutates_args=["mOut"])
+        h = wrap_cutedsl(add_half_kernel, mutates_args=["mOut"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                w(x, a, x.numel(), x.shape[0] % 3)
+                h(x, b, x.numel(), 0.5)
+                return a, b
+
+        n = torch.export.Dim("n", min=2, max=4096)
+        pkg = self._package(M(), (_rand(1000),), dynamic_shapes={"x": {0: n}})
+        run = torch._inductor.aoti_load_package(pkg)
+        for size in (1000, 1001, 1002):  # size % 3 = 1, 2, 0
+            x = _rand(size)
+            a, b = run(x)
+            self.assertEqual(a, (3 if size % 3 else 5) * x)
+            self.assertEqual(b, x + 0.5)
+
+    def test_aoti_toy_raw_call(self):
+        # The toy through strict export, where Dynamo captures the raw call, and
+        # AOTInductor.
+        x, y = _rand(2048), _rand(2048)
+        pkg, code = self._package_and_code(Toy(), (x, y), strict=True)
+        self.assertRegex(code, r"cute_dsl_\w+_wrapper\(")
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(x, y), (x + y).relu())
+        x2, y2 = _rand(2048), _rand(2048)
+        self.assertEqual(runner(x2, y2), (x2 + y2).relu())
+
+    def test_aoti_add(self):
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(_AddModule(), (x, y))
+        self.assertRegex(code, r"cute_dsl_\w+_wrapper\(")
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(x, y), x + y)
+        x2, y2 = _rand(1000), _rand(1000)
+        self.assertEqual(runner(x2, y2), x2 + y2)
+
+    @parametrize("strict", [False, True])
+    def test_aoti_dynamic_shapes(self, strict):
+        dim = torch.export.Dim("n", min=2, max=8192)
+        pkg = self._package(
+            _AddModule(),
+            (_rand(1000), _rand(1000)),
+            dynamic_shapes={"x": {0: dim}, "y": {0: dim}},
+            strict=strict,
+        )
+        runner = torch._inductor.aoti_load_package(pkg)
+        for n in (1000, 77, 8192):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_2d_view_dynamic(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                xt = x.t()  # strides (1, x.shape[1]): a non-contiguous view
+                out = torch.empty(xt.shape, device=x.device)
+                add_one_2d_w(xt, out)
+                return out
+
+        a, b = (
+            torch.export.Dim("a", min=2, max=512),
+            torch.export.Dim("b", min=2, max=512),
+        )
+        pkg = self._package(M(), (_rand(8, 4),), dynamic_shapes={"x": {0: a, 1: b}})
+        runner = torch._inductor.aoti_load_package(pkg)
+        for shape in ((8, 4), (33, 17), (4, 300)):
+            x = _rand(*shape)
+            self.assertEqual(runner(x), x.t() + 1)
+
+    def test_aoti_constexpr(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                o1, o2 = torch.empty_like(x), torch.empty_like(x)
+                mul_const_w(x, o1, x.numel(), 3)
+                mul_const_w(x, o2, x.numel(), 2.5)
+                return o1, o2
+
+        x = _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+        o1, o2 = runner(x)
+        self.assertEqual((o1, o2), (3 * x, 2.5 * x))
+
+    def test_aoti_unannotated_scalar(self):
+        # export_to_c takes a scalar's C type from its annotation ("Unsupported
+        # argument ... with type None" in cutlass 4.4.2), so AOTInductor asks for one.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_scalar_w(x, out, x.numel(), 5)
+                return out
+
+        x = _rand(1000)
+        # The Python wrapper launches it fine ...
+        self.assertEqual(torch.compile(M(), fullgraph=True)(x), x + 5)
+        # ... AOTInductor cannot export it.
+        with self.assertRaisesRegex(Exception, "annotated with a cutlass Numeric"):
+            self._package(M(), (x,))
+
+    def test_aoti_misaligned_input_guard(self):
+        # Exported with aligned inputs, the kernel assumes 16-byte alignment and
+        # the launch checks it.
+        base, base2 = _rand(1001), _rand(1001)
+        pkg = self._package(_AddModule(), (base[:1000], base2[:1000]))
+        runner = torch._inductor.aoti_load_package(pkg)
+        x, y = base[1:], base2[1:]
+        if inductor_config.is_fbcode():
+            # fbcode AOTI does not copy misaligned inputs, so the guard fires.
+            with self.assertRaises(RuntimeError):
+                runner(x, y)
+        else:
+            self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_two_outputs_and_default_scale(self):
+        # The C wrapper takes `float scale` after the stream: a defaulted runtime
+        # scalar must still be passed.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                s1, d1 = torch.empty_like(x), torch.empty_like(x)
+                add_sub_w(x, y, s1, d1, x.numel())
+                s2, d2 = torch.empty_like(x), torch.empty_like(x)
+                add_sub_w(x, y, s2, d2, x.numel(), scale=0.25)
+                return s1, d1, s2, d2
+
+        x, y = _rand(1000), _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x, y)))
+        s1, d1, s2, d2 = runner(x, y)
+        self.assertEqual((s1, d1), (x + y, x - y))
+        self.assertEqual((s2, d2), ((x + y) * 0.25, (x - y) * 0.25))
+
+    def test_aoti_inplace_kernel_and_view(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = x * 1
+                scale_inplace_w(y, y.numel())
+                v = y[4:]
+                scale_inplace_w(v, v.numel())
+                return y
+
+        x = _rand(1000)
+        expected = 2 * x
+        expected[4:] *= 2
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+        self.assertEqual(runner(x), expected)
+
+    def test_aoti_same_name_kernels(self):
+        # Two host functions named binary_kernel: their exported symbols must not
+        # collide in the package.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                o1, o2 = torch.empty_like(x), torch.empty_like(x)
+                same_name_add_w(x, y, o1, x.numel())
+                same_name_sub_w(x, y, o2, x.numel())
+                return o1, o2
+
+        x, y = _rand(1000), _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x, y)))
+        o1, o2 = runner(x, y)
+        self.assertEqual(o1, x + y)
+        self.assertEqual(o2, x - y)
+
+    def test_aoti_unaligned_view(self):
+        class M(torch.nn.Module):
+            def forward(self, base):
+                x = base[:, 1:]  # data_ptr 4 bytes past a 16-byte boundary
+                out = torch.empty(x.shape, device=x.device)
+                add_one_2d_w(x, out)
+                return out
+
+        base = _rand(4, 9)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (base,)))
+        self.assertEqual(runner(base), base[:, 1:] + 1)
+
+    @parametrize("strict", [False, True])
+    def test_aoti_program_exported_before_reset(self, strict):
+        # A program exported before torch._dynamo.reset() and another strict export
+        # must still compile its own kernel (the Triton side table is reset there).
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(_AddModule(), (x, y), strict=strict)
+        torch._dynamo.reset()
+        torch.export.export(_ScaleModule(), (x,), strict=True)
+        runner = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(ep)
+        )
+        self.assertEqual(runner(x, y), x + y)
+
+    def test_cutedsl_kernel_jit_cpp_wrapper(self):
+        # torch.compile with the C++ wrapper links the exported objects into the JIT
+        # module the same way.
+        x, y = _rand(1000), _rand(1000)
+        with inductor_config.patch(cpp_wrapper=True):
+            res, (code,) = run_and_get_code(
+                torch.compile(_AddModule(), fullgraph=True), x, y
+            )
+        self.assertEqual(res, x + y)
+        FileCheck().check("call_cutedsl_add_kernel_").run(code)
+
+
 instantiate_parametrized_tests(CuteDSLHOPTests)
 instantiate_parametrized_tests(CuteDSLWrapTests)
 instantiate_parametrized_tests(CuteDSLDynamoTests)
 instantiate_parametrized_tests(CuteDSLInductorTests)
+instantiate_parametrized_tests(CuteDSLAOTITests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
