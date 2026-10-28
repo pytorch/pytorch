@@ -1053,93 +1053,156 @@ void avg_pool_backward_kernel_impl(
       params.divisor_override);
 }
 
-// Sums the gradients of all grad_output elements whose adaptive pooling window
-// contains the grad_input element at pooling_dim_indices. Output windows
-// covering an input index follow the same formula as input windows of an output
-// index, with input and output sizes swapped.
-template <int32_t pooling_dims, typename T, typename idx_t>
-opmath_t<T> adaptive_avg_pool_backward_gather(
-    device const T* grad_output,
-    constant int32_t* grad_input_sizes,
-    constant int32_t* grad_output_sizes,
-    constant int32_t* grad_output_strides,
-    thread int32_t (&pooling_dim_indices)[3]) {
-  auto bounds0 = get_adaptive_input_iter_bounds<0, idx_t>(
-      grad_output_sizes, grad_input_sizes, pooling_dim_indices);
-  auto bounds1 = get_adaptive_input_iter_bounds<1, idx_t>(
-      grad_output_sizes, grad_input_sizes, pooling_dim_indices);
-  auto bounds2 = pooling_dims == 3
-      ? get_adaptive_input_iter_bounds<2, idx_t>(
-            grad_output_sizes, grad_input_sizes, pooling_dim_indices)
-      : IterBounds<int32_t>{0, 1};
+// One simdgroup per output element, with lanes splitting the innermost window
+// dim. For large adaptive windows, where one thread per output leaves the GPU
+// mostly idle while each thread sums a whole window serially.
+template <typename T, typename idx_t>
+kernel void adaptive_avg_pool_simd(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant AvgPoolingParams<5>& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint simd_width [[threads_per_simdgroup]]) {
+  auto pooling_dims = params.pooling_dims;
+  auto leading_dims = params.dims - pooling_dims;
+  int32_t pooling_dim_indices[3];
+  auto offsets = find_pool_offsets<int32_t, int32_t>(
+      params.output_sizes.data(),
+      params.output_strides.data(),
+      /*indices_strides=*/nullptr,
+      params.input_strides.data(),
+      pooling_dim_indices,
+      params.dims,
+      leading_dims,
+      /*return_indices=*/false,
+      tid / simd_width);
+  input += offsets.input_leading;
 
-  opmath_t<T> grad_sum = 0;
-  for (auto o0 = bounds0.start; o0 < bounds0.end; o0++) {
-    auto w0 = get_adaptive_bounds<idx_t>(
-        o0, grad_input_sizes[0], grad_output_sizes[0]);
-    auto offset0 = grad_output_strides[0] * o0;
-    for (auto o1 = bounds1.start; o1 < bounds1.end; o1++) {
-      auto w1 = get_adaptive_bounds<idx_t>(
-          o1, grad_input_sizes[1], grad_output_sizes[1]);
-      auto count01 = (w0.end - w0.start) * (w1.end - w1.start);
-      auto offset1 = offset0 + grad_output_strides[1] * o1;
-      for (auto o2 = bounds2.start; o2 < bounds2.end; o2++) {
-        auto w2 = pooling_dims == 3
-            ? get_adaptive_bounds<idx_t>(
-                  o2, grad_input_sizes[2], grad_output_sizes[2])
-            : IterBounds<int32_t>{0, 1};
-        auto offset2 = pooling_dims == 3 ? grad_output_strides[2] * o2 : 0;
-        auto count = count01 * (w2.end - w2.start);
-        grad_sum +=
-            static_cast<opmath_t<T>>(grad_output[offset1 + offset2]) / count;
+  // Pooling dims are right-aligned, so that bounds[2] is the innermost one
+  IterBounds<int32_t> bounds[3] = {{0, 1}, {0, 1}, {0, 1}};
+  int32_t strides[3] = {0, 0, 0};
+  for (int32_t dim = 0; dim < pooling_dims; dim++) {
+    auto k = 3 - pooling_dims + dim;
+    bounds[k] = get_adaptive_bounds<idx_t>(
+        pooling_dim_indices[dim],
+        params.input_sizes[leading_dims + dim],
+        params.output_sizes[leading_dims + dim]);
+    strides[k] = params.input_strides[leading_dims + dim];
+  }
+
+  opmath_t<T> sum = 0;
+  for (auto i0 = bounds[0].start; i0 < bounds[0].end; i0++) {
+    for (auto i1 = bounds[1].start; i1 < bounds[1].end; i1++) {
+      auto row = input + i0 * strides[0] + i1 * strides[1];
+      for (auto i2 = bounds[2].start + static_cast<int32_t>(lane);
+           i2 < bounds[2].end;
+           i2 += simd_width) {
+        sum += static_cast<opmath_t<T>>(row[i2 * strides[2]]);
       }
     }
   }
-  return grad_sum;
+  sum = simd_sum(sum);
+  if (lane == 0) {
+    auto count = (bounds[0].end - bounds[0].start) *
+        (bounds[1].end - bounds[1].start) * (bounds[2].end - bounds[2].start);
+    output[offsets.output] = static_cast<T>(sum / count);
+  }
 }
 
-// Computes one element of grad_input per thread, supports 2 or 3 pooling dims.
+// Divides every grad_output element by the size of its adaptive pooling window
+// once, writing them in opmath_t into the contiguous scaled_grad, so that the
+// gather below is a plain sum. Also fills out_ranges, which holds for every
+// input index of every pooling dim the range of outputs whose windows cover it,
+// as these are the same for all the planes.
+template <typename T, typename idx_t>
+kernel void adaptive_avg_pool_backward_scale(
+    device const T* grad_output [[buffer(0)]],
+    device opmath_t<T>* scaled_grad [[buffer(1)]],
+    constant AvgPoolingParams<5>& params [[buffer(2)]],
+    device int2* out_ranges [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto leading_dims = params.dims - params.pooling_dims;
+  auto range_idx = static_cast<int32_t>(tid);
+  for (auto dim = leading_dims; dim < params.dims; dim++) {
+    auto in_size = params.input_sizes[dim];
+    if (range_idx < in_size) {
+      auto b = get_adaptive_bounds<idx_t>(
+          range_idx, params.output_sizes[dim], in_size);
+      out_ranges[tid] = int2(b.start, b.end);
+      break;
+    }
+    range_idx -= in_size;
+  }
+
+  uint numel = 1;
+  for (auto dim = 0; dim < params.dims; dim++) {
+    numel *= params.output_sizes[dim];
+  }
+  if (tid >= numel) {
+    return;
+  }
+  int32_t offset = 0, count = 1;
+  auto idx = tid;
+  for (auto dim = params.dims - 1; dim >= 0; dim--) {
+    auto size = params.output_sizes[dim];
+    auto i = static_cast<int32_t>(idx % size);
+    idx /= size;
+    offset += i * params.output_strides[dim];
+    if (dim >= leading_dims) {
+      auto w = get_adaptive_bounds<idx_t>(i, params.input_sizes[dim], size);
+      count *= w.end - w.start;
+    }
+  }
+  scaled_grad[tid] = static_cast<opmath_t<T>>(grad_output[offset]) / count;
+}
+
+// Computes one element of grad_input per thread by summing the scaled
+// gradients of all outputs whose adaptive pooling window contains it. Output
+// windows covering an input index follow the same formula as input windows of
+// an output index, with input and output sizes swapped. Supports 2 or 3
+// pooling dims, params.output_strides are the strides of scaled_grad.
 template <typename T, typename idx_t>
 kernel void adaptive_avg_pool_backward(
     device T* grad_input [[buffer(0)]],
-    device const T* grad_output [[buffer(1)]],
+    device const opmath_t<T>* scaled_grad [[buffer(1)]],
     constant AvgPoolingParams<5>& params [[buffer(2)]],
+    device const int2* out_ranges [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   auto dims = params.dims;
-  auto leading_dims = dims - params.pooling_dims;
-  auto grad_input_sizes = params.input_sizes.data();
-  auto grad_output_sizes = params.output_sizes.data() + leading_dims;
-  auto grad_output_strides = params.output_strides.data();
+  auto pooling_dims = params.pooling_dims;
+  auto leading_dims = dims - pooling_dims;
   int32_t pooling_dim_indices[3];
-
   auto offsets = find_pool_offsets<int32_t, int32_t>(
-      grad_input_sizes,
+      params.input_sizes.data(),
       params.input_strides.data(),
       /*indices_strides=*/nullptr,
-      grad_output_strides,
+      params.output_strides.data(),
       pooling_dim_indices,
       dims,
       leading_dims,
       /*return_indices=*/false,
       tid);
+  scaled_grad += offsets.input_leading;
 
-  grad_input_sizes += leading_dims;
-  grad_output += offsets.input_leading;
-  grad_output_strides += leading_dims;
+  IterBounds<int32_t> bounds[3] = {{0, 1}, {0, 1}, {0, 1}};
+  int32_t strides[3] = {0, 0, 0};
+  for (int32_t dim = 0; dim < pooling_dims; dim++) {
+    auto range = out_ranges[pooling_dim_indices[dim]];
+    bounds[dim] = {range.x, range.y};
+    strides[dim] = params.output_strides[leading_dims + dim];
+    out_ranges += params.input_sizes[leading_dims + dim];
+  }
 
-  auto grad_sum = params.pooling_dims == 3
-      ? adaptive_avg_pool_backward_gather<3, T, idx_t>(
-            grad_output,
-            grad_input_sizes,
-            grad_output_sizes,
-            grad_output_strides,
-            pooling_dim_indices)
-      : adaptive_avg_pool_backward_gather<2, T, idx_t>(
-            grad_output,
-            grad_input_sizes,
-            grad_output_sizes,
-            grad_output_strides,
-            pooling_dim_indices);
+  opmath_t<T> grad_sum = 0;
+  for (auto o0 = bounds[0].start; o0 < bounds[0].end; o0++) {
+    for (auto o1 = bounds[1].start; o1 < bounds[1].end; o1++) {
+      auto row = scaled_grad + o0 * strides[0] + o1 * strides[1];
+      for (auto o2 = bounds[2].start; o2 < bounds[2].end; o2++) {
+        grad_sum += row[o2 * strides[2]];
+      }
+    }
+  }
   grad_input[offsets.output] = static_cast<T>(grad_sum);
 }
 
@@ -1237,20 +1300,36 @@ kernel void avg_pool_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],                  \
       uint tid [[thread_position_in_grid]]);
 
-#define REGISTER_ADAPTIVE_AVG_POOL_BACKWARD(DTYPE, IDX_T, SUFFIX)      \
-  template [[host_name("adaptive_avg_pool_backward_" #DTYPE #SUFFIX)]] \
-  kernel void adaptive_avg_pool_backward<DTYPE, IDX_T>(                \
-      device DTYPE * grad_input [[buffer(0)]],                         \
-      device const DTYPE* grad_output [[buffer(1)]],                   \
-      constant AvgPoolingParams<5>& params [[buffer(2)]],              \
+#define REGISTER_ADAPTIVE_AVG_POOL(DTYPE, IDX_T, SUFFIX)                     \
+  template [[host_name("adaptive_avg_pool_simd_" #DTYPE #SUFFIX)]]           \
+  kernel void adaptive_avg_pool_simd<DTYPE, IDX_T>(                          \
+      device const DTYPE* input [[buffer(0)]],                               \
+      device DTYPE* output [[buffer(1)]],                                    \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
+      uint tid [[thread_position_in_grid]],                                  \
+      uint lane [[thread_index_in_simdgroup]],                               \
+      uint simd_width [[threads_per_simdgroup]]);                            \
+  template [[host_name("adaptive_avg_pool_backward_scale_" #DTYPE #SUFFIX)]] \
+  kernel void adaptive_avg_pool_backward_scale<DTYPE, IDX_T>(                \
+      device const DTYPE* grad_output [[buffer(0)]],                         \
+      device opmath_t<DTYPE>* scaled_grad [[buffer(1)]],                     \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
+      device int2* out_ranges [[buffer(3)]],                                 \
+      uint tid [[thread_position_in_grid]]);                                 \
+  template [[host_name("adaptive_avg_pool_backward_" #DTYPE #SUFFIX)]]       \
+  kernel void adaptive_avg_pool_backward<DTYPE, IDX_T>(                      \
+      device DTYPE * grad_input [[buffer(0)]],                               \
+      device const opmath_t<DTYPE>* scaled_grad [[buffer(1)]],               \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
+      device const int2* out_ranges [[buffer(3)]],                           \
       uint tid [[thread_position_in_grid]])
 
 // Adaptive avg pooling supports floating types only, and is the only user of
 // the 64-bit avg_pool variant
-#define REGISTER_ADAPTIVE_AVG_POOL_OP(DTYPE)                 \
-  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")                  \
-  REGISTER_ADAPTIVE_AVG_POOL_BACKWARD(DTYPE, int32_t, _i32); \
-  REGISTER_ADAPTIVE_AVG_POOL_BACKWARD(DTYPE, int64_t, _i64)
+#define REGISTER_ADAPTIVE_AVG_POOL_OP(DTYPE)        \
+  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")         \
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, _i32); \
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int64_t, _i64)
 
 REGISTER_POOL_OP(float);
 REGISTER_POOL_OP(half);

@@ -7980,6 +7980,10 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 2, 3, 3), (7, 7), False)
 
+        # Windows large enough for the simdgroup per output kernel
+        helper((2, 3, 100, 70), (3, 2), False)
+        helper((2, 3, 100, 70), (3, 2), True)
+
         # Zero channels
         helper((0, 4, 4), (2, 2), False)
         helper((0, 2, 2), (4, 4), False)

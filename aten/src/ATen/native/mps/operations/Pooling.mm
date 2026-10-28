@@ -878,13 +878,15 @@ static void fill_avg_pool_params(AvgPoolingParams<5>& params,
   }
 }
 
+template <typename... ExtraArgs>
 static void launch_avg_pool_kernel(const std::string& kernel_name,
                                    const std::string& index_suffix,
                                    const Tensor& arg0,
                                    const Tensor& arg1,
                                    const int64_t numThreads,
                                    const AvgPoolingParams<5>& params,
-                                   const std::string& op_name) {
+                                   const std::string& op_name,
+                                   const ExtraArgs&... extra_args) {
   if (numThreads == 0) {
     return;
   }
@@ -896,7 +898,7 @@ static void launch_avg_pool_kernel(const std::string& kernel_name,
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {arg0, arg1}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];
-      mtl_setArgs(computeEncoder, arg0, arg1, params);
+      mtl_setArgs(computeEncoder, arg0, arg1, params, extra_args...);
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
       getMPSProfiler().endProfileKernel(PSO, mpsStream);
@@ -1027,13 +1029,19 @@ static void adaptive_avg_pool_out_mps_template(const Tensor& output,
   AvgPoolingParams<5> params{};
   fill_avg_pool_params(params, input, output, pooling_dims, op_name);
   params.adaptive = true;
-  launch_avg_pool_kernel("avg_pool_",
-                         adaptive_pool_needs_int64(input, output, pooling_dims) ? "_i64" : "_i32",
-                         input,
-                         output,
-                         output.numel(),
-                         params,
-                         op_name);
+  const auto index_suffix = adaptive_pool_needs_int64(input, output, pooling_dims) ? "_i64" : "_i32";
+  // A simdgroup per output pays off for windows large enough to amortize it and wide enough to keep its lanes busy
+  int64_t window_size = 1;
+  for (const auto dim : c10::irange(input.dim() - pooling_dims, input.dim())) {
+    window_size *= c10::metal::ceil_div(input.size(dim), output.size(dim));
+  }
+  constexpr int64_t simd_width = 32;
+  if (input.size(-1) >= 16 * output.size(-1) && window_size >= 1024) {
+    launch_avg_pool_kernel(
+        "adaptive_avg_pool_simd_", index_suffix, input, output, output.numel() * simd_width, params, op_name);
+    return;
+  }
+  launch_avg_pool_kernel("avg_pool_", index_suffix, input, output, output.numel(), params, op_name);
 }
 
 static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input,
@@ -1064,13 +1072,32 @@ static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input
   AvgPoolingParams<5> params{};
   fill_avg_pool_params(params, grad_input, grad_output, pooling_dims, op_name);
   params.adaptive = true;
-  launch_avg_pool_kernel("adaptive_avg_pool_backward_",
-                         adaptive_pool_needs_int64(grad_input, grad_output, pooling_dims) ? "_i64" : "_i32",
-                         grad_input,
+  const auto index_suffix = adaptive_pool_needs_int64(grad_input, grad_output, pooling_dims) ? "_i64" : "_i32";
+  auto scaled_grad = at::empty(grad_output.sizes(), grad_output.options().dtype(kFloat));
+  int64_t num_ranges = 0;
+  for (const auto dim : c10::irange(grad_input.dim() - pooling_dims, grad_input.dim())) {
+    num_ranges += grad_input.size(dim);
+  }
+  auto out_ranges = at::empty({num_ranges, 2}, grad_output.options().dtype(kInt));
+  launch_avg_pool_kernel("adaptive_avg_pool_backward_scale_",
+                         index_suffix,
                          grad_output,
+                         scaled_grad,
+                         std::max(grad_output.numel(), num_ranges),
+                         params,
+                         op_name,
+                         out_ranges);
+  for (const auto dim : c10::irange(grad_output.dim())) {
+    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(scaled_grad.stride(dim));
+  }
+  launch_avg_pool_kernel("adaptive_avg_pool_backward_",
+                         index_suffix,
+                         grad_input,
+                         scaled_grad,
                          grad_input.numel(),
                          params,
-                         op_name);
+                         op_name,
+                         out_ranges);
 }
 
 static Tensor& adaptive_avg_pool_out_mps_impl(const Tensor& input,
