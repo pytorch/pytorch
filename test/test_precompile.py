@@ -7440,89 +7440,7 @@ def fn(x, w):
 """
 
 
-_NEVER_RUN_BACKWARD_MODULE = """
-def fn(x, w):
-    return (x @ w).softmax(-1)
-"""
-
-
-_NEVER_RUN_BACKWARD_DRIVER = """
-import os
-import sys
-
-phase, directory, module = sys.argv[1:4]
-os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
-os.environ.pop("TRITON_CACHE_DIR", None)
-os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
-if phase == "replay":
-    os.environ["TORCH_PRECOMPILE_NO_COMPILATION"] = "1"
-
-import torch
-
-pc = torch.compiler.precompile
-artifact = os.path.join(directory, "artifact.py")
-cache = os.path.join(directory, "artifact.cache")
-torch._inductor.config.use_static_cuda_launcher = True
-torch._inductor.config.coordinate_descent_tuning = True
-sys.path.insert(0, directory)
-fn = __import__(module).fn
-
-
-def inputs():
-    g = torch.Generator(device="cuda").manual_seed(0)
-    x = torch.randn(64, 128, device="cuda", generator=g, requires_grad=True)
-    return x, torch.randn(128, 32, device="cuda", generator=g, requires_grad=True)
-
-
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner
-
-benchmarked = []
-benchmark_all_configs = CachingAutotuner.benchmark_all_configs
-
-
-def recording_benchmark_all_configs(self, *args, **kwargs):
-    benchmarked.append((self.is_backward, len(self.launchers)))
-    return benchmark_all_configs(self, *args, **kwargs)
-
-
-CachingAutotuner.benchmark_all_configs = recording_benchmark_all_configs
-if phase == "capture":
-    tracer = pc.DynamoTracer(require_no_risky_drops=False)
-    with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
-        # Lowers the backward too, but no call runs it.
-        cap(*inputs())
-    # The backward was tuned across its configs while it lowered.
-    assert any(bw and n > 1 for bw, n in benchmarked), benchmarked
-else:
-    from triton.runtime.cache import FileCacheManager
-
-    x, w = inputs()
-    expected = fn(x, w)
-    expected.sum().backward()
-    writes = []
-    put = FileCacheManager.put
-
-    def recording_put(self, data, filename, binary=True):
-        writes.append(filename)
-        return put(self, data, filename, binary=binary)
-
-    FileCacheManager.put = recording_put
-    x2, w2 = inputs()
-    with pc.no_compilation():
-        loaded = pc.load(artifact, cache)
-        out = loaded(x2, w2)
-        out.sum().backward()
-    torch.testing.assert_close(out, expected)
-    torch.testing.assert_close(x2.grad, x.grad)
-    torch.testing.assert_close(w2.grad, w.grad)
-    # Neither a Triton compile nor an autotuning benchmark ran for the backward.
-    assert not writes, writes
-    assert not benchmarked, benchmarked
-print("never-run backward phase ok:", phase)
-"""
-
-
-_RUNTIME_CACHE_DRIVER = """
+_FRESH_REPLAY_PRELUDE = """
 import os
 import sys
 
@@ -7536,22 +7454,40 @@ if phase == "replay":
     os.environ["TORCH_PRECOMPILE_NO_COMPILATION"] = "1"
 
 import torch
+from triton.runtime.cache import FileCacheManager
 
 sys.path.insert(0, directory)
 fn = __import__(module).fn
 pc = torch.compiler.precompile
 artifact = os.path.join(directory, "artifact.py")
 cache = os.path.join(directory, "artifact.cache")
-expected_path = os.path.join(directory, "expected.pt")
 torch._inductor.config.use_static_cuda_launcher = True
 
 
-def inputs(seed):
+def inputs(seed, requires_grad=False):
     g = torch.Generator(device="cuda").manual_seed(seed)
-    x = torch.randn(64, 128, device="cuda", generator=g)
-    return x, torch.randn(128, 32, device="cuda", generator=g)
+    x = torch.randn(64, 128, device="cuda", generator=g, requires_grad=requires_grad)
+    w = torch.randn(128, 32, device="cuda", generator=g, requires_grad=requires_grad)
+    return x, w
 
 
+# A Triton JIT compile or autotuning benchmark writes through the cache
+# manager; replaying from the imported runtime cache writes nothing. The
+# runtime-cache transport refuses a custom manager_class, so record in place.
+writes = []
+put = FileCacheManager.put
+
+
+def recording_put(self, data, filename, binary=True):
+    writes.append(filename)
+    return put(self, data, filename, binary=binary)
+"""
+
+
+_RUNTIME_CACHE_DRIVER = (
+    _FRESH_REPLAY_PRELUDE
+    + """
+expected_path = os.path.join(directory, "expected.pt")
 if phase == "capture":
     tracer = pc.DynamoTracer(require_no_risky_drops=False)
     # Tunes _scale_kernel before the capture: the capture tunes it again.
@@ -7560,18 +7496,6 @@ if phase == "capture":
         for seed in range(2):
             cap(*inputs(seed))
 else:
-    from triton.runtime.cache import FileCacheManager
-
-    # A Triton JIT compile or autotuning benchmark writes through the cache
-    # manager; replaying from the imported runtime cache writes nothing. The
-    # runtime-cache transport refuses a custom manager_class, so record in place.
-    writes = []
-    put = FileCacheManager.put
-
-    def recording_put(self, data, filename, binary=True):
-        writes.append(filename)
-        return put(self, data, filename, binary=binary)
-
     expected = torch.load(expected_path)
     FileCacheManager.put = recording_put
     with pc.no_compilation():
@@ -7581,6 +7505,60 @@ else:
     assert not writes, writes
 print("runtime cache phase ok:", phase)
 """
+)
+
+
+_NEVER_RUN_BACKWARD_MODULE = """
+def fn(x, w):
+    return (x @ w).softmax(-1)
+"""
+
+
+_NEVER_RUN_BACKWARD_DRIVER = (
+    _FRESH_REPLAY_PRELUDE
+    + """
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+# The runtime-cache export refuses a kernel whose coordinate descent has not
+# run, so compile-time tuning must finish it for the never-run backward too.
+torch._inductor.config.coordinate_descent_tuning = True
+# Both config autotuning and coordinate descent benchmark through bench.
+benchmarked = []
+bench = CachingAutotuner.bench
+
+
+def recording_bench(self, *args, **kwargs):
+    benchmarked.append((self.is_backward, len(self.launchers)))
+    return bench(self, *args, **kwargs)
+
+
+CachingAutotuner.bench = recording_bench
+if phase == "capture":
+    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
+        # Lowers the backward too, but no call runs it.
+        cap(*inputs(0, requires_grad=True))
+    # The backward was tuned across its configs while it lowered.
+    assert any(bw and n > 1 for bw, n in benchmarked), benchmarked
+else:
+    x, w = inputs(0, requires_grad=True)
+    expected = fn(x, w)
+    expected.sum().backward()
+    FileCacheManager.put = recording_put
+    x2, w2 = inputs(0, requires_grad=True)
+    with pc.no_compilation():
+        loaded = pc.load(artifact, cache)
+        out = loaded(x2, w2)
+        out.sum().backward()
+    torch.testing.assert_close(out, expected)
+    torch.testing.assert_close(x2.grad, x.grad)
+    torch.testing.assert_close(w2.grad, w.grad)
+    # Neither a Triton compile nor a tuning benchmark ran for the backward.
+    assert not writes, writes
+    assert not benchmarked, benchmarked
+print("never-run backward phase ok:", phase)
+"""
+)
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
@@ -7670,34 +7648,6 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel.launchers = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
-
-    @skipIfCrossRef
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
-    def test_strict_replay_of_a_never_run_backward(self):
-        from torch.compiler._runtime_cache import _triton_runtime_cache
-
-        if _triton_runtime_cache() is None:
-            self.skipTest("requires a Triton with cache and autotuning knobs")
-        with tempfile.TemporaryDirectory() as directory:
-            module = f"precompile_never_run_{uuid.uuid4().hex}"
-            with open(os.path.join(directory, module + ".py"), "w") as f:
-                f.write(_NEVER_RUN_BACKWARD_MODULE)
-            for phase in ("capture", "replay"):
-                out = subprocess.run(
-                    [
-                        sys.executable,
-                        "-c",
-                        _NEVER_RUN_BACKWARD_DRIVER,
-                        phase,
-                        directory,
-                        module,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=900,
-                )
-                self.assertEqual(out.returncode, 0, out.stderr)
-                self.assertIn(f"never-run backward phase ok: {phase}", out.stdout)
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
@@ -9210,9 +9160,7 @@ class TestPrecompileRuntimeCache(TestCase):
             ):
                 TritonBundler.read_and_emit(bundle)
 
-    @skipIfCrossRef
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
-    def test_strict_replay_in_fresh_process(self):
+    def _capture_and_replay(self, module_source, driver, marker):
         from torch.compiler._runtime_cache import _triton_runtime_cache
 
         if _triton_runtime_cache() is None:
@@ -9220,23 +9168,28 @@ class TestPrecompileRuntimeCache(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             module = f"precompile_runtime_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:
-                f.write(_RUNTIME_CACHE_MODULE)
+                f.write(module_source)
             for phase in ("capture", "replay"):
-                out = subprocess.run(
-                    [
-                        sys.executable,
-                        "-c",
-                        _RUNTIME_CACHE_DRIVER,
-                        phase,
-                        directory,
-                        module,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=900,
-                )
+                cmd = [sys.executable, "-c", driver, phase, directory, module]
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
                 self.assertEqual(out.returncode, 0, out.stderr)
-                self.assertIn(f"runtime cache phase ok: {phase}", out.stdout)
+                self.assertIn(f"{marker}: {phase}", out.stdout)
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_strict_replay_in_fresh_process(self):
+        self._capture_and_replay(
+            _RUNTIME_CACHE_MODULE, _RUNTIME_CACHE_DRIVER, "runtime cache phase ok"
+        )
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_strict_replay_of_a_never_run_backward(self):
+        self._capture_and_replay(
+            _NEVER_RUN_BACKWARD_MODULE,
+            _NEVER_RUN_BACKWARD_DRIVER,
+            "never-run backward phase ok",
+        )
 
 
 _CUSTOM_OP_MODULE = """
@@ -9470,6 +9423,8 @@ class TestPrecompileCustomOpModules(TestCase):
             traced_bw = tracer == "make_fx" and entry == "train_fn"
             modules = tuple(sorted((module, bwmod))) if traced_bw else (module,)
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
+            if traced_bw:
+                self.assertIn(repr((f"{bwns}::scale", "")), python_code)
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
@@ -9477,6 +9432,15 @@ class TestPrecompileCustomOpModules(TestCase):
 def _no_fake_op_fn(x):
     # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
     return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
+
+
+def _composite_impl(x):
+    return torch.ops.precompile_no_fake.op.default(x) * 2
+
+
+def _composite_op_fn(x):
+    # Fake mode fails on the decomposed op, but the graph break runs this one.
+    return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
 
 
 def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
@@ -9564,18 +9528,18 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_pystub_module_is_recorded(self):
-        try:
-            import libtorch_agn_2_13  # noqa: F401
-        except ImportError:
-            self.skipTest("requires the libtorch_agn_2_13 cpp extension")
         from torch._precompile import _custom_op_module
 
-        name = "libtorch_agn_2_13::identity_with_fake_module"
-        self.assertEqual(_custom_op_module(name, ""), "libtorch_agn_2_13")
-        missing = "libtorch_agn_2_13::identity_w_nonexistent_fake_module"
-        self.assertIsNone(_custom_op_module(missing, ""))
+        # As a C++ op that names its module with m.set_python_module.
+        name = f"precompile_pystub_{uuid.uuid4().hex}::op"
+        with mock.patch.object(torch._C, "_dispatch_pystub") as dispatch_pystub:
+            dispatch_pystub.return_value = ("unittest", "context")
+            self.assertEqual(_custom_op_module(name, ""), "unittest")
+            dispatch_pystub.return_value = None
+            self.assertIsNone(_custom_op_module(name, ""))
 
     def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
+        from torch._native.registry import _define_native_op_once
         from torch._precompile import _custom_op_modules
 
         op, qualname = self._op("in_main")
@@ -9594,6 +9558,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         names = [(qualname, ""), (f"{ns}::f", ""), (f"{ns}::legacy_op", "")]
         names.append((recorded._qualname, ""))
         importlib.import_module("torch.export.custom_ops")
+        # A register_op_override op, which only that call defines.
+        native = f"precompile_{uuid.uuid4().hex}"
+        _define_native_op_once(native, "aten", "neg")
+        names.append((f"_native::{native}", ""))
 
         # Torch's own ops, registered from C++ and from Python inside torch.
         names += [("aten::add", "Tensor"), ("export::access_subclass_inner_tensor", "")]
@@ -9604,6 +9572,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(qualname, message)
         self.assertIn(f"{ns}::f", message)
         self.assertIn(f"{ns}::legacy_op", message)
+        self.assertIn(f"_native::{native}", message)
         self.assertNotIn(recorded._qualname, message)
         self.assertNotIn("aten::add", message)
         self.assertNotIn("export::", message)
@@ -9612,12 +9581,29 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_an_op_a_torch_submodule_registers_records_that_module(self):
         from torch._precompile import _custom_op_modules
 
-        # device_mesh needs DeviceMesh registered as an opaque type first.
-        importlib.import_module("torch.distributed.tensor")
-        importlib.import_module("torch.distributed._ops.device_mesh")
-        op = ("device_mesh::_runtime_compute_coordinate_on_dim", "")
-        module = "torch.distributed._ops.device_mesh"
-        self.assertEqual(_custom_op_modules([op]), (module,))
+        # Registers the ops here; the recorded modules must import in this order.
+        modules = ("torch.distributed.tensor", "torch.distributed._ops.device_mesh")
+        for module in modules:
+            importlib.import_module(module)
+        ops = [
+            ("device_mesh::_runtime_compute_coordinate_on_dim", ""),
+            ("device_mesh::_get_submesh", ""),
+        ]
+        self.assertEqual(_custom_op_modules(ops), modules)
+
+    def test_a_prim_records_the_module_defining_it(self):
+        from torch._precompile import _custom_op_modules
+
+        importlib.import_module("torch._inductor.inductor_prims")
+        importlib.import_module("torch._dynamo.tensor_version_op")
+        expected = {
+            "add": "torch._prims",
+            "inductor_random": "torch._inductor.inductor_prims",
+            "_tensor_version": "torch._dynamo.tensor_version_op",
+            "_unsafe_set_version_counter": "torch._dynamo.tensor_version_op",
+        }
+        for name, module in expected.items():
+            self.assertEqual(_custom_op_modules([(f"prims::{name}", "")]), (module,))
 
     @unittest.skipIf(IS_WINDOWS, "forks")
     def test_no_op_torch_registers_is_reported(self):
@@ -9626,7 +9612,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             import json
             import torch
             import torch.onnx.ops
-            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _torch_op_module
+            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _torch_op_module
             if torch.distributed.is_available():
                 import torch.distributed.fsdp
                 import torch.distributed.pipelining
@@ -9645,7 +9631,8 @@ class TestPrecompileCustomOpRecording(TestCase):
                     reported.add(ns)
                 else:
                     modules.setdefault(module, []).append([op_name, overload])
-            print(json.dumps({"reported": sorted(reported), "modules": modules}))
+            chains = {m: [_custom_op_modules(ops), ops] for m, ops in modules.items()}
+            print(json.dumps({"reported": sorted(reported), "modules": chains}))
             """
         )
         # Only a source build records C++ schemas under torch/, so they are checked
@@ -9654,8 +9641,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         # metal, nnapi, ...) are not checked.
         out = subprocess.check_output([sys.executable, "-c", script], text=True)
         scan = json.loads(out)
-        # "_test" holds TorchScript's own test ops.
-        self.assertEqual(set(scan["reported"]) - {"_test"}, set())
+        # "_test" holds TorchScript's own test ops, and "_native" register_op_override's
+        # ops, which only that call defines.
+        self.assertEqual(set(scan["reported"]) - {"_test", "_native"}, set())
 
         # Each recorded module must register its ops when imported alone, as on a fresh
         # host. A child forked from a process that imported only torch imports each one.
@@ -9664,15 +9652,14 @@ class TestPrecompileCustomOpRecording(TestCase):
             import importlib, json, os, sys
             import torch
             modules = json.load(sys.stdin)
-            for module, ops in sorted(modules.items()):
+            for module, (chain, ops) in sorted(modules.items()):
                 sys.stdout.flush()
                 if os.fork() != 0:
                     os.wait()
                     continue
                 try:
-                    if module == "torch.distributed._ops.device_mesh":
-                        importlib.import_module("torch.distributed.tensor")
-                    importlib.import_module(module)
+                    for name in chain:
+                        importlib.import_module(name)
                     for op_name, overload in ops:
                         try:
                             torch._C._dispatch_find_schema_or_throw(op_name, overload)
@@ -9717,11 +9704,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", lambda x: x.clone(), "CPU")
+        lib.define("composite(Tensor x) -> Tensor")
+        lib.impl("composite", _composite_impl, "CompositeImplicitAutograd")
         lib.define("bypassed(Tensor x) -> Tensor")
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "artifact.py")
             with capture(
-                _no_fake_op_fn,
+                _composite_op_fn,
                 artifact_path=artifact,
                 cache_path=os.path.join(directory, "artifact.cache"),
                 tracer=DynamoTracer(),
@@ -9730,14 +9719,20 @@ class TestPrecompileCustomOpRecording(TestCase):
                 cap(torch.ones(4))
                 # A compile that graph-broke on an op and was then bypassed.
                 package = cap._session._package
-                with package.code_context(_no_fake_op_fn.__code__):
+                with package.code_context(_composite_op_fn.__code__):
                     package.add_graph_break_op(
                         torch.ops.precompile_no_fake.bypassed.default
                     )
                     package.bypass_current_compile()
+                # A recompile that records a guarded code must not keep its ops.
+                cap(torch.ones(4, 4))
             with open(artifact) as f:
                 python_code = f.read()
-        self.assertIn("CUSTOM_OPS = (('precompile_no_fake::op', ''),)", python_code)
+        expected = (
+            ("precompile_no_fake::composite", ""),
+            ("precompile_no_fake::op", ""),
+        )
+        self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
     def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
         served, served_name = self._op("served")

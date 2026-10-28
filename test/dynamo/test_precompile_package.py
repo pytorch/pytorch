@@ -2723,14 +2723,18 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             inductor_config.patch({"triton.autotune_at_compile_time": False}),
         ):
             self.assertEqual(flags(), ambient)
-            with _capture_config():
-                self.assertEqual(flags(), (True,) * 5)
-            self.assertEqual(flags(), ambient)
-
-            with self.assertRaisesRegex(RuntimeError, "boom"):
+            torch._logging._internal.warning_once.cache_clear()
+            with self.assertLogs(precompile_package.log, "WARNING") as logs:
                 with _capture_config():
-                    raise RuntimeError("boom")
-            self.assertEqual(flags(), ambient)
+                    self.assertEqual(flags(), (True,) * 5)
+                self.assertEqual(flags(), ambient)
+
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    with _capture_config():
+                        raise RuntimeError("boom")
+                self.assertEqual(flags(), ambient)
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("autotune_at_compile_time=False", logs.output[0])
 
             # Config values are per thread, so a worker entering the scope
             # patches only itself and the main thread stays ambient.
