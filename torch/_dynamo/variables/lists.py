@@ -79,6 +79,7 @@ from .object_protocol import (
     pyindex_check,
     pyiter_next,
     pylong_as_ssize_t,
+    pylong_check,
     pynumber_as_ssize_t,
     pynumber_index,
     python_constant_repr_impl,
@@ -2595,6 +2596,52 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(result)
 
+    def bytearray_replace(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_replace: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        try:
+            const_args = [arg.as_python_constant() for arg in args[:2]]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            if len(args) == 3 and not kwargs and not args[2].is_python_constant():
+                # CPython validates both buffers before calling count.__index__.
+                # The result is discarded; this only pins down the error order.
+                bytearray().replace(*const_args, 0)
+                if any(
+                    isinstance(arg, ByteArrayVariable) for arg in args[:2]
+                ) and not pylong_check(maybe_get_python_type(args[2])):
+                    # Exports on mutable arguments are invisible on traced copies.
+                    return None
+                const_args.append(pynumber_index(tx, args[2]).as_python_constant())
+            else:
+                const_args.extend(arg.as_python_constant() for arg in args[2:])
+            result = self.data.replace(*const_args, **const_kwargs)
+        except AsPythonConstantNotImplementedError:
+            return None
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ByteArrayVariable(result, mutation_type=ValueMutationNew())
+
+    def bytearray_translate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_translate: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            result = self.data.translate(*const_args, **const_kwargs)
+        except AsPythonConstantNotImplementedError:
+            return None
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ByteArrayVariable(result, mutation_type=ValueMutationNew())
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
@@ -2607,6 +2654,8 @@ class ByteArrayVariable(VariableTracker):
         "extend": Method(bytearray_extend),
         "insert": Method(bytearray_insert),
         "pop": Method(bytearray_pop),
+        "replace": Method(bytearray_replace),
+        "translate": Method(bytearray_translate),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
