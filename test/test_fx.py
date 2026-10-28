@@ -16,6 +16,7 @@ import numbers
 import operator
 import os
 import pickle
+import subprocess
 import sys
 import traceback
 import types
@@ -1791,6 +1792,58 @@ class TestFX(JitTestCase):
             _wrapped_fns_to_patch.pop((id(frame_dict), "leaf_fn"), None)
         targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
         self.assertIn(leaf_fn, targets)
+
+    def test_wrap_registered_while_patching_wrapped_functions_is_applied(self):
+        from torch.fx._symbolic_trace import (
+            _Patcher,
+            _patch_wrapped_functions,
+            _wrapped_fns_to_patch,
+        )
+
+        def leaf(x):
+            return x
+
+        def resolve(d):
+            _wrapped_fns_to_patch[(id(d), "leaf")] = d
+            return math.sqrt
+
+        frame_dict = self._lazy_globals("bar", resolve, leaf=leaf)
+        keys = [(id(frame_dict), "bar"), (id(frame_dict), "leaf")]
+        _wrapped_fns_to_patch[keys[0]] = frame_dict
+        try:
+            with self._patch_is_lazy_import(), _Patcher() as patcher:
+                _patch_wrapped_functions(patcher)
+                self.assertIsNot(dict.__getitem__(frame_dict, "leaf"), leaf)
+        finally:
+            for key in keys:
+                _wrapped_fns_to_patch.pop(key, None)
+
+    def test_symbolic_trace_on_a_real_lazy_import_runtime(self):
+        is_enabled = getattr(importlib, "is_lazy_imports_enabled", None)
+        if not callable(is_enabled):
+            self.skipTest("lazy imports are unavailable")
+        script = """
+import importlib, os, sys, tempfile
+import torch
+d = tempfile.mkdtemp()
+with open(os.path.join(d, "lazy_body.py"), "w") as f:
+    f.write("import torch\n@torch.jit.script\ndef g(x: torch.Tensor) -> torch.Tensor:\n    return x\nSCALE = 2\n")
+with open(os.path.join(d, "lazy_model.py"), "w") as f:
+    f.write("import torch\nimport lazy_body\nclass M(torch.nn.Module):\n    def forward(self, x):\n        return x * lazy_body.SCALE\n")
+sys.path.insert(0, d)
+import lazy_model
+assert importlib.is_lazy_import(lazy_model.__dict__, "lazy_body")
+gm = torch.fx.symbolic_trace(lazy_model.M())
+assert torch.equal(gm(torch.ones(2)), torch.full((2,), 2.0))
+"""
+        result = subprocess.run(
+            [sys.executable, "-L", "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_nested_symbolic_trace_resolves_lazy_globals_with_every_patch_reverted(
         self,

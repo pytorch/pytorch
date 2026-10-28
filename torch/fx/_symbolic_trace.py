@@ -918,8 +918,8 @@ class Tracer(TracerBase):
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
-                # Resolve lazy globals before patching: a module body run here may call
-                # torch.fx.wrap, which must register before _patch_wrapped_functions runs.
+                # Resolve the lazy globals of the scanned scopes before patching, so a
+                # torch.fx.wrap their module bodies call applies to this trace.
                 _resolve_lazy_imports(patcher, fn_globals)
                 for module in self._autowrap_search:
                     _resolve_lazy_imports(patcher, module.__dict__)
@@ -1309,8 +1309,12 @@ def _resolve_lazy_imports(
     in, reverted.
 
     Reading an unresolved lazy import runs its module body, which must not see the
-    globals FX patches mid-trace or FX's tracing flag. ``importlib.is_lazy_import``
-    exists only on PEP 690-style lazy-import runtimes (e.g. Cinder).
+    globals FX patches mid-trace or FX's tracing flag. This covers only the scopes FX
+    scans (the traced function's globals, the autowrap modules, the wrapped names and
+    each called submodule's ``forward.__globals__``); a lazy global read by any other
+    code during the trace still resolves under FX's patches.
+    ``importlib.is_lazy_import`` exists only on PEP 690-style lazy-import runtimes
+    (e.g. Cinder).
     """
     is_lazy_import = getattr(importlib, "is_lazy_import", None)
     if is_lazy_import is None:
@@ -1340,13 +1344,19 @@ def _patch_wrapped_functions(patcher: _Patcher) -> None:
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
-    for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
-        _resolve_lazy_imports(patcher, frame_dict, (name,))
-        if name not in frame_dict and hasattr(builtins, name):
-            orig_fn = getattr(builtins, name)
-        else:
-            orig_fn = frame_dict[name]
-        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+    # Resolving a lazy import may run a body that registers more wraps.
+    patched: set[tuple[int, str]] = set()
+    while pending := [k for k in _wrapped_fns_to_patch if k not in patched]:
+        for key in pending:
+            patched.add(key)
+            frame_dict = _wrapped_fns_to_patch[key]
+            name = key[1]
+            _resolve_lazy_imports(patcher, frame_dict, (name,))
+            if name not in frame_dict and hasattr(builtins, name):
+                orig_fn = getattr(builtins, name)
+            else:
+                orig_fn = frame_dict[name]
+            patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
