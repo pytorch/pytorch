@@ -1348,6 +1348,20 @@ class TestTensorCreation(TestCase):
 
         self.assertEqual(out, torch.stack((a,), 0), atol=0, rtol=0)
 
+    # The serial stack kernel ignores strides, so it can only use contiguous tensors.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test__stack_noncontiguous(self, device, dtype):
+        x = torch.arange(12, device=device, dtype=dtype).view(4, 3)
+        transposed = x.t()
+        expanded = x[:1].expand(4, 3)
+        for inputs in ((transposed,), (transposed, transposed), (expanded,)):
+            self.assertEqual(torch._stack(inputs, 0), torch.stack(inputs, 0), atol=0, rtol=0)
+
+        out = torch.empty(1, 3, 4, device=device, dtype=dtype).transpose(1, 2)
+        torch._stack((x,), 0, out=out)
+        self.assertEqual(out, torch.stack((x,), 0), atol=0, rtol=0)
+
     def test_repeat_interleave(self, device):
         x = torch.tensor([0, 1, 2, 3], device=device)
         expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
