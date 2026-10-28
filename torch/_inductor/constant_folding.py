@@ -5,6 +5,7 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._inductor.freezing_utils import maybe_set_is_frozen_param
 from torch.utils._ordered_set import OrderedSet
 
@@ -222,10 +223,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         # TODO - constant folding triton kernel returns the inputs -- fix this
-        if (
-            node.op == "call_function"
-            and node.name == "triton_kernel_wrapper_functional_proxy"
-        ):
+        if node.op == "call_function" and is_user_kernel_functional_hop(node.target):
             return self.unknown_value
 
         # skip constructors, since inductor generates optimal code for them already
