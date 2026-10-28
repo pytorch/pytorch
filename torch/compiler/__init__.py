@@ -606,8 +606,8 @@ def _current_flags() -> _TracingFlags:
 
 
 @contextlib.contextmanager
-def _session_flag(attr: str):
-    """Hold one session flag True; the session flags object lives in a
+def _session_flag(*attrs: str):
+    """Hold session flags True; the session flags object lives in a
     per-thread TLS slot while the session is active."""
     # Invariant: only _session_flag writes this key, and it never stashes the
     # shared default, so stashed objects are safe to mutate.
@@ -615,13 +615,15 @@ def _session_flag(attr: str):
     fresh = flags is _flags
     if fresh:
         flags = _TracingFlags()
-    old_value = getattr(flags, attr)
-    setattr(flags, attr, True)
+    old_values = [(attr, getattr(flags, attr)) for attr in attrs]
+    for attr in attrs:
+        setattr(flags, attr, True)
     torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, flags)
     try:
         yield
     finally:
-        setattr(flags, attr, old_value)
+        for attr, old_value in old_values:
+            setattr(flags, attr, old_value)
         if fresh:
             torch._C._remove_obj_from_tls(_SESSION_FLAGS_TLS_KEY)
 
@@ -655,19 +657,15 @@ def _is_non_strict_tracing() -> bool:
     return _current_flags().is_non_strict_tracing
 
 
-@contextlib.contextmanager
 def _non_strict_tracing_context():
     """Context manager that sets the non-strict tracing flag."""
-    with _session_flag("is_non_strict_tracing"):
-        yield
+    return _session_flag("is_non_strict_tracing")
 
 
-@contextlib.contextmanager
 def _compile_session_context():
     """Context manager that sets the compiling flag for the duration of a
     torch.compile session in the current thread (per-thread, see #202042)."""
-    with _session_flag("is_compiling"):
-        yield
+    return _session_flag("is_compiling")
 
 
 @contextlib.contextmanager

@@ -9,7 +9,7 @@ import operator
 import re
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from inspect import ismethod, Parameter
 from typing import Any, TYPE_CHECKING
 
@@ -1472,14 +1472,11 @@ def _get_decomp_for_cia(op: "OperatorBase") -> Callable[..., object]:
     return functools.partial(_special_op_to_decompose_cia, kernel=op)
 
 
-@contextmanager
-def _compiling_state_context() -> Generator[None, None, None]:
-    # Both flags ride the same per-thread session object stashed in TLS, so
-    # autograd worker threads observe is_exporting too, and export sessions in
+def _compiling_state_context() -> AbstractContextManager[None]:
+    # Sets both flags on one per-thread session object stashed in TLS, so
+    # autograd worker threads observe them too and export sessions in
     # different threads cannot clobber each other's save/restore (#202042).
-    with torch.compiler._compile_session_context():
-        with torch.compiler._session_flag("is_exporting"):
-            yield
+    return torch.compiler._session_flag("is_compiling", "is_exporting")
 
 
 def _fakify_params_buffers(

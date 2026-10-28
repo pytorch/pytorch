@@ -48,7 +48,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_item_memo
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -2199,7 +2199,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 or example_value.dim() != 0
                 or example_value.device.type != "cpu"
                 or example_value.dtype != torch.int64
-                or (item_memo := example_value.item_memo) is None
+                or (item_memo := maybe_get_item_memo(example_value)) is None
             ):
                 return None
 
@@ -2625,24 +2625,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx,
                     torch.fx.experimental.symbolic_shapes.optimization_hint(
                         expr.sym_num, fallback_int
-                    ),
-                )
-            elif expr.is_python_constant():
-                return expr
-            else:
-                return None
-
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
-        def handle_guard_size_oblivious(
-            self, tx: "InstructionTranslatorBase", expr: VariableTracker
-        ) -> VariableTracker | None:
-            if isinstance(expr, SymNodeVariable):
-                # TODO: this probably should be folded somewhere else but I'm not sure where
-                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
-                return VariableTracker.build(
-                    tx,
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
-                        expr.sym_num
                     ),
                 )
             elif expr.is_python_constant():

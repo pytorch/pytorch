@@ -5,6 +5,7 @@
 #include <torch/headeronly/util/Float8_e4m3fnuz.h>
 #include <torch/headeronly/util/Float8_e5m2.h>
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/complex.h>
@@ -169,6 +170,16 @@ struct static_cast_with_inter_type<
 };
 
 template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e5m3fnu> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::Float8_e5m3fnu src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
+  }
+};
+
+template <>
 struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Half> {
   C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(c10::Half src) {
     return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
@@ -239,6 +250,17 @@ struct static_cast_with_inter_type<
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::BFloat16>
   apply(c10::Float8_e8m0fnu src) {
+    return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::Float8_e5m3fnu> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Float8_e5m3fnu src) {
     return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
   }
 };
