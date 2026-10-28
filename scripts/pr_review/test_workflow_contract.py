@@ -5300,6 +5300,9 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
             prompt,
         )
         self.assertIn("reason for Request Changes or names as blocking", prompt)
+        # The summary keeps the Recommendation and explains an override.
+        self.assertIn("summary and its Recommendation", prompt)
+        self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
 
     def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
         # parse_diff's KNOWN LIMITS: findings on these files are discarded,

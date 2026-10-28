@@ -939,8 +939,10 @@ jobs:
               "changes_requested". Approve and Needs Discussion are
               "ready_for_human_review", unless the review names a point as
               blocking: then it is "changes_requested".
-            - `summary`: the review's one-sentence summary and the verdict
-              you chose, in at most three sentences.
+            - `summary`: the review's one-sentence summary and its
+              Recommendation, in at most three sentences. If a blocking point
+              made the verdict "changes_requested" under Approve or Needs
+              Discussion, say so in words.
             - `findings`: one per problem the review raises, in the review's
               words. `severity` is `major` for each point the review gives as a
               reason for Request Changes or names as blocking, `minor` for
