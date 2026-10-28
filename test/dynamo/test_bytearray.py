@@ -305,9 +305,21 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.count("i")
         with self.assertRaisesRegex(ValueError, "byte must be in range"):
             b.count(256)
-        with self.assertRaisesRegex(TypeError, r"^count expected at least 1 argument"):
+        # CPython 3.13 reformatted arity TypeErrors ("expected ... got ...");
+        # 3.11 and 3.12 say "() takes ... (N given)". make_dynamo_test runs the
+        # body eagerly before compiling, so accept either form, matching the
+        # pattern used in test/cpython/v3_13/test_call.py.
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at least 1 argument \(0 given\)"
+            r"|count expected at least 1 argument, got 0",
+        ):
             b.count()
-        with self.assertRaisesRegex(TypeError, r"^count expected at most 3 arguments"):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at most 3 arguments \(4 given\)"
+            r"|count expected at most 3 arguments, got 4",
+        ):
             b.count(b"i", None, None, None)
 
     @make_dynamo_test
@@ -523,9 +535,17 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.find(-1)
         with self.assertRaisesRegex(ValueError, "byte must be in range"):
             b.find(256)
-        with self.assertRaisesRegex(TypeError, r"^find expected at least 1 argument"):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at least 1 argument \(0 given\)"
+            r"|find expected at least 1 argument, got 0",
+        ):
             b.find()
-        with self.assertRaisesRegex(TypeError, r"^find expected at most 3 arguments"):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at most 3 arguments \(4 given\)"
+            r"|find expected at most 3 arguments, got 4",
+        ):
             b.find(b"i", None, None, None)
 
     def test_rfind(self):
@@ -540,9 +560,17 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.rfind("i")
         with self.assertRaisesRegex(ValueError, "byte must be in range"):
             b.rfind(256)
-        with self.assertRaisesRegex(TypeError, r"^rfind expected at least 1 argument"):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at least 1 argument \(0 given\)"
+            r"|rfind expected at least 1 argument, got 0",
+        ):
             b.rfind()
-        with self.assertRaisesRegex(TypeError, r"^rfind expected at most 3 arguments"):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at most 3 arguments \(4 given\)"
+            r"|rfind expected at most 3 arguments, got 4",
+        ):
             b.rfind(b"i", None, None, None)
 
 
