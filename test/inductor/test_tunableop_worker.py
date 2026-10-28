@@ -87,6 +87,10 @@ class TunableOpWorkerTest(TestCase):
         self.addCleanup(setattr, tunableop, "_worker", None)
         self.addCleanup(setattr, tunableop, "_worker_key", None)
 
+    def _stamped(self):
+        """The envelope submit() put on the pipe."""
+        return self.created[-1].sent[-1]
+
     def _submit(self, device=0, filename="t0.csv", job=None):
         with (
             mock.patch("torch.cuda.current_device", return_value=device),
@@ -106,7 +110,16 @@ class TunableOpWorkerTest(TestCase):
         # worker -- but only if the job actually carries it.
         job = tunableop.BenchmarkJob(None, tuning=False)
         self._submit(device=3, job=job)
-        self.assertEqual(job.device, 3)
+        self.assertEqual(self._stamped().device, 3)
+
+    def test_submit_does_not_mutate_the_job(self):
+        # The state submit() resolves travels in the envelope, so a job carries
+        # only what its caller gave it.
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        before = dict(vars(job))
+        self._submit(device=3, job=job)
+        self.assertEqual(vars(job), before)
+        self.assertIsNot(self._stamped(), job)
 
     def test_worker_restarts_when_the_device_changes(self):
         self._submit(device=0)
@@ -197,8 +210,8 @@ class TunableOpWorkerTest(TestCase):
             ),
         ):
             tunableop.submit(job)
-        self.assertEqual(job.device, 1)
-        self.assertEqual(job.settings["set_rotating_buffer_size"], -1)
+        self.assertEqual(self._stamped().device, 1)
+        self.assertEqual(self._stamped().settings["set_rotating_buffer_size"], -1)
 
     def test_worker_device_comes_from_the_job_not_the_process(self):
         # Inductor does not set the CUDA current device while lowering, so a
@@ -217,8 +230,8 @@ class TunableOpWorkerTest(TestCase):
             mock.patch.dict(os.environ, env, clear=True),
         ):
             tunableop.submit(job)
-        self.assertEqual(job.device, 1)
-        self.assertEqual(job.filename, "tunableop_results1.csv")
+        self.assertEqual(self._stamped().device, 1)
+        self.assertEqual(self._stamped().filename, "tunableop_results1.csv")
 
     def test_worker_is_reused_when_device_and_file_are_unchanged(self):
         self._submit(device=2, filename="a.csv")
@@ -337,7 +350,7 @@ class TunableOpWorkerTest(TestCase):
         ):
             tunableop.submit(job)
         self.assertEqual(
-            job.settings,
+            self._stamped().settings,
             {
                 "set_max_tuning_duration": 11,
                 "set_max_tuning_iterations": 12,
@@ -365,7 +378,7 @@ class TunableOpWorkerTest(TestCase):
             ),
         ):
             tunableop.submit(job)
-        self.assertEqual(job.settings["set_rotating_buffer_size"], -1)
+        self.assertEqual(self._stamped().settings["set_rotating_buffer_size"], -1)
 
     def test_snapshot_skips_unreadable_knobs(self):
         tunable = mock.Mock()
@@ -377,9 +390,9 @@ class TunableOpWorkerTest(TestCase):
             mock.patch("torch.cuda.tunable", tunable),
         ):
             tunableop.submit(job)
-        self.assertNotIn("set_max_tuning_duration", job.settings)
+        self.assertNotIn("set_max_tuning_duration", self._stamped().settings)
         # The failure is contained: the submission still went through.
-        self.assertEqual(job.filename, "s.csv")
+        self.assertEqual(self._stamped().filename, "s.csv")
 
     def test_submit_stamps_resolved_filename(self):
         # get_filename() is "" until the manager initializes; submit() must
@@ -393,7 +406,7 @@ class TunableOpWorkerTest(TestCase):
         ):
             # No PYTORCH_TUNABLEOP_FILENAME: default rule applies, ordinal included.
             tunableop.submit(job)
-            self.assertEqual(job.filename, "tunableop_results0.csv")
+            self.assertEqual(self._stamped().filename, "tunableop_results0.csv")
             self.assertEqual(tunableop._worker_key, (0, "tunableop_results0.csv"))
 
     def test_submit_prefers_env_filename_when_unset(self):
@@ -406,7 +419,7 @@ class TunableOpWorkerTest(TestCase):
             mock.patch.dict("os.environ", {"PYTORCH_TUNABLEOP_FILENAME": "env.csv"}),
         ):
             tunableop.submit(job)
-            self.assertEqual(job.filename, "env1.csv")
+            self.assertEqual(self._stamped().filename, "env1.csv")
 
     def test_insert_device_ordinal_matches_cpp_rule(self):
         self.assertEqual(tunableop._insert_device_ordinal("r%d.csv", 3), "r3.csv")
@@ -420,7 +433,7 @@ class TunableOpWorkerTest(TestCase):
             mock.patch("torch.cuda.tunable.get_filename", return_value="parent.csv"),
         ):
             tunableop.submit(job)
-            self.assertEqual(job.filename, "parent.csv")
+            self.assertEqual(self._stamped().filename, "parent.csv")
 
 
 class _NoopTunable:
@@ -475,8 +488,6 @@ class BenchmarkJobCallTest(TestCase):
                 return 1.5
 
         job = tunableop.BenchmarkJob(FakeBmreq(), tuning=True, nearest_match=True)
-        job.device = 3
-        job.filename = "w.csv"
         with (
             mock.patch(
                 "torch.cuda.set_device",
@@ -484,7 +495,7 @@ class BenchmarkJobCallTest(TestCase):
             ),
             mock.patch("torch.cuda.tunable", FakeTunable()),
         ):
-            self.assertEqual(job(), 1.5)
+            self.assertEqual(job(3, "w.csv", {}), 1.5)
         # Device first, then filename, then flags; warm benchmark, tuning off,
         # measured benchmark; cudagraphs cleared.
         kinds = [c[0] for c in calls]
@@ -534,12 +545,11 @@ class BenchmarkJobCallTest(TestCase):
                 return 1.0
 
         job = tunableop.BenchmarkJob(FakeBmreq(), tuning=False)
-        job.filename = ""
         with (
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", FakeTunable()),
         ):
-            job()
+            job(0, "", {})
         self.assertEqual(seen, [])
 
     def test_call_applies_the_stamped_settings_after_the_flags(self):
@@ -568,16 +578,12 @@ class BenchmarkJobCallTest(TestCase):
                 return 3.0
 
         job = tunableop.BenchmarkJob(FakeBmreq(), tuning=True)
-        job.filename = ""
-        job.settings = {
-            "set_max_tuning_duration": 11,
-            "set_rotating_buffer_size": 13,
-        }
         with (
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", FakeTunable()),
         ):
-            self.assertEqual(job(), 3.0)
+            settings = {"set_max_tuning_duration": 11, "set_rotating_buffer_size": 13}
+            self.assertEqual(job(0, "", settings), 3.0)
         self.assertIn(("set_max_tuning_duration", 11), calls)
         self.assertIn(("set_rotating_buffer_size", 13), calls)
         # After the flags and before the benchmark: a setter applied afterwards
@@ -612,12 +618,11 @@ class BenchmarkJobCallTest(TestCase):
         job = tunableop.BenchmarkJob(
             FakeBmreq(), tuning=True, dyn_dims_mask=(True, False, True, False)
         )
-        job.filename = ""
         with (
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", FakeTunable()),
         ):
-            self.assertEqual(job(), 2.5)
+            self.assertEqual(job(0, "", {}), 2.5)
         # A span, not an exact sequence: __call__ may benchmark more than once,
         # and every benchmark must fall inside the scope.
         self.assertEqual(calls[0], ("enter", (True, False, True, False)))
@@ -646,12 +651,11 @@ class BenchmarkJobCallTest(TestCase):
                 job = tunableop.BenchmarkJob(
                     FakeBmreq(), tuning=True, dyn_dims_mask=mask
                 )
-                job.filename = ""
                 with (
                     mock.patch("torch.cuda.set_device"),
                     mock.patch("torch.cuda.tunable", FakeTunable()),
                 ):
-                    self.assertEqual(job(), 1.0)
+                    self.assertEqual(job(0, "", {}), 1.0)
                 self.assertEqual(entered, [])
 
 
@@ -678,6 +682,33 @@ class TunableopModeValidationTest(TestCase):
                     tunableop.is_enabled()
         finally:
             tunableop._mode_warned = False
+
+    def test_tune_mode_warns_when_env_blocks_recording(self):
+        # The env reads win over the setters the worker applies, so tune mode
+        # would benchmark everything and persist nothing.
+        for var, value in (
+            ("PYTORCH_TUNABLEOP_TUNING", "0"),
+            ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
+        ):
+            with self.subTest(var=var):
+                tunableop._env_warned = False
+                self.addCleanup(setattr, tunableop, "_env_warned", False)
+                with (
+                    inductor_config.patch({"cuda.aten_tunableop_mode": "tune"}),
+                    mock.patch("torch.cuda.is_available", return_value=True),
+                    mock.patch.dict(os.environ, {var: value}),
+                    self.assertLogs(tunableop.log, level="WARNING") as logs,
+                ):
+                    self.assertTrue(tunableop.is_tune_mode())
+                self.assertTrue(any(var in m for m in logs.output))
+                # Warns once, not per GEMM.
+                with (
+                    inductor_config.patch({"cuda.aten_tunableop_mode": "tune"}),
+                    mock.patch("torch.cuda.is_available", return_value=True),
+                    mock.patch.dict(os.environ, {var: value}),
+                    self.assertNoLogs(tunableop.log, level="WARNING"),
+                ):
+                    tunableop.is_tune_mode()
 
     def test_valid_modes_do_not_warn(self):
         tunableop._mode_warned = False
@@ -1027,10 +1058,7 @@ class WarmMeasureTest(TestCase):
         bmreq.benchmark_with_cudagraphs = True
         bmreq.config_cudagraph_benchmarking = True
         bmreq.benchmark.return_value = 3.0
-        job = tunableop.BenchmarkJob(bmreq, tuning=True, **kwargs)
-        job.device = 0
-        job.filename = ""
-        return job
+        return tunableop.BenchmarkJob(bmreq, tuning=True, **kwargs)
 
     def test_measure_runs_warm_then_measured(self):
         job = self._job()
@@ -1038,7 +1066,7 @@ class WarmMeasureTest(TestCase):
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
-            self.assertEqual(job(), 3.0)
+            self.assertEqual(job(0, "", {}), 3.0)
         # Warm + measured: two full benchmarks.
         self.assertEqual(job.bmreq.benchmark.call_count, 2)
         self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
@@ -1051,7 +1079,7 @@ class WarmMeasureTest(TestCase):
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
-            self.assertEqual(job(), 4.0)
+            self.assertEqual(job(0, "", {}), 4.0)
 
     def test_tune_only_skips_second_benchmark(self):
         job = self._job(measure=False)
@@ -1059,7 +1087,7 @@ class WarmMeasureTest(TestCase):
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
-            self.assertEqual(job(), 3.0)
+            self.assertEqual(job(0, "", {}), 3.0)
         self.assertEqual(job.bmreq.benchmark.call_count, 1)
 
     def test_tune_only_failed_warm_reraises(self):
@@ -1073,7 +1101,7 @@ class WarmMeasureTest(TestCase):
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
             with self.assertRaisesRegex(RuntimeError, "tune-only warm-up failed"):
-                job()
+                job(0, "", {})
 
 
 if __name__ == "__main__":
