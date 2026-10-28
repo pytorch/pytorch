@@ -2759,10 +2759,8 @@ class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
       return {};
     }
 
-    // Only the addresses are kept, without a reference. A freed hook's
-    // address can be reused by new hooks, so this comparison relies on
-    // AUTOGRAD_SAVED_TENSORS_HOOKS in torch/_dynamo/guards.py registering
-    // both hooks with id_ref, which invalidates the entry when one is freed.
+    // This is safe since we're not accessing the contents of these pointers,
+    // only the contained address.
     return std::array<PyObject*, 2>{pack, unpack};
   }
 };

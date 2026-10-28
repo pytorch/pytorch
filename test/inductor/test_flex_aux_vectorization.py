@@ -243,13 +243,7 @@ class TestFlexAuxVectorization(InductorTestCase):
                 expected,
             )
 
-    @parametrize(
-        "cuda_major", [9, 10, 11, 12], name_fn=lambda cuda_major: str(cuda_major)
-    )
-    @torch._inductor.config.patch(
-        {"max_autotune": True, "test_configs.max_flex_configs": None}
-    )
-    def test_score_mod_vec_config_allows_mixed_gather(self, cuda_major):
+    def test_score_mod_vec_size_selector_allows_mixed_gather(self):
         graph = torch.fx.Graph()
         graph.placeholder("score")
         graph.placeholder("b")
@@ -271,25 +265,19 @@ class TestFlexAuxVectorization(InductorTestCase):
         )
         graph.output((direct_load, gather_load))
         graph_module = torch.fx.GraphModule({}, graph)
-        with (
-            V.set_graph_handler(MockGraphHandler()),
-            mock.patch.object(torch.cuda, "is_available", return_value=True),
-            mock.patch.object(
-                torch.cuda, "get_device_capability", return_value=(cuda_major, 0)
-            ),
-        ):
-            configs = flex_flash_attention_module.get_flex_flash_fwd_configs(
-                True,
-                True,
-                score_mod_graph_module=graph_module,
-                score_mod_other_buffers=[
-                    FakeAuxBuffer((128, 128), (128, 1)),
-                    FakeAuxBuffer((1,), (1,)),
-                ],
-            )
+        with V.set_graph_handler(MockGraphHandler()):
             self.assertEqual(
-                tuple(config.score_mod_vec_size for config in configs),
-                (8,) if cuda_major in (10, 11) else (1,),
+                select_score_mod_vec_size(
+                    has_score_mod=True,
+                    has_aux_tensors=True,
+                    is_sm100_or_later=True,
+                    graph_module=graph_module,
+                    other_buffers=[
+                        FakeAuxBuffer((128, 128), (128, 1)),
+                        FakeAuxBuffer((1,), (1,)),
+                    ],
+                ),
+                8,
             )
 
     @parametrize("chained", [False, True], name_fn=lambda chained: str(chained))
@@ -315,32 +303,11 @@ class TestFlexAuxVectorization(InductorTestCase):
                 select_score_mod_vec_size(
                     has_score_mod=True,
                     has_aux_tensors=True,
-                    supports_score_mod_vec=True,
+                    is_sm100_or_later=True,
                     graph_module=graph_module,
                     other_buffers=[FakeAuxBuffer((128, 128), (128, 1))],
                 ),
                 1,
-            )
-
-    @parametrize(
-        "cuda_major", [9, 10, 11, 12], name_fn=lambda cuda_major: str(cuda_major)
-    )
-    @torch._inductor.config.patch(
-        {"max_autotune": True, "test_configs.max_flex_configs": None}
-    )
-    def test_score_mod_vec_config_without_captured_tensors(self, cuda_major):
-        with (
-            mock.patch.object(torch.cuda, "is_available", return_value=True),
-            mock.patch.object(
-                torch.cuda, "get_device_capability", return_value=(cuda_major, 0)
-            ),
-        ):
-            configs = flex_flash_attention_module.get_flex_flash_fwd_configs(
-                True, False
-            )
-            self.assertEqual(
-                tuple(config.score_mod_vec_size for config in configs),
-                (1, 2, 4, 8, 16, 32, 64, 128) if cuda_major in (10, 11) else (1, 2),
             )
 
     @parametrize(

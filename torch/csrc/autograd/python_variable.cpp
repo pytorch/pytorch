@@ -2472,6 +2472,7 @@ create_native_op_schema(
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "can't happen");
+        break;
     }
     idx++;
   }
@@ -2584,6 +2585,7 @@ create_native_op_schema(
         }
         default:
           TORCH_INTERNAL_ASSERT(false, "can't happen");
+          break;
       }
     }
   }

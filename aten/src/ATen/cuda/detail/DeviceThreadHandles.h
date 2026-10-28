@@ -117,10 +117,8 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
 
 #ifdef USE_ROCM
     // hipblaslt cannot share a single handle across multiple streams, so this
-    // overload returns a handle unique to each (device, stream) pair. With
-    // create=false it returns nullptr instead of creating a handle when this
-    // thread has none for the pair and the pool has no spare.
-    Handle_t reserve(int device, void* stream, bool create = true)
+    // overload returns a handle unique to each (device, stream) pair.
+    Handle_t reserve(int device, void* stream)
     {
         auto key = std::make_pair(device, stream);
         // If this thread already has a handle for this (device, stream), return it
@@ -138,14 +136,10 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         my_stream_handles[key] = parent->available_handles[device].back();
         parent->available_handles[device].pop_back();
         }
-        else if(create)
+        else
         {
         parent->created_handles[device].emplace_back(true /*create*/);
         my_stream_handles[key] = parent->created_handles[device].back().handle;
-        }
-        else
-        {
-        return nullptr;
         }
 
         return my_stream_handles[key];

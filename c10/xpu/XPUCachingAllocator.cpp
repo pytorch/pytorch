@@ -5,7 +5,6 @@
 #include <deque>
 #include <functional>
 #include <mutex>
-#include <ranges>
 #include <set>
 #include <thread>
 #include <vector>
@@ -794,8 +793,7 @@ class DeviceCachingAllocator {
 
   BlockPool& get_pool(size_t size, sycl::queue* queue) {
     if (C10_UNLIKELY(!allocation_scopes_.empty())) {
-      // Search allocation_scopes_ in LIFO order so the innermost scope wins.
-      for (auto& entry : std::views::reverse(allocation_scopes_)) {
+      for (auto& entry : allocation_scopes_) {
         // lookup for mempool id matching current capture graph
         if (entry.second(queue)) {
           auto it1 = graph_pools.find(entry.first);

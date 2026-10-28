@@ -341,7 +341,7 @@ struct SchemaParser {
       case TypeKind::GeneratorType:
       case TypeKind::QuantizerType: {
         return parseTensorDefault(range);
-      }
+      } break;
       case TypeKind::StringType:
       case TypeKind::OptionalType:
       case TypeKind::NumberType:
@@ -350,10 +350,12 @@ struct SchemaParser {
       case TypeKind::FloatType:
       case TypeKind::ComplexType:
         return parseSingleConstant(arg_type, kind, real_type);
+        break;
       case TypeKind::DeviceObjType: {
         auto device_text =
             parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
         return c10::Device(device_text);
+        break;
       }
       case TypeKind::ListType: {
         auto elem_type = arg_type.containedType(0);
@@ -369,7 +371,7 @@ struct SchemaParser {
           return parseConstantList(
               *elem_type, elem_type->kind(), *real_elem_type);
         }
-      }
+      } break;
       case TypeKind::DynamicType:
         return parseDefaultValue(
             arg_type,
@@ -379,6 +381,7 @@ struct SchemaParser {
       default:
         throw(ErrorReport(range) << "unexpected type, file a bug report");
     }
+    return IValue(); // silence warnings
   }
 
   void parseList(

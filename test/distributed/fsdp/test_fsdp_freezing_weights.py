@@ -10,14 +10,10 @@ import torch.optim as optim
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_full_params
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -34,6 +30,8 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class Model(nn.Module):
@@ -120,8 +118,6 @@ class FreezingMethod(str, Enum):
 
 
 class TestFreezingWeights(FSDPTestContinuous):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     def _create_model(
         self,
         with_fsdp,
@@ -148,10 +144,8 @@ class TestFreezingWeights(FSDPTestContinuous):
         with_fsdp,
         disable_autograd,
         forward_prefetch,
-        device,
     ):
         torch.manual_seed(0)
-        device_type = torch.device(device).type
         batch = torch.randn(size=(2, 3, 224, 224)).to(device_type)
 
         fsdp_kwargs = {
@@ -205,7 +199,6 @@ class TestFreezingWeights(FSDPTestContinuous):
         return list(model.parameters())
 
     @skip_if_lt_x_gpu(2)
-    @onlyAccelerator
     @parametrize("with_nested_trunk", [True, False])
     @parametrize(
         "freezing_method", [FreezingMethod.RequiresGrad, FreezingMethod.GradToNone]
@@ -215,7 +208,6 @@ class TestFreezingWeights(FSDPTestContinuous):
     @parametrize("forward_prefetch", [True, False])
     def test_freezing_weights(
         self,
-        device,
         with_nested_trunk,
         freezing_method,
         freeze_after_wrap_fsdp,
@@ -230,7 +222,6 @@ class TestFreezingWeights(FSDPTestContinuous):
             with_fsdp=False,
             disable_autograd=disable_autograd,
             forward_prefetch=False,  # does not apply to DDP
-            device=device,
         )
 
         # FSDP
@@ -241,7 +232,6 @@ class TestFreezingWeights(FSDPTestContinuous):
             with_fsdp=True,
             disable_autograd=disable_autograd,
             forward_prefetch=forward_prefetch,
-            device=device,
         )
 
         self.assertEqual(
@@ -256,7 +246,7 @@ class TestFreezingWeights(FSDPTestContinuous):
                 self.assertEqual(ddp_param.requires_grad, fsdp_param.requires_grad)
 
 
-instantiate_device_type_tests(TestFreezingWeights, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestFreezingWeights)
 
 if __name__ == "__main__":
     run_tests()

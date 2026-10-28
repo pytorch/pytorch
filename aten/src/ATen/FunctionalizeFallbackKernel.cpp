@@ -82,7 +82,7 @@ namespace {
 
     auto any_functional_inputs = false;
     auto any_tensor_inputs = false;
-    for (const auto idx : c10::irange(num_arguments)) {
+    for (uint64_t idx = 0; idx < num_arguments; ++idx) {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         any_tensor_inputs = true;

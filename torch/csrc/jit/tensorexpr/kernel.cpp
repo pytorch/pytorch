@@ -1225,6 +1225,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
     }
     default: {
       TORCH_CHECK(false, "UNSUPPORTED DTYPE: ", t->repr_str());
+      break;
     }
   }
   return result;

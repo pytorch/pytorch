@@ -36,22 +36,7 @@ struct CuptiPMSamplingConfig {
   std::chrono::nanoseconds lookbackWindow{std::chrono::seconds{1}};
 };
 
-// The controller calls API methods one at a time, but may call decode()
-// from different threads.
-class ICuptiPMSamplingApi {
- public:
-  virtual ~ICuptiPMSamplingApi() = default;
-
-  virtual void configure(const CuptiPMSamplingConfig& config) = 0;
-  virtual void start() = 0;
-  // Appends one batch and returns true if all current records were decoded.
-  virtual bool decode(std::vector<CuptiPMSample>& samples) = 0;
-  virtual void stop() = 0;
-  // Must tolerate partial configuration and repeated calls.
-  virtual void disable() noexcept = 0;
-};
-
-class CuptiPMSamplingApi final : public ICuptiPMSamplingApi {
+class CuptiPMSamplingApi {
  public:
   CuptiPMSamplingApi() = default;
   CuptiPMSamplingApi(const CuptiPMSamplingApi&) = delete;
@@ -59,13 +44,14 @@ class CuptiPMSamplingApi final : public ICuptiPMSamplingApi {
   CuptiPMSamplingApi(CuptiPMSamplingApi&&) = delete;
   CuptiPMSamplingApi& operator=(CuptiPMSamplingApi&&) = delete;
 
-  ~CuptiPMSamplingApi() override;
+  virtual ~CuptiPMSamplingApi();
 
-  void configure(const CuptiPMSamplingConfig& config) override;
-  void start() override;
-  bool decode(std::vector<CuptiPMSample>& samples) override;
-  void stop() override;
-  void disable() noexcept override;
+  virtual void configure(const CuptiPMSamplingConfig& config);
+  virtual void start();
+  // Appends one batch and returns true if all current records were decoded.
+  virtual bool decode(std::vector<CuptiPMSample>& samples);
+  virtual void stop();
+  virtual void disable();
 
  private:
   void ensureConfigured() const;

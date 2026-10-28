@@ -2,6 +2,7 @@
 
 // ${generated_comment}
 
+#include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/TracerMode.h>

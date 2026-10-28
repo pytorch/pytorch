@@ -502,6 +502,7 @@ at::Tensor parseTensorFromMetadata(
             false,
             "Unsupported tensor quantization type in serialization ",
             toString(qscheme_type));
+        break;
     }
   } else {
     tensor = at::empty({0}, options);

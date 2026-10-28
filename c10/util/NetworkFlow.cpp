@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 
-#include <c10/util/irange.h>
 #include <functional>
 #include <queue>
 #include <unordered_map>
@@ -225,7 +224,7 @@ struct DinicFlowGraph {
     //   the behavior of networkx.
     auto can_reach_t = reverse_bfs_reachable(t);
     std::vector<size_t> reachable, unreachable;
-    for (const auto i : c10::irange(graph_size)) {
+    for (size_t i = 0; i < graph_size; ++i) {
       if (can_reach_t[i]) {
         unreachable.push_back(i);
       } else {

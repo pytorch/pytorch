@@ -15,7 +15,6 @@
 #pragma once
 
 #include <array>
-#include <c10/util/irange.h>
 #include <cstdint>
 
 namespace at::cpu {
@@ -51,7 +50,7 @@ inline std::array<uint32_t, 4> philox_4x32(uint64_t seed, uint64_t offset) {
   constexpr uint32_t kPhilox10A = 0x9E3779B9;
   constexpr uint32_t kPhilox10B = 0xBB67AE85;
 
-  for ([[maybe_unused]] const auto _ : c10::irange(N_ROUNDS - 1)) {
+  for (int i = 0; i < N_ROUNDS - 1; i++) {
     ctr = philox_round(ctr, key);
     key[0] += kPhilox10A;
     key[1] += kPhilox10B;

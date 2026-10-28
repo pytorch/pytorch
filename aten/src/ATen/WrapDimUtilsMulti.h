@@ -2,7 +2,6 @@
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/irange.h>
 #include <bitset>
 #include <sstream>
 
@@ -34,7 +33,7 @@ inline std::bitset<dim_bitset_size> dim_list_to_bitset(
       seen[dim] = true;
     }
   } else {
-    for (const auto dim : c10::irange(ndims)) {
+    for (size_t dim = 0; dim < ndims; dim++) {
       seen[dim] = true;
     }
   }

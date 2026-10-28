@@ -272,30 +272,30 @@ class SmallVectorTemplateCommon
   using Base::size;
 
   // forward iterator creation methods.
-  [[nodiscard]] iterator begin() C10_LIFETIMEBOUND {
+  [[nodiscard]] iterator begin() {
     return (iterator)this->BeginX;
   }
-  [[nodiscard]] const_iterator begin() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_iterator begin() const {
     return (const_iterator)this->BeginX;
   }
-  [[nodiscard]] iterator end() C10_LIFETIMEBOUND {
+  [[nodiscard]] iterator end() {
     return begin() + size();
   }
-  [[nodiscard]] const_iterator end() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_iterator end() const {
     return begin() + size();
   }
 
   // reverse iterator creation methods.
-  [[nodiscard]] reverse_iterator rbegin() C10_LIFETIMEBOUND {
+  [[nodiscard]] reverse_iterator rbegin() {
     return reverse_iterator(end());
   }
-  [[nodiscard]] const_reverse_iterator rbegin() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_reverse_iterator rbegin() const {
     return const_reverse_iterator(end());
   }
-  [[nodiscard]] reverse_iterator rend() C10_LIFETIMEBOUND {
+  [[nodiscard]] reverse_iterator rend() {
     return reverse_iterator(begin());
   }
-  [[nodiscard]] const_reverse_iterator rend() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_reverse_iterator rend() const {
     return const_reverse_iterator(begin());
   }
 
@@ -311,47 +311,46 @@ class SmallVectorTemplateCommon
   }
 
   /// Return a pointer to the vector's buffer, even if empty().
-  [[nodiscard]] pointer data() C10_LIFETIMEBOUND {
+  [[nodiscard]] pointer data() {
     return pointer(begin());
   }
   /// Return a pointer to the vector's buffer, even if empty().
-  [[nodiscard]] const_pointer data() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_pointer data() const {
     return const_pointer(begin());
   }
 
   // SmallVector::at is NOT from LLVM.
-  [[nodiscard]] reference at(size_type idx) C10_LIFETIMEBOUND {
+  [[nodiscard]] reference at(size_type idx) {
     assert(idx < size());
     return begin()[idx];
   }
-  [[nodiscard]] const_reference at(size_type idx) const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_reference at(size_type idx) const {
     assert(idx < size());
     return begin()[idx];
   }
-  [[nodiscard]] reference operator[](size_type idx) C10_LIFETIMEBOUND {
+  [[nodiscard]] reference operator[](size_type idx) {
     assert(idx < size());
     return begin()[idx];
   }
-  [[nodiscard]] const_reference operator[](size_type idx) const
-      C10_LIFETIMEBOUND {
+  [[nodiscard]] const_reference operator[](size_type idx) const {
     assert(idx < size());
     return begin()[idx];
   }
 
-  [[nodiscard]] reference front() C10_LIFETIMEBOUND {
+  [[nodiscard]] reference front() {
     assert(!empty());
     return begin()[0];
   }
-  [[nodiscard]] const_reference front() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_reference front() const {
     assert(!empty());
     return begin()[0];
   }
 
-  [[nodiscard]] reference back() C10_LIFETIMEBOUND {
+  [[nodiscard]] reference back() {
     assert(!empty());
     return end()[-1];
   }
-  [[nodiscard]] const_reference back() const C10_LIFETIMEBOUND {
+  [[nodiscard]] const_reference back() const {
     assert(!empty());
     return end()[-1];
   }
