@@ -13039,6 +13039,25 @@ class TestGDS(TestCase):
             self.assertIsNotNone(file.handle)
             file.save_storage(storage)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "hipFile transfer size limit")
+    @largeTensorTest("3GB", "cuda")
+    def test_gds_hipfile_transfer_size_limit(self):
+        # hipFile silently truncates transfers to MAX_RW_COUNT, so GdsFile
+        # rejects larger storages.
+        self._require_gds()
+        storage = torch.UntypedStorage(2**31, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            transfers = (
+                file.save_storage,
+                file.load_storage,
+                file.save_storage_async,
+                file.load_storage_async,
+            )
+            for transfer in transfers:
+                with self.assertRaisesRegex(RuntimeError, "transfers at most"):
+                    transfer(storage)
+
     def test_gds_async_stream_ordered(self):
         # The transfers run on the current (side) stream after the kernels that
         # produce src.
