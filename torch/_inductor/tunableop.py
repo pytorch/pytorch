@@ -490,8 +490,8 @@ def _job_device(job: BenchmarkJob) -> int:
     graph bookkeeping, and compile_fx's CUDA guard covers post-grad passes
     rather than lowering, so a graph targeting cuda:1 can be autotuned while
     the process current device is 0. The child builds its tensors from these
-    metas, so this is the GPU it really tunes on, and the ordinal an
-    uninitialized results manager will name its file for. Mirrors
+    metas, so this is the GPU it really tunes on, and the ordinal
+    resolve_and_pin_filename names an as-yet-unchosen results file for. Mirrors
     BenchmarkRequest._get_benchmark_device, including its fall back to the
     current device when nothing carries one.
     """

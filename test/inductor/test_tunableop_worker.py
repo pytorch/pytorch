@@ -233,8 +233,8 @@ class TunableOpWorkerTest(TestCase):
         ):
             tunableop.submit(job)
         self.assertEqual(self._stamped().device, 1)
-        # Nothing has set a filename, so the runtime manager will name its file
-        # when the graph's first GEMM runs under set_device(1).
+        # Nothing has set a filename, so submit() derives one from the job's
+        # device and pins it; the runtime then opens what the worker wrote.
         self.assertEqual(self._stamped().filename, "tunableop_results1.csv")
 
     def test_pinned_filename_is_reused_for_a_job_on_another_device(self):
@@ -443,8 +443,9 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(self._stamped().filename, "s.csv")
 
     def test_submit_stamps_resolved_filename(self):
-        # get_filename() is "" until the manager initializes; submit() must
-        # resolve the C++ default rule instead of keying the worker on "".
+        # get_filename() is "" until the manager initializes, so submit()
+        # applies the C++ default rule and pins the result rather than keying
+        # the worker on "".
         job = tunableop.BenchmarkJob(None, tuning=False)
         env = {k: v for k, v in os.environ.items() if k != "PYTORCH_TUNABLEOP_FILENAME"}
         with (
@@ -462,8 +463,9 @@ class TunableOpWorkerTest(TestCase):
             self.assertEqual(tunableop._worker_key, (0, "tunableop_results0.csv"))
 
     def test_submit_prefers_env_filename_when_unset(self):
-        # The C++ manager inserts the device ordinal into the env name; the
-        # worker must use the same file or the runtime never sees its results.
+        # submit() mirrors the C++ rule for inserting the ordinal into the env
+        # name, then pins it, so parent and worker cannot land on different
+        # files.
         job = tunableop.BenchmarkJob(None, tuning=False)
         with (
             mock.patch("torch.cuda.current_device", return_value=1),
