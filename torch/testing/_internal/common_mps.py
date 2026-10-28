@@ -244,7 +244,6 @@ if torch.backends.mps.is_available():
             "_segment_reduceoffsets": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
-            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],

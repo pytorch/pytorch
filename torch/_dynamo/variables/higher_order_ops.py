@@ -767,6 +767,7 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._subclasses.fake_tensor import maybe_clear_fake_constant
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -832,9 +833,8 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
+                cloned_carry = cast(TensorVariable, carry.clone())
+                maybe_clear_fake_constant(cloned_carry.proxy.node.meta["example_value"])
                 return cloned_carry
 
         # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
@@ -2371,6 +2371,16 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx, fn=str)
 
     def call_function(
         self,
