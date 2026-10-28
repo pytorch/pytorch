@@ -4913,6 +4913,103 @@ class AOTInductorTestsTemplate:
             else:
                 self.assertIsNone(ref)
 
+    @requires_cuda_tma
+    @requires_autotune_at_compile_time
+    def test_triton_kernel_tma_descriptors_on_one_tensor_autotune_with_sample_inputs(
+        self,
+    ):
+        # Two descriptors over one captured input, with different block shapes,
+        # must not share a variable in the compile-time autotune block.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        @triton.jit
+        def copy_kernel(
+            full_desc,
+            half_desc,
+            out_full_desc,
+            out_half_desc,
+            BLOCK_SIZE_X: "tl.constexpr",
+            BLOCK_SIZE_Y: "tl.constexpr",
+        ):
+            x = tl.program_id(axis=0) * BLOCK_SIZE_X
+            y = tl.program_id(axis=1) * BLOCK_SIZE_Y
+            half: tl.constexpr = BLOCK_SIZE_Y // 2
+            tl.store_tensor_descriptor(
+                out_full_desc, [x, y], tl.load_tensor_descriptor(full_desc, [x, y])
+            )
+            tl.store_tensor_descriptor(
+                out_half_desc, [x, y], tl.load_tensor_descriptor(half_desc, [x, y])
+            )
+            tl.store_tensor_descriptor(
+                out_half_desc,
+                [x, y + half],
+                tl.load_tensor_descriptor(half_desc, [x, y + half]),
+            )
+
+        class Model(torch.nn.Module):
+            def forward(self, a):
+                BLOCK_SIZE_X = 16
+                BLOCK_SIZE_Y = 32
+                out_full = torch.empty_like(a)
+                out_half = torch.empty_like(a)
+                x_size, y_size = a.size()
+                descs = [
+                    create_tensor_descriptor_shim(t, block_shape, new_api=True)
+                    for t, block_shape in (
+                        (a, [BLOCK_SIZE_X, BLOCK_SIZE_Y]),
+                        (a, [BLOCK_SIZE_X, BLOCK_SIZE_Y // 2]),
+                        (out_full, [BLOCK_SIZE_X, BLOCK_SIZE_Y]),
+                        (out_half, [BLOCK_SIZE_X, BLOCK_SIZE_Y // 2]),
+                    )
+                ]
+                grid = (
+                    triton.cdiv(x_size, BLOCK_SIZE_X),
+                    triton.cdiv(y_size, BLOCK_SIZE_Y),
+                )
+                copy_kernel[grid](
+                    *descs, BLOCK_SIZE_X=BLOCK_SIZE_X, BLOCK_SIZE_Y=BLOCK_SIZE_Y
+                )
+                return out_full, out_half
+
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        autotune_code = []
+        generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def capture_autotune_block(wrapper):
+            autotune_code.append(wrapper.kernel_autotune_calls.getvalue())
+            return generate_and_run(wrapper)
+
+        a = torch.randn((32, 64), device=self.device)
+
+        with (
+            config.patch(
+                {
+                    "triton.autotune_with_sample_inputs": True,
+                    "force_disable_caches": True,
+                }
+            ),
+            unittest.mock.patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                capture_autotune_block,
+            ),
+        ):
+            self.check_model(Model(), example_inputs=(a,))
+
+        # The model's own launch is correct either way; only the autotune block
+        # shows whether each descriptor parameter got its own block shape.
+        code = "\n".join(autotune_code)
+        match = re.search(r"copy_kernel_\d+\.run\((\w+), (\w+),", code)
+        self.assertIsNotNone(match, code)
+        full, half = match.groups()
+        self.assertNotEqual(full, half)
+        FileCheck().check(f"{full} = ").check_same("(16, 32)").run(code)
+        FileCheck().check(f"{half} = ").check_same("(16, 16)").run(code)
+
     def test_triton_kernel_sympy_expr_arg(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
