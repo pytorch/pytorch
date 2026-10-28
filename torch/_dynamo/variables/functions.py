@@ -3530,6 +3530,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_module(self) -> str:
         return self.wrapper_obj.__module__
 
+    def get_doc(self) -> str | None:
+        return self.wrapper_obj.__doc__
+
     def get_name(self) -> str:
         return self.wrapper_obj.__name__
 
@@ -3541,6 +3544,40 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self) -> types.CodeType:
         return self.get_function().__code__
+
+    # The wrapper is not a function object, so these must not fall through to
+    # the function getsets the MRO walk would find (python_type() reports
+    # FunctionType). They read the wrapper via the get_* accessors above; the
+    # function-only slots (__defaults__ et al.) are deliberately absent.
+    tp_members = {
+        "__doc__": Member(
+            getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
+            getset_set("__doc__"),
+        ),
+        "__module__": Member(
+            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
+            getset_set("__module__"),
+        ),
+    }
+
+    tp_getset = {
+        "__name__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
+            _set_qualname,
+        ),
+        "__code__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
+            unmodeled_setter,
+        ),
+        "__dict__": GetSet(
+            lambda s, tx: s.get_dict_vt(tx),
+            unmodeled_setter,
+        ),
+    }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
