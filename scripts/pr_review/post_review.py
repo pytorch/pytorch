@@ -252,8 +252,22 @@ def marked(mark: str, lines: list[str]) -> list[str]:
     return [f"{mark} {lines[0]}", *lines[1:]]
 
 
+def _positive_int(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def run_url(repo: str, row: dict) -> str:
+    """The attempt that wrote `row`: a re-run would put a later attempt's logs
+    behind the bare run link. "" without a run id."""
+    run_id, attempt = row.get("review_run_id"), row.get("review_run_attempt")
+    if not _positive_int(run_id):
+        return ""
+    url = f"https://github.com/{repo}/actions/runs/{run_id}"
+    return f"{url}/attempts/{attempt}" if _positive_int(attempt) else url
+
+
 def report_url(
-    repo: str, pr: int, sha: str, run_id: object, finding: dict | None = None
+    repo: str, pr: int, sha: str, run: str = "", finding: dict | None = None
 ) -> str:
     """The feedback form for this review, or for one finding of it. Every value
     is percent-encoded, so the link cannot leave its markdown link syntax."""
@@ -263,16 +277,17 @@ def report_url(
         "pr": f"https://github.com/{repo}/pull/{pr}",
         "commit": sha,
     }
-    if type(run_id) is int and run_id > 0:
-        params["run"] = f"https://github.com/{repo}/actions/runs/{run_id}"
+    if run:
+        params["run"] = run
     if finding is not None:
         params["finding"] = f"{unescape_path(finding['path'])}:{finding['line']}"
     return f"{REPORT_ISSUE_URL}?{urllib.parse.urlencode(params)}"
 
 
 def comment_body(finding: dict, report: str = "") -> str:
-    # Contained as in the body, so an unclosed fence cannot swallow the link.
-    lines = marked(BLOCKING_MARK, contained(finding["message"]))
+    # Not contained like the body: that would break every closed code block to
+    # save the link from a rare unclosed one, where it just shows as text.
+    lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
     if report:
         lines += ["", f"<sub>[Report this finding]({report})</sub>"]
     return defuse_bot_commands("\n".join(lines))
@@ -418,13 +433,11 @@ def _compose(
     return defuse_bot_commands("\n".join(lines))
 
 
-def post(
-    gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_id=None
-) -> dict:
+def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings, run="") -> dict:
     """Create the review. If GitHub refuses the inline comments (422), they go
     into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
-    report = report_url(gh.repo, pr, sha, run_id)
+    report = report_url(gh.repo, pr, sha, run)
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
     comments = [
@@ -432,7 +445,7 @@ def post(
             "path": unescape_path(f["path"]),
             "line": f["line"],
             "side": "RIGHT",
-            "body": comment_body(f, report_url(gh.repo, pr, sha, run_id, f)),
+            "body": comment_body(f, report_url(gh.repo, pr, sha, run, f)),
         }
         for f in blocking_findings(verdict, findings)
         if not f.get("discussion")
@@ -979,7 +992,7 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     clean = verdict == "ready_for_human_review"
     try:
         new_id = publish(
-            gh, pr, sha, author, verdict, summary, findings, row.get("review_run_id")
+            gh, pr, sha, author, verdict, summary, findings, run_url(gh.repo, row)
         )
     except GitHubError as exc:
         if not clean:
@@ -1050,11 +1063,11 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
 RETRACTED = object()
 
 
-def publish(gh, pr, sha, author, verdict, summary, findings, run_id=None):
+def publish(gh, pr, sha, author, verdict, summary, findings, run=""):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
     findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
-    new = post(gh, pr, sha, verdict, summary, findings, run_id)
+    new = post(gh, pr, sha, verdict, summary, findings, run)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")

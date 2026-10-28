@@ -494,10 +494,13 @@ def report_links(text):
     ]
 
 
+RUN77 = "https://github.com/o/r/actions/runs/77/attempts/2"  # @lint-ignore
+
+
 class TestReportLinks(unittest.TestCase):
     def test_the_review_and_each_inline_finding_link_to_the_feedback_form(self):
         gh = FakeGitHub()
-        go(gh, dict(row(), review_run_id=77))
+        go(gh, dict(row(), review_run_id=77, review_run_attempt=2))
         (body,) = gh.posted()
         (link,) = report_links(body["body"])
         self.assertEqual(
@@ -508,18 +511,14 @@ class TestReportLinks(unittest.TestCase):
         self.assertEqual(q["title"], "[AI PR review] o/r#1")
         self.assertEqual(q["pr"], "https://github.com/o/r/pull/1")  # @lint-ignore
         self.assertEqual(q["commit"], SHA)
-        self.assertEqual(
-            q["run"], "https://github.com/o/r/actions/runs/77"
-        )  # @lint-ignore
+        self.assertEqual(q["run"], RUN77)  # @lint-ignore
         self.assertNotIn("finding", q)
         self.assertIn("[Report a bad review]", body["body"].splitlines()[-1])
         (c,) = body["comments"]
         (link,) = report_links(c["body"])
         q = dict(urllib.parse.parse_qsl(link.query))
         self.assertEqual(q["finding"], "torch/x.py:3")
-        self.assertEqual(
-            q["run"], "https://github.com/o/r/actions/runs/77"
-        )  # @lint-ignore
+        self.assertEqual(q["run"], RUN77)  # @lint-ignore
 
     def test_the_finding_names_the_real_file(self):
         f = {
@@ -536,11 +535,21 @@ class TestReportLinks(unittest.TestCase):
             dict(urllib.parse.parse_qsl(link.query))["finding"], "a_b/c.py:9"
         )
 
-    def test_a_missing_or_odd_run_id_is_left_out(self):
+    def test_the_run_link_names_the_attempt_that_posted(self):
+        u = post_review.run_url
+        runs = "https://github.com/o/r/actions/runs"  # @lint-ignore
+        self.assertEqual(
+            u("o/r", {"review_run_id": 7, "review_run_attempt": 2}),
+            f"{runs}/7/attempts/2",
+        )
+        for attempt in (None, 0, "2", True):
+            self.assertEqual(
+                u("o/r", {"review_run_id": 7, "review_run_attempt": attempt}),
+                f"{runs}/7",
+            )
         for run_id in (None, "1)[x](y", True, 0):
-            url = post_review.report_url("o/r", 1, SHA, run_id)
-            self.assertNotIn("run=", url)
-            self.assertNotRegex(url, r"[()\s<>\[\]]")
+            self.assertEqual(u("o/r", {"review_run_id": run_id}), "")
+        self.assertNotIn("run=", post_review.report_url("o/r", 1, SHA))
 
     def test_findings_in_the_body_carry_no_extra_links(self):
         major = {"path": "a.py", "line": 1, "severity": "major", "message": "Bug."}
@@ -560,18 +569,13 @@ class TestReportLinks(unittest.TestCase):
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
         self.assertTrue(q["finding"].endswith(".py:3"))
 
-    def test_an_unclosed_fence_cannot_swallow_the_link(self):
-        f = {
-            "path": "a.py",
-            "line": 1,
-            "severity": "major",
-            "message": "See:\n```\ncode",
-        }
+    def test_a_fenced_code_block_in_a_finding_is_posted_unchanged(self):
+        message = "Use:\n\n```python\nx = a_b * c\n```"
+        f = {"path": "a.py", "line": 1, "severity": "major", "message": message}
         gh = FakeGitHub()
         go(gh, row(findings=[f]))
         text = gh.posted()[0]["comments"][0]["body"]
-        self.assertNotIn("\n```", text)
-        self.assertTrue(text.split("\n")[-1].startswith("<sub>[Report this finding]"))
+        self.assertTrue(text.startswith("\U0001f534 " + message + "\n\n<sub>[Report"))
 
 
 class TestNothingIsPosted(unittest.TestCase):
