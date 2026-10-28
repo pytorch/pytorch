@@ -367,6 +367,35 @@ class TestReductionConfigDevice(TestCase):
         fallback.assert_not_called()
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
+    @parametrize("stride", [1, 2])
+    def test_selectors_can_pick_inner_tree_for_unordered(self, device, stride):
+        """Serve a selector's inner-tree pick; a general-route decline stays silent."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn((64, 2048 * stride), device=device)[:, ::stride]
+        with (
+            mock.patch.object(rt, "select_row_order", return_value="inner_tree"),
+            mock.patch.object(
+                kg,
+                "select_general_config",
+                return_value=kg._GeneralConfig(kernel_order="inner_tree"),
+            ),
+            mock.patch.object(kg, "_try_indexed_itree", return_value=None) as indexed,
+            mock.patch.object(rt, "reduce_row_tile", wraps=rt.reduce_row_tile) as row,
+            mock.patch.object(rt, "inner_tree_fallback") as fallback,
+        ):
+            got = kg.reduce_dim(
+                traits.SumOps(acc=cutlass.Float32), "sum", x, [1], torch.float32
+            )
+        if stride == 1:
+            self.assertEqual(row.call_args.kwargs["order"], "inner_tree")
+        else:
+            indexed.assert_called_once()
+        fallback.assert_not_called()
+        self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
+
     @parametrize("entry", ["reduce_dim2", "reduce_all", "reduce_all2"])
     def test_order_keyword_reaches_the_row_kernel(self, device, entry):
         """Thread an explicit order through every reduce entry point."""
