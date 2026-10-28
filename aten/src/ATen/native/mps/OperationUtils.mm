@@ -852,22 +852,33 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 }
 
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
-    id<MTLLibrary> lib,
-    const std::string& fname) {
-  auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
-  std::lock_guard guard(cache_mutex);
-  auto found_cpl = cplMap.find(key);
-  if (found_cpl != cplMap.end()) {
-    return found_cpl->second;
+    const std::string& fname,
+    id<MTLLibrary> lib) {
+  auto key = lib ? fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname) : fname;
+  {
+    std::lock_guard guard(cache_mutex);
+    auto found_cpl = cplMap.find(key);
+    if (found_cpl != cplMap.end()) {
+      return found_cpl->second;
+    }
   }
 
+  if (!lib) {
+    lib = getLibraryForFunc(fname);
+  }
   NSError* error = nil;
   id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
   TORCH_CHECK(func, "Failed to create function state object for: ", fname);
   auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
-  return cplMap.try_emplace(std::move(key), cpl, func).first->second;
+  std::lock_guard guard(cache_mutex);
+  auto [it, inserted] = cplMap.try_emplace(std::move(key), cpl, func);
+  if (!inserted) {
+    [cpl release];
+    [func release];
+  }
+  return it->second;
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
@@ -907,7 +918,7 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto [cpl, func] = getLibraryPipelineState(name);
   return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
@@ -920,10 +931,10 @@ MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::s
     }
   }
 
-  // Both of these take the lock, so build the kernel before reacquiring it. A
-  // racing thread may have cached `name` first, in which case try_emplace keeps
-  // the winner and this one is dropped.
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  // getLibraryPipelineState() takes the lock, so build the kernel before
+  // reacquiring it. A racing thread may have cached `name` first, in which case
+  // try_emplace keeps the winner and this one is dropped.
+  auto [cpl, func] = getLibraryPipelineState(name);
   auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
   std::lock_guard guard(cache_mutex);
   return kernelCache.try_emplace(name, std::move(kernel)).first->second.get();
@@ -933,21 +944,39 @@ class BundledShaderLibrary : public MetalShaderLibrary {
  public:
   BundledShaderLibrary() : MetalShaderLibrary("") {}
 
+  std::vector<std::string> getFunctionNames() override {
+    auto rc = MetalShaderLibrary::getFunctionNames();
+    std::erase_if(rc, [&](const auto& name) { return variantLibraries.contains(name); });
+    for (const auto& it : variantLibraries) {
+      rc.push_back(it.first);
+    }
+    return rc;
+  }
+
  protected:
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
-      auto device = MPSDevice::getInstance()->device();
-      NSError* error = nil;
+      const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
 #ifdef CAN_BUILD_METAL_4
-      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
-      // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
-      const auto section_name = has_mpp() ? "metal_40" : "metal_basic";
-#else
-      const auto section_name = "metal_basic";
+          // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+          // cooperative-tensor ABI); every kernel it defines shadows the
+          // metal_basic one when has_mpp() holds.
+          {"metal_40", has_mpp},
 #endif
-      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
-      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+      };
+      for (const auto& [section, isSupported] : variantSections) {
+        if (!isSupported()) {
+          continue;
+        }
+        auto lib = loadSection(section);
+        @autoreleasepool {
+          for (NSString* name in [lib functionNames]) {
+            variantLibraries.try_emplace([name UTF8String], lib);
+          }
+        }
+      }
+      library = loadSection("metal_basic");
     }
     return library;
   }
@@ -956,7 +985,20 @@ class BundledShaderLibrary : public MetalShaderLibrary {
     TORCH_CHECK(false, "Should never be called");
   }
 
+  id<MTLLibrary> getLibraryForFunc(const std::string& fname) override {
+    auto basicLibrary = getLibrary();
+    auto it = variantLibraries.find(fname);
+    return it != variantLibraries.end() ? it->second : basicLibrary;
+  }
+
  private:
+  static id<MTLLibrary> loadSection(const std::string& name) {
+    NSError* error = nil;
+    auto lib = [MPSDevice::getInstance()->device() newLibraryWithData:getSectionData(name) error:&error];
+    TORCH_CHECK(lib, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    return lib;
+  }
+
   static dispatch_data_t getSectionData(const std::string& name) {
     uint32_t idx = 0;
     for (const auto cnt : c10::irange(_dyld_image_count())) {
@@ -975,6 +1017,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
                                 ^(){
                                 });
   }
+
+  std::unordered_map<std::string, id<MTLLibrary>> variantLibraries;
 };
 
 // Inner extent below which the per-element strided kernel beats the ILP tile.
