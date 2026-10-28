@@ -736,7 +736,7 @@ class PadBaddbmmTest(TestCase):
             )
         )
 
-    def _check_compiled(self, fn, args, dimensions=None, expect_padding=True):
+    def _check_compiled(self, fn, args, dimensions):
         observed = []
 
         def record_graph(graph):
@@ -764,12 +764,12 @@ class PadBaddbmmTest(TestCase):
         if grad_args:
             actual_grads = torch.autograd.grad(actual, grad_args, tangent)
             self.assertEqual(actual_grads, expected_grads)
-        if dimensions is not None:
-            self.assertEqual(observed, [dimensions])
-        if not expect_padding:
+        if dimensions is None:
             original_dims = (args[1].shape[1], args[1].shape[2], args[2].shape[2])
             for dims in observed:
                 self.assertEqual(dims, original_dims)
+        else:
+            self.assertEqual(observed, [dimensions])
         return actual
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
@@ -896,7 +896,7 @@ class PadBaddbmmTest(TestCase):
             torch.ones((batch, m, k), device=device),
             torch.ones((batch, k, n), device=device),
         )
-        self._check_compiled(torch.baddbmm, args, expect_padding=False)
+        self._check_compiled(torch.baddbmm, args, dimensions=None)
 
     @inductor_config.patch(strict_output_strides=True)
     @parametrize(
@@ -996,7 +996,7 @@ class PadBaddbmmTest(TestCase):
         with unittest.mock.patch.object(
             pad_mm, "is_mm_compute_bound", return_value=True
         ):
-            self._check_compiled(fn, args, expect_padding=False)
+            self._check_compiled(fn, args, dimensions=None)
 
     @fresh_cache()
     @inductor_config.patch(force_shape_pad=False)
