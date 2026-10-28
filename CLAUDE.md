@@ -229,18 +229,13 @@ Follow these rules for all code changes in this repository:
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for
   comments you are adding or rewriting.
-- New or substantially rewritten comments in C++/CUDA headers (`.h`, `.cuh`,
-  `.hpp`) should be short: at most a one-line description per declaration,
-  plus a `// See Note [Foo]` pointer. Put long explanations, including
-  `Note [...]` blocks and interface contracts, in the source file (`.cpp`,
-  `.cu`, `.mm`, ...) that implements the op or uses the code, even when the
-  code itself (a template, an inline function) lives in the header. Any edit to
-  a header, even to a comment, recompiles every file that includes it.
-  Exceptions: Doxygen docs in headers that `docs/cpp/source/Doxyfile` feeds to
-  Doxygen (or the `aten/src/ATen/templates/` headers they are generated from),
-  and header-only code with no natural source file (e.g. `torch/headeronly`,
-  `ATen/native/cuda/Loops.cuh`). Existing long comments in headers can stay and
-  take small edits.
+- Don't put long explanations of how or why an implementation works (e.g. a
+  `Note [...]`) in C++/CUDA headers (`.h`, `.cuh`, `.hpp`): editing a header,
+  even just a comment, rebuilds every file that includes it. Put them in the
+  `.cpp`/`.cu` file that implements the logic and leave a short
+  `// See Note [...]` pointer in the header. Documentation callers need (API
+  docs, interface contracts) stays in the header. This applies to comments you
+  add or substantially rewrite; existing comments can stay.
 
 If uncertain, choose the simpler, more concise implementation.
 
