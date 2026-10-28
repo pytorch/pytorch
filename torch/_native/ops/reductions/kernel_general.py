@@ -320,16 +320,21 @@ def _physical_col_view(
 # B200 CUDA-graph timings of the batched column kernel against the general kernel:
 # R <= 64 wins at every C (4-33x). Longer R needs C >= 16 (1.3x or better), and two
 # outputs also need B * C >= 8192 kept outputs; below that, general is up to 4x faster.
+# Only B200 is measured, so other architectures keep the general kernel for these routes.
+_BATCHED_COL_CCS = ((10, 0),)
 _BATCHED_COL_SHORT_R = 64
 _BATCHED_COL_MIN_C = 16
 _BATCHED_COL_2OUT_MIN_OUTPUTS = 8192
 
 
-def _col_route_ok(view: torch.Tensor, nouts: int) -> bool:
+def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
     """Whether the unordered column kernels beat the general kernel on this view."""
-    if view.dim() == 2:
+    if view.dim() == 2 and nouts == 1:
+        # The single-output 2D route predates the measured batched and two-output routes.
         return True
-    B, R, C = view.shape
+    if cc not in _BATCHED_COL_CCS:
+        return False
+    B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
     if R <= _BATCHED_COL_SHORT_R:
         return True
     return C >= _BATCHED_COL_MIN_C and (
@@ -395,16 +400,15 @@ def select_general_config(
     red_pairs: Pairs,
     kept_pairs: Pairs,
     *,
-    order: Literal["unordered", "inner_tree"],
     nfields: int,
     nouts: int,
     acc_bits: int = 32,
     alignment: int = 16,
 ) -> _GeneralConfig:
-    if order == "inner_tree":
-        return _GeneralConfig(kernel_order="inner_tree", rule="required_inner_tree")
-    if order != "unordered":
-        raise ValueError(f"unknown reduction order: {order!r}")
+    # One-output strided reductions on B200 at 512 MiB: 128 threads ran 0.87x (fp32) and
+    # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
+    if num_o == 1:
+        return _GeneralConfig(block=_K0_ALL_BLOCK, rule="general_one_output")
     strided_row = (
         cc == (10, 0)
         and dtype in (torch.float16, torch.bfloat16, torch.float32)
@@ -505,8 +509,6 @@ def _try_fast_row(
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
-    *,
-    order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...] | None:
     # Fast contiguous 2D last-dimension path. It needs no index remap, so index traits work.
     if x.dim() != 2 or x.stride(-1) != 1:
@@ -518,31 +520,25 @@ def _try_fast_row(
         return None
     from . import kernel_rowtile as rt
 
+    # Callers resolve any required order first, so this only serves unordered requests.
     M, itemsize = x.shape[0], x.element_size()
-    order = rt.reduction_order(order)
     kernel_order = rt.select_row_order(
         _hw.caps(x.device).cc,
         x.dtype,
         trait_key,
         N,
         M,
-        order=order,
         nfields=trait.nfields,
         nouts=nouts,
         acc_bits=max(dt.width for dt in trait.fdtypes),
         alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
     )
-    # A tuned inner-tree choice for an unordered request falls back when no plan exists.
-    if kernel_order == "inner_tree" and (
-        order == "inner_tree"
-        or rt.trait_itree_plan(trait, N, M, itemsize, device=x.device) is not None
-    ):
+    if kernel_order == "inner_tree":
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
         )
     ragged_vector = (
-        order == "unordered"
-        and _hw.caps(x.device).cc == (10, 0)
+        _hw.caps(x.device).cc == (10, 0)
         and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and tile.vec_size(N, itemsize) == 1
         and _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
@@ -809,7 +805,6 @@ def _reduce(
     dims: int | Sequence[int] | None,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
-    block: int | None = None,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
@@ -827,7 +822,6 @@ def _reduce(
 
     explicit = order == "inner_tree"
     order = rt.reduction_order(order)
-    tune = block is None
     if order == "inner_tree" and count > 0:
         ordered = None
         if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
@@ -837,18 +831,14 @@ def _reduce(
             red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
             kind = fast_kind(red_pairs, kept_pairs, nouts)
             if x.is_contiguous() and kind in ("row", "all"):
-                plan = rt.trait_itree_plan(
-                    trait, count, num_o, x.element_size(), device=x.device
+                ordered = rt.reduce_row_tile(
+                    trait,
+                    trait_key,
+                    x.reshape(num_o, count),
+                    out_dtypes,
+                    nouts=nouts,
+                    order="inner_tree",
                 )
-                if plan is not None:
-                    ordered = rt.reduce_row_tile(
-                        trait,
-                        trait_key,
-                        x.reshape(num_o, count),
-                        out_dtypes,
-                        nouts=nouts,
-                        order="inner_tree",
-                    )
             else:
                 from . import kernel_coltile as ct
 
@@ -888,11 +878,9 @@ def _reduce(
     # Route one-element outputs through the reduce-all split instead of one general block.
     if math.prod(out_shape) == 1 and x.is_contiguous():
         if nouts == 1:
-            out = reduce_all(
-                trait, trait_key, x, out_dtypes[0], block=block, order=order
-            )
+            out = reduce_all(trait, trait_key, x, out_dtypes[0], order=order)
             return (_as_shape(out, out_shape),)
-        outs = reduce_all2(trait, trait_key, x, out_dtypes, block=block, order=order)
+        outs = reduce_all2(trait, trait_key, x, out_dtypes, order=order)
         return tuple(_as_shape(o, out_shape) for o in outs)
 
     red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
@@ -904,11 +892,12 @@ def _reduce(
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row" and x.is_contiguous():
             x2 = x.reshape(math.prod(out_shape), red_n)
-            fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts, order=order)
+            fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
             if fast is not None:
                 return tuple(_as_shape(o, out_shape) for o in fast)
         col_view = _physical_col_view(x, red_axes, red_pairs, kept_pairs, red_n, num_o)
-        if col_view is not None and _col_route_ok(col_view, nouts):
+        cc = _hw.caps(x.device).cc
+        if col_view is not None and _col_route_ok(col_view, nouts, cc):
             from . import kernel_coltile as ct
 
             if col_view.dim() == 2:
@@ -931,22 +920,19 @@ def _reduce(
                 )
             return tuple(_as_shape(out, out_shape) for out in fast)
 
-    config = _GeneralConfig() if block is None else _GeneralConfig(block=block)
-    if tune:
-        config = select_general_config(
-            _hw.caps(x.device).cc,
-            x.dtype,
-            trait_key,
-            count,
-            num_o,
-            red_pairs,
-            kept_pairs,
-            order=order,
-            nfields=trait.nfields,
-            nouts=nouts,
-            acc_bits=max(dt.width for dt in trait.fdtypes),
-            alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
-        )
+    config = select_general_config(
+        _hw.caps(x.device).cc,
+        x.dtype,
+        trait_key,
+        count,
+        num_o,
+        red_pairs,
+        kept_pairs,
+        nfields=trait.nfields,
+        nouts=nouts,
+        acc_bits=max(dt.width for dt in trait.fdtypes),
+        alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+    )
     if config.kernel_order == "inner_tree":
         ordered = _try_indexed_itree(
             trait, trait_key, x, red_pairs, kept_pairs, num_o, count, out_dtypes, nouts
@@ -986,14 +972,7 @@ def _reduce(
         block=block,
         tree_count=count if config.uniform_tree else 0,
     )
-    key = (
-        "reduce",
-        trait_key,
-        x.dtype,
-        tuple(out_dtypes),
-        order,
-        config,
-    ) + op.cache_sig
+    key = ("reduce", trait_key, x.dtype, tuple(out_dtypes)) + op.cache_sig
     _launch(op, key, [_flat(x)], _flat_outs(outs))
     return tuple(outs)
 
@@ -1004,13 +983,10 @@ def reduce_dim(
     x: torch.Tensor,
     dims: int | Sequence[int] | None,
     out_dtype: torch.dtype,
-    block: int | None = None,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> torch.Tensor:
-    return _reduce(trait, trait_key, x, dims, [out_dtype], 1, block=block, order=order)[
-        0
-    ]
+    return _reduce(trait, trait_key, x, dims, [out_dtype], 1, order=order)[0]
 
 
 def reduce_dim2(
@@ -1019,13 +995,10 @@ def reduce_dim2(
     x: torch.Tensor,
     dims: int | Sequence[int] | None,
     out_dtypes: Sequence[torch.dtype],
-    block: int | None = None,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    return _reduce(
-        trait, trait_key, x, dims, list(out_dtypes), 2, block=block, order=order
-    )
+    return _reduce(trait, trait_key, x, dims, list(out_dtypes), 2, order=order)
 
 
 def _grid_size(L: int, block: int, sm_count: int, grid_mult: int = 4) -> int:
@@ -1039,14 +1012,10 @@ def reduce_all(
     trait_key: str,
     x: torch.Tensor,
     out_dtype: torch.dtype,
-    block: int | None = None,
-    grid_mult: int = _K0_ALL_GRID_MULT,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> torch.Tensor:
-    return _reduce_all(
-        trait, trait_key, x, [out_dtype], 1, block, grid_mult, order=order
-    )[0]
+    return _reduce_all(trait, trait_key, x, [out_dtype], 1, order=order)[0]
 
 
 def reduce_all2(
@@ -1054,14 +1023,10 @@ def reduce_all2(
     trait_key: str,
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
-    block: int | None = None,
-    grid_mult: int = _K0_ALL_GRID_MULT,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    return _reduce_all(
-        trait, trait_key, x, list(out_dtypes), 2, block, grid_mult, order=order
-    )
+    return _reduce_all(trait, trait_key, x, list(out_dtypes), 2, order=order)
 
 
 def _reduce_all(
@@ -1070,8 +1035,6 @@ def _reduce_all(
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
-    block: int | None,
-    grid_mult: int,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
@@ -1093,7 +1056,6 @@ def _reduce_all(
                 None,
                 out_dtypes,
                 nouts,
-                block=block,
                 order=requested,
             )
     L = x.numel()
@@ -1146,18 +1108,15 @@ def _reduce_all(
     if res is not None:
         return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
-    if block is None and grid_mult == _K0_ALL_GRID_MULT:
-        cfg = select_all_config(
-            _hw.caps(x.device).cc,
-            x.dtype,
-            trait_key,
-            L,
-            nfields=trait.nfields,
-            nouts=nouts,
-        )
-        block, grid_mult = cfg.block, cfg.grid_mult
-    elif block is None:
-        block = _K0_ALL_BLOCK
+    cfg = select_all_config(
+        _hw.caps(x.device).cc,
+        x.dtype,
+        trait_key,
+        L,
+        nfields=trait.nfields,
+        nouts=nouts,
+    )
+    block, grid_mult = cfg.block, cfg.grid_mult
     sm = _hw.caps(x.device).sm_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
