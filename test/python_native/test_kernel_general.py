@@ -69,11 +69,13 @@ class _DecodeProbe:
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelGeneral(TestCase):
     def test_reduce_dim_general_path(self):
-        x = torch.randn(8, 16, 32, device="cuda")
+        # Non-adjacent reduced axes have no column view, so the general kernel serves them.
+        x = torch.randn(8, 16, 16, device="cuda")
         out = kg.reduce_dim(
-            T.SumOps(acc=cutlass.Float32), "smoke", x, [1], torch.float32
+            T.SumOps(acc=cutlass.Float32), "general_smoke", x, [0, 2], torch.float32
         )
-        torch.testing.assert_close(out, x.sum(dim=1), atol=1e-2, rtol=1e-2)
+        self.assertEqual(_plan_tags("general_smoke"), {"reduce"})
+        torch.testing.assert_close(out, x.sum(dim=(0, 2)), atol=1e-2, rtol=1e-2)
 
     def test_extent_one_reduced_axis(self):
         # TensorIterator coalesces away the reduced run; the kernel must fold one value.
@@ -304,7 +306,7 @@ class TestKernelGeneral(TestCase):
         # reduce-all has no flat view of a transposed input, so it ROUTES that through the general
         # path (which addresses via the TI decode) rather than refusing it.
         xt = torch.randn(64, 128, device="cuda").t()
-        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1)
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(flat, xt.double().sum().float(), atol=1e-5, rtol=1e-5)
         # The general path needs a CUDA input; a CPU tensor is refused, not silently run.
