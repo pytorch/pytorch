@@ -1831,6 +1831,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Match the descriptor, e.g. `dict.update(ordered, src)` must select
         # `dict.update`, even when the receiver's tracker models `OrderedDict`.
         name = descriptor.__name__
+        if self._cpython_type is None:
+            # Some trackers have no type-to-table mapping. Keep their name lookup;
+            # the caller already validated the descriptor's receiver type.
+            return self.lookup_tp_method(name)
         python_type = self._cpython_type
         for cls in type(self).__mro__:
             python_type = cls.__dict__.get("_cpython_type", python_type)
@@ -1986,8 +1990,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         Return the type name for the Python type this VariableTracker represents.
 
-        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
-        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). type.__name__
+        matches CPython's tp_name exactly (e.g., "list", "NoneType").
 
         Note: There are no external callers outside torch._dynamo that rely on this.
         Internal uses should prefer this over hardcoded type name strings.
